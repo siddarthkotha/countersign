@@ -19,9 +19,10 @@ BEFORE the submission form is filed. Every box below gets checked, with evidence
       performance numbers, no "immutable/sealed" language (LAW 4 phrasing only).
 - [ ] **Flip:** `gh repo edit siddarthkotha/countersign --visibility public`, then verify
       logged-out access to the repo, the README rendering, and the demo URL end-to-end.
-- [ ] **Restore the sharp positioning line:** the lablab TEAM IDEA field was deliberately
-      dulled during the build ("Voice agent for security. Full concept revealed at
-      submission.") — at submission week, restore the real one-liner:
+- [ ] **Restore the sharp positioning line — BOTH surfaces:** the lablab TEAM IDEA field
+      AND the GitHub repo description were deliberately dulled during the build ("Voice
+      agent for security. Full concept revealed at submission.") — at submission week,
+      restore the real one-liner on both:
       "The conversational security checkpoint that stands between social engineering and
       irreversible actions." It matters for the Team's Choice vote window (final 24h).
 - [ ] **Submission form:** repo URL + demo URL + video + deck + cover, per BRIEF §7
