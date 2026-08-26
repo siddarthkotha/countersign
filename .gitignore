@@ -1,0 +1,17 @@
+# Secrets — never committed, from the first commit onward
+.env
+.env.*
+*.key
+*.key.local
+*.pem
+
+# Dependencies / build output
+node_modules/
+dist/
+build/
+coverage/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log
