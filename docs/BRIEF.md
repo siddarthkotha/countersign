@@ -410,6 +410,20 @@ retained offline by the founder).
   as our invention; CITE that number as independent proof the architecture works, and
   claim the novel APPLICATION (inbound voice-fraud interrogation). Business-value cite:
   Aug-2026 vishing wave against major Wall Street funds.
+**SWEEP #2 (2026-08-26, adversarial patent/trade-press pass — deeper surfaces):** still NO
+direct assembled competitor found; confidence NO MARKETED DIRECT COMPETITOR EXISTS =
+**MEDIUM, not high** (patents searched thoroughly; funding-trail/analyst/non-English
+surfaces only partially covered — treat "unique" claims accordingly; the pitch already
+never claims "first ever"). **THE LOAD-BEARING NEAR-MISS: US Bancorp patent US12562169B1**
+(priority 2025-09-16 — weeks old): a major US bank has patented adaptive iterative
+challenge-question generation + a deterministic rule-engine/LLM routing split with
+immutable logging — the two hardest mechanics of this product — but as AGENT-ASSIST for
+human call-center staff: not autonomous, no staged-approval gate, not treasury-specific.
+IMPLICATIONS: (a) validates the mechanics are worth a bank's IP budget RIGHT NOW; (b) the
+first-mover window on the ASSEMBLED autonomous product is real but moving; (c) hackathon
+IP exposure ≈ none in practice (different claims, non-commercial demo) — if this ever goes
+commercial, a real patent review happens then, by a lawyer, not by this brief.
+
 - **Name:** Countersign (founder pick 2026-08-26) — collision-scanned CLEAR-for-purpose
   (one small eSignature co at countersign.com, different space; zero malware/ransomware
   associations). Rejected en route: Sentry (sentry.io), Guardian (naming conflicts,
