@@ -83,6 +83,13 @@ not swap ideas casually.
    technology, Originality), asks off-script questions, tries to break it in a stranger's
    hands. Output = a scored card + the top 3 fixes. Sims: Sep 12, Sep 19, Sep 26 (that
    one runs on the full submission package).
+   BUILD-ON-FIRST-USE (founder-ratified 2026-08-26, do NOT build earlier): at the FIRST
+   sim (Sep 12), first create the named `judge-sim` agent (user-level ~/.claude/agents/,
+   Sonnet pin, PERSISTENT MEMORY ON so Friday scores are comparable, preload = the rubric
+   + scoring format only). At G1 deploy (~Sep 3), first create `qa-walker` (Sonnet,
+   memory ON for regression-spotting, preload = experience-report format) and run it on
+   the fresh URL. The `red-team` named agent gets built at its next invocation — memory
+   OFF BY DESIGN (fresh eyes every kill; blind panels are the law).
 3. **The ambition pass:** before ANY artifact reaches the founder (UI state, video cut,
    README, deck): answer "what would the keynote version of this be?" with one concrete
    upgrade, applied or proposed. Every ritual's output must name a decision or it is
