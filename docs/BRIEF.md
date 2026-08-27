@@ -424,6 +424,20 @@ first-mover window on the ASSEMBLED autonomous product is real but moving; (c) h
 IP exposure ≈ none in practice (different claims, non-commercial demo) — if this ever goes
 commercial, a real patent review happens then, by a lawyer, not by this brief.
 
+**PRIOR-ART CLASS: ACTIVE LIVENESS / CHALLENGE-RESPONSE (founder's own research find,
+2026-08-26):** academic frameworks (PITCH, GOTCHA, D-CAPTCHA) and commercial liveness
+engines (ID R&D, Pindrop, ValidSoft) actively challenge callers — whisper/sing/tongue-
+twister tasks, latency probes, read-this-phrase — to make synthesis pipelines glitch.
+ADJACENT, and the distinction is the pitch: they interrogate the VOICE (still "is this a
+machine?", still the arms race, and USELESS against a live human impostor — who passes
+every liveness test and has run most wire fraud in history). Countersign interrogates the
+REQUEST — knowledge, cross-turn consistency, out-of-band, staged approval — which stops
+clone and human identically. PITCH LANGUAGE RULE: never claim challenge-response as novel
+(judges may know PITCH); cite it, then land the line: "liveness asks 'is this voice a
+machine?' — Countersign asks 'is this request true?' — only the second stops the human
+con artist too." Knowledge-questioning per se also isn't novel (bank KBA, agent-assist
+per US12562169B1) — the novel assembly claim stands unchanged.
+
 - **Name:** Countersign (founder pick 2026-08-26) — collision-scanned CLEAR-for-purpose
   (one small eSignature co at countersign.com, different space; zero malware/ransomware
   associations). Rejected en route: Sentry (sentry.io), Guardian (naming conflicts,
