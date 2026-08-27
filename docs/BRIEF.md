@@ -424,6 +424,37 @@ first-mover window on the ASSEMBLED autonomous product is real but moving; (c) h
 IP exposure ≈ none in practice (different claims, non-commercial demo) — if this ever goes
 commercial, a real patent review happens then, by a lawyer, not by this brief.
 
+**SWEEP #4 — FOUNDER-RUN GEMINI CHECK + FETCH-VERIFICATION (2026-08-26): confidence
+upgraded to MEDIUM-HIGH that no assembled competitor is publicly marketed.** Four
+independent checks now converge (2 adversarial agent sweeps, founder's liveness research,
+grounded Gemini): pieces everywhere, assembly nowhere. Gemini's architectural framing is
+the pitch's cleanest line: the market does conversation → risk signals → LOCK/TRANSFER/
+ESCALATE; Countersign does conversation → structured evidence → deterministic verdict →
+STAGE-ONLY. New near-misses, each FETCH-VERIFIED against its live page same day:
+- **CETRAI** (cetrai.com, closest commercial): banking voice agents, verbatim "watches
+  for fraud signals in real time — failed authentication attempts, mismatched device or
+  caller ID, unusual payee or wire requests, and social-engineering language" + action
+  locking + "warm transfer to fraud specialist with transcript" + KBA/OTP. NO disclosed
+  adaptive interrogation, verdict engine, or staging — their architecture ENDS at
+  escalation, where ours begins.
+- **Workforce Wave** (workforcewave.com, closest use-case): AI calls the registered
+  number to CONFIRM a wire ("Can you confirm this is authorized?") and routes unconfirmed
+  to fraud. Confirmation checkbox, not interrogation; no engine, no staging.
+- **NVIDIA's public wire-transfer voice-agent example** (HuggingFace, code-verified):
+  exposes `wire_transfer_domestic` + `wire_transfer_international` EXECUTION tools in the
+  agent's _TOOLS list — the literal LAW-2 anti-pattern. DECK AMMO (verified, quotable):
+  "The industry's reference demo hands the AI the wire button. Countersign is built on
+  the opposite promise."
+- **CFAgentBench** (arXiv 2606.22000, per Gemini — cite-check at deck time): benchmark
+  where executing money movement FAILS the task; stage-for-human is the correct behavior.
+  Academic backing for LAW 2, cites next to the APort CTF number.
+- Patents added to the prior-art ledger (Gemini-surfaced, unverified beyond existence):
+  US11783839 (call-center auth for wires, includes voiceprint — excluded by us),
+  US12519773 (spoken-passphrase step-up — challenge-response class, not interrogation).
+Standing caveat (honest, keep in README language): absence of a PUBLIC product ≠ absence
+of proprietary bank-internal systems; we claim the assembly and the stance, never "first
+ever."
+
 **PRIOR-ART CLASS: ACTIVE LIVENESS / CHALLENGE-RESPONSE (founder's own research find,
 2026-08-26):** academic frameworks (PITCH, GOTCHA, D-CAPTCHA) and commercial liveness
 engines (ID R&D, Pindrop, ValidSoft) actively challenge callers — whisper/sing/tongue-
