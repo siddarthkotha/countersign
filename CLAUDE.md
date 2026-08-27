@@ -66,6 +66,14 @@ structured evidence, approve ceiling = STAGED (always) · G5 50+ rehearsals, tai
 in target (Sep 21) · G6 video ≥2:20 live agent (Sep 27). Two gates slip → founder
 downgrade call.
 
+## Origin (know what you're holding)
+This concept was produced by the Origination Protocol (~/.claude/roles/originator.md),
+2026-08-25: mined from the founder's IAM career → generated as a rival to its own
+predecessor (Attest) against a written judging function → survived four blind hostile
+panels → its differentiator (behavioral verification, LAW 1) IS the panels' strongest
+objection, redesigned into the product. Any pivot proposal must re-run that protocol,
+not swap ideas casually.
+
 ## THE RITUALS (founder-ratified 2026-08-26 — enforced at phase boundaries, not per-commit)
 1. **Demo-first days:** every build day ends with the full demo RUNNABLE from the deployed
    URL. A day that ends with a broken demo is not done. (Polish compounds for 4 weeks
