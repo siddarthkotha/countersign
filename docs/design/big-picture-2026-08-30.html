@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Countersign on one page</title>
+<style>
+  :root { --ink: #111; --paper: #fbfbf9; --rule: #cfcfc8; --muted: #555; --wash: #f1f1ec; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 19px/1.45 -apple-system, "Helvetica Neue", Arial, sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 40px 28px 80px; }
+  h1 { font-size: 34px; margin: 0 0 6px; }
+  .sub { color: var(--muted); margin: 0 0 30px; }
+  h2 { font-size: 24px; margin: 44px 0 14px; padding-bottom: 8px; border-bottom: 2px solid var(--ink); }
+  h2 span { color: var(--muted); font-weight: normal; font-size: 18px; margin-left: 10px; }
+  .row { display: grid; gap: 12px; }
+  .c5 { grid-template-columns: repeat(5, 1fr); }
+  .c4 { grid-template-columns: repeat(4, 1fr); }
+  .c3 { grid-template-columns: repeat(3, 1fr); }
+  .c2 { grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 900px) { .c5, .c4, .c3 { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 600px) { .c5, .c4, .c3, .c2 { grid-template-columns: 1fr; } }
+  .box { border: 1.5px solid var(--ink); padding: 14px 16px; background: #fff; }
+  .box b { display: block; font-size: 20px; margin-bottom: 4px; }
+  .box small { display: block; color: var(--muted); font-size: 17px; }
+  .box .n { display: inline-block; font-size: 15px; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 6px; }
+  .week { border-top: 6px solid var(--ink); }
+  .week b { font-size: 21px; }
+  .gate { display: block; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--rule); font-size: 16px; }
+  .arrowline { text-align: center; color: var(--muted); font-size: 17px; padding: 8px 0; }
+  .map { display: grid; grid-template-columns: 1fr 44px 1fr; gap: 12px; align-items: stretch; }
+  @media (max-width: 600px) { .map { grid-template-columns: 1fr; } .map .mid { display: none; } }
+  .mid { display: flex; align-items: center; justify-content: center; font-size: 24px; color: var(--muted); }
+  .wash { background: var(--wash); border: 1.5px solid var(--ink); padding: 14px 16px; }
+  .wash b { display: block; margin-bottom: 4px; }
+  .note { margin-top: 20px; border-left: 6px solid var(--ink); padding: 12px 16px; background: var(--wash); }
+  .note b { display: block; margin-bottom: 4px; }
+  .key { margin-top: 44px; border-top: 1px solid var(--rule); padding-top: 14px; color: var(--muted); font-size: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Countersign on one page</h1>
+  <p class="sub">What a hackathon entry is, what our month looks like, and where everything decided today plugs in.</p>
+
+  <h2>1 · What we hand in on September 27 or 28 <span>five things, all required</span></h2>
+  <div class="row c5">
+    <div class="box"><span class="n">HAND-IN 1</span><b>A live web app</b><small>A public web address. A judge opens it in Chrome, picks a scenario card, talks, and sees the verdict.</small></div>
+    <div class="box"><span class="n">HAND-IN 2</span><b>A 3-minute video</b><small>The story: the $25M deepfake call, then the product catching a fake CEO live. You narrate the open and close.</small></div>
+    <div class="box"><span class="n">HAND-IN 3</span><b>The code, public</b><small>The repository goes public at submission, with real commits spread across September.</small></div>
+    <div class="box"><span class="n">HAND-IN 4</span><b>Up to 8 slides</b><small>Problem, the checkpoint idea, demo stills, how it works, why voice, business value, what is real vs mocked, team.</small></div>
+    <div class="box"><span class="n">HAND-IN 5</span><b>Cover image + text</b><small>A 16:9 picture in the verdict look, a title, short and long descriptions, tags.</small></div>
+  </div>
+  <div class="note"><b>Who judges, and on what</b>Five people, including AssemblyAI's CEO and head of realtime, score four things: presentation, business value, how well we use their technology, and originality. Five winners share $10,000. Deadline: September 30, 10 AM Central. We submit two days early.</div>
+
+  <h2>2 · The month <span>from the brief's plan, with its pass/fail gates</span></h2>
+  <div class="row c4">
+    <div class="box week"><b>Week 1 · Sep 1 to 7</b><small>Kickoff Tuesday 10 AM. Build the skeleton end to end: a real call in, the checks, a verdict out, deployed at a web address.</small><span class="gate">Gate G1 by Sep 7: a stranger can run the golden path unaided at the URL.</span></div>
+    <div class="box week"><b>Week 2 · Sep 8 to 14</b><small>The rule engine, the tools, the evidence record. Light week for you (NYC on the 10th); sessions continue.</small><span class="gate">Gates G2 and G3 by Sep 14: the fake-CEO scenario runs twice in a row with no resets; verdicts reproducible; challenge questions sound natural.</span></div>
+    <div class="box week"><b>Week 3 · Sep 15 to 21</b><small>Polish the one path. The screen in the chosen look. The character. 50+ rehearsals with a live human attacker: interruptions, story shifts, pressure.</small><span class="gate">Gate G5 by Sep 21: latency within target, or the stalling plan is redesigned.</span></div>
+    <div class="box week"><b>Week 4 · Sep 22 to 28</b><small>Video shoot, README, slides, cover, the recorded attack corpus. Submit Sep 27 or 28.</small><span class="gate">Gate G6 by Sep 27: video has at least 2:20 of live agent interaction, no explainer longer than 15 s.</span></div>
+  </div>
+  <div class="note"><b>The founder's own law, already in the brief</b>If two gates slip, you make the downgrade call: ship as portfolio only, or do not ship. Winning is the credibility; a mediocre public entry is negative credibility. Your time: about two evenings a week plus the voice recording.</div>
+
+  <h2>3 · Where today's decisions plug in <span>left: what we decided · right: what it feeds</span></h2>
+  <div class="map">
+    <div class="box"><b>The look: shortlist 2, 4, 6</b><small>TV control room, oscilloscope, train departure board. Live moving elements on dark instrument surfaces.</small></div>
+    <div class="mid">→</div>
+    <div class="wash"><b>The app screen, the cover image, the slides</b>One pick sets the style everywhere. Decided in Week 3 at the latest.</div>
+
+    <div class="box"><b>The character</b><small>A named, friendly voice that never shows its hand. A real traced side-profile whose lines move as it speaks and freeze when interrupted.</small></div>
+    <div class="mid">→</div>
+    <div class="wash"><b>The call screen and the video's face</b>Gives judges a "who" to remember. Rebuilt for real inside the app in September (today's file is a drawing).</div>
+
+    <div class="box"><b>Demo laws</b><small>Live human attacker, never scripted ping-pong. Overlaps and anger are the showcase. A cloned voice of the real principal still fails.</small></div>
+    <div class="mid">→</div>
+    <div class="wash"><b>The video and the live demo</b>What makes it read as a company's launch, not a class project. Rehearsed in Week 3, shot in Week 4.</div>
+
+    <div class="box"><b>Judge flow</b><small>Scenario cards (Dana the real request, the fake CEO), a replay for judges without a microphone, off-script is safe by design.</small></div>
+    <div class="mid">→</div>
+    <div class="wash"><b>The landing page</b>Built in Week 1 with the skeleton, refined in Week 3. The Dana card is the fix that stops "it always says no."</div>
+
+    <div class="box"><b>Density</b><small>Your instinct: the final screen may be too much. Newest evidence large, older receding; tool feed as a ticker; the verdict as the only loud thing.</small></div>
+    <div class="mid">→</div>
+    <div class="wash"><b>The app screen</b>Decided when the screen is built in Week 3. Cheap test: show the end state to three people for five seconds.</div>
+  </div>
+
+  <h2>4 · What a judge actually does <span>in order</span></h2>
+  <div class="row c3">
+    <div class="box"><b>Watches the video</b><small>Three minutes. The hook, a real request passing, the fake CEO caught live, the family scene, one sentence on how it works.</small></div>
+    <div class="box"><b>Opens the web address</b><small>Reads the landing page, picks a card, talks to Countersign or watches a replay, sees STAGED or WIRE FROZEN and the sealed record.</small></div>
+    <div class="box"><b>Reads the code and the slides</b><small>Checks for real commits across the month, measured latency numbers, what is real vs mocked, and that we claim nothing we cannot show.</small></div>
+  </div>
+
+  <div class="key">2026-08-30 · from the brief: sections 1, 7, 8, 10 and 14 · nothing on this page is built yet except the drawings in docs/design</div>
+</main>
+</body>
+</html>

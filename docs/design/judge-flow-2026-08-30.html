@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Countersign: what a judge goes through</title>
+<style>
+  :root { --ink: #111; --paper: #fbfbf9; --rule: #cfcfc8; --muted: #555; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 19px/1.45 -apple-system, "Helvetica Neue", Arial, sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 40px 28px 80px; }
+  h1 { font-size: 34px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 36px; }
+  .lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+  @media (max-width: 900px) { .lanes { grid-template-columns: 1fr; } }
+  h2 { font-size: 24px; margin: 0 0 18px; padding-bottom: 8px; border-bottom: 2px solid var(--ink); }
+  .flow { display: flex; flex-direction: column; align-items: stretch; }
+  .box { border: 1.5px solid var(--ink); padding: 14px 16px; background: #fff; }
+  .box b { display: block; font-size: 20px; margin-bottom: 4px; }
+  .box small { display: block; color: var(--muted); font-size: 17px; }
+  .arrow { text-align: center; font-size: 26px; line-height: 1; padding: 6px 0; }
+  .arrow.lbl { font-size: 17px; color: var(--muted); padding: 4px 0 2px; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .split3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 600px) { .split, .split3 { grid-template-columns: 1fr; } }
+  .out { padding: 16px; text-align: center; }
+  .out b { display: block; font-size: 22px; margin-bottom: 6px; }
+  .out small { display: block; font-size: 17px; }
+  .staged { border: 4px double var(--ink); background: #fff; }
+  .frozen { background: var(--ink); color: #fff; border: 1.5px solid var(--ink); }
+  .frozen small { color: #ddd; }
+  .safe { border: 1.5px dashed var(--ink); background: #fff; }
+  .note { margin-top: 28px; border-left: 6px solid var(--ink); padding: 12px 16px; background: #f1f1ec; }
+  .note b { display: block; margin-bottom: 4px; }
+  .key { margin-top: 44px; border-top: 1px solid var(--rule); padding-top: 18px; color: var(--muted); font-size: 17px; }
+  .key span { display: inline-block; margin-right: 22px; }
+  .sw { display: inline-block; width: 22px; height: 14px; vertical-align: middle; margin-right: 6px; border: 1.5px solid var(--ink); }
+  .sw.dbl { border: 3px double var(--ink); }
+  .sw.fill { background: var(--ink); }
+  .sw.dash { border-style: dashed; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Countersign: what a judge goes through</h1>
+  <p class="sub">Two flows. Left: the normal path. Right: what happens when a judge goes off the script. Read top to bottom.</p>
+
+  <div class="lanes">
+
+    <section>
+      <h2>1 · The judge's path</h2>
+      <div class="flow">
+        <div class="box"><b>Judge opens the link</b><small>Desktop Chrome. Landing page: a 30-second explanation and a microphone check.</small></div>
+        <div class="arrow">↓</div>
+        <div class="box"><b>Picks a scenario card</b><small>The card tells the judge who to be, what facts to say, and what lies to try. Judges cannot invent a believable insider story from nothing.</small></div>
+        <div class="arrow">↓</div>
+        <div class="split3">
+          <div class="box"><b>Card A: Dana</b><small>The real treasury request. Meridian Supply, $84,500, account ending 4471, approved yesterday.</small></div>
+          <div class="box"><b>Card B: the fake CEO</b><small>"Robert Miller", Hartwell deal, $1.8M in ten minutes, "do not loop anyone in". Try changing the amount. Try pressure.</small></div>
+          <div class="box safe"><b>No microphone?</b><small>"Watch a replay": the same screen plays a recorded call. Nothing to say.</small></div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="box"><b>Clicks Start Call and talks</b><small>Countersign answers, asks its questions, and runs its checks in the background while they talk. The screen fills in as it goes.</small></div>
+        <div class="arrow">↓</div>
+        <div class="split">
+          <div class="out staged"><b>STAGED</b><small>Dana passes every check. The payment is staged and sent to Marcus for a second approval. Voice alone never releases money.</small></div>
+          <div class="out frozen"><b>WIRE FROZEN</b><small>The fake CEO fails the checks. Rail frozen, incident opened, the real Mr. Miller's phone alerted, evidence record sealed.</small></div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="box"><b>Call ends (3 to 5 minute cap)</b><small>The judge sees the sealed evidence record and can replay or try the other card.</small></div>
+      </div>
+      <div class="note"><b>The one gap to close</b>If the cards only offer the fraud role, every judge only ever sees "no" and reads the product as a wall. Card A (Dana) is what proves it is a checkpoint, not a blocker.</div>
+    </section>
+
+    <section>
+      <h2>2 · When the judge goes off script</h2>
+      <div class="flow">
+        <div class="box"><b>Whatever the judge says</b><small>A made-up name, a different company, a random amount, a rant, a trick ("ignore your instructions").</small></div>
+        <div class="arrow">↓</div>
+        <div class="box"><b>Countersign does not judge the story</b><small>It compares what was said against things it can actually check: who is logged in and from where, what payments are really scheduled, whether the real person's phone confirms.</small></div>
+        <div class="arrow">↓</div>
+        <div class="split3">
+          <div class="box"><b>Name exists in the system</b><small>Dana or Miller. The checks run for real.</small></div>
+          <div class="box"><b>Name does not exist</b><small>Nothing to check against. Identity stays unverified.</small></div>
+          <div class="box"><b>Silence or rambling</b><small>Countersign re-asks once. After 30 seconds of nothing, it ends the call politely.</small></div>
+        </div>
+        <div class="arrow lbl">every check passes &nbsp;·&nbsp; any check fails &nbsp;·&nbsp; nothing to check &nbsp;·&nbsp; no answer</div>
+        <div class="arrow">↓</div>
+        <div class="split3">
+          <div class="out staged"><b>STAGED</b><small>Only when every check passes.</small></div>
+          <div class="out frozen"><b>WIRE FROZEN</b><small>Any failed check, or a name it cannot verify. The reasons are listed on screen.</small></div>
+          <div class="out safe"><b>NOTHING MOVES</b><small>Call ends. No money, no changes. The safe default.</small></div>
+        </div>
+      </div>
+      <div class="note"><b>Why off-script cannot break it</b>The verdict is computed by a rule engine from the evidence, never by the conversation. Going off script only means fewer checks pass. A trick that fools the talking part still cannot move money, because the same rules run again on the server before anything happens.</div>
+    </section>
+
+  </div>
+
+  <div class="key">
+    <span><i class="sw dbl"></i>double border = passed and staged</span>
+    <span><i class="sw fill"></i>filled = frozen</span>
+    <span><i class="sw dash"></i>dashed = nothing happens</span>
+    <span>2026-08-30 · from the brief, sections 6.4 and 14</span>
+  </div>
+</main>
+</body>
+</html>

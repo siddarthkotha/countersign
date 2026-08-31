@@ -599,3 +599,94 @@ this event (the one AI-tool submission rule found on their guidelines page names
 different sponsor's tool — templated boilerplate, not applicable). Late submission:
 "Manual submission is available for 6 hours post-hackathon for those with valid reasons
 and prior approval from organizers or mentors" — never plan to need it.
+
+
+---
+
+## 15. DESIGN + DEMO DECISIONS (2026-08-30, founder-ratified in session; extends, supersedes nothing above)
+
+**Where the artefacts live:** `docs/design/six-looks-2026-08-30/` (six standalone HTML looks of the
+main screen at the Scenario-B verdict moment, rendered from one `content.json`; the talking-profile
+prototypes v2/v3/v4; contact sheets; `design-log.md`, `curation-log.md`), `docs/design/
+judge-flow-2026-08-30.html` (what a judge goes through, and what happens off script),
+`docs/design/big-picture-2026-08-30.html` (the whole entry on one page), `docs/HANDOFF-2026-08-30.md`
+(context for any fresh AI session). Linear team CSN carries every decision verbatim with timestamps
+(CSN-4 look, CSN-5 character, CSN-6 target). Everything here is DESIGN DOCS, allowed pre-kickoff per
+§14c; the real UI is built from scratch inside the app Sep 1-30; today's HTML is a drawing, never
+copied into product code.
+
+**Visual identity, the method (founder, morning):** the look is BORROWED FROM A REAL-WORLD DISCIPLINE
+outside software, never an invented palette (Claude palettes regress to the web median and the
+founder fights them). Enforcement: a design decision that cannot be traced to its source does not
+ship. Colour decided numerically (WCAG 2.x, luminance-based, colour-blind-safe by construction).
+
+**The look, founder shortlist (20:29):** 2 TV control room · 4 oscilloscope · 6 Swiss departure
+board. Common thread: dark instrument surfaces with LIVE moving elements. Looks 1, 3, 5 are out.
+Final pick pending; the live trace and the talking profile were proven on look 4 and are to be carried
+onto 2 and 6 before the pick. The pick sets the style for the app screen, the cover image and the
+slides.
+
+**The character (founder idea 18:41; laws 21:37):** Countersign presents as a NAMED, human-centred
+character, shown as a line-drawn SIDE PROFILE traced from a real human silhouette (v4: William James
+Hubard, "Profile of a Man", Wikimedia Commons, public domain), whose lips, jaw and contour lines move
+with its speech and FREEZE mid-motion the instant the caller barges in, then resume calmly. The caller
+is the same profile, dashed and incomplete, labelled UNVERIFIED, never filling in. Voice law: friendly
+and cooperative, never showing its hand, sounding like it is helping the request along; for the
+honest caller that is good service, for the attacker it is containment. The only moment the mask drops
+is the verdict line, and it stays calm. NOT a therapist persona. Open: the character's name and TTS
+voice; modern vs period silhouette source (a swap, not a rebuild). §6.4's "avatar-free / no talking
+heads" line is amended by the founder to permit this line-art profile (it is not a talking head).
+
+**Live instrumentation:** the two-channel voice trace on the call panel is REAL during a call (drawn
+from the live audio envelope, flat when silent, the caller's spike at the barge-in, Countersign's
+channel dead-flat while frozen). Motion is a colour-independent signal.
+
+**Demo laws (founder, 21:29 to 21:43):**
+1. Bar: must read as a seed-stage company's launch demo, never as a project being turned in. Tonight's
+   scripted animation is explicitly the latter; the live build is the former.
+2. NO SCRIPTED PING-PONG. The attacker in the video and in rehearsals is a LIVE HUMAN improvising within
+   the cheat-sheet facts; overlaps, talk-overs, corrections, backchannels and anger happen for real and
+   the agent handles them for real (this is also the showcase for a speech-company jury). Agent rules:
+   yield to short overlaps and backchannel; retake the floor only after a PRESSURE interruption (the one
+   hard stop); never leave silence (stalling lines). Test with speakers, not headsets.
+3. CLONED VOICE AS THE ATTACKER: Scenario B's fake CEO speaks in a cloned voice of the real principal
+   (the founder's own voice cloned with consent, disclosed in README). Countersign still freezes the
+   wire because it never trusted the voice, only the facts. Prefer a REAL-TIME voice changer on the live
+   human; if only offline cloning exists, keep the human live and add a separate "even a perfect clone
+   fails" beat. No detection claim, ever.
+4. NO VOICE BIOMETRICS (pitch or prosody as identity): rejected under LAW 1 and scope fence §9; it would
+   contradict "we don't guess who's calling, we make them prove it." Legitimate cousin: BEHAVIOURAL
+   pressure signals (talk-over count, speech rate, deadline language, threats) feeding the Urgency
+   Escalation card, labelled as behaviour, never identity.
+5. Why our voice use is different (deck and README line): every other entry uses voice as an INTERFACE;
+   Countersign uses the conversation as an EVIDENCE INSTRUMENT and the agent's own speech behaviour as
+   SECURITY CONTROLS (cross-turn consistency as evidence, barge-in as a control, stalling as latency
+   defence, containment, the transcript as a sealed record, keyterms). The stand-out lives in three
+   live moments: catching the changed amount, refusing authority as verification, stopping mid-word.
+
+**Judge experience (founder questions, 21:04):** the scenario cheat-sheet (§14 Amendment 3) MUST offer
+a passing role (Card A: Dana, the legitimate request) as well as the fraud role (Card B), or judges only
+ever see "no" and read the product as a wall. Replay mode covers judges without a microphone. Off-script
+is safe by construction: the verdict is computed from seeded evidence, never from the story; an
+unknown identity lands UNVERIFIED; silence ends the call politely; nothing moves.
+
+**Density (to ponder, not decided):** the END state of the screen is dense (5 cards, 6 tool rows,
+tally, state machine, banner); live, it fills in rhythm with the call. Mitigations to weigh at build:
+tool feed as a one-line ticker with an expander; newest evidence card large, older receding; the verdict
+banner as the only loud element; a presentation mode for the video. Cheap test: show the end-state
+frame to three people for five seconds and ask what happened.
+
+**Target (founder, 22:05; CSN-6):** build complete (G1-G3 + UI + landing) **Sep 12** · video draft
+**Sep 14** · submit by **Sep 20** · Sep 27 stays the backstop. ESTIMATE 31-51 session-hours and
+10-15 founder-hours at 4-5 short touchpoints per week (decisions, accounts and keys, playing the live
+attacker, voice recording, verdicts on runs, video cuts, the submission form). Critical path: day-1
+AssemblyAI API behaviour (ephemeral tokens, tool-call hold, barge-in events; a forced relay adds 4-6
+session-hours), founder availability for live-attacker rehearsals, video edit rounds. NYC Sep 10 =
+light founder days; rehearsals cluster Sep 5-8 and Sep 12-13.
+
+**Working rules adopted with the founder today (apply to every session on this project):** before any
+multi-agent spend, state in one line what he will receive, in his words, with a token estimate, and
+disclose the overrun after; he only ever sees the LAST step of a plan (finished screens, never
+reference material or designer vocabulary); one decision at a time with a recommendation; nothing
+published or linked without his word (local HTML in his browser); agents move rejected files, never
+delete.
