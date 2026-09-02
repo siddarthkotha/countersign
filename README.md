@@ -54,5 +54,6 @@ format, adversarial corpus, measured latency, setup) fills in as the build progr
 | Date (CDT) | Runs | Connect → session.ready | session.ready → first reply audio | Notes |
 |---|---|---|---|---|
 | 2026-09-02 11:13 AM | 1 | 995 ms | 221 ms | `npm run smoke:live` from the founder's Mac in Austin; single run, no percentiles yet. p50/p95 over 50+ rehearsals land in week 3 (gate G5). |
+| 2026-09-02 11:49 AM | 1 | 1740 ms | 76 ms | Same script, second run; voices endpoint returned 426 (fallback to `anna` worked). |
 
 Method: `packages/server/scripts/smoke-live.ts` mints a token, opens the socket, sends `session.update`, times `session.ready`, then times the first `reply.audio` after the greeting. Opt-in only (`--live` + `ASSEMBLYAI_API_KEY`); never runs in CI.
