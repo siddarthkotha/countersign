@@ -23,8 +23,8 @@
 // duplicate is not removing content); Call.tsx's and Replay.tsx's own screen-level banners
 // are now the SINGLE, ALWAYS-ON source per screen. (6) the verdict reasons are a real `<ul>`
 // again, not a string-joined line -- the " · " separator is CSS-only.
-import { useEffect, useRef, useState } from 'react';
-import type { AssuranceChecklist, Claim, ChallengeResult, Evidence, ScreenState, Speaker } from '@countersign/engine';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import type { AssuranceChecklist, Claim, ChallengeResult, Evidence, Quote, ScreenState, Speaker } from '@countersign/engine';
 
 // No standalone `AgentStatus` export exists on `@countersign/engine` (an engine change is
 // out of scope for this task) -- derived locally from `ScreenState['agent_status']` instead,
@@ -111,13 +111,83 @@ function EvidenceCard({ evidence }: { evidence: Evidence }) {
   );
 }
 
-/** Task W5, fix round 2: the checks-board's compact row form of the SAME evidence card --
- *  amber square glyph (decorative only, `aria-hidden`), label, status word, one-line detail.
- *  The full card (provenance, quotes) still renders via `EvidenceCard` in the forensic
- *  section below the fold; this is an addition above the fold, not a replacement. */
-function ChecksRow({ evidence }: { evidence: Evidence }) {
+// Task P3, evidence-to-quote linking: `Quote.utterance_id` already names the transcript line
+// it came from (packages/engine/src/types.ts) -- so the primary match is by id, never a
+// fresh substring search. The substring fallback below only fires if an id somehow doesn't
+// resolve to a line on THIS screen's transcript (should not happen -- every quote is drawn
+// from the same conversation the transcript is built from -- but a silent wrong-line jump is
+// worse than a defensive extra check), and even then it is an exact-substring match per
+// LAW 4 (quotes are always verbatim), first match, never a fuzzy one.
+type TranscriptLine = ScreenState['transcript'][number];
+
+function findQuoteLine(quote: Quote, transcript: TranscriptLine[]): TranscriptLine | null {
+  const byId = transcript.find((line) => line.id === quote.utterance_id);
+  if (byId && byId.text.includes(quote.text)) return byId;
+  return transcript.find((line) => line.text.includes(quote.text)) ?? byId ?? null;
+}
+
+/** Wraps the verbatim quoted substring in a `<mark>` -- the surrounding text is untouched
+ *  (LAW 4: `line.text` itself is never edited or reworded, only wrapped for display). Falls
+ *  back to the plain string if the substring can't be found (defensive; should not happen). */
+function withQuoteMark(text: string, quote: string) {
+  const idx = text.indexOf(quote);
+  if (idx === -1) return text;
   return (
-    <div className="checks-row">
+    <>
+      {text.slice(0, idx)}
+      <mark className="quote-mark">{text.slice(idx, idx + quote.length)}</mark>
+      {text.slice(idx + quote.length)}
+    </>
+  );
+}
+
+/** Task P3: the checks-board's compact row form of the SAME evidence card -- amber square
+ *  glyph (decorative only, `aria-hidden`), label, status word, one-line detail. The full card
+ *  (provenance, quotes) still renders via `EvidenceCard` in the forensic section below the
+ *  fold; this is an addition above the fold, not a replacement.
+ *
+ *  A row with at least one quote is a real button-semantics control (`role="button"`,
+ *  `tabIndex`, `aria-pressed`, Enter/Space activation) that jumps the transcript to the
+ *  quoted line; `aria-pressed` is the row's own non-colour signal for "this is the active
+ *  one". A row with no quote is left plain and inert -- its `title` says why, rather than
+ *  silently doing nothing on click. */
+function ChecksRow({
+  evidence,
+  isActive,
+  onActivate,
+}: {
+  evidence: Evidence;
+  isActive: boolean;
+  onActivate: (evidence: Evidence) => void;
+}) {
+  const hasQuote = evidence.quotes.length > 0;
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+      // Space also scrolls the page in most browsers -- this row isn't a native <button>
+      // (it sits inside a CSS grid row shared with plain, non-interactive rows), so that
+      // default has to be suppressed by hand.
+      event.preventDefault();
+      onActivate(evidence);
+    }
+  }
+
+  return (
+    <div
+      className={`checks-row${hasQuote ? ' checks-row-clickable' : ''}`}
+      role={hasQuote ? 'button' : undefined}
+      tabIndex={hasQuote ? 0 : undefined}
+      aria-pressed={hasQuote ? isActive : undefined}
+      onClick={hasQuote ? () => onActivate(evidence) : undefined}
+      onKeyDown={hasQuote ? handleKeyDown : undefined}
+      title={
+        hasQuote
+          ? isActive
+            ? 'Clear the quoted line in the transcript'
+            : 'Jump to the quoted line in the transcript'
+          : 'No verbatim quote on the transcript to jump to for this check'
+      }
+    >
       <span className="checks-mark" aria-hidden="true">
         ■
       </span>
@@ -139,6 +209,19 @@ function LedgerRow({ claim }: { claim: Claim }) {
   );
 }
 
+// Task P3: how long a clicked-through quote stays highlighted before it's cleared
+// automatically, and how much of that window is the (CSS-only, `prefers-reduced-motion`
+// guarded) fade at the end -- so the mark and its "quoted" flag don't just vanish outright.
+const QUOTE_HIGHLIGHT_MS = 2000;
+const QUOTE_FADE_MS = 300;
+
+type ActiveQuote = {
+  evidenceId: string;
+  utteranceId: string;
+  text: string;
+  fading: boolean;
+};
+
 export default function CallView({ screen, defaultForensicOpen }: CallViewProps) {
   const [showWhy, setShowWhy] = useState(defaultForensicOpen ?? false);
   // Fix round 1, Important: brief requirement C asks for an auto-scrolling transcript with
@@ -153,6 +236,65 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
   useEffect(() => {
     lastLineRef.current?.scrollIntoView({ block: 'end' });
   }, [lastLineId]);
+
+  // Task P3, evidence-to-quote linking: which checks-row (if any) is currently "pressed",
+  // and which transcript line/substring it points at. One ref per transcript line (not just
+  // the last one) so a click handler can scroll straight to it; two timers so the highlight
+  // clears itself after ~2s even if the caller never clicks it away, with a short fade first
+  // (skipped visually, not skipped in timing, under `prefers-reduced-motion` -- that's a CSS
+  // concern, guarded in styles.css, not a branch here).
+  const [activeQuote, setActiveQuote] = useState<ActiveQuote | null>(null);
+  const quoteLineRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const quoteFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const quoteClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clearQuoteTimers() {
+    if (quoteFadeTimerRef.current !== null) {
+      clearTimeout(quoteFadeTimerRef.current);
+      quoteFadeTimerRef.current = null;
+    }
+    if (quoteClearTimerRef.current !== null) {
+      clearTimeout(quoteClearTimerRef.current);
+      quoteClearTimerRef.current = null;
+    }
+  }
+
+  // Unmount cleanup only -- a real dependency array here would also fire on every
+  // `activeQuote` change, clearing timers the click handler just armed.
+  useEffect(() => clearQuoteTimers, []);
+
+  function handleChecksRowActivate(evidence: Evidence) {
+    if (evidence.quotes.length === 0) return;
+
+    // A second click/press on the row that's already active clears it immediately --
+    // requirement, not just the ~2s timeout's job.
+    if (activeQuote?.evidenceId === evidence.id) {
+      clearQuoteTimers();
+      setActiveQuote(null);
+      return;
+    }
+
+    // Only the row's first quote drives the jump -- the row (and the "why" this check
+    // failed/passed) can cite more than one, but "click a row, land on a line" only ever
+    // means one line at a time.
+    const quote = evidence.quotes[0]!;
+    const line = findQuoteLine(quote, screen.transcript);
+    const utteranceId = line?.id ?? quote.utterance_id;
+
+    clearQuoteTimers();
+    setActiveQuote({ evidenceId: evidence.id, utteranceId, text: quote.text, fading: false });
+    quoteLineRefs.current.get(utteranceId)?.scrollIntoView({ block: 'center' });
+
+    quoteFadeTimerRef.current = setTimeout(() => {
+      setActiveQuote((current) => (current ? { ...current, fading: true } : current));
+      quoteFadeTimerRef.current = null;
+    }, QUOTE_HIGHLIGHT_MS - QUOTE_FADE_MS);
+
+    quoteClearTimerRef.current = setTimeout(() => {
+      setActiveQuote(null);
+      quoteClearTimerRef.current = null;
+    }, QUOTE_HIGHLIGHT_MS);
+  }
 
   return (
     <div className="call-view">
@@ -207,23 +349,43 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
               colour alone. The "[flagged]"/"[interrupted]" markers are the look's italic
               amber notes (`.turn-note`), same words as before this round. */}
           <div className="transcript" aria-label="transcript">
-            {screen.transcript.map((line, i) => (
-              <div
-                key={line.id}
-                ref={i === screen.transcript.length - 1 ? lastLineRef : undefined}
-                className={`turn turn-${line.speaker}${line.highlighted ? ' highlighted' : ''}`}
-                data-highlighted={line.highlighted ? 'true' : 'false'}
-                data-speaker={line.speaker}
-              >
-                <span className="turn-index">{String(i + 1).padStart(2, '0')}.</span>
-                <span className="turn-body">
-                  <span className="turn-speaker">{SPEAKER_LABELS[line.speaker]}</span>
-                  <span className="turn-text">{line.text}</span>
-                  {line.highlighted && <em className="turn-note">[flagged]</em>}
-                  {line.interrupted && <em className="turn-note">[interrupted]</em>}
-                </span>
-              </div>
-            ))}
+            {screen.transcript.map((line, i) => {
+              const isQuoted = activeQuote !== null && activeQuote.utteranceId === line.id;
+              return (
+                <div
+                  key={line.id}
+                  ref={(el) => {
+                    if (i === screen.transcript.length - 1) lastLineRef.current = el;
+                    if (el) quoteLineRefs.current.set(line.id, el);
+                    else quoteLineRefs.current.delete(line.id);
+                  }}
+                  className={`turn turn-${line.speaker}${line.highlighted ? ' highlighted' : ''}${
+                    isQuoted ? ` quote-active${activeQuote!.fading ? ' quote-fading' : ''}` : ''
+                  }`}
+                  data-highlighted={line.highlighted ? 'true' : 'false'}
+                  data-quote-active={isQuoted ? 'true' : 'false'}
+                  data-speaker={line.speaker}
+                >
+                  <span className="turn-index">{String(i + 1).padStart(2, '0')}.</span>
+                  <span className="turn-body">
+                    <span className="turn-speaker">{SPEAKER_LABELS[line.speaker]}</span>
+                    <span className="turn-text">
+                      {/* Task P3: the "quoted" prefix glyph -- a visible word, not a colour --
+                          so the checks-row's `aria-pressed` and this line's own label both say
+                          "this is the linked one" without either depending on colour alone. */}
+                      {isQuoted && (
+                        <span className="quote-flag">
+                          <span aria-hidden="true">▸</span> quoted
+                        </span>
+                      )}
+                      {isQuoted ? withQuoteMark(line.text, activeQuote!.text) : line.text}
+                    </span>
+                    {line.highlighted && <em className="turn-note">[flagged]</em>}
+                    {line.interrupted && <em className="turn-note">[interrupted]</em>}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </section>
 
@@ -258,7 +420,12 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
               visible, no matter how many evidence cards this call has produced. */}
           <div className="checks-rows">
             {screen.forensic.evidence.map((e) => (
-              <ChecksRow key={`checks-${e.id}`} evidence={e} />
+              <ChecksRow
+                key={`checks-${e.id}`}
+                evidence={e}
+                isActive={activeQuote?.evidenceId === e.id}
+                onActivate={handleChecksRowActivate}
+              />
             ))}
           </div>
 

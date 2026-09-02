@@ -504,6 +504,57 @@ input {
   background: var(--cs-elevated);
 }
 
+/* Task P3, evidence-to-quote linking: the transcript line a clicked checks-row points at.
+   `.quote-flag` is a visible word ("quoted"), not a colour, so the link between row and line
+   reads without relying on `.quote-mark`'s background alone; `--cs-accent` text-on-panel/bg/
+   elevated and `#000000` on `--cs-accent` are both already covered by test/contrast.test.ts
+   (the latter is the exact pairing button.primary already uses). Fades out over
+   `QUOTE_FADE_MS` (CallView.tsx) via the `.quote-fading` modifier the component adds just
+   before it clears the highlight outright -- `prefers-reduced-motion` turns the transition
+   off below, which still ends at the same final (unhighlighted) state, just without the
+   animated step in between. */
+.turn.quote-active {
+  background: var(--cs-elevated);
+}
+
+.quote-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-right: 0.4rem;
+  color: var(--cs-accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  transition: opacity 0.3s ease;
+}
+
+.quote-mark {
+  background: var(--cs-accent);
+  color: #000000;
+  padding: 0 0.15rem;
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
+}
+
+.turn.quote-fading .quote-flag {
+  opacity: 0.4;
+}
+
+.turn.quote-fading .quote-mark {
+  background: transparent;
+  color: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quote-flag,
+  .quote-mark {
+    transition: none;
+  }
+}
+
 /* --- Checks board: the right column (fix round 2) --------------------------------------- */
 .checks-board {
   display: flex;
@@ -577,6 +628,23 @@ input {
 
 .checks-detail {
   color: var(--cs-muted);
+}
+
+/* Task P3, evidence-to-quote linking: a checks-row with at least one quote is a real
+   button-semantics control (see CallView.tsx's `role="button"` row). No new text/background
+   token pair here -- `[aria-pressed='true']` reuses the same --cs-elevated the row already
+   sits on when highlighted/hovered, already covered by test/contrast.test.ts. */
+.checks-row-clickable {
+  cursor: pointer;
+}
+
+.checks-row-clickable:hover,
+.checks-row-clickable:focus-visible {
+  background: var(--cs-elevated);
+}
+
+.checks-row-clickable[aria-pressed='true'] {
+  background: var(--cs-elevated);
 }
 
 /* The verdict line, landing as a board update. Text-only headline + reasons + subline --

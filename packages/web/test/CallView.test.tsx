@@ -5,8 +5,11 @@
 // this test exercises the actual contract, not a hand-typed guess at its shape. CallView
 // must render ScreenState verbatim: it computes nothing about verdicts.
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { evaluate, MERIDIAN } from '@countersign/engine';
 import type { CorpusFile, EngineInput, ScreenState } from '@countersign/engine';
 import { deriveScreenState } from '@countersign/server/src/screen/state.js';
@@ -319,5 +322,180 @@ describe('CallView', () => {
     expect(scrollIntoView).toHaveBeenCalledTimes(2);
 
     scrollIntoView.mockRestore();
+  });
+});
+
+// Task P3, evidence-to-quote linking: every evidence card's `quotes[]` carries a verbatim
+// STT substring AND the `utterance_id` it came from (packages/engine/src/types.ts, `Quote`).
+// Clicking (or Enter/Space-activating) a checks-row with a quote scrolls the transcript to
+// that line and marks the exact substring; a row with no quotes is inert; a second
+// activation clears the highlight; it also clears itself after ~2s on its own. Scenario B's
+// real engine output (same fixture as the suite above) is used throughout -- never a
+// hand-typed ScreenState -- so this exercises the real `Evidence.quotes` shape.
+describe('evidence-to-quote linking (Task P3)', () => {
+  // `ev-consistency-amount_usd`'s first quote is `{ utterance_id: 'c1', text: '$1.8 million' }`
+  // (packages/engine/corpus/scenario-b-miller-fraud.json, verified against the real engine
+  // output) -- a short, unambiguous substring of c1's utterance text, distinct from the
+  // request-header's differently-formatted "$1,800,000".
+  const CONSISTENCY_LABEL = 'Consistency: amount usd';
+  const CONSISTENCY_QUOTE = '$1.8 million';
+  const CONSISTENCY_UTTERANCE_ID = 'c1';
+
+  function getRow(label: string) {
+    const row = screen.getByText(label).closest('.checks-row');
+    expect(row).not.toBeNull();
+    return row as HTMLElement;
+  }
+
+  it('clicking a checks-row with a quote scrolls the transcript to the matching line and marks the verbatim substring', async () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const user = userEvent.setup();
+    render(<CallView screen={scenarioBFinalState()} />);
+
+    const row = getRow(CONSISTENCY_LABEL);
+    expect(row).toHaveAttribute('role', 'button');
+    expect(row).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(row);
+
+    expect(row).toHaveAttribute('aria-pressed', 'true');
+
+    const transcript = screen.getByLabelText('transcript');
+    const targetLine = transcript.querySelector(`[data-quote-active="true"]`);
+    expect(targetLine).not.toBeNull();
+    expect(targetLine).toHaveAttribute('data-speaker', 'caller');
+
+    // The line the quote points at is really `c1` -- found by `utterance_id`, not a
+    // coincidental substring match elsewhere.
+    const callerLine = within(transcript).getByText(/This is Robert Miller/).closest('.turn');
+    expect(targetLine).toBe(callerLine);
+
+    const mark = (targetLine as HTMLElement).querySelector('mark.quote-mark');
+    expect(mark).not.toBeNull();
+    expect(mark!.textContent).toBe(CONSISTENCY_QUOTE);
+
+    // The "quoted" prefix glyph -- a visible word, not colour -- names the line as the
+    // linked one.
+    expect(within(targetLine as HTMLElement).getByText('quoted')).toBeInTheDocument();
+
+    // scrollIntoView was actually called on that exact line element (not just on some
+    // element -- `mock.instances` records the `this` each call was invoked with).
+    expect(scrollIntoView.mock.instances).toContain(targetLine);
+
+    scrollIntoView.mockRestore();
+  });
+
+  it('a checks-row with no quotes is inert: no button semantics, click does nothing, and its title says why', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<CallView screen={scenarioBFinalState()} />);
+
+    // `ev-sso` ("SSO context") carries no quotes in Scenario B's real engine output.
+    const row = getRow('SSO context');
+    expect(row).not.toHaveAttribute('role');
+    expect(row).not.toHaveAttribute('tabindex');
+    expect(row).not.toHaveAttribute('aria-pressed');
+    expect(row).toHaveAttribute('title', 'No verbatim quote on the transcript to jump to for this check');
+
+    await user.click(row);
+
+    expect(row).not.toHaveAttribute('aria-pressed');
+    expect(container.querySelector('[data-quote-active="true"]')).toBeNull();
+  });
+
+  it('activates a checks-row from the keyboard (Enter), same result as a click', async () => {
+    const user = userEvent.setup();
+    render(<CallView screen={scenarioBFinalState()} />);
+
+    const row = getRow(CONSISTENCY_LABEL);
+    row.focus();
+    expect(row).toHaveFocus();
+
+    await user.keyboard('{Enter}');
+
+    expect(row).toHaveAttribute('aria-pressed', 'true');
+    const transcript = screen.getByLabelText('transcript');
+    expect(transcript.querySelector('[data-quote-active="true"]')).not.toBeNull();
+  });
+
+  it('activates a checks-row from the keyboard (Space) too', async () => {
+    const user = userEvent.setup();
+    render(<CallView screen={scenarioBFinalState()} />);
+
+    const row = getRow(CONSISTENCY_LABEL);
+    row.focus();
+    await user.keyboard(' ');
+
+    expect(row).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('a second click on the same row clears the highlight', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<CallView screen={scenarioBFinalState()} />);
+
+    const row = getRow(CONSISTENCY_LABEL);
+    await user.click(row);
+    expect(row).toHaveAttribute('aria-pressed', 'true');
+    expect(container.querySelector('[data-quote-active="true"]')).not.toBeNull();
+
+    await user.click(row);
+    expect(row).toHaveAttribute('aria-pressed', 'false');
+    expect(container.querySelector('[data-quote-active="true"]')).toBeNull();
+  });
+
+  it('clicking a different row moves the highlight instead of requiring a clear first', async () => {
+    const user = userEvent.setup();
+    render(<CallView screen={scenarioBFinalState()} />);
+
+    const consistencyRow = getRow(CONSISTENCY_LABEL);
+    await user.click(consistencyRow);
+    expect(consistencyRow).toHaveAttribute('aria-pressed', 'true');
+
+    // `ev-knowledge-*` ("Knowledge check")'s quote sits on a different line (`c2`), so this
+    // proves the highlight actually moves to the new row's line, not just that a second row
+    // also reports itself pressed.
+    const knowledgeRow = getRow('Knowledge check');
+    await user.click(knowledgeRow);
+
+    expect(consistencyRow).toHaveAttribute('aria-pressed', 'false');
+    expect(knowledgeRow).toHaveAttribute('aria-pressed', 'true');
+
+    const transcript = screen.getByLabelText('transcript');
+    const activeLines = transcript.querySelectorAll('[data-quote-active="true"]');
+    expect(activeLines.length).toBe(1);
+  });
+
+  it('the quote highlight clears itself automatically after ~2s even without a second click', () => {
+    vi.useFakeTimers();
+    try {
+      render(<CallView screen={scenarioBFinalState()} />);
+      const row = getRow(CONSISTENCY_LABEL);
+
+      fireEvent.click(row);
+      expect(row).toHaveAttribute('aria-pressed', 'true');
+
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(row).toHaveAttribute('aria-pressed', 'false');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Motion is a CSS-only concern here (no matchMedia branch in the component -- see
+  // CallView.tsx), guarded the same way `.banner-terminal`'s landing animation already is
+  // (styles.css). This reads the real file and asserts the mechanism directly: the quote
+  // mark/flag transitions exist by default and are turned off under
+  // `prefers-reduced-motion: reduce`.
+  it('turns the quote-highlight fade transition off under prefers-reduced-motion (styles.css)', () => {
+    const cssPath = resolve(dirname(fileURLToPath(import.meta.url)), '../src/styles.css');
+    const css = readFileSync(cssPath, 'utf-8');
+
+    expect(css).toMatch(/\.quote-mark\s*\{[^}]*transition:/);
+    expect(css).toMatch(/\.quote-flag\s*\{[^}]*transition:/);
+
+    const reducedMotionBlock = css.match(/@media \(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?)\n\}\n/);
+    expect(reducedMotionBlock, 'no prefers-reduced-motion block found in styles.css').not.toBeNull();
+    expect(reducedMotionBlock![1]).toMatch(/\.quote-flag,\s*\n\s*\.quote-mark\s*\{\s*transition:\s*none;/);
   });
 });
