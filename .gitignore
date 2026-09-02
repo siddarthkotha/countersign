@@ -24,3 +24,4 @@ Thumbs.db
 .superpowers/
 .claude/autopilot.on
 .claude/compaction-log.txt
+!.env.example

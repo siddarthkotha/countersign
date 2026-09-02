@@ -733,3 +733,5 @@ moment: 1,477 approved participants (the brief's Aug 26 figure of 485 is superse
 is superseded (engine on the server only; browser is an untrusted terminal). §15 character laws amended per D3.
 §4 Scenario C is cut from the video; the README keeps one sentence that the same checkpoint generalizes to a
 family phone. Language adopted everywhere: "A call can request a privileged action. It can never authorize one."
+
+**2026-09-02 10:06 AM CDT, founder: "yes to all five, go."** Ratified: the four corpus/engine items parked in docs/AUTOPILOT_LOG.md (Scenario B barge-in flag on the agent line; roster name; the correct-answers description; recorded challenge spec carried in `challenge_issued` actions) and Plan 2 GO (docs/superpowers/plans/2026-09-02-plan2-voice-path.md). Corpus edits are founder-authorized (GOLDEN_OVERRIDE). The RELATIONAL-above-SEED_FACT reorder is applied in the same pass (controller ruling 2026-09-01 11:24 PM; disclosed).

@@ -44,7 +44,18 @@ PROTECTED_ORACLE=( "packages/engine/corpus/*.json" "packages/engine/test/corpus.
 oracle_violations=$(
   { git -C "$PROJ" diff --cached --numstat -- "${PROTECTED_ORACLE[@]}" 2>/dev/null | awk '($1 == "-" && $2 == "-") || ($2 ~ /^[0-9]+$/ && $2 > 0) { print $3 }'
     git -C "$PROJ" diff --cached --name-status -- "${PROTECTED_ORACLE[@]}" 2>/dev/null | awk '$1 ~ /^(D|R|C)/ { print $2 }'
-    if [ "$will_add" = 1 ]; then git -C "$PROJ" diff --numstat -- "${PROTECTED_ORACLE[@]}" 2>/dev/null | awk '($1 == "-" && $2 == "-") || ($2 ~ /^[0-9]+$/ && $2 > 0) { print $3 }'; fi
+    # In add-mode, only the paths the command itself adds count (parallel lanes leave other files dirty).
+    if [ "$will_add" = 1 ]; then
+      _addp=$(printf '%s' "$cmd" | tr '\n' ' ' | sed -E 's/.*git[[:space:]]+add[[:space:]]+//; s/[[:space:]]*(&&|;|\|).*$//')
+      if printf '%s' "$_addp" | grep -qE '(^|[[:space:]])(-A|--all|\.)([[:space:]]|$)'; then
+        git -C "$PROJ" diff --numstat -- "${PROTECTED_ORACLE[@]}" 2>/dev/null | awk '($1 == "-" && $2 == "-") || ($2 ~ /^[0-9]+$/ && $2 > 0) { print $3 }'
+      else
+        for _f in $_addp; do
+          if [ "${_f#-}" != "$_f" ]; then continue; fi
+          git -C "$PROJ" diff --numstat -- "$_f" 2>/dev/null | awk '($1 == "-" && $2 == "-") || ($2 ~ /^[0-9]+$/ && $2 > 0) { print $3 }'
+        done | grep -E '^(packages/engine/corpus/.*[.]json|packages/engine/test/corpus[.]test[.]ts|packages/engine/test/mutants[.]test[.]ts|[.]github/workflows/ci[.]yml)$'
+      fi
+    fi
   } | sort -u)
 if [ -n "$oracle_violations" ]; then
   if [ -f "$PROJ/.claude/autopilot.on" ]; then
