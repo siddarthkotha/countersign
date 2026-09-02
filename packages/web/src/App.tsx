@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import Landing from './screens/Landing';
+import Replay from './screens/Replay';
 
 type Screen = 'landing' | 'replay' | 'call';
 
@@ -7,7 +8,7 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('landing');
 
   if (screen === 'replay') {
-    return <div>Replay (W2)</div>;
+    return <Replay />;
   }
 
   if (screen === 'call') {

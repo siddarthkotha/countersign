@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { ServerConfig } from './config.js';
 import { newCapsState, canStartSession, startSession, endSession, type CapsState } from './caps.js';
+import { defaultCorpusDir, listCorpusFiles } from './replay.js';
 
 export interface HttpDeps {
   fetchImpl: typeof fetch;
@@ -53,6 +54,17 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
         killed: cfg.kill_switch || state.killed,
         has_key: cfg.assemblyai_api_key !== null,
       });
+      return;
+    }
+
+    // W2 (replay screen): the corpus file names, without extension, so the browser's file
+    // picker never has to hard-code the list. `listCorpusFiles`/`defaultCorpusDir` already
+    // exist in replay.ts (S2) -- this route just exposes them over HTTP; the whitelist
+    // behaviour (no path can escape the corpus directory) lives entirely in replay.ts and is
+    // unchanged by this route.
+    if (req.method === 'GET' && path === '/api/replay') {
+      const files = Array.from(listCorpusFiles(defaultCorpusDir())).sort();
+      sendJson(res, 200, { files });
       return;
     }
 
