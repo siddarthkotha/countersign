@@ -57,15 +57,37 @@ if [ -n "$oracle_violations" ]; then
   fi
 fi
 
-# --- 3. EXECUTABLE GATE ---
+# --- 3. EXECUTABLE GATE (runs against a SNAPSHOT of what is being committed, never the live tree) ---
+# Parallel lanes share one working tree: another agent's half-written file must not block this commit.
+# Snapshot = the index exported to a temp dir, plus (when the command itself runs `git add`) the paths it names
+# copied from the working tree. `git add -A|.|--all` = the whole working tree.
 staged=$(git -C "$PROJ" diff --cached --name-only 2>/dev/null | grep -E '^(packages/|\.github/)')
-if [ -z "$staged" ] && [ "$will_add" = 1 ]; then
-  staged=$(git -C "$PROJ" status --porcelain 2>/dev/null | awk '{print $NF}' | grep -E '^(packages/|\.github/)')
+add_paths=""
+if [ "$will_add" = 1 ]; then
+  add_paths=$(printf '%s' "$cmd" | tr '\n' ' ' | sed -E 's/.*git[[:space:]]+add[[:space:]]+//; s/[[:space:]]*(&&|;|\|).*$//')
+  if printf '%s' "$add_paths" | grep -qE '(^|[[:space:]])(-A|--all|\.)([[:space:]]|$)'; then
+    staged=$(printf '%s\n%s' "$staged" "$(git -C "$PROJ" status --porcelain 2>/dev/null | awk '{print $NF}')" | grep -E '^(packages/|\.github/)')
+  else
+    staged=$(printf '%s\n%s' "$staged" "$(printf '%s' "$add_paths" | tr ' ' '\n')" | grep -E '^(packages/|\.github/)')
+  fi
 fi
 [ -z "$staged" ] && exit 0
 [ -n "${PRECOMMIT_GATE_TEST_DIFF:-}" ] && exit 0   # test harness stops before running the suite
-if ! gate_log=$( (cd "$PROJ" && npm test --silent 2>&1 && npm run typecheck --silent 2>&1) ); then
-  { echo "BLOCKED by pre-commit-gate — the executable gate is RED (npm test / npm run typecheck). Countersign law: nothing is done without a green test importing the real code. Fix the failure; never bypass."; printf '%s\n' "$gate_log" | tail -30; } >&2
+SNAP=$(mktemp -d "${TMPDIR:-/tmp}/csgate.XXXXXX") || exit 0
+cleanup() { rm -rf "$SNAP" 2>/dev/null; }
+trap cleanup EXIT
+git -C "$PROJ" checkout-index -a --prefix="$SNAP/" 2>/dev/null || { echo "pre-commit-gate: could not snapshot the index; allowing (fail-open on infrastructure, logged)" >&2; exit 0; }
+if [ "$will_add" = 1 ]; then
+  if printf '%s' "$add_paths" | grep -qE '(^|[[:space:]])(-A|--all|\.)([[:space:]]|$)'; then
+    (cd "$PROJ" && git ls-files -m -o --exclude-standard -z 2>/dev/null | while IFS= read -r -d '' f; do mkdir -p "$SNAP/$(dirname "$f")"; [ -f "$f" ] && cp "$f" "$SNAP/$f"; done)
+  else
+    for f in $add_paths; do case "$f" in -*) continue;; esac; if [ -d "$PROJ/$f" ]; then (cd "$PROJ" && find "$f" -type f -not -path '*/node_modules/*' | while read -r g; do mkdir -p "$SNAP/$(dirname "$g")"; cp "$g" "$SNAP/$g"; done); elif [ -f "$PROJ/$f" ]; then mkdir -p "$SNAP/$(dirname "$f")"; cp "$PROJ/$f" "$SNAP/$f"; fi; done
+  fi
+fi
+[ -d "$PROJ/node_modules" ] && ln -s "$PROJ/node_modules" "$SNAP/node_modules"
+for w in "$PROJ"/packages/*/; do n=$(basename "$w"); [ -d "$w/node_modules" ] && [ -d "$SNAP/packages/$n" ] && ln -s "$w/node_modules" "$SNAP/packages/$n/node_modules"; done
+if ! gate_log=$( (cd "$SNAP" && npm test --silent 2>&1 && npm run typecheck --silent 2>&1) ); then
+  { echo "BLOCKED by pre-commit-gate — the executable gate is RED on the snapshot of what you are committing (npm test / npm run typecheck). Countersign law: nothing is done without a green test importing the real code. Fix the failure; never bypass. (Other agents' uncommitted files are NOT in this snapshot — the red is yours.)"; printf '%s\n' "$gate_log" | tail -30; } >&2
   exit 2
 fi
 exit 0
