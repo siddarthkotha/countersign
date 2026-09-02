@@ -48,3 +48,11 @@ in this repository.
 
 *README structure (video, live demo, "why voice", architecture, deny conditions, evidence
 format, adversarial corpus, measured latency, setup) fills in as the build progresses.*
+
+## Measured latency (live AssemblyAI Voice Agent API, from the real stack)
+
+| Date (CDT) | Runs | Connect → session.ready | session.ready → first reply audio | Notes |
+|---|---|---|---|---|
+| 2026-09-02 11:13 AM | 1 | 995 ms | 221 ms | `npm run smoke:live` from the founder's Mac in Austin; single run, no percentiles yet. p50/p95 over 50+ rehearsals land in week 3 (gate G5). |
+
+Method: `packages/server/scripts/smoke-live.ts` mints a token, opens the socket, sends `session.update`, times `session.ready`, then times the first `reply.audio` after the greeting. Opt-in only (`--live` + `ASSEMBLYAI_API_KEY`); never runs in CI.
