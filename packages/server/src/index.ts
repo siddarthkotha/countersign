@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import { loadConfig } from './config.js';
 import { createHttpServer } from './http.js';
+import { createStaticServer } from './static.js';
 import { reapIdle } from './caps.js';
 import { attachWebSocketServer } from './ws/browser.js';
 import { FakeAaiSocket } from './aai/fake.js';
@@ -9,6 +12,12 @@ import type { AaiEvent, AaiSocket } from './aai/types.js';
 import { connectAai, type WsLike } from './aai/session.js';
 import { loadAaiEnvDefaults, type AaiSessionConfig } from './aai/config.js';
 import { allToolSchemas } from './aai/schemas.js';
+
+// Task D1: packages/server/src/index.ts -> packages/web/dist (siblings under packages/),
+// whether this file is running as source (tsx, packages/server/src/index.ts) or as the
+// compiled build (packages/server/dist/index.js) -- both sit one directory under
+// packages/server/, so '../../web/dist' resolves the same from either location.
+const webDistDir = join(dirname(fileURLToPath(import.meta.url)), '../../web/dist');
 
 const useFakeAai = process.env.COUNTERSIGN_FAKE_AAI === '1';
 
@@ -37,6 +46,10 @@ const { server, state } = createHttpServer(cfg, {
   now: () => Date.now(),
   randomId: () => randomUUID(),
   endCall: (id, reason) => (endCallImpl ? endCallImpl(id, reason) : false),
+  // Mounted as the LAST fallback inside http.ts, after every API/WS route -- `available` is
+  // false (so this never activates) unless `npm run build:web` has actually produced
+  // packages/web/dist, which keeps plain `dev:server` (no build) working exactly as before.
+  staticServer: createStaticServer(webDistDir),
 });
 
 // COUNTERSIGN_FAKE_AAI=1 (founder ruling, Task S2): every call session gets a scripted
@@ -168,6 +181,9 @@ if (useFakeAai) {
   console.log('COUNTERSIGN_FAKE_AAI=1 -- call sessions use a scripted fake AssemblyAI socket, no API key required');
 }
 
-server.listen(cfg.port, () => {
+// Task D1: bind 0.0.0.0 explicitly -- Render (and most PaaS hosts) route inbound traffic to
+// the container's external interface, not just loopback, so an implicit default host is the
+// wrong thing to rely on for the always-on deploy target.
+server.listen(cfg.port, '0.0.0.0', () => {
   console.log(`countersign server listening on :${cfg.port}`);
 });

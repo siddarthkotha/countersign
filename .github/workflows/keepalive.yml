@@ -1,0 +1,36 @@
+# Free-tier fallback for the Render deploy (Task D1 / docs/DEPLOY.md).
+#
+# Render's Free plan suspends the service after 15 minutes with no traffic and takes about a
+# minute to wake back up on the next request (verified docs/hosting-render-check-2026-09-02.md).
+# That is a dead-on-arrival demo if a judge's first click is what wakes it up. The real fix is
+# switching `plan: free` to `plan: starter` in render.yaml before judging week (docs/DEPLOY.md
+# has the one-line switch) -- an always-on plan never spins down, so this workflow becomes
+# unnecessary once that switch happens. Until then, this is the fallback: a periodic ping to
+# /health keeps the free instance awake during active build/rehearsal hours.
+#
+# DISABLED BY DEFAULT: the `schedule` trigger below is commented out, so this workflow only
+# ever runs when someone manually triggers it (`workflow_dispatch`, in the Actions tab, or
+# `gh workflow run keepalive.yml`) -- it costs nothing and pings nothing until enabled.
+#
+# TO ENABLE: uncomment the `schedule:` block below, set `COUNTERSIGN_HEALTH_URL` (repo
+# Settings -> Secrets and variables -> Actions -> Variables) to the deployed service's
+# `/health` URL (e.g. https://countersign.onrender.com/health), and commit.
+name: keepalive
+on:
+  workflow_dispatch: {}
+  # schedule:
+  #   - cron: '*/10 * * * *'  # every 10 minutes -- comfortably under Render's 15-minute
+  #                            # suspend window; see the note above before enabling.
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health to keep the free-tier instance awake
+        run: |
+          if [ -z "${COUNTERSIGN_HEALTH_URL}" ]; then
+            echo "COUNTERSIGN_HEALTH_URL is not set (repo Settings -> Secrets and variables -> Actions -> Variables) -- nothing to ping. See docs/DEPLOY.md."
+            exit 0
+          fi
+          curl -fsS --max-time 20 "${COUNTERSIGN_HEALTH_URL}" || echo "ping failed (service may be waking from suspend) -- not treated as a workflow failure"
+        env:
+          COUNTERSIGN_HEALTH_URL: ${{ vars.COUNTERSIGN_HEALTH_URL }}

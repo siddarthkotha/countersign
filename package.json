@@ -16,12 +16,18 @@
     "replay": "npm run replay --workspace @countersign/engine --",
     "dev:web": "vite --config packages/web/vite.config.ts packages/web",
     "build:web": "vite build --config packages/web/vite.config.ts packages/web",
+    "build:server": "tsc -p packages/server/tsconfig.build.json",
+    "build": "npm run build:web && npm run build:server",
     "dev:server": "tsx packages/server/src/index.ts",
-    "smoke:live": "tsx packages/server/scripts/smoke-live.ts --live"
+    "start:server": "tsx packages/server/dist/index.js",
+    "smoke:live": "tsx packages/server/scripts/smoke-live.ts --live",
+    "preflight:deploy": "tsx scripts/preflight-deploy.ts"
+  },
+  "dependencies": {
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
-    "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0"
   }

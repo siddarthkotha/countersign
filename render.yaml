@@ -1,0 +1,48 @@
+# Render Blueprint — one always-on web service serving the API, the WebSocket call path,
+# and the built React SPA out of the same process/port (Task D1; BRIEF Amendment 1 + §14b(5)).
+#
+# plan: free for the build weeks (controller ruling 2026-09-02) -- Render's free tier
+# suspends the service after 15 minutes of inactivity and takes about a minute to wake back
+# up on the next request (verified docs/hosting-render-check-2026-09-02.md). That is fine
+# while only the founder and this session hit the URL during the build, but a cold start on
+# a judge's first click during judging week is a dead submission -- flip `plan: free` below
+# to `plan: starter` in the Render dashboard (or edit this file and redeploy) BEFORE judging
+# week (~Sep 20). See docs/DEPLOY.md for the exact one-line switch and the free-tier
+# keep-alive fallback if the plan bump is missed.
+#
+# region: oregon is a FIRST GUESS (UNKNOWN which Render region sits closest to AssemblyAI's
+# realtime WebSocket servers) -- measure connect->session.ready latency from the deployed
+# box (README's latency table already has a place for it) and move regions if a closer one
+# measures meaningfully better. See docs/DEPLOY.md.
+services:
+  - type: web
+    name: countersign
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:server
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      # Set in the Render dashboard, never in this file or the repo (hygiene law: secrets
+      # only in the host's secret store). `sync: false` means Render will prompt for it on
+      # first deploy and never overwrite whatever's already there from this blueprint.
+      - key: ASSEMBLYAI_API_KEY
+        sync: false
+      # Must equal this service's actual URL (CORS allowlist -- http.ts's applyCors rejects
+      # any other Origin). Render names the default URL after `name:` above
+      # (https://countersign.onrender.com) unless that slug was already taken, in which
+      # case Render appends a suffix -- check the real URL after the first deploy and update
+      # this value (then redeploy) if it doesn't match. See docs/DEPLOY.md.
+      - key: COUNTERSIGN_ALLOWED_ORIGINS
+        value: https://countersign.onrender.com
+      - key: COUNTERSIGN_SESSION_CAP_SECONDS
+        value: "300"
+      - key: COUNTERSIGN_MAX_CONCURRENT
+        value: "2"
+      - key: COUNTERSIGN_DAILY_CAP
+        value: "40"
+      - key: COUNTERSIGN_KILL_SWITCH
+        value: "0"

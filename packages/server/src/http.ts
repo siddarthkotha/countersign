@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { ServerConfig } from './config.js';
 import { newCapsState, canStartSession, startSession, type CapsState } from './caps.js';
 import { defaultCorpusDir, listCorpusFiles } from './replay.js';
+import type { StaticServer } from './static.js';
 
 export interface HttpDeps {
   fetchImpl: typeof fetch;
@@ -14,6 +15,11 @@ export interface HttpDeps {
    *  the live `CallSession` + AAI socket + browser socket and frees the caps slot together.
    *  Returns `false` for an id that was never active -- routed to 404, same shape as before. */
   endCall: (session_id: string, reason: string) => boolean;
+  /** Task D1: serves the built web SPA (packages/web/dist) as the LAST fallback, after every
+   *  API route has failed to match. Optional -- omitted in tests that only exercise the API
+   *  surface, and `available: false` (no build present) makes `handle` always decline, so
+   *  omitting it changes nothing about existing behaviour. */
+  staticServer?: StaticServer;
 }
 
 function applyCors(req: IncomingMessage, res: ServerResponse, cfg: ServerConfig): void {
@@ -107,6 +113,13 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
       }
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    // Task D1: static SPA fallback -- only reached once every API/WS route above has
+    // declined this request. `staticServer.handle` itself refuses /api and /ws paths, so an
+    // unmatched API route still gets the JSON 404 below, never an HTML page.
+    if (req.method === 'GET' && deps.staticServer?.handle(req, res)) {
       return;
     }
 
