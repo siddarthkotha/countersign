@@ -1,0 +1,28 @@
+{
+  "title": "Honest judge, no request made",
+  "description": "A judge or stranger immediately discloses this is a test, before making any request at all. Proves rule 1 (out-of-scope marker, no open request -> NO_ACTION, explain this is a demo checkpoint) -- the FSM never deadlocks on an off-script opener, and nothing is left open to route anywhere.",
+  "call": {
+    "session_id": "sess-judge-1",
+    "origin_kind": "unverified_voip",
+    "origin_geo": "unknown"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "I'm not the CEO, I'm testing this for a hackathon.",
+      "t_ms": 1000
+    }
+  ],
+  "tools": [],
+  "actions": [],
+  "expected": {
+    "verdict": "NO_ACTION",
+    "state": "OUT_OF_SCOPE",
+    "reasons": [
+      "OUT_OF_SCOPE"
+    ],
+    "failure_tally": 0,
+    "request_version": 1
+  }
+}

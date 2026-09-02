@@ -1,0 +1,151 @@
+{
+  "title": "Pressure signals alone do not block staging",
+  "description": "Otherwise-identical to Scenario A (exact amendment match, every critical field confirmed, every live check clean) except Dana opens with two urgency phrases (\"right now\", \"this is urgent\") drawn from the pressure lexicon. Proves rule 11's carve-out in the rulebook: a pressure FLAG counts 0 toward the tally and never blocks assuranceAllTrue -- it only changes how the agent is instructed to talk (ANNOUNCE_STAGED with no details disclosed, alert_principal already on the required-actions list) -- never whether the request stages.",
+  "call": {
+    "session_id": "sess-6",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury — right now, this is urgent — I need to wire it to Meridian Supply, $84,500, account ending 4471, approved in yesterday's close meeting.",
+      "t_ms": 1000
+    },
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "To confirm: $84,500 to Meridian Supply, account ending 4471. Is that right?",
+      "t_ms": 2000
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 2500
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "And the account ending 4471, correct?",
+      "t_ms": 3000
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "Yes, correct.",
+      "t_ms": 3500
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "And Meridian Supply is the beneficiary, correct?",
+      "t_ms": 4000
+    },
+    {
+      "id": "c4",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 4500
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 5000,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 5100,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 5200,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "r1",
+      "kind": "readback_issued",
+      "t_ms": 2000,
+      "field": "amount_usd",
+      "value": "84500"
+    },
+    {
+      "id": "r2",
+      "kind": "readback_issued",
+      "t_ms": 3000,
+      "field": "account_last4",
+      "value": "4471"
+    },
+    {
+      "id": "r3",
+      "kind": "readback_issued",
+      "t_ms": 4000,
+      "field": "beneficiary",
+      "value": "Meridian Supply"
+    }
+  ],
+  "expected": {
+    "verdict": "STAGE",
+    "state": "ACTION",
+    "reasons": [],
+    "failure_tally": 0,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": true,
+      "critical_fields_confirmed": true,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true
+    }
+  }
+}

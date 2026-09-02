@@ -9,6 +9,7 @@ import { gradeChallenges, selectChallenge } from './challenges';
 import { evidenceFromTranscript } from './evidence/fromTranscript';
 import { evidenceFromTools } from './evidence/fromTools';
 import { decide } from './rules';
+import type { RuleMutant } from './rules';
 import { allowedTools, deriveState, phrasingGoal, requiredActions } from './fsm';
 import {
   applyOverrides,
@@ -21,7 +22,10 @@ import {
 } from './compose';
 import type { ChallengeResult, EngineInput, EngineOutput, Evidence, EvidenceStatus } from './types';
 
-export function evaluate(input: EngineInput, overrides?: Record<string, EvidenceStatus>): EngineOutput {
+/** `overrides` and `mutant` are TEST-ONLY (used by test/evaluate.test.ts's counterfactual
+ *  checks and test/mutants.test.ts respectively). `evaluate(input)` alone stays the only
+ *  signature the server/browser ever calls -- a real invocation never supplies either. */
+export function evaluate(input: EngineInput, overrides?: Record<string, EvidenceStatus>, mutant?: RuleMutant): EngineOutput {
   const { conversation, tools, actions, call, seed } = input;
 
   // 1. Story ledger.
@@ -65,7 +69,7 @@ export function evaluate(input: EngineInput, overrides?: Record<string, Evidence
   const ctx = deriveRuleContext(claims, request_version, merged, tools, conversation, actions, issued.length, seed);
 
   // 8. Decide, derive state, pick the next challenge (for the CHALLENGE goal), phrase the goal.
-  const decideResult = decide(merged, seed, ctx);
+  const decideResult = decide(merged, seed, ctx, mutant);
   const state = deriveState(decideResult, merged, tools);
 
   const resultsForSelect: Record<string, ChallengeResult> = {};

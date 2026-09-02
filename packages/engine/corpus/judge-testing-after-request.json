@@ -1,0 +1,34 @@
+{
+  "title": "Honest judge, disclosed AFTER making a request",
+  "description": "A caller states a real-shaped request, then discloses mid-call that this is a test. Proves rule 2 (out-of-scope marker WITH an open request -> NO_ACTION, EXPLAIN_OPEN_REQUEST): the request_params evidence card stays in the output (nothing is erased), the agent explains a real desk would route it to a human, and nothing ever stages or freezes just because the caller admitted the game.",
+  "call": {
+    "session_id": "sess-judge-2",
+    "origin_kind": "unverified_voip",
+    "origin_geo": "unknown"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Robert Miller, I need $1.8 million wired to the escrow account.",
+      "t_ms": 1000
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "Actually, I'm not the CEO, I'm just testing this for a hackathon.",
+      "t_ms": 5000
+    }
+  ],
+  "tools": [],
+  "actions": [],
+  "expected": {
+    "verdict": "NO_ACTION",
+    "state": "OUT_OF_SCOPE",
+    "reasons": [
+      "OUT_OF_SCOPE"
+    ],
+    "failure_tally": 0,
+    "request_version": 1
+  }
+}

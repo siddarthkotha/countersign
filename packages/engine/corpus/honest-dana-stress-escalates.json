@@ -1,0 +1,195 @@
+{
+  "title": "An honest but unrepaired inconsistency escalates, never freezes",
+  "description": "Dana is who she says she is (every live check stays clean the whole call) but, well past the correction window and without any correction or negation language, names a different deadline than she gave at the top of the call. The ledger records this as CONTRADICTED, not CORRECTED -- there is no mechanic for \"explained it to my satisfaction\" to erase a logged inconsistency. Because every live check still passes, freeze rule 7b (contradiction AND a failed check) never fires -- this is precisely why the rulebook separates STORY_INCONSISTENCY-alone from FREEZE: a caller with a clean identity and a messy story still needs a human, but does not get treated as an active attacker.",
+  "call": {
+    "session_id": "sess-8",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today, approved in yesterday's close meeting.",
+      "t_ms": 1000
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "To confirm: $84,500. Is that right?",
+      "t_ms": 2500
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 3500
+    },
+    {
+      "id": "a4",
+      "speaker": "agent",
+      "text": "To confirm: ending 4471. Is that right?",
+      "t_ms": 5000
+    },
+    {
+      "id": "c5",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 6000
+    },
+    {
+      "id": "a6",
+      "speaker": "agent",
+      "text": "To confirm: Meridian Supply. Is that right?",
+      "t_ms": 7500
+    },
+    {
+      "id": "c7",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 8500
+    },
+    {
+      "id": "c8",
+      "speaker": "caller",
+      "text": "One more thing on my end — it needs to be done by Friday.",
+      "t_ms": 35400
+    },
+    {
+      "id": "c9",
+      "speaker": "caller",
+      "text": "It's $84,500, same as before.",
+      "t_ms": 36900
+    },
+    {
+      "id": "c10",
+      "speaker": "caller",
+      "text": "Meridian Supply, that's right.",
+      "t_ms": 38400
+    },
+    {
+      "id": "c11",
+      "speaker": "caller",
+      "text": "No, that's not what I said -- it's Meridian Supply.",
+      "t_ms": 39900
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 9500,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 9800,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 10100,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "act1",
+      "kind": "readback_issued",
+      "t_ms": 2000,
+      "field": "amount_usd",
+      "value": "84500"
+    },
+    {
+      "id": "act2",
+      "kind": "readback_issued",
+      "t_ms": 4500,
+      "field": "account_last4",
+      "value": "4471"
+    },
+    {
+      "id": "act3",
+      "kind": "readback_issued",
+      "t_ms": 7000,
+      "field": "beneficiary",
+      "value": "meridian supply"
+    },
+    {
+      "id": "act4",
+      "kind": "challenge_issued",
+      "t_ms": 36400,
+      "challenge_id": "sess-8-1"
+    },
+    {
+      "id": "act5",
+      "kind": "challenge_issued",
+      "t_ms": 37900,
+      "challenge_id": "sess-8-2"
+    },
+    {
+      "id": "act6",
+      "kind": "challenge_issued",
+      "t_ms": 39400,
+      "challenge_id": "sess-8-3"
+    }
+  ],
+  "expected": {
+    "verdict": "ESCALATE",
+    "state": "ACTION",
+    "reasons": [
+      "STORY_INCONSISTENCY"
+    ],
+    "failure_tally": 1,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": false,
+      "critical_fields_confirmed": true,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true
+    }
+  }
+}

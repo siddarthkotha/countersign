@@ -1,0 +1,154 @@
+{
+  "title": "Repeated barge-ins are pressure signal, never evidence",
+  "description": "Dana talks over the agent three separate times (every readback line gets cut off, `interrupted: true`) while the underlying request is the same fully-verified Scenario A. `talk_overs > 0` FLAGs the pressure_marker card regardless of lexicon hits, but pressure counts 0 toward the tally and decide() never reads talk_overs directly -- the verdict comes entirely from the identity/context/readback evidence underneath. Proves barge-in spam alone cannot push a call toward a worse (or, importantly, a better) verdict than its actual evidence supports.",
+  "call": {
+    "session_id": "sess-15",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
+      "t_ms": 1000
+    },
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "To confirm: $84,500 to Meridian Sup",
+      "t_ms": 2000,
+      "interrupted": true
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "Yes yes, that's right, hurry up.",
+      "t_ms": 2200
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "And the account ending 4",
+      "t_ms": 3000,
+      "interrupted": true
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "Yes, correct, come on.",
+      "t_ms": 3200
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "And Meridian Sup",
+      "t_ms": 4000,
+      "interrupted": true
+    },
+    {
+      "id": "c4",
+      "speaker": "caller",
+      "text": "Yes, that's right, let's go.",
+      "t_ms": 4200
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 4600,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 4700,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 4800,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "r1",
+      "kind": "readback_issued",
+      "t_ms": 2000,
+      "field": "amount_usd",
+      "value": "84500"
+    },
+    {
+      "id": "r2",
+      "kind": "readback_issued",
+      "t_ms": 3000,
+      "field": "account_last4",
+      "value": "4471"
+    },
+    {
+      "id": "r3",
+      "kind": "readback_issued",
+      "t_ms": 4000,
+      "field": "beneficiary",
+      "value": "Meridian Supply"
+    }
+  ],
+  "expected": {
+    "verdict": "STAGE",
+    "state": "ACTION",
+    "reasons": [],
+    "failure_tally": 0,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": true,
+      "critical_fields_confirmed": true,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true
+    }
+  }
+}

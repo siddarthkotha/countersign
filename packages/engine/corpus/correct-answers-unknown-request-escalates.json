@@ -1,0 +1,178 @@
+{
+  "title": "Passing the quiz is not the same as authorization",
+  "description": "Dana (real identity, clean SSO, clean out-of-band) asks to pay a vendor that has never been paid before -- no scheduled payment matches, so the context check fails and the beneficiary reads as new, which doubles the challenge requirement to 2 PASSes. The caller answers every challenge the engine asks correctly. It does not matter: rule 10 escalates ANY first-time beneficiary for a human callback regardless of amount or how well the knowledge checks went, ahead of rule 11's all-green STAGE gate. Proves the amendment's own framing verbatim: knowing the right facts is necessary, never sufficient, to move money to someone new.",
+  "call": {
+    "session_id": "sess-9",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Colinwood Analytics — $18,000, account ending 5521 — approved in yesterday's close meeting.",
+      "t_ms": 1000
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "To confirm: $18,000. Is that right?",
+      "t_ms": 2500
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 3500
+    },
+    {
+      "id": "a4",
+      "speaker": "agent",
+      "text": "To confirm: ending 5521. Is that right?",
+      "t_ms": 5000
+    },
+    {
+      "id": "c5",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 6000
+    },
+    {
+      "id": "a6",
+      "speaker": "agent",
+      "text": "To confirm: Colinwood Analytics. Is that right?",
+      "t_ms": 7500
+    },
+    {
+      "id": "c7",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 8500
+    },
+    {
+      "id": "c8",
+      "speaker": "caller",
+      "text": "It's $18,000, same as I said.",
+      "t_ms": 10900
+    },
+    {
+      "id": "c9",
+      "speaker": "caller",
+      "text": "Colinwood Analytics, that's right.",
+      "t_ms": 12400
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 9500,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 9800,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 10100,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "act1",
+      "kind": "readback_issued",
+      "t_ms": 2000,
+      "field": "amount_usd",
+      "value": "18000"
+    },
+    {
+      "id": "act2",
+      "kind": "readback_issued",
+      "t_ms": 4500,
+      "field": "account_last4",
+      "value": "5521"
+    },
+    {
+      "id": "act3",
+      "kind": "readback_issued",
+      "t_ms": 7000,
+      "field": "beneficiary",
+      "value": "colinwood analytics"
+    },
+    {
+      "id": "act4",
+      "kind": "challenge_issued",
+      "t_ms": 10400,
+      "challenge_id": "sess-9-1"
+    },
+    {
+      "id": "act5",
+      "kind": "challenge_issued",
+      "t_ms": 11900,
+      "challenge_id": "sess-9-2"
+    }
+  ],
+  "expected": {
+    "verdict": "ESCALATE",
+    "state": "ACTION",
+    "reasons": [
+      "CONTEXT_FAILURE",
+      "NEW_BENEFICIARY"
+    ],
+    "failure_tally": 1,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": false,
+      "no_contradictions": true,
+      "critical_fields_confirmed": true,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
+      "not_new_beneficiary": false
+    }
+  }
+}

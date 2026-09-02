@@ -19,6 +19,18 @@ Hackathon (lablab.ai, September 1–30, 2026).
 
 Pre-kickoff scaffold. Product code begins with the event build window.
 
+## Replay the corpus
+
+`packages/engine/corpus/*.json` holds 18 transcripts replayed through the real engine every
+test run (`test/corpus.test.ts`), and every rule mutant breaks at least one of them
+(`test/mutants.test.ts`) — G3's evidence that the rulebook is load-bearing, not decorative.
+Inspect any file judge-legibly:
+
+`npm run replay -- packages/engine/corpus/scenario-b-miller-fraud.json`
+
+Prints the verdict, every evidence card, and the "what would flip this" counterfactuals; exits
+1 if the file no longer matches the engine.
+
 ## What Countersign does NOT do
 
 Countersign makes **no acoustic deepfake-detection claims** and uses **no voice biometrics** —

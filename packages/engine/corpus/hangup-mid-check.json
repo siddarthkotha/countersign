@@ -1,0 +1,43 @@
+{
+  "title": "A hangup mid-check with no request ever made -> NO_ACTION, not a silent PENDING",
+  "description": "The caller identifies and then the line goes dead: an SSO check was kicked off but never returned, and 48 seconds pass (past seed.thresholds.tool_timeout_ms = 45000) with no further audio and no request ever stated. Rule 3 (no request) alone would just hold at PENDING; invariant I4 additionally treats a tool that never returned past the timeout as an incomplete evaluation, and since there is no open request to route to a human, I4 downgrades the outcome to NO_ACTION rather than leaving it open-endedly PENDING or (as amendment §E's one-line description names it) escalating. FINDING (see task-6-report.md): the amendment text also expects required_actions to include a \"low-priority\" open_incident; requiredActions() only ever populates for STAGE/FREEZE/ESCALATE verdicts, so a NO_ACTION file carries required_actions: [] in the real engine -- recorded here as an intentional design property, not silently matched to the brief's wording.",
+  "call": {
+    "session_id": "sess-16",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury.",
+      "t_ms": 1000
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 2000,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "act1",
+      "kind": "session_config_updated",
+      "t_ms": 50000,
+      "detail": "caller line disconnected -- no further audio"
+    }
+  ],
+  "expected": {
+    "verdict": "NO_ACTION",
+    "state": "OUT_OF_SCOPE",
+    "reasons": [],
+    "failure_tally": 0,
+    "request_version": 1
+  }
+}

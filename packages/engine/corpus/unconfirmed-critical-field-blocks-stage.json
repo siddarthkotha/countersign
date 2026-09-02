@@ -1,0 +1,93 @@
+{
+  "title": "EXTRA: an unread-back critical field blocks STAGE, full stop",
+  "description": "MUTATION-COVERAGE FILE, not one of amendment §E's 16 named scenarios (see task-6-report.md for why). Dana states a fully correct, exact-match request and every live check comes back clean -- but the agent never reads amount/account/beneficiary back to her and she never affirms them. Rule 4 holds the call at PENDING for exactly this reason: a critical fact merely CLAIMED, never CONFIRMED, is not enough to stage money, no matter how clean everything else looks. This file exists so mutants.test.ts's \"skip_readback_gate\" mutant has something to break: under that mutant, this same evidence would wrongly reach STAGE with an unconfirmed amount, account, and beneficiary.",
+  "call": {
+    "session_id": "sess-18",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — approved in yesterday's close meeting.",
+      "t_ms": 1000
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 2000,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 2300,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 2600,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [],
+  "expected": {
+    "verdict": "PENDING",
+    "state": "CONSISTENCY_CHECK",
+    "reasons": [],
+    "failure_tally": 0,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": true,
+      "critical_fields_confirmed": false,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true
+    }
+  }
+}
