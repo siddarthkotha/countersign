@@ -328,3 +328,56 @@ export interface CorpusFile {
     assurance?: Partial<AssuranceChecklist>; // v2 (Task 6): required for STAGE/ESCALATE files
   };
 }
+
+// ---------- Server <-> browser protocol (Plan 2, Task S2) ----------
+// Additive. The engine never constructs these -- only packages/server does, from an
+// EngineOutput plus live session context (t_ms, speaking/outstanding-tool state, the export
+// hash, the countersign re-run result). Living here keeps server, browser, and tests all
+// importing one shared definition instead of three drifting copies.
+
+/** What the browser is shown at any instant. The browser renders this; it never computes
+ *  a verdict of its own -- `forensic.countersign.browser_verdict` is always null (v1: the
+ *  browser has no independent verdict to compare; reserved so a future browser-side replay
+ *  check has somewhere to put one without a type change). */
+export interface ScreenState {
+  session_id: string;
+  t_ms: number;
+  state: EngineState;
+  verdict: Verdict;
+  reasons: VerdictReason[];
+  request: {
+    claimed_identity: string | null;
+    amount_usd: number | null;
+    beneficiary: string | null;
+    request_version: number;
+  };
+  gates: { context: EvidenceStatus; device: EvidenceStatus; consistency: EvidenceStatus };
+  transcript: { id: string; speaker: Speaker; text: string; t_ms: number; interrupted?: boolean; highlighted?: boolean }[];
+  agent_status: 'LISTENING' | 'SPEAKING' | 'VERIFYING' | 'AWAITING_OUT_OF_BAND' | 'VERDICT';
+  banner: { headline: string; reasons: string[]; subline: string } | null;
+  forensic: {
+    evidence: Evidence[];
+    ledger: Claim[];
+    challenges: EngineOutput['challenges'];
+    assurance: AssuranceChecklist;
+    counterfactuals: { flip: string; verdict: Verdict; state: EngineState }[];
+    export_hash: string | null;
+    countersign: { browser_verdict: null; server_verdict: Verdict; recomputed: boolean };
+  };
+  simulated: true;
+  link: 'live' | 'replay' | 'lost';
+}
+
+/** Messages the browser sends up to the server over the call WebSocket. */
+export type BrowserEvent =
+  | { type: 'audio'; data: string }
+  | { type: 'start' }
+  | { type: 'end' }
+  | { type: 'ping' };
+
+/** Messages the server sends down to the browser over the call (or replay) WebSocket. */
+export type ServerEvent =
+  | { type: 'state'; state: ScreenState }
+  | { type: 'audio'; data: string }
+  | { type: 'flush' }
+  | { type: 'ended'; reason: string };

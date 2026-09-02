@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@countersign/engine": "*",
     "ws": "^8.18.1"
   },
   "devDependencies": {

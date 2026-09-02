@@ -1,0 +1,132 @@
+import { describe, it, expect } from 'vitest';
+import { evaluate, MERIDIAN } from '@countersign/engine';
+import type { CorpusFile, EngineInput } from '@countersign/engine';
+import { deriveScreenState } from '../src/screen/state.js';
+import scenarioBJson from '../../engine/corpus/scenario-b-miller-fraud.json' with { type: 'json' };
+import scenarioAJson from '../../engine/corpus/scenario-a-dana-legitimate.json' with { type: 'json' };
+
+// `with { type: 'json' }` gives each import site its own structurally-inferred (and
+// therefore mutually "unrelated" per TS) literal type; casting once through the engine's
+// own CorpusFile contract is what makes the two importing test files agree.
+const scenarioB = scenarioBJson as unknown as CorpusFile;
+const scenarioA = scenarioAJson as unknown as CorpusFile;
+
+function inputFor(corpus: CorpusFile): EngineInput {
+  return {
+    conversation: corpus.conversation,
+    tools: corpus.tools,
+    actions: corpus.actions,
+    call: corpus.call,
+    seed: MERIDIAN,
+  };
+}
+
+describe('deriveScreenState — Scenario B end state (FREEZE)', () => {
+  const engineInput = inputFor(scenarioB);
+  const output = evaluate(engineInput);
+
+  it('maps gates from ev-context/ev-oob/ev-consistency-*', () => {
+    const state = deriveScreenState({
+      session_id: 'sess-b',
+      t_ms: 52000,
+      engineInput,
+      output,
+      speaking: false,
+      export_hash: null,
+      recomputed: false,
+      link: 'live',
+    });
+
+    expect(state.gates.context).toBe('FAIL'); // no scheduled payment matches
+    expect(state.gates.device).toBe('FAIL'); // out-of-band: no_response
+    expect(state.gates.consistency).toBe('FAIL'); // the $1.8M -> $2.1M contradiction
+  });
+
+  it('sets agent_status to VERDICT once the verdict is terminal', () => {
+    const state = deriveScreenState({
+      session_id: 'sess-b',
+      t_ms: 52000,
+      engineInput,
+      output,
+      speaking: true, // even mid-reply, a terminal verdict wins
+      export_hash: null,
+      recomputed: false,
+      link: 'live',
+    });
+    expect(state.agent_status).toBe('VERDICT');
+  });
+
+  it('produces a FREEZE banner with plain-words reasons and highlights the contradicted utterances', () => {
+    const state = deriveScreenState({
+      session_id: 'sess-b',
+      t_ms: 52000,
+      engineInput,
+      output,
+      speaking: false,
+      export_hash: 'abc123def456',
+      recomputed: true,
+      link: 'live',
+    });
+
+    expect(state.banner).not.toBeNull();
+    expect(state.banner?.headline).toBe('WIRE FROZEN');
+    expect(state.banner?.reasons).toContain('identity unverified');
+    expect(state.banner?.reasons).toContain('story inconsistency');
+    expect(state.banner?.reasons.every((r) => r === r.toLowerCase())).toBe(true);
+    expect(state.banner?.subline).toContain('export abc123def4');
+
+    const c3 = state.transcript.find((u) => u.id === 'c3');
+    const c2 = state.transcript.find((u) => u.id === 'c2'); // "Whitmore & Bass" -- the wrong counsel
+    expect(c3?.highlighted).toBe(true);
+    expect(c2?.highlighted).toBe(true);
+
+    expect(state.forensic.countersign).toEqual({ browser_verdict: null, server_verdict: 'FREEZE', recomputed: true });
+    expect(state.forensic.export_hash).toBe('abc123def456');
+    expect(state.simulated).toBe(true);
+    expect(state.link).toBe('live');
+    expect(state.request.claimed_identity).toBe('Robert Miller');
+    expect(state.request.amount_usd).toBe(2_100_000);
+  });
+});
+
+describe('deriveScreenState — Scenario A end state (STAGE)', () => {
+  const engineInput = inputFor(scenarioA);
+  const output = evaluate(engineInput);
+
+  it('all gates PASS, banner names the second approver, agent_status is VERDICT', () => {
+    const state = deriveScreenState({
+      session_id: 'sess-a',
+      t_ms: 4500,
+      engineInput,
+      output,
+      speaking: false,
+      export_hash: null,
+      recomputed: true,
+      link: 'live',
+    });
+
+    expect(state.gates).toEqual({ context: 'PASS', device: 'PASS', consistency: 'PASS' });
+    expect(state.agent_status).toBe('VERDICT');
+    expect(state.banner?.headline).toBe('STAGED FOR SECOND APPROVAL');
+    expect(state.banner?.subline).toContain('second approval: Marcus Obi');
+    expect(state.request.claimed_identity).toBe('Dana Whitfield');
+    // Claim.value is normalized/lower-cased by the ledger (types.ts: "names lower-cased,
+    // trimmed") -- ScreenState surfaces the raw claim value, not a display-cased copy.
+    expect(state.request.beneficiary).toBe('meridian supply');
+    expect(state.transcript.some((u) => u.highlighted)).toBe(false); // nothing failed or flagged
+  });
+});
+
+describe('deriveScreenState — replay-path parity', () => {
+  it('produces an identical ScreenState (besides link) whether called for a live or a replay session_id/t_ms', () => {
+    const engineInput = inputFor(scenarioA);
+    const output = evaluate(engineInput);
+    const base = { engineInput, output, speaking: false, export_hash: null, recomputed: false };
+
+    const live = deriveScreenState({ ...base, session_id: 'sess-a', t_ms: 4500, link: 'live' });
+    const replay = deriveScreenState({ ...base, session_id: 'sess-a', t_ms: 4500, link: 'replay' });
+
+    expect({ ...live, link: undefined }).toEqual({ ...replay, link: undefined });
+    expect(replay.link).toBe('replay');
+  });
+});
