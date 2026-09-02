@@ -22,3 +22,23 @@ describe('loadConfig — browser_grace_ms', () => {
     expect(loadConfig({ COUNTERSIGN_BROWSER_GRACE_MS: 'not-a-number' }).browser_grace_ms).toBe(20000);
   });
 });
+
+// Same-origin fix (2026-09-02): render.yaml now ships COUNTERSIGN_ALLOWED_ORIGINS="" in
+// production (the server recognizes its own origin automatically -- see http.ts's
+// selfOrigin/isAllowedOrigin), so an explicitly empty env var must parse to a genuinely
+// empty list, never fall back to "allow all" or to the local-dev default below.
+describe('loadConfig — allowed_origins', () => {
+  it('defaults to the local dev origin when the env var is unset entirely', () => {
+    expect(loadConfig({}).allowed_origins).toEqual(['http://localhost:5173']);
+  });
+
+  it('an explicitly empty env var parses to an empty list, not the dev default', () => {
+    expect(loadConfig({ COUNTERSIGN_ALLOWED_ORIGINS: '' }).allowed_origins).toEqual([]);
+  });
+
+  it('parses a comma-separated list, trimming whitespace and dropping empty entries', () => {
+    expect(
+      loadConfig({ COUNTERSIGN_ALLOWED_ORIGINS: 'https://a.example, https://b.example,,' }).allowed_origins
+    ).toEqual(['https://a.example', 'https://b.example']);
+  });
+});

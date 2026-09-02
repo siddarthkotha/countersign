@@ -28,11 +28,19 @@ function intFromEnv(value: string | undefined, fallback: number): number {
 export function loadConfig(env: Record<string, string | undefined>): ServerConfig {
   const sessionCapSeconds = clamp(intFromEnv(env.COUNTERSIGN_SESSION_CAP_SECONDS, 300), 60, 10800);
   const apiKey = env.ASSEMBLYAI_API_KEY;
+  // Unset (local dev, .env.example never sets this) keeps the old default: Vite's dev
+  // server on :5173 is a genuinely different origin from the backend on :8787, so it needs
+  // an explicit extra origin. An env var explicitly set to "" (render.yaml's production
+  // value -- the deployed frontend and backend share one origin, see http.ts's same-origin
+  // check) means what it says: no extra origins at all, never a fallback to "allow all" or
+  // to the dev default.
   const originsRaw = env.COUNTERSIGN_ALLOWED_ORIGINS;
-  const allowed_origins = (originsRaw && originsRaw.length > 0 ? originsRaw : 'http://localhost:5173')
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const allowed_origins = originsRaw === undefined
+    ? ['http://localhost:5173']
+    : originsRaw
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
 
   return {
     port: intFromEnv(env.PORT, 8787),

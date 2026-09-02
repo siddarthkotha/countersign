@@ -32,13 +32,15 @@ services:
       # first deploy and never overwrite whatever's already there from this blueprint.
       - key: ASSEMBLYAI_API_KEY
         sync: false
-      # Must equal this service's actual URL (CORS allowlist -- http.ts's applyCors rejects
-      # any other Origin). Render names the default URL after `name:` above
-      # (https://countersign.onrender.com) unless that slug was already taken, in which
-      # case Render appends a suffix -- check the real URL after the first deploy and update
-      # this value (then redeploy) if it doesn't match. See docs/DEPLOY.md.
+      # same-origin is always allowed; list extra origins here. http.ts's applyCors now
+      # recognizes this service's OWN origin automatically (from the request's Host /
+      # X-Forwarded-Host + X-Forwarded-Proto, which Render sets) -- no need to guess or hand-
+      # enter the deployed URL. This var is only for a custom domain or a second front end.
+      # Note: the `countersign` name slug on Render belongs to an unrelated product, so our
+      # real URL carries a suffix Render appended -- same-origin handles that with zero
+      # config either way. See docs/DEPLOY.md §3.
       - key: COUNTERSIGN_ALLOWED_ORIGINS
-        value: https://countersign.onrender.com
+        value: ""
       - key: COUNTERSIGN_SESSION_CAP_SECONDS
         value: "300"
       - key: COUNTERSIGN_MAX_CONCURRENT

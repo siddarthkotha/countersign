@@ -175,6 +175,88 @@ describe('http server', () => {
     expect(rDisallowed.headers.get('access-control-allow-origin')).toBeNull();
   });
 
+  // Same-origin fix (2026-09-02): the deployed Render URL never matched render.yaml's
+  // guessed COUNTERSIGN_ALLOWED_ORIGINS (the `countersign` name slug belongs to an unrelated
+  // product, so Render appended a suffix) -- http.ts now recognizes a request's OWN origin
+  // automatically instead of relying on that guess.
+  it('CORS: allows this server\'s own origin via the plain Host header, with no allowlist entry for it', async () => {
+    const { base } = await start();
+    // `base` is this test server's real address (http://127.0.0.1:<port>) -- fetch sends
+    // that same value as the Host header, so it IS this request's own origin, and it is
+    // deliberately absent from cfg()'s allowed_origins (['http://localhost:5173']).
+    const r = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: { Origin: base },
+    });
+    expect(r.headers.get('access-control-allow-origin')).toBe(base);
+  });
+
+  it('CORS: allows this server\'s own origin via X-Forwarded-Proto/X-Forwarded-Host (how Render presents it)', async () => {
+    const { base } = await start();
+    const r = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://countersign-abc123.onrender.com',
+        'X-Forwarded-Proto': 'https',
+        'X-Forwarded-Host': 'countersign-abc123.onrender.com',
+      },
+    });
+    expect(r.headers.get('access-control-allow-origin')).toBe('https://countersign-abc123.onrender.com');
+  });
+
+  it('CORS: a foreign origin is still denied even when X-Forwarded headers are present', async () => {
+    const { base } = await start();
+    const r = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'http://evil.example',
+        'X-Forwarded-Proto': 'https',
+        'X-Forwarded-Host': 'countersign-abc123.onrender.com',
+      },
+    });
+    expect(r.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('CORS: a configured extra origin is still allowed alongside same-origin', async () => {
+    const { base } = await start({ allowed_origins: ['https://extra.example'] });
+
+    const rExtra = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://extra.example' },
+    });
+    expect(rExtra.headers.get('access-control-allow-origin')).toBe('https://extra.example');
+
+    const rSelf = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: { Origin: base },
+    });
+    expect(rSelf.headers.get('access-control-allow-origin')).toBe(base);
+  });
+
+  it('CORS: an empty allowed_origins config (render.yaml\'s production value) allows only same-origin', async () => {
+    const { base } = await start({ allowed_origins: [] });
+
+    const rSelf = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: { Origin: base },
+    });
+    expect(rSelf.headers.get('access-control-allow-origin')).toBe(base);
+
+    // The old dev default (localhost:5173) is no longer configured, so it's no longer
+    // allowed either -- an empty env means no EXTRA origins, never "allow all".
+    const rDevDefault = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'http://localhost:5173' },
+    });
+    expect(rDevDefault.headers.get('access-control-allow-origin')).toBeNull();
+
+    const rForeign = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'http://evil.example' },
+    });
+    expect(rForeign.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
   it('kill switch returns 503 replay_only', async () => {
     const { base } = await start({ kill_switch: true });
     const r = await fetch(`${base}/api/session/start`, { method: 'POST' });

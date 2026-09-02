@@ -79,12 +79,24 @@ blank page (after the same possible wake-up delay on a cold instance). If it 404
 likely didn't produce `packages/web/dist` — check the Render build logs for `build:web`
 output.
 
-**Important — match the CORS allowlist to the real URL.** `render.yaml` sets
-`COUNTERSIGN_ALLOWED_ORIGINS` to `https://countersign.onrender.com` as a guess. If Render
-assigned a different URL (the `countersign` name slug was taken, so it appended a suffix —
-check the dashboard), the browser's API/WebSocket calls will be silently rejected by CORS.
-Fix: Render dashboard → Environment → edit `COUNTERSIGN_ALLOWED_ORIGINS` to the real URL →
-save (redeploys automatically).
+**CORS works out of the box — no URL to guess or paste in.** The server recognizes its own
+origin automatically (it reads the real scheme/host off the incoming request — `Host` and
+Render's `X-Forwarded-Proto`/`X-Forwarded-Host` headers — and always allows same-origin
+calls), so `render.yaml` leaves `COUNTERSIGN_ALLOWED_ORIGINS` empty (`""`, with a comment:
+"same-origin is always allowed; list extra origins here"). Whatever URL Render actually
+assigns, the browser's own API/WebSocket calls to that same URL just work.
+
+Note: the `countersign` name slug on Render was already taken by an unrelated product, so
+this service's real URL is `https://countersign-<suffix>.onrender.com`, not the bare
+`https://countersign.onrender.com` you might expect — check the Render dashboard for the
+exact hostname. That mismatch used to break CORS (the old setup hard-coded a guessed URL
+into `COUNTERSIGN_ALLOWED_ORIGINS`); it doesn't anymore, since same-origin needs no
+configured value at all.
+
+Only set `COUNTERSIGN_ALLOWED_ORIGINS` (comma-separated) if you add a custom domain in front
+of this service, or a second front end (e.g. a staging site) that needs to call this same
+backend from a different origin — same-origin coverage for this service's own URL stays on
+either way.
 
 ## 4. The kill switch
 

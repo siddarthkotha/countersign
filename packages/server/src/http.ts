@@ -22,9 +22,43 @@ export interface HttpDeps {
   staticServer?: StaticServer;
 }
 
+/** First value of a header that may be a single string, a comma-joined string (a proxy can
+ *  append rather than replace `X-Forwarded-*`), or (per Node's typings) a string array --
+ *  `undefined` if the header is absent. */
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value?.split(',')[0];
+  const trimmed = raw?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+/** The origin this request itself arrived on, i.e. what a browser on the SAME host+port as
+ *  this server would send as its `Origin` header. Render (and most PaaS hosts) terminate TLS
+ *  in front of the app and forward the original scheme/host via `X-Forwarded-Proto` /
+ *  `X-Forwarded-Host` -- honoured here so a deployed instance recognizes its own real URL
+ *  without anyone having to guess it into an env var (the bug this function exists to fix:
+ *  render.yaml guessed `https://countersign.onrender.com`, but Render assigned a different
+ *  hostname because that slug belonged to an unrelated product). Falls back to the plain
+ *  `Host` header and `http` for local dev, where there is no proxy in front of this process.
+ *  Returns `null` only when even `Host` is missing (not a real browser request). */
+function selfOrigin(req: IncomingMessage): string | null {
+  const host = firstHeaderValue(req.headers['x-forwarded-host']) ?? firstHeaderValue(req.headers.host);
+  if (!host) return null;
+  const proto = firstHeaderValue(req.headers['x-forwarded-proto']) ?? 'http';
+  return `${proto}://${host}`;
+}
+
+/** An origin is allowed if it's in the configured allowlist (unchanged behaviour, e.g. a
+ *  custom domain or a second front end -- see config.ts/docs/DEPLOY.md) OR it's this
+ *  request's own origin (new: same-origin always works, with no env var needed). An empty
+ *  configured allowlist never widens this to "allow all" -- it only means no EXTRA origins
+ *  beyond same-origin. */
+function isAllowedOrigin(origin: string, req: IncomingMessage, cfg: ServerConfig): boolean {
+  return cfg.allowed_origins.includes(origin) || origin === selfOrigin(req);
+}
+
 function applyCors(req: IncomingMessage, res: ServerResponse, cfg: ServerConfig): void {
   const origin = req.headers.origin;
-  if (typeof origin === 'string' && cfg.allowed_origins.includes(origin)) {
+  if (typeof origin === 'string' && isAllowedOrigin(origin, req, cfg)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
