@@ -53,6 +53,21 @@ describe('extractIdentityClaim', () => {
     const hit = extractIdentityClaim(text, MERIDIAN);
     expect(hit?.identity_id ?? null).toBe(identity_id);
   });
+
+  // Fix round 1 (review of 2a08920 + 7d16440), finding 2: an auxiliary/adverb run between
+  // the name and the disqualifying verb must still disqualify -- and the plain "starts the
+  // utterance" matches must keep working alongside the wider exclusion.
+  it.each([
+    ['Marcus Obi has approved it', null],
+    ['Marcus Obi was our counsel', null],
+    ['Marcus Obi already approved it', null],
+    ['Dana Whitfield will approve', null],
+    ['Dana Whitfield, corporate treasury', 'dana-whitfield'],
+    ['Robert Miller here', 'robert-miller'],
+  ])('%s → %s', (text, identity_id) => {
+    const hit = extractIdentityClaim(text, MERIDIAN);
+    expect(hit?.identity_id ?? null).toBe(identity_id);
+  });
 });
 
 describe('extractPressure', () => {

@@ -87,8 +87,17 @@ function hasFollowingCue(text: string, lowerText: string, nameEnd: number): bool
 // A name that opens the utterance is disqualified when what follows reads as a possessive
 // ("Marcus Obi's account") or a cued-name pattern ("Marcus Obi approved it", "... is our
 // counsel", "... handled the deal") -- those are statements ABOUT the named person, not a
-// self-identification.
-const DISQUALIFYING_CONTINUATIONS = [/^'s\b/i, /^\s*approved\b/i, /^\s*is our\b/i, /^\s*handled\b/i];
+// self-identification. Fix round 1 (review of 2a08920 + 7d16440), finding 2: an optional
+// auxiliary/adverb run (has/have/had/was/were/is/are/will/already/just/also/then/
+// previously, up to 3 words) may sit between the name and the disqualifying verb --
+// "Marcus Obi has approved it", "Marcus Obi was our counsel", "Dana Whitfield will approve"
+// must disqualify exactly like the bare-verb forms already did.
+const AUX_RUN = '(?:\\s+(?:has|have|had|was|were|is|are|will|already|just|also|then|previously)){0,3}';
+const DISQUALIFYING_VERB_PHRASE = 'approved|approves|approve|handled|signed|authorized|is our|was our|are our|counsel|represents';
+const DISQUALIFYING_CONTINUATIONS = [
+  /^\s*'s\b/i,
+  new RegExp(`^${AUX_RUN}\\s*\\b(?:${DISQUALIFYING_VERB_PHRASE})\\b`, 'i'),
+];
 
 function startsUtteranceValidly(text: string, nameStart: number, nameEnd: number): boolean {
   const prefix = text.slice(0, nameStart);

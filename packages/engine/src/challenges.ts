@@ -118,7 +118,9 @@ function arraysEqual(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
-function seedFieldForEntry(id: string): ClaimField {
+// Exported for compose.ts's `isLegalSpec`: a recorded SEED_FACT spec's `field` must equal
+// this same mapping for its `fact_id`, or it's not a spec `selectSeedFact` could have built.
+export function seedFieldForEntry(id: string): ClaimField {
   if (id === 'counsel_of_record') return 'counsel';
   if (id === 'escrow_institution') return 'escrow_institution';
   return 'purpose';

@@ -64,7 +64,9 @@ const CUE_PATTERNS: { field: CuedNameField; re: RegExp }[] = [
   // "counsel Jane Doe" match with no "is"/"was"/etc.), matching the beneficiary/vendor shape.
   { field: 'counsel', re: new RegExp(`\\bcounsel\\b (?:is|was|of record is|of record was)\\s+(${NAME})`, 'g') },
   { field: 'counsel', re: new RegExp(`(${NAME})\\s+handled (?:it|the deal)\\b`, 'g') },
-  { field: 'counsel', re: new RegExp(`(${NAME})\\s+(?:is|are)\\s+(?:our\\s+)?counsel\\b`, 'g') },
+  // Fix round 1 (review of 2a08920 + 7d16440), finding 2: was/were alongside is/are, so
+  // "X was our counsel" is recognized the same as "X is our counsel".
+  { field: 'counsel', re: new RegExp(`(${NAME})\\s+(?:is|are|was|were)\\s+(?:our\\s+)?counsel\\b`, 'g') },
   // Fix round 1, finding 4: added "is at" so "escrow is at X" (not just "escrow is X" /
   // "escrow at X") matches; spacing is embedded per-alternative so there's no backtracking
   // ambiguity between "is" and "at".

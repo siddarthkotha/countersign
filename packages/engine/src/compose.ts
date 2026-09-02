@@ -3,7 +3,8 @@
 // orchestration script. LAW 4: facts (raw) stay separate from status/detail (interpretation)
 // on every card built here; every quote is a verbatim substring of the utterance it cites.
 import { buildLedger, currentClaim, isConfirmed } from './ledger';
-import { gradeChallenges, selectChallenge } from './challenges';
+import { gradeChallenges, selectChallenge, seedFieldForEntry } from './challenges';
+import { normalizeValue } from './normalize';
 import type { RuleContext } from './rules';
 import type {
   AgentAction,
@@ -58,24 +59,54 @@ function driftSpec(challenge_id: string | undefined, fallbackId: string): Challe
  *  instead of the hash-order recomputation), so a legal spec can carry a DIFFERENT
  *  challenge than recomputation would have picked (e.g. the server asked counsel_of_record
  *  while hash order would have picked a different seed fact) and still be used verbatim. */
+/** Order-insensitive array equality -- a recorded spec's `accept_tokens` must be the SAME
+ *  SET the seed entry carries, not merely present, so a doctored/edited token list can't
+ *  pass as a legal reconstruction of a real `selectSeedFact` choice. */
+function sameTokenSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sortedA = [...a].sort();
+  const sortedB = [...b].sort();
+  return sortedA.every((t, i) => t === sortedB[i]);
+}
+
+/** Fix round 1 (review of 2a08920 + 7d16440), finding 1: the original checks only proved
+ *  the referenced id EXISTED, not that the spec was actually CONSISTENT with what that id
+ *  points to. A spec could name a real `fact_id`/claim id and still carry a field, tokens,
+ *  or trap value that `selectSeedFact`/`selectLiveCommitment`/`selectTrapFact` never would
+ *  have produced -- e.g. a SEED_FACT spec whose `field` doesn't match `seedFieldForEntry`
+ *  for its own `fact_id`, or a TRAP_FACT spec whose `trap_value` happens to equal the true
+ *  claim's own value (which would make it not a trap at all). Every kind now checks full
+ *  structural consistency against what the id it names actually is, plus (for TRAP_FACT and
+ *  RELATIONAL) the same once-per-call rule `selectChallenge` itself enforces. */
 function isLegalSpec(spec: ChallengeSpec, issued: ChallengeSpec[], claimsAsOf: Claim[], seed: SeedConfig, session_id: string): boolean {
   if (spec.challenge_id !== `${session_id}-${issued.length + 1}`) return false;
   if (spec.kind === 'SEED_FACT') {
     if (!spec.fact_id) return false;
-    if (!seed.knowledge.some((k) => k.id === spec.fact_id)) return false;
+    const entry = seed.knowledge.find((k) => k.id === spec.fact_id);
+    if (!entry) return false;
+    if (!('accept_tokens' in spec.expect) || !sameTokenSet(spec.expect.accept_tokens, entry.accept_tokens)) return false;
+    if (spec.field !== seedFieldForEntry(entry.id)) return false;
     return !issued.some((s) => s.kind === 'SEED_FACT' && s.fact_id === spec.fact_id);
   }
   if (spec.kind === 'LIVE_COMMITMENT') {
     const expect = spec.expect;
-    return 'commitment_claim_id' in expect && claimsAsOf.some((c) => c.id === expect.commitment_claim_id);
+    if (!('commitment_claim_id' in expect)) return false;
+    const claim = claimsAsOf.find((c) => c.id === expect.commitment_claim_id);
+    return claim !== undefined && claim.field === spec.field;
   }
   if (spec.kind === 'TRAP_FACT') {
     const expect = spec.expect;
-    return 'true_claim_id' in expect && claimsAsOf.some((c) => c.id === expect.true_claim_id);
+    if (!('true_claim_id' in expect)) return false;
+    const claim = claimsAsOf.find((c) => c.id === expect.true_claim_id);
+    if (!claim || claim.field !== spec.field) return false;
+    if (issued.some((s) => s.kind === 'TRAP_FACT')) return false; // once per call, mirrors selectChallenge
+    return normalizeValue(spec.field, expect.trap_value) !== claim.value;
   }
   // RELATIONAL: expect is accept_tokens-shaped (no claim id of its own) -- the field it
   // depends on (escrow_institution, or beneficiary as the fallback) must have been claimed
-  // by this point, the same precondition `selectRelational` itself requires.
+  // by this point, the same precondition `selectRelational` itself requires; and at most
+  // one RELATIONAL per call, mirroring `selectChallenge`'s once-per-call rule.
+  if (issued.some((s) => s.kind === 'RELATIONAL')) return false;
   return claimsAsOf.some((c) => c.field === 'escrow_institution' || c.field === 'beneficiary');
 }
 

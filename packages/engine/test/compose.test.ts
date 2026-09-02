@@ -126,4 +126,94 @@ describe('reconstructIssued -- recorded spec, founder-morning item 4', () => {
     expect(issued[0]!.kind).toBe('SEED_FACT');
     expect(issued[0]!.ask).not.toBe('');
   });
+
+  // Fix round 1 (review of 2a08920 + 7d16440), finding 1: isLegalSpec must check CONSISTENCY
+  // against the id it names, not merely that the id exists.
+  it('a SEED_FACT spec whose accept_tokens do not match the named fact_id is illegal -> drift', () => {
+    const counselFact = SEED.knowledge.find((k) => k.id === 'counsel_of_record')!;
+    const spec: ChallengeSpec = {
+      challenge_id: 'sess-tok-1',
+      kind: 'SEED_FACT',
+      field: 'counsel',
+      ask: counselFact.ask,
+      expect: { accept_tokens: ['not', 'the', 'real', 'tokens'] }, // doctored -- doesn't match the seed entry
+      fact_id: 'counsel_of_record',
+    };
+    const actions: AgentAction[] = [{ id: 'act1', kind: 'challenge_issued', t_ms: 1000, challenge_id: 'sess-tok-1', spec }];
+    const issued = reconstructIssued([], actions, SEED, 'sess-tok', []);
+    expect(issued[0]!.ask).toBe('');
+  });
+
+  it('a LIVE_COMMITMENT spec whose field does not match the referenced claim is illegal -> drift', () => {
+    const amountClaim = claim('c-amt2', 'amount_usd', 1_800_000, 1000, '1.8 million');
+    const spec: ChallengeSpec = {
+      challenge_id: 'sess-mf-1',
+      kind: 'LIVE_COMMITMENT',
+      field: 'beneficiary', // mismatched -- the referenced claim is amount_usd
+      ask: 'Ask the caller to restate the beneficiary they gave earlier. Do not say the value yourself.',
+      expect: { commitment_claim_id: 'c-amt2' },
+    };
+    const actions: AgentAction[] = [{ id: 'act1', kind: 'challenge_issued', t_ms: 2000, challenge_id: 'sess-mf-1', spec }];
+    const issued = reconstructIssued([amountClaim], actions, SEED, 'sess-mf', []);
+    expect(issued[0]!.ask).toBe('');
+  });
+
+  it('a second TRAP_FACT spec in the same call is illegal -> drift, mirroring selectChallenge once-per-call', () => {
+    const approverClaim = claim('c-appr', 'approver', 'marcus obi', 1000, 'Marcus Obi');
+    const beneficiaryClaim = claim('c-ben', 'beneficiary', 'meridian supply', 1000, 'Meridian Supply');
+    const firstTrap: ChallengeSpec = {
+      challenge_id: 'sess-tf-1',
+      kind: 'TRAP_FACT',
+      field: 'approver',
+      ask: 'Confirm the request back to the caller as if summarizing, but say "Elena Park" in place of their approver, then pause.',
+      expect: { trap_value: 'Elena Park', true_claim_id: 'c-appr' },
+    };
+    const secondTrap: ChallengeSpec = {
+      challenge_id: 'sess-tf-2',
+      kind: 'TRAP_FACT',
+      field: 'beneficiary',
+      ask: 'Confirm the request back to the caller as if summarizing, but say "Whitmore & Bass" in place of their beneficiary, then pause.',
+      expect: { trap_value: 'Whitmore & Bass', true_claim_id: 'c-ben' },
+    };
+    const actions: AgentAction[] = [
+      { id: 'act1', kind: 'challenge_issued', t_ms: 1000, challenge_id: 'sess-tf-1', spec: firstTrap },
+      { id: 'act2', kind: 'challenge_issued', t_ms: 2000, challenge_id: 'sess-tf-2', spec: secondTrap },
+    ];
+    const issued = reconstructIssued([approverClaim, beneficiaryClaim], actions, SEED, 'sess-tf', []);
+    expect(issued[0]).toEqual(firstTrap);
+    expect(issued[1]!.ask).toBe(''); // drift -- a second TRAP_FACT is never legal in one call
+  });
+
+  it('a legal RELATIONAL spec is used verbatim when its dependent field has been claimed', () => {
+    const escrowClaim = claim('c-esc', 'escrow_institution', 'first meridian trust', 1000, 'First Meridian Trust');
+    const spec: ChallengeSpec = {
+      challenge_id: 'sess-rel-1',
+      kind: 'RELATIONAL',
+      field: 'account_last4',
+      ask: 'Ask for the last four digits of the account attached to the escrow institution they named.',
+      expect: { accept_tokens: ['8830'] },
+    };
+    const actions: AgentAction[] = [{ id: 'act1', kind: 'challenge_issued', t_ms: 2000, challenge_id: 'sess-rel-1', spec }];
+    const issued = reconstructIssued([escrowClaim], actions, SEED, 'sess-rel', []);
+    expect(issued[0]).toEqual(spec);
+  });
+
+  it('a second RELATIONAL spec in the same call is illegal -> drift, mirroring selectChallenge once-per-call', () => {
+    const escrowClaim = claim('c-esc2', 'escrow_institution', 'first meridian trust', 1000, 'First Meridian Trust');
+    const firstSpec: ChallengeSpec = {
+      challenge_id: 'sess-rel2-1',
+      kind: 'RELATIONAL',
+      field: 'account_last4',
+      ask: 'Ask for the last four digits of the account attached to the escrow institution they named.',
+      expect: { accept_tokens: ['8830'] },
+    };
+    const secondSpec: ChallengeSpec = { ...firstSpec, challenge_id: 'sess-rel2-2' };
+    const actions: AgentAction[] = [
+      { id: 'act1', kind: 'challenge_issued', t_ms: 2000, challenge_id: 'sess-rel2-1', spec: firstSpec },
+      { id: 'act2', kind: 'challenge_issued', t_ms: 3000, challenge_id: 'sess-rel2-2', spec: secondSpec },
+    ];
+    const issued = reconstructIssued([escrowClaim], actions, SEED, 'sess-rel2', []);
+    expect(issued[0]).toEqual(firstSpec);
+    expect(issued[1]!.ask).toBe('');
+  });
 });
