@@ -12,10 +12,11 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p packages/engine --noEmit && tsc -p packages/web --noEmit",
+    "typecheck": "tsc -p packages/engine --noEmit && tsc -p packages/web --noEmit && tsc -p packages/server --noEmit",
     "replay": "npm run replay --workspace @countersign/engine --",
     "dev:web": "vite --config packages/web/vite.config.ts packages/web",
-    "build:web": "vite build --config packages/web/vite.config.ts packages/web"
+    "build:web": "vite build --config packages/web/vite.config.ts packages/web",
+    "dev:server": "tsx packages/server/src/index.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
