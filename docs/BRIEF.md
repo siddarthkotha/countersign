@@ -725,3 +725,8 @@ panel + overrides-green case. 9. False positives on honest correction/stress →
 the honest-Dana-under-stress corpus case (ESCALATE, never FREEZE). 10. In-event competitor in the
 scam-screening lane (seat-asserted "VoiceFirewall," lablab page 403 to fetchers; verify from the
 founder's browser) → positioning stays on the assembly and on "request, never authorize."
+
+**RATIFIED by the founder 2026-09-01, 10:27 PM CDT: "yes to all five, go."** D1-D5 are now law. Amendment 1b
+is superseded (engine on the server only; browser is an untrusted terminal). §15 character laws amended per D3.
+§4 Scenario C is cut from the video; the README keeps one sentence that the same checkpoint generalizes to a
+family phone. Language adopted everywhere: "A call can request a privileged action. It can never authorize one."
