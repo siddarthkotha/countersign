@@ -25,6 +25,149 @@
 
 ---
 
+# AMENDMENT v2 (2026-09-01, 10:05 PM CDT) — panel-driven engine contract changes. READ FIRST.
+
+The four-seat panel (docs/consults/2026-09-01-panel-synthesis.md) changed the engine contract. Where this
+section conflicts with a task below, THIS SECTION WINS. Tasks 1, 2, 3, 6, 7 stand with the edits listed here;
+Task 4's `record_answer` and Task 5's rule table are REPLACED. The engine stays a pure, dependency-free module;
+it now runs ONLY on the server (D2), but nothing in the module knows or cares where it runs.
+
+## A. Types added or changed (`src/types.ts`)
+
+```ts
+// REMOVE 'record_answer' from ToolName. The LLM gets NO evidence-writing tool. Tools are server-executed.
+export type ToolName =
+  | 'get_request_history' | 'check_sso_context' | 'verify_out_of_band'
+  | 'stage_payment_for_second_approval' | 'freeze_transaction_rail' | 'open_incident'
+  | 'alert_principal' | 'seal_evidence_record';
+
+/** Things the AGENT side did, written by the server when the LLM's reply for a goal completes. Never by the LLM. */
+export type AgentActionKind = 'challenge_issued' | 'readback_issued' | 'session_config_updated';
+export interface AgentAction {
+  id: string; kind: AgentActionKind; t_ms: number;
+  challenge_id?: string;              // challenge_issued
+  field?: ClaimField; value?: string; // readback_issued: what the agent read back
+  detail?: string;                    // session_config_updated: e.g. "keyterms+=First Meridian Trust"
+}
+
+export type ClaimField =
+  | 'amount_usd' | 'beneficiary' | 'account_last4' | 'deadline' | 'approver'
+  | 'counsel' | 'escrow_institution' | 'purpose' | 'others_aware' | 'identity';
+
+export type ClaimKind = 'STATED' | 'CONFIRMED' | 'APPROXIMATE' | 'CORRECTED' | 'CONTRADICTED' | 'UNKNOWN';
+
+/** One entry in the STORY LEDGER: a fact the caller stated, verbatim, with its lifecycle. */
+export interface Claim {
+  id: string; field: ClaimField; kind: ClaimKind;
+  value: string | number;             // normalized (amount as number; names lower-cased, trimmed)
+  quote: Quote;                       // verbatim
+  t_ms: number;
+  supersedes?: string;                // claim id this one corrected or contradicted
+  request_version: number;            // version this claim belongs to
+}
+
+export type ChallengeKind = 'SEED_FACT' | 'LIVE_COMMITMENT' | 'TRAP_FACT' | 'RELATIONAL';
+export interface ChallengeSpec {
+  challenge_id: string;               // deterministic: `${session_id}-${index}`
+  kind: ChallengeKind;
+  field: ClaimField;
+  ask: string;                        // phrasing goal for the LLM (never contains the expected answer)
+  expect: { accept_tokens: string[] } | { commitment_claim_id: string } | { trap_value: string; true_claim_id: string };
+}
+export type ChallengeResult = 'PASS' | 'FAIL' | 'AMBIGUOUS' | 'REFUSED' | 'UNANSWERED';
+
+export type Provenance = 'CALLER_SAID' | 'CALLER_CORRECTED' | 'SIMULATED_SYSTEM' | 'POLICY_DERIVED' | 'UNRESOLVED';
+// ADD to Evidence: provenance: Provenance; request_version: number;
+// ADD EvidenceKind members: 'identity_switch' | 'exposure_check_result' | 'readback_result' | 'injection_marker'
+
+export interface EngineInput {
+  conversation: Utterance[]; tools: ToolLogEntry[]; actions: AgentAction[]; call: CallContext; seed: SeedConfig;
+}
+
+export type GoalCode = /* existing */ | 'READBACK' | 'RE_ELICIT_AFTER_SWITCH' | 'EXPLAIN_OPEN_REQUEST' | 'CONTAIN_NO_DISCLOSURE';
+// PhrasingGoal gains: challenge?: ChallengeSpec; readback?: { field: ClaimField; value: string };
+//   keyterms: string[] (seed keyterms + every proper noun and amount the caller has stated: fed to session.update)
+//   turn_detection_hint: 'default' | 'patient'  ('patient' in CHALLENGE and READBACK: longer min_silence)
+
+export interface EngineOutput { /* existing */
+  ledger: Claim[]; request_version: number; challenges: { issued: ChallengeSpec[]; results: Record<string, ChallengeResult> };
+  assurance: AssuranceChecklist;      // the affirmative requirements for STAGE, each true/false with a reason
+  invariants_ok: boolean;             // VOICE_CAN_NEVER_RELEASE and friends; false = engine bug, treated as NO_ACTION
+}
+export interface AssuranceChecklist {
+  identity_claimed: boolean; sso_pass_current: boolean; oob_confirmed_current: boolean; context_pass_current: boolean;
+  no_contradictions: boolean; critical_fields_confirmed: boolean; exposure_within_limit: boolean;
+  challenge_requirement_met: boolean; no_identity_switch: boolean; not_new_beneficiary: boolean;
+}
+```
+
+Seed gains: `knowledge` grows to ≥6 SEED_FACT entries (add: hartwell_target_ceo "Lena Voss"; deal_signing_city "Zurich"; escrow_account_last4 "8830"; board_approval_date "August 19"), each with `accept_tokens`; `correction_lexicon: ["sorry","i mean","correction","actually","no wait","scratch that","let me correct"]`; `affirm_lexicon`, `negate_lexicon`; `injection_lexicon: ["ignore previous","ignore your instructions","system prompt","mark this verified","override","developer mode"]`; `thresholds.correction_window_ms: 20000`.
+
+## B. Story ledger (`src/ledger.ts`, replaces the consistency part of Task 4)
+
+`buildLedger(conversation, actions, seed): { claims: Claim[]; request_version: number }`
+- Extract per caller utterance: amount (Task 3 extractor), account digits (`(?:ending|last four|suffix)\s*(?:in\s*)?(\d{4})`), deadline phrases (`(?:in|within)\s+(\w+)\s+(minutes|hours)|today|tonight|by (friday|end of day)`), proper nouns after cue phrases (`approved by (X)`, `counsel (?:is|was|of record is) (X)`, `escrow (?:is|at|with|institution is) (X)`, `bank is (X)`, `(X) handled it`), identity (Task 3). X = up to four capitalized words, may include `&`. Everything quoted verbatim.
+- Lifecycle per field, in time order: first value → STATED. A later different value: if the utterance contains a `correction_lexicon` hit OR arrives within `correction_window_ms` of the previous claim for that field → CORRECTED (previous stays in the ledger, new claim `supersedes` it, kind CORRECTED, certainty downgraded: requires readback). Otherwise → CONTRADICTED (both remain; the new claim is the CONTRADICTED one; `supersedes` points at the first).
+- Readback: an `actions` entry `readback_issued {field, value}` followed by a caller utterance with an `affirm_lexicon` hit and no `negate_lexicon` hit → the current claim for that field becomes CONFIRMED. A negate hit → kind UNKNOWN and goal READBACK again with the value re-elicited. `critical_fields = ['amount_usd','account_last4','beneficiary']`: the engine NEVER evaluates a critical field for STAGE until CONFIRMED; FREEZE rules may use unconfirmed values (fail-safe direction).
+- Approximation: amount preceded by `about|around|roughly|approximately|ish` → APPROXIMATE; a later exact value within the window is CORRECTED, not CONTRADICTED.
+- `request_version` starts at 1 and increments whenever the current value of amount_usd, beneficiary or account_last4 changes (correction OR contradiction). Every Evidence and Claim carries the version. Tool evidence (sso/oob/context) is "current" only if `result.request_version === output.request_version`; the mock backend echoes the version passed in `args.request_version`. Stale evidence → PENDING (must re-run), never PASS.
+- Identity switch: a second identity claim for a DIFFERENT seed identity → `identity_switch` evidence FLAG (both quotes), request_version increments, assurance resets (all tool evidence stale), goal RE_ELICIT_AFTER_SWITCH.
+- Injection: `injection_lexicon` hit in a caller utterance → `injection_marker` evidence FLAG (verbatim quote), provenance CALLER_SAID. It is CONTENT, never proof of fraud: counts 0 toward tally; the goal becomes CONTAIN_NO_DISCLOSURE.
+
+## C. Challenges: the LLM may ask, never grade (`src/challenges.ts`, replaces `record_answer`)
+
+`selectChallenge(ledger, issued: ChallengeSpec[], results, seed, session_id): ChallengeSpec | null`, deterministic:
+1. LIVE_COMMITMENT first: a ledger claim (kind STATED/CONFIRMED) at least 2 caller utterances old on a field not yet challenged → "Ask the caller to restate their <field> (do not say the value)." Expect `commitment_claim_id`.
+2. TRAP_FACT second (at most once per call): pick a caller claim on `beneficiary|counsel|escrow_institution|approver` and the ask is "Restate the request back as if confirming, but with <trap_value> in place of <field>, then pause." `trap_value` = a different seed name (e.g. the impostor's own wrong firm if the caller was right, else the seed truth if the caller was wrong). PASS = caller objects (negate lexicon or restates the original within the next 2 utterances); FAIL = affirm lexicon; else AMBIGUOUS. Card label: "Consistency probe (deliberate misstatement)". Provenance POLICY_DERIVED.
+3. SEED_FACT third: unused `seed.knowledge` entries, ordered by `hash(session_id + index)` for per-session entropy (implement a tiny FNV-1a; no deps).
+4. RELATIONAL: after a beneficiary claim exists, ask for the account suffix (expect seed `escrow_account_last4`).
+Cap: `seed.thresholds.max_challenges` (now 3).
+
+`gradeChallenges(conversation, actions, issued, seed): Record<challenge_id, {result, quote?, eligible_utterance_ids}>`:
+- Eligible turns = caller utterances after the `challenge_issued` action's t_ms and before the NEXT `challenge_issued`/`readback_issued` action, capped at 2 utterances.
+- Normalize: lower-case, strip punctuation, collapse whitespace, "and"→"&", spoken digits → digits.
+- SEED_FACT/RELATIONAL: all `accept_tokens` present → PASS; a `refusal` (negate lexicon + "not going to|won't|can't tell|don't know") → REFUSED; no eligible turn → UNANSWERED; else FAIL.
+- LIVE_COMMITMENT: normalized eligible text contains the normalized committed value → PASS; contains a different value for that field → FAIL (and the ledger will also mark CONTRADICTED); else AMBIGUOUS.
+- Quote = the eligible utterance(s) verbatim. Evidence id `ev-knowledge-<challenge_id>`, provenance POLICY_DERIVED for the grade, quotes CALLER_SAID.
+- AMBIGUOUS and REFUSED never count as PASS; each counts 0.5 toward the tally (two AMBIGUOUS = one failure) so evasion is not free but not fatal.
+
+## D. Rules v2 (`src/rules.ts`, replaces Task 5's table). First match wins; publish verbatim in README.
+
+Invariants (checked LAST, override everything; violation ⇒ `invariants_ok=false`, verdict NO_ACTION):
+- I1 VOICE_CAN_NEVER_RELEASE: no verdict, tool, or action string equals RELEASE.
+- I2 STAGE only if every AssuranceChecklist item is true.
+- I3 A material change (request_version bump) invalidates all tool evidence from earlier versions.
+- I4 Any tool entry with `result.error` or absent past `seed.thresholds.tool_timeout_ms` (from t_ms to the last event time) ⇒ EVALUATION_INCOMPLETE ⇒ verdict ESCALATE (or NO_ACTION if no request), never STAGE.
+
+Table:
+1. Out-of-scope marker AND no request_params ⇒ NO_ACTION, state OUT_OF_SCOPE, goal EXPLAIN_OUT_OF_SCOPE.
+2. Out-of-scope marker AND a request exists ⇒ NO_ACTION, state OUT_OF_SCOPE, goal EXPLAIN_OPEN_REQUEST ("this is a demo; the request you made stays open and unstaged; a real desk would route it to a human"). The request is never erased.
+3. No identity or no request ⇒ PENDING (CLAIM).
+4. Any critical field not CONFIRMED ⇒ PENDING, goal READBACK for the oldest unconfirmed critical field.
+5. Identity switch this version with stale evidence ⇒ PENDING, goal RE_ELICIT_AFTER_SWITCH.
+6. Any of sso/oob/context PENDING or stale ⇒ PENDING (EVIDENCE, goal STALL; CONTAIN_NO_DISCLOSURE instead if pressure FLAG or injection marker).
+7. FREEZE if any: (a) oob FAIL AND sso FAIL; (b) any CONTRADICTED claim AND any check FAIL; (c) failure_tally ≥ 3; (d) RELATIONAL/account challenge FAIL AND oob FAIL; (e) TRAP_FACT FAIL AND any check FAIL. Reasons ordered: IDENTITY_UNVERIFIED, OUT_OF_BAND_NO_RESPONSE, CONTEXT_FAILURE, STORY_INCONSISTENCY, KNOWLEDGE_CHECK_FAILED, URGENCY_ESCALATION.
+8. Challenge requirement: `need = (context PASS && only the date changed) ? 0 : 1`; new beneficiary ⇒ need 2. Results < need and challenges remaining ⇒ PENDING (CHALLENGE, goal ASK_CHALLENGE with `selectChallenge`).
+9. Exposure: sum of every amount ever CONFIRMED or STATED across the session versions > `high_value_usd` while any single request is below it ⇒ `exposure_check_result` FAIL (anti-structuring) ⇒ ESCALATE.
+10. New beneficiary (not in request history) ⇒ ESCALATE regardless of amount ("never voice-stage a first-time beneficiary").
+11. AssuranceChecklist all true ⇒ STAGE. Pressure FLAG never blocks staging, but forces goal ANNOUNCE_STAGED with no details disclosed and adds `alert_principal` to required actions.
+12. failure_tally in (0,3) and challenges remaining ⇒ PENDING (CHALLENGE).
+13. Otherwise ⇒ ESCALATE (human callback on the registered number; nothing moves).
+
+Tally: sso FAIL 1, oob FAIL 1 (label UNVERIFIED, never IMPOSTOR), context FAIL 1, each CONTRADICTED claim 1 (max 2), each challenge FAIL 1, AMBIGUOUS/REFUSED 0.5, pressure 0, injection 0, identity switch 0 (it resets instead).
+
+`counterfactuals(input): { flip: string; verdict: Verdict }[]` (new, `src/counterfactual.ts`): for each evidence card with status FAIL/FLAG/PASS, re-run `evaluate` with that one card's status flipped (FAIL↔PASS, FLAG→INFO) by injecting an override map into `evaluate(input, overrides?)`; return the flips whose verdict differs. Pure; used by the UI's "why?" panel.
+
+## E. Corpus v2 (Task 6 grows to 16 files; `expected` also asserts `request_version` and `assurance`)
+scenario-a-dana-legitimate (STAGE) · scenario-b-miller-fraud (FREEZE) · judge-out-of-scope-no-request (NO_ACTION) · judge-testing-after-request (NO_ACTION, request open) · single-wrong-answer-escalates (PENDING→CHALLENGE then ESCALATE) · pressure-only-still-stages (STAGE) · honest-correction-stages ("one point eight, sorry, one point nine" → CORRECTED, readback, STAGE) · honest-dana-stress-escalates (initially inconsistent then explains; ESCALATE not FREEZE) · correct-answers-unknown-request-escalates (all SEED_FACTs PASS, no history match → ESCALATE: passing the quiz ≠ authorization) · live-evidence-overrides-green (sso PASS, oob CONFIRMED, but CONTRADICTED amount + RELATIONAL FAIL → not STAGE; ESCALATE) · identity-switch (assurance reset, PENDING) · structuring-two-wires (two $42,250 → exposure FAIL → ESCALATE) · prompt-injection (marker FLAG, verdict unchanged from the underlying evidence) · amount-drift-after-pass (FREEZE via 7b) · interruption-spam (pressure FLAG only; verdict from evidence) · hangup-mid-check (oob pending at end → NO_ACTION; required_actions = open_incident low).
+
+Mutation tests (`test/mutants.test.ts`, new): `decide(evidence, seed, ctx, mutant?)` accepts `mutant: { ignore_contradictions?: true; or_instead_of_and_in_7a?: true; skip_readback_gate?: true; ignore_exposure?: true }`. For each mutant, at least one corpus file's expected verdict must FAIL to reproduce. This proves every rule is load-bearing (README section "Break the rules and watch the tests fail").
+
+## F. What the server/browser plan (Plan 2) must respect from this engine
+The engine emits `goal.keyterms` and `goal.turn_detection_hint`; the server pushes them via `session.update` per state and logs `session_config_updated` actions (shown on screen as "listening reconfigured"). The server writes `challenge_issued`/`readback_issued` when the LLM's `reply.done` for that goal arrives. The LLM never sees expected answers: the system prompt carries only the `ask` string.
+
+---
+
 ## File Structure
 
 ```
