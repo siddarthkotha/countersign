@@ -2,9 +2,10 @@
 //
 // Hash-chained evidence export: turns an EngineOutput's evidence list into a linear
 // chain of entries, each hashed over the previous entry's hash and its own canonical
-// JSON. This lets a reviewer verify nothing in the export was altered after the fact
-// by recomputing the chain and comparing it entry by entry — a "hash-chained evidence
-// export", not a promise of immutability or cryptographic guarantee.
+// JSON. This lets a reviewer recompute the chain and compare it entry by entry to spot
+// where an export diverges from what was originally produced — a "hash-chained evidence
+// export", not a claim that the export cannot be edited, and not a cryptographic proof
+// of authenticity.
 //
 // No runtime dependencies: uses globalThis.crypto.subtle, which is available in both
 // Node 24+ and browsers, so this module can run client-side too.
@@ -31,7 +32,11 @@ export interface EvidenceExport {
 
 const GENESIS_PREV_HASH = '0'.repeat(64);
 
-/** Deterministic JSON serialization: object keys sorted recursively, no whitespace. */
+/**
+ * Deterministic JSON serialization: object keys sorted recursively, no whitespace.
+ * Note: an object property whose value is `undefined` serializes as `null`, same as
+ * `null` itself (deliberate — matches JSON's lack of an `undefined` literal).
+ */
 export function canonicalJson(value: unknown): string {
   return serialize(value);
 }

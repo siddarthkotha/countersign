@@ -57,14 +57,14 @@ describe('sha256Hex', () => {
 describe('buildEvidenceExport / verifyEvidenceExport', () => {
   it('produces the same root_hash for the same input twice', async () => {
     const out = outputFixture([evidenceFixture('e1', 'Caller claimed identity Robert Miller')]);
-    const exportA = await buildEvidenceExport('review-1', out as EngineOutput, '2026-09-01T00:00:00.000Z');
-    const exportB = await buildEvidenceExport('review-1', out as EngineOutput, '2026-09-01T00:00:00.000Z');
+    const exportA = await buildEvidenceExport('review-1', out, '2026-09-01T00:00:00.000Z');
+    const exportB = await buildEvidenceExport('review-1', out, '2026-09-01T00:00:00.000Z');
     expect(exportA.root_hash).toBe(exportB.root_hash);
   });
 
   it('sets entries[0].prev_hash to 64 zeros', async () => {
     const out = outputFixture([evidenceFixture('e1', 'Caller claimed identity Robert Miller')]);
-    const built = await buildEvidenceExport('review-1', out as EngineOutput, '2026-09-01T00:00:00.000Z');
+    const built = await buildEvidenceExport('review-1', out, '2026-09-01T00:00:00.000Z');
     expect(built.entries[0]!.prev_hash).toBe('0'.repeat(64));
   });
 
@@ -74,7 +74,7 @@ describe('buildEvidenceExport / verifyEvidenceExport', () => {
       evidenceFixture('e2', 'SSO context confirmed'),
     ];
     const out = outputFixture(evidenceList);
-    const built = await buildEvidenceExport('review-1', out as EngineOutput, '2026-09-01T00:00:00.000Z');
+    const built = await buildEvidenceExport('review-1', out, '2026-09-01T00:00:00.000Z');
 
     const expectedHash0 = await sha256Hex('0'.repeat(64) + canonicalJson(evidenceList[0]));
     expect(built.entries[0]!.hash).toBe(expectedHash0);
@@ -90,7 +90,7 @@ describe('buildEvidenceExport / verifyEvidenceExport', () => {
       evidenceFixture('e1', 'Caller claimed identity Robert Miller'),
       evidenceFixture('e2', 'SSO context confirmed'),
     ]);
-    const built = await buildEvidenceExport('review-1', out as EngineOutput, '2026-09-01T00:00:00.000Z');
+    const built = await buildEvidenceExport('review-1', out, '2026-09-01T00:00:00.000Z');
     const result = await verifyEvidenceExport(built);
     expect(result).toEqual({ ok: true, broken_at: null });
   });
@@ -101,7 +101,7 @@ describe('buildEvidenceExport / verifyEvidenceExport', () => {
       evidenceFixture('e2', 'SSO context confirmed'),
       evidenceFixture('e3', 'Out-of-band verification confirmed'),
     ]);
-    const built = await buildEvidenceExport('review-1', out as EngineOutput, '2026-09-01T00:00:00.000Z');
+    const built = await buildEvidenceExport('review-1', out, '2026-09-01T00:00:00.000Z');
 
     // Tamper with the second entry's evidence detail after the fact.
     built.entries[1]!.evidence = { ...built.entries[1]!.evidence, detail: 'TAMPERED' };
@@ -111,9 +111,32 @@ describe('buildEvidenceExport / verifyEvidenceExport', () => {
     expect(result.broken_at).toBe(1);
   });
 
+  it('reports ok: false, broken_at: <first moved index> when two entries are reordered', async () => {
+    const out = outputFixture([
+      evidenceFixture('e1', 'Caller claimed identity Robert Miller'),
+      evidenceFixture('e2', 'SSO context confirmed'),
+      evidenceFixture('e3', 'Out-of-band verification confirmed'),
+    ]);
+    const built = await buildEvidenceExport('review-1', out, '2026-09-01T00:00:00.000Z');
+
+    // Swap entries 0 and 1 wholesale — their own hash/evidence fields are left
+    // untouched, only their position in the array changes. This breaks the
+    // prev_hash linkage between entries without breaking any individual entry's
+    // own hash, so it exercises the prev_hash-mismatch branch in
+    // verifyEvidenceExport (hashChain.ts:117-119), not the hash-recompute branch.
+    const first = built.entries[0]!;
+    const second = built.entries[1]!;
+    built.entries[0] = second;
+    built.entries[1] = first;
+
+    const result = await verifyEvidenceExport(built);
+    expect(result.ok).toBe(false);
+    expect(result.broken_at).toBe(0);
+  });
+
   it('handles empty evidence: ok: true, root_hash === sha256Hex("")', async () => {
     const out = outputFixture([]);
-    const built = await buildEvidenceExport('review-1', out as EngineOutput, '2026-09-01T00:00:00.000Z');
+    const built = await buildEvidenceExport('review-1', out, '2026-09-01T00:00:00.000Z');
     expect(built.entries).toEqual([]);
     expect(built.root_hash).toBe(await sha256Hex(''));
 
