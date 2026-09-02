@@ -211,8 +211,15 @@ export class CallSession {
         this.recordGoalCompletionAction(evt.status);
         if (evt.status === 'interrupted') {
           this.opts.onServerEvent({ type: 'flush' });
+          // docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md: "If reply.done.status == 'interrupted'
+          // (user barge-in), discard pending tool results." The evidence stands -- the
+          // ToolLogEntry and its mock result stay in the logs untouched -- only the
+          // tool.result message to AAI is dropped (a new turn already started; AAI is no
+          // longer expecting a reply to the old one).
+          this.discardPendingToolResults();
+        } else {
+          this.flushToolResults();
         }
-        this.flushToolResults();
         break;
 
       case 'input.speech.started':
@@ -310,6 +317,20 @@ export class CallSession {
     if (this.pendingToolResults.length === 0) return;
     for (const p of this.pendingToolResults) {
       this.opts.aai.send({ type: 'tool.result', call_id: p.call_id, result: JSON.stringify(p.result), is_error: p.is_error });
+    }
+    this.pendingToolResults = [];
+  }
+
+  /** The interrupted-reply.done counterpart to `flushToolResults`: never sends the queued
+   *  tool.result messages (a new turn has already started -- AAI is no longer expecting
+   *  answers to the old one), but marks each already-logged ToolLogEntry with
+   *  `discarded_on_interrupt: true` in its `args` so the discard itself is visible evidence,
+   *  not a silent drop -- the entry's `result` (the mock's actual answer) is left untouched. */
+  private discardPendingToolResults(): void {
+    if (this.pendingToolResults.length === 0) return;
+    for (const p of this.pendingToolResults) {
+      const entry = this.logs.tools.find((t) => t.id === p.call_id);
+      if (entry) entry.args = { ...entry.args, discarded_on_interrupt: true };
     }
     this.pendingToolResults = [];
   }

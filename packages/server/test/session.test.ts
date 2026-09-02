@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { MERIDIAN, mockToolResult } from '@countersign/engine';
 import type { AgentAction, CallContext, ServerEvent, ToolLogEntry } from '@countersign/engine';
 import { CallSession } from '../src/call/session.js';
@@ -19,6 +19,48 @@ function newSession(clockRef: { now: number }, call: CallContext, aai: FakeAaiSo
   });
 }
 
+/** Replays Scenario B's c1..a4 (identity claimed as 'robert-miller', request_version bumped
+ *  to 2 by c3's amount contradiction) so `check_sso_context`/`get_request_history`/
+ *  `verify_out_of_band` are on the allowlist (EVIDENCE state) afterward -- the shared setup
+ *  behind the main replay test and the two fix-round-1 tests that only care about what
+ *  happens to ONE tool.call from that point on. */
+function driveScenarioBThroughA4(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
+  clock.now = 1000;
+  aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+
+  clock.now = 4000;
+  aai.emit({ type: 'reply.started', reply_id: 'a1' });
+  aai.emit({ type: 'transcript.agent', item_id: 'a1', text: scenarioB.conversation[1]!.text, reply_id: 'a1', interrupted: false });
+  aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+  clock.now = 8000;
+  aai.emit({ type: 'transcript.user', item_id: 'c2', text: scenarioB.conversation[2]!.text });
+
+  clock.now = 12000;
+  aai.emit({ type: 'reply.started', reply_id: 'a2' });
+  aai.emit({ type: 'transcript.agent', item_id: 'a2', text: scenarioB.conversation[3]!.text, reply_id: 'a2', interrupted: false });
+  aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
+
+  clock.now = 40000;
+  aai.emit({ type: 'transcript.user', item_id: 'c3', text: scenarioB.conversation[4]!.text });
+
+  clock.now = 44000;
+  aai.emit({ type: 'reply.started', reply_id: 'a3' });
+  aai.emit({ type: 'transcript.agent', item_id: 'a3', text: scenarioB.conversation[5]!.text, reply_id: 'a3', interrupted: true });
+  aai.emit({ type: 'reply.done', reply_id: 'a3', status: 'interrupted' });
+
+  clock.now = 48000;
+  aai.emit({ type: 'transcript.user', item_id: 'c4', text: scenarioB.conversation[6]!.text });
+
+  clock.now = 50000;
+  aai.emit({ type: 'reply.started', reply_id: 'a4' });
+  aai.emit({ type: 'transcript.agent', item_id: 'a4', text: scenarioB.conversation[7]!.text, reply_id: 'a4', interrupted: false });
+  aai.emit({ type: 'reply.done', reply_id: 'a4', status: 'completed' });
+
+  clock.now = 50500;
+  aai.emit({ type: 'reply.started', reply_id: 'tools-1' });
+}
+
 /** `buildEvidenceExport` hashes via `crypto.subtle.digest`, which resolves on a real
  *  Node task, not a plain microtask -- a chain of `await Promise.resolve()` isn't enough
  *  to observe it settle, so this waits on the real (unfaked, injected-clock-independent)
@@ -36,48 +78,11 @@ describe('CallSession — Scenario B (Robert Miller, fraudulent) replayed as liv
 
     session.start(); // INTAKE, before anything is said
 
-    // c1 -- caller states identity + the fraudulent request
-    clock.now = 1000;
-    aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
-
-    // a1 -- agent's first challenge (the engine picks it; a1's own line is just what the
-    // real call sounded like, not something session.ts trusts for anything)
-    clock.now = 4000;
-    aai.emit({ type: 'reply.started', reply_id: 'a1' });
-    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: scenarioB.conversation[1]!.text, reply_id: 'a1', interrupted: false });
-    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
-
-    // c2 -- counsel answer + pressure ("Release it.")
-    clock.now = 8000;
-    aai.emit({ type: 'transcript.user', item_id: 'c2', text: scenarioB.conversation[2]!.text });
-
-    clock.now = 12000;
-    aai.emit({ type: 'reply.started', reply_id: 'a2' });
-    aai.emit({ type: 'transcript.agent', item_id: 'a2', text: scenarioB.conversation[3]!.text, reply_id: 'a2', interrupted: false });
-    aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
-
-    // c3 -- the amount contradiction ($1.8M -> $2.1M)
-    clock.now = 40000;
-    aai.emit({ type: 'transcript.user', item_id: 'c3', text: scenarioB.conversation[4]!.text });
-
-    // a3 -- the agent's probe, barged in on (recorded interrupted: true)
-    clock.now = 44000;
-    aai.emit({ type: 'reply.started', reply_id: 'a3' });
-    aai.emit({ type: 'transcript.agent', item_id: 'a3', text: scenarioB.conversation[5]!.text, reply_id: 'a3', interrupted: true });
-    aai.emit({ type: 'reply.done', reply_id: 'a3', status: 'interrupted' });
-
-    // c4 -- "Release the wire or you're fired!"
-    clock.now = 48000;
-    aai.emit({ type: 'transcript.user', item_id: 'c4', text: scenarioB.conversation[6]!.text });
-
-    clock.now = 50000;
-    aai.emit({ type: 'reply.started', reply_id: 'a4' });
-    aai.emit({ type: 'transcript.agent', item_id: 'a4', text: scenarioB.conversation[7]!.text, reply_id: 'a4', interrupted: false });
-    aai.emit({ type: 'reply.done', reply_id: 'a4', status: 'completed' });
-
-    // The evidence-gathering tool calls, all inside one "hold" reply cycle.
-    clock.now = 50500;
-    aai.emit({ type: 'reply.started', reply_id: 'tools-1' });
+    // c1..a4 -- identity + the fraudulent request, the counsel/pressure exchange, the
+    // amount contradiction, the barge-in, the final "one last check" -- see the helper for
+    // line-by-line detail. Leaves the call in EVIDENCE state, identity 'robert-miller',
+    // request_version 2, one open "hold" reply bracketing the tool calls below.
+    driveScenarioBThroughA4(session, aai, clock);
 
     clock.now = 51000;
     aai.emit({ type: 'tool.call', call_id: 't1', name: 'check_sso_context', arguments: { identity_id: 'robert-miller' } });
@@ -117,20 +122,16 @@ describe('CallSession — Scenario B (Robert Miller, fraudulent) replayed as liv
     const recordedThreeTools = session.logs.tools.slice(0, 3);
     expect(recordedThreeTools).toEqual(scenarioB.tools as ToolLogEntry[]);
 
-    // The corpus file's `challenge_issued` action is fictional narration (a hand-authored
-    // trace satisfying the engine's constraints for its recorded `expected` block), not a
-    // recording of what THIS conversation's own live phrasingGoal would say turn by turn.
-    // Replayed live, the engine's real priority order (amount_usd stays an unconfirmed
-    // critical field the whole call -- the caller never once affirms a readback) keeps
-    // choosing READBACK over ASK_CHALLENGE every time, so this session's own actions log is
-    // readback_issued entries, not the corpus's challenge_issued one -- and that's the
-    // correct, verified behaviour of the real engine, not a test bug. What must (and does)
-    // still hold is LAW 3's real promise: the SAME engine, fed the SAME evidence, reaches
-    // the SAME verdict regardless of which legal path the actions log took to get there.
-    expect(session.logs.actions.filter((a) => a.kind === 'challenge_issued')).toHaveLength(0);
-    const readbacks = session.logs.actions.filter((a) => a.kind === 'readback_issued');
-    expect(readbacks.length).toBeGreaterThan(0);
-    expect(readbacks.every((a) => a.field === 'amount_usd')).toBe(true);
+    // The corpus file's own `challenge_issued` action names the counsel-of-record question
+    // specifically -- one legal choice among several the live engine could make; this
+    // session's own live goal-following independently chose two different (also legal)
+    // SEED_FACT challenges via the same deterministic selectChallenge. Which exact
+    // challenges get asked isn't the load-bearing fact here (both are equally valid
+    // consequences of the SAME deterministic selection given the SAME session_id/seed); that
+    // the live path reaches the SAME verdict and the SAME full reason set as the corpus is.
+    const challenges = session.logs.actions.filter((a) => a.kind === 'challenge_issued');
+    expect(challenges.length).toBeGreaterThan(0);
+    expect(challenges.every((a) => a.spec?.kind === 'SEED_FACT')).toBe(true);
 
     // ---- terminal actions ran, in the FSM's FREEZE order, all after the three recorded tools ----
     const terminalTools = session.logs.tools.slice(3);
@@ -142,14 +143,9 @@ describe('CallSession — Scenario B (Robert Miller, fraudulent) replayed as liv
     ]);
     expect(terminalTools.every((t) => t.result !== undefined)).toBe(true);
 
-    // ---- the engine's own verdict: FREEZE, on the reasons this exact live path actually
-    // proves (a strict subset of the corpus's -- KNOWLEDGE_CHECK_FAILED never applies here
-    // since this path never reaches a challenge; see the actions note above) ----
-    expect(session.last?.verdict).toBe('FREEZE');
-    expect(session.last?.reasons).toEqual(
-      expect.arrayContaining(['IDENTITY_UNVERIFIED', 'OUT_OF_BAND_NO_RESPONSE', 'CONTEXT_FAILURE', 'STORY_INCONSISTENCY', 'URGENCY_ESCALATION']),
-    );
-    expect(session.last?.reasons).not.toContain('KNOWLEDGE_CHECK_FAILED');
+    // ---- the engine's own verdict, matching the corpus's recorded expectation exactly ----
+    expect(session.last?.verdict).toBe(scenarioB.expected.verdict);
+    expect(session.last?.reasons).toEqual(scenarioB.expected.reasons);
     expect(session.last?.state).toBe('SEALED'); // seal_evidence_record has now run
 
     // ---- the countersign: re-running evaluate over the frozen logs reproduced FREEZE ----
@@ -193,6 +189,128 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
     expect(toolResult).toBeDefined();
     expect(toolResult?.call_id).toBe('tc1');
     expect(toolResult?.is_error).toBe(true);
+  });
+
+  it('replaces a spoofed identity_id with the engine\'s own claimed identity before the mock ever sees it', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession(clock, CALL_B, aai, sent);
+    session.start();
+    driveScenarioBThroughA4(session, aai, clock); // claimed identity is 'robert-miller'
+
+    clock.now = 51000;
+    aai.emit({
+      type: 'tool.call',
+      call_id: 'spoof-1',
+      name: 'check_sso_context',
+      // The LLM (or a compromised one) claims to be checking someone else entirely.
+      arguments: { identity_id: 'someone-else-entirely' },
+    });
+
+    const entry = session.logs.tools.find((t) => t.id === 'spoof-1');
+    expect(entry).toBeDefined();
+    // The logged args show what was ACTUALLY sent to the mock -- the engine's claimed
+    // identity, not the LLM's -- never the spoofed value.
+    expect(entry?.args.identity_id).toBe('robert-miller');
+    // Proof it's not just logged but actually used: Robert Miller's real (Frankfurt) SSO
+    // context comes back, not an unknown_identity error for "someone-else-entirely".
+    expect(entry?.result).toEqual({
+      session_active: true,
+      geo: 'Frankfurt, DE',
+      device: 'MacBook Pro (managed)',
+      request_version: 2,
+    });
+  });
+
+  it('rejects garbage tool arguments before they reach the mock backend, and answers invalid_arguments', () => {
+    // freeze_transaction_rail is the only one of our 8 tools with an LLM-reachable
+    // non-identity argument (rail_id) -- the three identity-bearing evidence tools always
+    // self-heal identity_id via the override proven above (by design: "the LLM never
+    // overrides the claimed identity"), so garbage there can never produce invalid_arguments.
+    // In live operation freeze_transaction_rail is only ever consumed by the server's own
+    // synchronous terminal-action runner the instant a FREEZE verdict is decided (see
+    // runTerminalActionsIfNeeded), so an LLM tool.call for it can never actually win that
+    // race through the public event path either. `handleToolCall` is invoked directly here
+    // (a legitimate, narrow exception) to prove the validate-before-mock rule itself, since
+    // no reachable public scenario can exercise a rejection on real tool.call traffic.
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const mockSpy = vi.fn(mockToolResult);
+    const call: CallContext = { session_id: 'sess-garbage', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = new CallSession({
+      session_id: call.session_id,
+      seed: MERIDIAN,
+      call,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockSpy,
+    });
+    session.start();
+
+    // freeze_transaction_rail is only ever on `allowed_tools` transiently, during the exact
+    // synchronous instant a FREEZE verdict is decided -- and the server's own terminal-action
+    // runner consumes it in that same instant, before any test code (or real LLM) could
+    // observe the window and call it. Patching `last.allowed_tools` is the only way to reach
+    // handleToolCall's validation step for this tool at all; everything downstream of the
+    // allowlist gate is exercised exactly as the real code runs it.
+    const sessionInternals = session as unknown as {
+      last: { allowed_tools: string[] } | null;
+      handleToolCall: (evt: unknown) => void;
+    };
+    sessionInternals.last = { ...sessionInternals.last, allowed_tools: ['freeze_transaction_rail'] };
+
+    sessionInternals.handleToolCall({
+      type: 'tool.call',
+      call_id: 'garbage-1',
+      name: 'freeze_transaction_rail',
+      arguments: { rail_id: 12345 }, // wrong type: schema says string
+    });
+
+    const entry = session.logs.tools.find((t) => t.id === 'garbage-1');
+    expect(entry).toBeDefined();
+    expect(entry?.result).toEqual({ error: 'invalid_arguments', rejected: ['rail_id'] });
+    expect(mockSpy).not.toHaveBeenCalled();
+
+    clock.now = 10;
+    aai.emit({ type: 'reply.done', reply_id: 'r', status: 'completed' });
+    const toolResult = aai.sent.find((m) => (m as { type?: string }).type === 'tool.result') as
+      | { call_id: string; is_error: boolean }
+      | undefined;
+    expect(toolResult?.call_id).toBe('garbage-1');
+    expect(toolResult?.is_error).toBe(true);
+  });
+
+  it('discards queued tool.results on an interrupted reply.done but keeps the ToolLogEntry (AAI agent-instructions rule)', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession(clock, CALL_B, aai, sent);
+    session.start();
+    driveScenarioBThroughA4(session, aai, clock);
+
+    clock.now = 51000;
+    aai.emit({ type: 'tool.call', call_id: 'ti1', name: 'check_sso_context', arguments: { identity_id: 'robert-miller' } });
+
+    clock.now = 51200;
+    aai.emit({ type: 'reply.done', reply_id: 'tools-1', status: 'interrupted' });
+
+    // Discarded: no tool.result ever reaches AAI for this call_id.
+    expect(aai.sent.some((m) => (m as { type?: string; call_id?: string }).type === 'tool.result')).toBe(false);
+
+    // Kept: the evidence stands -- the ToolLogEntry and its real mock result are untouched,
+    // only marked with the discard fact.
+    const entry = session.logs.tools.find((t) => t.id === 'ti1');
+    expect(entry).toBeDefined();
+    expect(entry?.result).toEqual({
+      session_active: true,
+      geo: 'Frankfurt, DE',
+      device: 'MacBook Pro (managed)',
+      request_version: 2,
+    });
+    expect(entry?.args.discarded_on_interrupt).toBe(true);
   });
 
   it('flushes on input.speech.started and on an interrupted reply.done', () => {
