@@ -21,11 +21,14 @@ Pre-kickoff scaffold. Product code begins with the event build window.
 
 ## How Countersign uses the AssemblyAI Voice Agent API
 
-- **Server-minted, single-use tokens with a session cap.** The server calls
+- **Server-minted, single-use tokens with a session cap.** The browser never talks to
+  AssemblyAI at all — it only ever opens Countersign's own `/ws/call/:id` socket
+  (`packages/server/src/http.ts`). The server mints the AssemblyAI token itself, calling
   `GET https://agents.assemblyai.com/v1/token` with `expires_in_seconds` (the 60-second window
   the token must be redeemed in) and `max_session_duration_seconds` (the hard cap on how long
-  the call itself can run), and hands the browser only the resulting token — never the API key
-  (`packages/server/src/token.ts`).
+  the call itself can run), and uses that token exclusively server-side to open its own
+  connection to AssemblyAI. Neither the token nor the API key ever reaches the browser
+  (`packages/server/src/token.ts`, `packages/server/src/aai/session.ts`).
 - **24 kHz PCM16 mic audio via an AudioWorklet.** The browser captures the mic with
   `getUserMedia`, downsamples whatever the browser's native sample rate is to 24,000 Hz mono
   16-bit PCM inside an `AudioWorkletProcessor` running on the audio-render thread (off the React
@@ -40,12 +43,13 @@ Pre-kickoff scaffold. Product code begins with the event build window.
   Voice, output audio encoding, and the greeting are set once, at connect, and never resent,
   because AssemblyAI fixes those three for the rest of the session once it starts
   (`packages/server/src/call/session.ts`, the `applyEvaluate` method).
-- **Keyterms grow with the call.** The listening vocabulary (up to 100 terms, AssemblyAI's cap)
-  starts as the seed's known names and companies, then the server adds every proper noun and
-  dollar amount the caller has actually stated — both the caller's spoken form (e.g. "one point
-  eight million") and the normalized display form (e.g. "$1,800,000") — plus every evidence
-  quote captured so far, so the transcriber is boosted toward the exact words this specific call
-  needs (`packages/engine/src/fsm.ts`, the `buildKeyterms` function).
+- **Keyterms grow with the call.** `input.keyterms` starts from the seed's keyterms list (names,
+  companies, and domain phrases such as wire transfer, escrow, SSO, out-of-band) and grows per
+  state — the server adds every proper noun and dollar amount the caller has actually stated
+  (both the caller's spoken form, e.g. "one point eight million", and the normalized display
+  form, e.g. "$1,800,000") plus every evidence quote captured so far, so the transcriber is
+  boosted toward the exact words this specific call needs, up to the 100-term cap
+  (`packages/engine/src/fsm.ts`, the `buildKeyterms` function).
 - **Turn detection and barge-in.** The same `session.update` sets `turn_detection`
   (`vad_threshold`, `min_silence`, `max_silence`, `interrupt_response: true`). When the caller
   talks over the agent, AssemblyAI sends `input.speech.started` and, once the turn resolves,
@@ -68,11 +72,14 @@ Pre-kickoff scaffold. Product code begins with the event build window.
   (500 ms / 1.5 s / 3 s), and only while still inside AssemblyAI's documented 30-second resumable
   window. Exhausting the attempts, missing the window, or having no session id to resume against
   all give up rather than retry forever (`packages/server/src/aai/session.ts`).
-- **A fake AssemblyAI mode for tests and replay.** `FakeAaiSocket` implements the same socket
-  interface the real adapter does, so every test drives the full call-handling logic with no
-  network call and no API key; the same fake, run in `COUNTERSIGN_FAKE_AAI=1` dev mode, plays a
-  scripted event timeline in real time so the no-mic replay screen can be driven end to end
-  without a live AssemblyAI connection (`packages/server/src/aai/fake.ts`).
+- **A fake AssemblyAI mode for tests; a separate path for replay.** `FakeAaiSocket` implements
+  the same socket interface the real adapter does, so every test drives the full call-handling
+  logic with no network call and no API key; `COUNTERSIGN_FAKE_AAI=1` dev mode hands the same
+  stub to a live call session so the server can boot and be exercised locally without an
+  AssemblyAI key (`packages/server/src/aai/fake.ts`). The no-mic replay screen is a different
+  path entirely: `/ws/replay/:file` re-runs a recorded call through the real policy engine
+  (`runReplay`), with no AssemblyAI connection — real or fake — involved at all
+  (`packages/server/src/replay.ts`, `packages/server/src/ws/browser.ts`).
 - **Measured latency.** The "Measured latency" table below is produced by actually running the
   real socket, not estimated: `packages/server/scripts/smoke-live.ts` mints a token, opens the
   connection, times connect → `session.ready`, then times `session.ready` → the first
