@@ -19,6 +19,65 @@ Hackathon (lablab.ai, September 1–30, 2026).
 
 Pre-kickoff scaffold. Product code begins with the event build window.
 
+## How Countersign uses the AssemblyAI Voice Agent API
+
+- **Server-minted, single-use tokens with a session cap.** The server calls
+  `GET https://agents.assemblyai.com/v1/token` with `expires_in_seconds` (the 60-second window
+  the token must be redeemed in) and `max_session_duration_seconds` (the hard cap on how long
+  the call itself can run), and hands the browser only the resulting token — never the API key
+  (`packages/server/src/token.ts`).
+- **24 kHz PCM16 mic audio via an AudioWorklet.** The browser captures the mic with
+  `getUserMedia`, downsamples whatever the browser's native sample rate is to 24,000 Hz mono
+  16-bit PCM inside an `AudioWorkletProcessor` running on the audio-render thread (off the React
+  thread), and posts 20 ms base64-encoded frames up to the server one at a time
+  (`packages/web/src/audio/capture.worklet.ts`, `packages/web/src/audio/capture.ts`).
+- **`session.update` at connect, then again on every goal change.** The first `session.update`,
+  sent the instant the socket opens, sets `system_prompt`, `input.format.encoding`,
+  `output.voice`, `output.format.encoding`, an optional one-time `greeting`, the tool list, and
+  `keyterms` (`packages/server/src/aai/config.ts`). After that, every time the policy engine's
+  goal changes mid-call, the server sends a fresh `session.update` — but that later update only
+  ever touches `system_prompt`, `tools`, `input.keyterms`, and `input.turn_detection.min_silence`.
+  Voice, output audio encoding, and the greeting are set once, at connect, and never resent,
+  because AssemblyAI fixes those three for the rest of the session once it starts
+  (`packages/server/src/call/session.ts`, the `applyEvaluate` method).
+- **Keyterms grow with the call.** The listening vocabulary (up to 100 terms, AssemblyAI's cap)
+  starts as the seed's known names and companies, then the server adds every proper noun and
+  dollar amount the caller has actually stated — both the caller's spoken form (e.g. "one point
+  eight million") and the normalized display form (e.g. "$1,800,000") — plus every evidence
+  quote captured so far, so the transcriber is boosted toward the exact words this specific call
+  needs (`packages/engine/src/fsm.ts`, the `buildKeyterms` function).
+- **Turn detection and barge-in.** The same `session.update` sets `turn_detection`
+  (`vad_threshold`, `min_silence`, `max_silence`, `interrupt_response: true`). When the caller
+  talks over the agent, AssemblyAI sends `input.speech.started` and, once the turn resolves,
+  `reply.done` with `status: 'interrupted'`. The server treats `input.speech.started` as the
+  signal to flush playback immediately; on the browser side, the playback queue stops every
+  scheduled audio source and clears itself within one frame, so nothing already queued keeps
+  playing after the interrupt — the barge-in is won client-side, in the audio buffer
+  (`packages/server/src/call/session.ts`, `packages/web/src/audio/playback.ts`).
+- **`tool.result` timing.** A tool result is computed and queued as soon as the tool call
+  arrives, but only sent back to AssemblyAI once `reply.done` arrives for that turn — never
+  earlier, never later, per AssemblyAI's own timing rule. If that `reply.done` instead reports
+  `status: 'interrupted'`, the queued result is never sent (a new turn has already started); the
+  tool call and its result stay in the evidence log regardless, just marked
+  `discarded_on_interrupt: true` so the discard itself is visible, not silent
+  (`packages/server/src/call/session.ts`, the `flushToolResults`/`discardPendingToolResults`
+  methods).
+- **Bounded reconnect on a dropped link.** If the AssemblyAI socket drops unexpectedly, the
+  server re-mints a token, opens a new socket, and sends `session.resume` with the previous
+  `session_id` — up to 3 attempts total for the life of the call (not per drop), each backed off
+  (500 ms / 1.5 s / 3 s), and only while still inside AssemblyAI's documented 30-second resumable
+  window. Exhausting the attempts, missing the window, or having no session id to resume against
+  all give up rather than retry forever (`packages/server/src/aai/session.ts`).
+- **A fake AssemblyAI mode for tests and replay.** `FakeAaiSocket` implements the same socket
+  interface the real adapter does, so every test drives the full call-handling logic with no
+  network call and no API key; the same fake, run in `COUNTERSIGN_FAKE_AAI=1` dev mode, plays a
+  scripted event timeline in real time so the no-mic replay screen can be driven end to end
+  without a live AssemblyAI connection (`packages/server/src/aai/fake.ts`).
+- **Measured latency.** The "Measured latency" table below is produced by actually running the
+  real socket, not estimated: `packages/server/scripts/smoke-live.ts` mints a token, opens the
+  connection, times connect → `session.ready`, then times `session.ready` → the first
+  `reply.audio` byte. It's opt-in only (`--live` plus `ASSEMBLYAI_API_KEY`) and never runs in CI.
+
 ## Replay the corpus
 
 `packages/engine/corpus/*.json` holds 18 transcripts replayed through the real engine every
@@ -37,6 +96,10 @@ Countersign makes **no acoustic deepfake-detection claims** and uses **no voice 
 by design. The mechanism is exclusively behavioral verification: what the caller knows, how
 their story holds together across turns, and what independent out-of-band checks say. That's a
 feature: it's the layer that still works when synthetic voices are perfect.
+
+Every quote in the evidence record is AssemblyAI's own transcribed text, verbatim — never a
+paraphrase written by the agent. Facts are stored separately from interpretation, so no evidence
+card ever depends on how the agent chose to phrase anything mid-call.
 
 ## Disclosure
 
