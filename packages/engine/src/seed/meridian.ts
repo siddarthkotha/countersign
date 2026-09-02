@@ -42,11 +42,13 @@ export const MERIDIAN: SeedConfig = {
       id: 'counsel_of_record', topic: 'Hartwell acquisition',
       ask: 'Ask which law firm is our counsel of record on the Hartwell deal.',
       truth: 'Calder & Finch', accept_tokens: ['calder', 'finch'],
+      priority: 1, // ratified demo script opens with this question (controller ruling 2026-09-01 11:25 AM CDT)
     },
     {
       id: 'escrow_institution', topic: 'Hartwell acquisition',
       ask: 'Ask which institution holds the Hartwell escrow.',
       truth: 'First Meridian Trust', accept_tokens: ['first', 'meridian', 'trust'],
+      priority: 2, // ratified demo script asks this second (controller ruling 2026-09-01 11:25 AM CDT)
     },
     // v2 (amendment §A): grow to >=6 SEED_FACT entries.
     {

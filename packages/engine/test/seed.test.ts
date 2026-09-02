@@ -37,6 +37,17 @@ describe('seed', () => {
     expect(k.truth).toBe('8830');
   });
 
+  it('counsel_of_record and escrow_institution carry the ratified demo-script priorities (counsel first, escrow second); every other knowledge entry is unprioritized', () => {
+    const counsel = MERIDIAN.knowledge.find((k) => k.id === 'counsel_of_record')!;
+    const escrow = MERIDIAN.knowledge.find((k) => k.id === 'escrow_institution')!;
+    expect(counsel.priority).toBe(1);
+    expect(escrow.priority).toBe(2);
+    for (const k of MERIDIAN.knowledge) {
+      if (k.id === 'counsel_of_record' || k.id === 'escrow_institution') continue;
+      expect(k.priority).toBeUndefined();
+    }
+  });
+
   it('thresholds carry the v2 values: max_challenges 3, correction_window_ms 20000, tool_timeout_ms 45000', () => {
     expect(MERIDIAN.thresholds.max_challenges).toBe(3);
     expect(MERIDIAN.thresholds.correction_window_ms).toBe(20000);

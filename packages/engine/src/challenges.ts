@@ -136,9 +136,16 @@ function selectSeedFact(
     (k) => !issued.some((s) => 'accept_tokens' in s.expect && arraysEqual(s.expect.accept_tokens, k.accept_tokens)),
   );
   if (unused.length === 0) return null;
-  const sorted = [...unused].sort(
-    (a, b) => fnv1a(`${session_id}:${a.id}`) - fnv1a(`${session_id}:${b.id}`),
-  );
+  // Controller ruling 2026-09-01 11:25 AM CDT: prioritized facts (e.g. the ratified demo
+  // script's counsel-of-record/escrow-institution opener) ask first, in ascending priority
+  // order; unset ⇒ Infinity, i.e. after every prioritized entry. Entries with the same
+  // priority (including all-unset) keep the existing per-session fnv1a entropy.
+  const sorted = [...unused].sort((a, b) => {
+    const pa = a.priority ?? Number.POSITIVE_INFINITY;
+    const pb = b.priority ?? Number.POSITIVE_INFINITY;
+    if (pa !== pb) return pa - pb;
+    return fnv1a(`${session_id}:${a.id}`) - fnv1a(`${session_id}:${b.id}`);
+  });
   const entry = sorted[0]!;
   return {
     challenge_id: challengeId,

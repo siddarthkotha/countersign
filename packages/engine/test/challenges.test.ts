@@ -131,26 +131,37 @@ describe('selectChallenge — determinism', () => {
     expect(a).toEqual(b);
   });
 
-  it('uses fnv1a to order SEED_FACT entries, and different session ids can change the order', () => {
+  it('priority orders SEED_FACT: counsel_of_record first, escrow_institution second, across three session ids; the rest keep per-session fnv1a entropy', () => {
     expect(fnv1a('a')).not.toBe(fnv1a('b'));
 
     // No claims at all ⇒ LIVE_COMMITMENT and TRAP_FACT both find nothing ⇒ straight to
-    // SEED_FACT. Compute the expected winner independently via the exported fnv1a and
-    // compare against what selectChallenge actually returns, for two different session ids.
-    for (const sessionId of ['session-alpha', 'session-beta']) {
-      const expectedEntry = [...SEED.knowledge].sort(
-        (x, y) => fnv1a(`${sessionId}:${x.id}`) - fnv1a(`${sessionId}:${y.id}`),
-      )[0]!;
-      const spec = selectChallenge([], [], {}, SEED, sessionId, undefined);
-      expect(spec?.kind).toBe('SEED_FACT');
-      expect(spec?.expect).toEqual({ accept_tokens: expectedEntry.accept_tokens });
+    // SEED_FACT. `counsel_of_record` (priority 1) and `escrow_institution` (priority 2)
+    // must win picks 1 and 2 in that order for EVERY session id -- the founder's ratified
+    // demo script opens the interrogation with those two questions regardless of who calls
+    // in. The remaining, unprioritized entries keep the pre-existing per-session fnv1a
+    // ordering (checked below by confirming the three sessions don't all agree on it).
+    const bigMaxSeed = { ...SEED, thresholds: { ...SEED.thresholds, max_challenges: 100 } };
+    const sequences: Record<string, string[]> = {};
+
+    for (const sessionId of ['session-alpha', 'session-beta', 'session-gamma']) {
+      const seq: string[] = [];
+      let issued: ChallengeSpec[] = [];
+      for (let i = 0; i < SEED.knowledge.length; i++) {
+        const spec = selectChallenge([], issued, {}, bigMaxSeed, sessionId, undefined);
+        expect(spec?.kind).toBe('SEED_FACT');
+        seq.push(spec!.fact_id!);
+        issued = [...issued, spec!];
+      }
+      expect(seq[0]).toBe('counsel_of_record');
+      expect(seq[1]).toBe('escrow_institution');
+      sequences[sessionId] = seq;
     }
 
-    // And the two session ids actually do disagree on the winner (proves the ordering
-    // function is genuinely in use, not a fixed/ignored argument).
-    const winnerFor = (sessionId: string) =>
-      [...SEED.knowledge].sort((x, y) => fnv1a(`${sessionId}:${x.id}`) - fnv1a(`${sessionId}:${y.id}`))[0]!.id;
-    expect(winnerFor('session-alpha')).not.toBe(winnerFor('session-beta'));
+    // Entropy preserved: the third-onward order is not identical across all three sessions.
+    const restOf = (sessionId: string) => sequences[sessionId]!.slice(2).join(',');
+    const allIdentical =
+      restOf('session-alpha') === restOf('session-beta') && restOf('session-beta') === restOf('session-gamma');
+    expect(allIdentical).toBe(false);
   });
 });
 

@@ -143,6 +143,11 @@ export interface KnowledgeFact {
   ask: string; // phrasing goal for the LLM
   truth: string; // display value
   accept_tokens: string[]; // lower-case tokens that must ALL appear in the answer
+  // Controller ruling 2026-09-01 11:25 AM CDT: the ratified demo script opens with a fixed
+  // pair of questions. Lower asks first; unset ⇒ after every prioritized entry, ordered
+  // among themselves by the existing per-session fnv1a hash (selectSeedFact in
+  // src/challenges.ts). Not a security property -- purely a demo-pacing knob.
+  priority?: number;
 }
 
 export interface SeedConfig {
