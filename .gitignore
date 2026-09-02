@@ -8,6 +8,7 @@
 # Dependencies / build output
 node_modules/
 dist/
+packages/*/dist/
 build/
 coverage/
 
@@ -18,3 +19,6 @@ Thumbs.db
 
 # Claude Code per-session usage ledgers (local telemetry, never submission content)
 .claude/session-usage/
+
+# SDD scratch (ledgers, briefs, review packages)
+.superpowers/
