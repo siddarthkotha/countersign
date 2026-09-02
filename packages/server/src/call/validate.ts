@@ -18,7 +18,11 @@ export interface FlatToolProperty {
   enum?: string[];
 }
 
-export interface FlatToolSchema {
+// Named `ParamsSchema` (fix round 1, finding 4) -- NOT the same shape as `allowlist.ts`'s
+// `FlatToolSchema` (the whole outer tool schema: type/name/description/parameters/
+// execution_mode/timeout_seconds). This is just the `parameters` JSON-Schema-subset object
+// nested inside one of those -- two different things had been exported under the same name.
+export interface ParamsSchema {
   type: 'object';
   properties: Record<string, FlatToolProperty>;
   required?: string[];
@@ -77,7 +81,7 @@ function coerceScalar(value: unknown, type: FlatToolProperty['type']): { value: 
  *  parity with every other per-tool function on the call path (mock, argsForTerminalTool)
  *  and for a caller building its own error/log messages -- the checker itself is generic
  *  over `schema` and never branches on it. */
-export function validateToolArgs(name: string, args: unknown, schema: FlatToolSchema): ValidateResult {
+export function validateToolArgs(name: string, args: unknown, schema: ParamsSchema): ValidateResult {
   void name;
   const repaired: string[] = [];
   const rejected: string[] = [];

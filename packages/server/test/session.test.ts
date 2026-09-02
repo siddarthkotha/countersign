@@ -365,3 +365,41 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
     expect(aai.isClosed).toBe(true);
   });
 });
+
+describe('CallSession — STALL line anti-repeat is call-scoped (fix round 1, finding 1)', () => {
+  it('two consecutive picks for the same kind render different lines; the 9th may repeat once alternatives are exhausted', () => {
+    // White-box test, deliberately: driving this through a real multi-turn STALL scenario
+    // would mean contriving many distinct-but-same-kind PhrasingGoal objects through the
+    // real FSM (goalKey is JSON.stringify(goal), so an UNCHANGED STALL goal on consecutive
+    // evaluate() calls never even re-fires session.update -- only a goal that differs
+    // somehow, e.g. because keyterms grew, would trigger a second render of the same kind).
+    // What actually needs proving is narrower: that CallSession's own per-kind `used` state
+    // persists and advances across calls to `pickStallLine`, which is exactly what this
+    // checks directly. `renderPrompt`'s STALL branch calling whatever `ctx.stalls.pick` it's
+    // given is covered separately in prompt.test.ts.
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-stall', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+
+    const pick = (kind: 'sso' | 'history' | 'oob' | 'generic'): string =>
+      (session as unknown as { pickStallLine(k: typeof kind): string }).pickStallLine(kind);
+
+    const first = pick('oob');
+    const second = pick('oob');
+    expect(first).not.toBe(second);
+
+    const seen = new Set([first, second]);
+    for (let i = 0; i < 6; i++) seen.add(pick('oob')); // picks 3..8
+    expect(seen.size).toBe(8); // the oob library has exactly 8 lines -- all 8 got used
+
+    const ninth = pick('oob'); // alternatives exhausted -- repeating (not throwing) is correct
+    expect(seen.has(ninth)).toBe(true);
+
+    // A different kind tracks its own independent `used` set.
+    const ssoFirst = pick('sso');
+    expect(seen.has(ssoFirst)).toBe(false);
+  });
+});

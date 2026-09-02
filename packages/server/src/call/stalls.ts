@@ -4,7 +4,11 @@
 // kind, so a run of consecutive stalls on the same kind of check doesn't repeat itself while
 // alternatives remain. Pure: `stallLineFor` never mutates `used` and never touches the
 // clock or Math.random -- the caller decides what "already said" means by what it puts in
-// the set it passes in, and updates that set between calls.
+// the set it passes in, and updates that set between calls. `call/session.ts` owns the
+// actual `used` state for the life of a call (fix round 1, finding 1) -- this module never
+// carries session state itself.
+import type { EngineOutput } from '@countersign/engine';
+
 export type StallKind = 'sso' | 'history' | 'oob' | 'generic';
 
 const STALL_LINES: Record<StallKind, string[]> = {
@@ -60,11 +64,32 @@ export function stallLineFor(kind: StallKind, used: Set<string>): string {
   return fresh ?? candidates[0]!;
 }
 
+/** Fix round 1, finding 2: derives the check kind a STALL goal is actually stalling on from
+ *  the live evidence state, not hint text -- the engine's STALL hints don't currently name a
+ *  specific check (see `kindFromHint`'s own note below), so `kindFromHint` alone was always
+ *  falling through to 'generic' in the real call path. Looks for the PENDING evidence card
+ *  among the three tool-backed checks (SSO context, payment/request history, out-of-band
+ *  verification) -- PENDING means that check's tool call is outstanding: no result yet,
+ *  errored, or stale for the current request version (engine/src/evidence/fromTools.ts
+ *  `pendingCard`). Falls back to `kindFromHint(output.goal.hint)` when nothing is pending
+ *  (e.g. no tool has been called yet, or every called tool already resolved). */
+export function stallKindFor(output: EngineOutput): StallKind {
+  const pending = output.evidence.find(
+    (e) =>
+      e.status === 'PENDING' &&
+      (e.kind === 'sso_context_result' || e.kind === 'context_check_result' || e.kind === 'oob_verification_result'),
+  );
+  if (pending?.kind === 'sso_context_result') return 'sso';
+  if (pending?.kind === 'context_check_result') return 'history';
+  if (pending?.kind === 'oob_verification_result') return 'oob';
+  return kindFromHint(output.goal.hint);
+}
+
 /** Maps a goal's hint to the kind of check it's naming, so the stalling line matches what's
  *  actually pending instead of always saying something generic. Keyword match against the
  *  hint text; falls back to 'generic' when the hint doesn't name a specific check (the
- *  engine's current STALL hints are deliberately check-agnostic -- this stays ready for
- *  richer hint text without needing a signature change). */
+ *  engine's current STALL hints are deliberately check-agnostic). Kept as `stallKindFor`'s
+ *  fallback, and exported in its own right for anything that only has hint text to go on. */
 export function kindFromHint(hint: string): StallKind {
   const h = hint.toLowerCase();
   if (h.includes('sso') || h.includes('sign-in') || h.includes('sign in') || h.includes('session context')) {

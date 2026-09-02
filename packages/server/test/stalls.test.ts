@@ -1,7 +1,58 @@
 import { describe, it, expect } from 'vitest';
-import { stallLineFor, kindFromHint, type StallKind } from '../src/call/stalls.js';
+import type { AssuranceChecklist, EngineOutput, Evidence, EvidenceKind, EvidenceStatus } from '@countersign/engine';
+import { stallLineFor, kindFromHint, stallKindFor, type StallKind } from '../src/call/stalls.js';
 
 const KINDS: StallKind[] = ['sso', 'history', 'oob', 'generic'];
+
+const ASSURANCE_ALL_FALSE: AssuranceChecklist = {
+  identity_claimed: false,
+  sso_pass_current: false,
+  oob_confirmed_current: false,
+  context_pass_current: false,
+  no_contradictions: true,
+  critical_fields_confirmed: false,
+  exposure_within_limit: true,
+  challenge_requirement_met: false,
+  no_identity_switch: true,
+  not_new_beneficiary: true,
+};
+
+function evidenceCard(id: string, kind: EvidenceKind, status: EvidenceStatus): Evidence {
+  return {
+    id,
+    kind,
+    t_ms: 0,
+    label: id,
+    status,
+    detail: 'test fixture',
+    facts: {},
+    quotes: [],
+    source: 'tool',
+    provenance: 'SIMULATED_SYSTEM',
+    request_version: 1,
+  };
+}
+
+/** A minimal-but-type-complete `EngineOutput` fixture: only `evidence` and `goal.hint` vary
+ *  per test -- everything else is a plausible EVIDENCE-state placeholder. */
+function fixtureOutput(evidence: Evidence[], hint = 'Checks are running. Hold the floor with one short neutral line.'): EngineOutput {
+  return {
+    state: 'EVIDENCE',
+    verdict: 'PENDING',
+    reasons: [],
+    failure_tally: 0,
+    evidence,
+    allowed_tools: [],
+    required_actions: [],
+    goal: { code: 'STALL', hint, keyterms: [], turn_detection_hint: 'patient' },
+    claimed_identity_id: null,
+    ledger: [],
+    request_version: 1,
+    challenges: { issued: [], results: {} },
+    assurance: ASSURANCE_ALL_FALSE,
+    invariants_ok: true,
+  };
+}
 
 describe('stallLineFor', () => {
   for (const kind of KINDS) {
@@ -70,5 +121,45 @@ describe('kindFromHint', () => {
     expect(kindFromHint('Checks are running. Hold the floor with one short neutral line; do not promise an outcome.')).toBe(
       'generic',
     );
+  });
+});
+
+describe('stallKindFor (fix round 1, finding 2)', () => {
+  it('picks "oob" from a PENDING ev-oob card, per the reviewer\'s exact fixture', () => {
+    const output = fixtureOutput([
+      evidenceCard('ev-sso', 'sso_context_result', 'PASS'),
+      evidenceCard('ev-oob', 'oob_verification_result', 'PENDING'),
+    ]);
+    expect(stallKindFor(output)).toBe('oob');
+  });
+
+  it('picks "sso" from a PENDING ev-sso card', () => {
+    const output = fixtureOutput([evidenceCard('ev-sso', 'sso_context_result', 'PENDING')]);
+    expect(stallKindFor(output)).toBe('sso');
+  });
+
+  it('picks "history" from a PENDING ev-context card', () => {
+    const output = fixtureOutput([evidenceCard('ev-context', 'context_check_result', 'PENDING')]);
+    expect(stallKindFor(output)).toBe('history');
+  });
+
+  it('ignores a resolved (PASS/FAIL) card and only matches a genuinely PENDING one', () => {
+    const output = fixtureOutput([
+      evidenceCard('ev-sso', 'sso_context_result', 'PASS'),
+      evidenceCard('ev-context', 'context_check_result', 'FAIL'),
+      evidenceCard('ev-oob', 'oob_verification_result', 'PENDING'),
+    ]);
+    expect(stallKindFor(output)).toBe('oob');
+  });
+
+  it('falls back to kindFromHint(goal.hint) when nothing is PENDING', () => {
+    const noPending = fixtureOutput(
+      [evidenceCard('ev-sso', 'sso_context_result', 'PASS')],
+      'Stall while the SSO session context check completes.',
+    );
+    expect(stallKindFor(noPending)).toBe('sso');
+
+    const noEvidenceAtAll = fixtureOutput([]);
+    expect(stallKindFor(noEvidenceAtAll)).toBe('generic');
   });
 });

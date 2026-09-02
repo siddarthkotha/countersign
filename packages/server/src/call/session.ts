@@ -27,9 +27,10 @@ import { evaluate } from '@countersign/engine';
 import type { AaiEvent, AaiSocket } from '../aai/types.js';
 import { isToolName, toolLogEntryFromCall, utteranceFromTranscript } from './events.js';
 import { renderPrompt, type PromptCtx } from './prompt.js';
-import { toolSchemasFor } from './allowlist.js';
+import { toolSchemasFor, paramsFor } from './allowlist.js';
 import { deriveScreenState } from '../screen/state.js';
-import { validateToolArgs, type FlatToolSchema } from './validate.js';
+import { validateToolArgs } from './validate.js';
+import { stallKindFor, stallLineFor, type StallKind } from './stalls.js';
 
 export interface CallSessionOpts {
   session_id: string;
@@ -62,41 +63,6 @@ function resolveAgentName(explicit: string | undefined): string {
  *  a spoofed or altered value can never reach the mock backend. */
 const IDENTITY_ARG_TOOLS = new Set<ToolName>(['get_request_history', 'check_sso_context', 'verify_out_of_band', 'alert_principal']);
 
-const TOOL_SCHEMAS: Record<ToolName, { description: string; parameters: FlatToolSchema }> = {
-  get_request_history: {
-    description: 'Look up prior scheduled payments on file for the claimed identity, to check this request against history.',
-    parameters: { type: 'object', properties: { identity_id: { type: 'string' } }, required: ['identity_id'] },
-  },
-  check_sso_context: {
-    description: "Check the claimed identity's current SSO session context (geo, device).",
-    parameters: { type: 'object', properties: { identity_id: { type: 'string' } }, required: ['identity_id'] },
-  },
-  verify_out_of_band: {
-    description: "Send an out-of-band verification push to the claimed identity's registered devices.",
-    parameters: { type: 'object', properties: { identity_id: { type: 'string' } }, required: ['identity_id'] },
-  },
-  stage_payment_for_second_approval: {
-    description: 'Stage the request for a required second approval. Never releases funds.',
-    parameters: { type: 'object', properties: {} },
-  },
-  freeze_transaction_rail: {
-    description: 'Freeze the transaction rail this request would have used.',
-    parameters: { type: 'object', properties: { rail_id: { type: 'string' } } },
-  },
-  open_incident: {
-    description: 'Open a security incident record for this call.',
-    parameters: { type: 'object', properties: {} },
-  },
-  alert_principal: {
-    description: 'Alert the claimed identity, out of band, that this call happened.',
-    parameters: { type: 'object', properties: { identity_id: { type: 'string' } } },
-  },
-  seal_evidence_record: {
-    description: 'Produce the hash-chained evidence export for this call.',
-    parameters: { type: 'object', properties: {} },
-  },
-};
-
 export class CallSession {
   readonly logs: { conversation: Utterance[]; tools: ToolLogEntry[]; actions: AgentAction[] } = {
     conversation: [],
@@ -119,6 +85,10 @@ export class CallSession {
   private exportHash: string | null = null;
   private countersignRecomputed = false;
   private readonly agentName: string;
+  /** Fix round 1, finding 1: owned for the life of the call (not per-render) so consecutive
+   *  STALL goals of the same kind actually get different holding lines instead of each
+   *  render restarting from an empty `used` set. */
+  private readonly usedStalls = new Map<StallKind, Set<string>>();
 
   constructor(opts: CallSessionOpts) {
     this.opts = opts;
@@ -291,7 +261,7 @@ export class CallSession {
     // CLAUDE.md law: "typed tool payloads validated/repaired in code." A tool.call's
     // `arguments` is LLM-generated (untrusted shape, even though it's not evidence) --
     // validate/repair it against the schema we advertised before it can reach the mock.
-    const validation = validateToolArgs(name, candidateArgs, TOOL_SCHEMAS[name].parameters);
+    const validation = validateToolArgs(name, candidateArgs, paramsFor(name));
     const loggedArgs: Record<string, unknown> =
       validation.repaired.length > 0 ? { ...validation.args, _repaired: validation.repaired } : validation.args;
 
@@ -343,6 +313,18 @@ export class CallSession {
     this.emitState();
   }
 
+  /** Fix round 1, finding 1: picks (and remembers) the next stall line for `kind`, scoped to
+   *  THIS call for its whole lifetime -- `stallLineFor` itself is pure and never mutates
+   *  `used`, so the mutation (recording that a line was said) happens here, the one place
+   *  that's actually allowed to have state. */
+  private pickStallLine(kind: StallKind): string {
+    const used = this.usedStalls.get(kind) ?? new Set<string>();
+    const line = stallLineFor(kind, used);
+    used.add(line);
+    this.usedStalls.set(kind, used);
+    return line;
+  }
+
   private promptCtx(output: EngineOutput): PromptCtx {
     const claimed_identity_name = output.claimed_identity_id
       ? (this.opts.seed.identities.find((i) => i.id === output.claimed_identity_id)?.name ?? null)
@@ -352,6 +334,8 @@ export class CallSession {
       agent_name: this.agentName,
       claimed_identity_name,
       state: output.state,
+      stall_kind: stallKindFor(output),
+      stalls: { pick: (kind: StallKind) => this.pickStallLine(kind) },
     };
   }
 

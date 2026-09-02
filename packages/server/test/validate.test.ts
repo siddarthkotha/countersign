@@ -1,25 +1,25 @@
 import { describe, it, expect } from 'vitest';
-import { validateToolArgs, type FlatToolSchema } from '../src/call/validate.js';
+import { validateToolArgs, type ParamsSchema } from '../src/call/validate.js';
 
-const IDENTITY_SCHEMA: FlatToolSchema = {
+const IDENTITY_SCHEMA: ParamsSchema = {
   type: 'object',
   properties: { identity_id: { type: 'string' } },
   required: ['identity_id'],
 };
 
-const NUMERIC_SCHEMA: FlatToolSchema = {
+const NUMERIC_SCHEMA: ParamsSchema = {
   type: 'object',
   properties: { amount_usd: { type: 'number' }, count: { type: 'integer' } },
   required: ['amount_usd'],
 };
 
-const ENUM_SCHEMA: FlatToolSchema = {
+const ENUM_SCHEMA: ParamsSchema = {
   type: 'object',
   properties: { rail_id: { type: 'string', enum: ['TREASURY-WIRE', 'ACH'] } },
   required: ['rail_id'],
 };
 
-const BOOLEAN_SCHEMA: FlatToolSchema = {
+const BOOLEAN_SCHEMA: ParamsSchema = {
   type: 'object',
   properties: { confirm: { type: 'boolean' } },
 };
