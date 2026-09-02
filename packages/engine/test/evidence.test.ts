@@ -371,4 +371,26 @@ describe('evidenceFromTools edge cases (fix round 1)', () => {
     expect(oob.detail).toBe('No usable response.');
     expect(oob.facts.response).toBeNull();
   });
+
+  it('an explicit "denied" response is labeled "Declined." and FAILs', () => {
+    const tools: ToolLogEntry[] = [
+      {
+        id: 't1',
+        name: 'verify_out_of_band',
+        t_ms: 1000,
+        args: { identity_id: 'robert-miller' },
+        result: { response: 'denied', devices: 2, latency_ms: 1800, request_version: 1 },
+      },
+    ];
+    const ev = evidenceFromTools(tools, voip, MERIDIAN, {
+      claimed_id: 'robert-miller',
+      amount_usd: null,
+      beneficiary: null,
+      request_version: 1,
+    });
+    const oob = ev.find((e) => e.id === 'ev-oob')!;
+    expect(oob.status).toBe('FAIL');
+    expect(oob.detail).toBe('Declined.');
+    expect(oob.facts.response).toBe('denied');
+  });
 });

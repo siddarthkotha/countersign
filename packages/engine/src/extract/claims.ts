@@ -58,6 +58,17 @@ export interface CuedNameHit {
 // after 4 words (fix round 1, finding 3: the trailing repeat is capped at {0,3}).
 const NAME = "[A-Z][A-Za-z.']*(?:\\s+(?:&|and|of|the|[A-Z][A-Za-z.']*)){0,3}";
 
+// escrow_institution cue, split into named pieces so the alternation is legible (fix round
+// 1, finding 4: "is at" was added so "escrow is at X" matches, not just "escrow is X" /
+// "escrow at X"; spacing is embedded per-alternative in the connector so there's no
+// backtracking ambiguity between "is" and "at"). The three pieces read left to right as:
+// "escrow" [+ optional "institution "/"bank "] [+ is-at/is/at/with/account-is-at] + NAME
+// -- e.g. "escrow institution is at Harbor Fidelity", "escrow with Harbor Fidelity",
+// "escrow account is at Harbor Fidelity".
+const ESCROW_CUE_HEAD = '\\bescrow\\b\\s+';
+const ESCROW_CUE_KIND = '(?:institution\\s+|bank\\s+)?';
+const ESCROW_CUE_CONNECTOR = '(?:is\\s+at\\s+|is\\s+|at\\s+|with\\s+|account\\s+(?:is\\s+)?at\\s+)';
+
 const CUE_PATTERNS: { field: CuedNameField; re: RegExp }[] = [
   { field: 'approver', re: new RegExp(`\\bapproved by\\s+(${NAME})`, 'g') },
   // Fix round 1, finding 1: connector is now mandatory (was `?\s*`, which let bare
@@ -67,15 +78,9 @@ const CUE_PATTERNS: { field: CuedNameField; re: RegExp }[] = [
   // Fix round 1 (review of 2a08920 + 7d16440), finding 2: was/were alongside is/are, so
   // "X was our counsel" is recognized the same as "X is our counsel".
   { field: 'counsel', re: new RegExp(`(${NAME})\\s+(?:is|are|was|were)\\s+(?:our\\s+)?counsel\\b`, 'g') },
-  // Fix round 1, finding 4: added "is at" so "escrow is at X" (not just "escrow is X" /
-  // "escrow at X") matches; spacing is embedded per-alternative so there's no backtracking
-  // ambiguity between "is" and "at".
   {
     field: 'escrow_institution',
-    re: new RegExp(
-      `\\bescrow\\b\\s+(?:institution\\s+|bank\\s+)?(?:is\\s+at\\s+|is\\s+|at\\s+|with\\s+|account\\s+(?:is\\s+)?at\\s+)(${NAME})`,
-      'g',
-    ),
+    re: new RegExp(`${ESCROW_CUE_HEAD}${ESCROW_CUE_KIND}${ESCROW_CUE_CONNECTOR}(${NAME})`, 'g'),
   },
   { field: 'escrow_institution', re: new RegExp(`\\bescrowed\\b\\s+(?:at\\s+|with\\s+)(${NAME})`, 'g') },
   {

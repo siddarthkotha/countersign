@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { MERIDIAN } from '../src/seed/meridian';
+import type { ToolName } from '../src/types';
+
+// Compile-time guard (final-review fix -- the old runtime-only version of this check was
+// misleadingly named: it asserted `MERIDIAN.rails` never contains a 'record_answer' id,
+// which is a payment-rail list ('TREASURY-WIRE', ...) and was never going to contain a
+// tool name regardless of what ToolName allows -- so it always trivially passed and never
+// actually exercised the type it claimed to. This line is the real check: it fails to
+// TYPE-CHECK (`npm run typecheck`), not just to run, if 'record_answer' is ever re-added to
+// the ToolName union (controller ruling, amendment v2 §A).
+type AssertRecordAnswerNotAToolName = 'record_answer' extends ToolName ? never : true;
+const _recordAnswerExcludedFromToolName: AssertRecordAnswerNotAToolName = true;
+void _recordAnswerExcludedFromToolName;
 
 describe('seed', () => {
   it('has unique identity ids and a second approver that exists', () => {
@@ -103,9 +115,7 @@ describe('seed', () => {
     }
   });
 
-  it('ToolName no longer includes record_answer (controller ruling, amendment v2 §A)', () => {
-    // Type-level check: this would fail to compile if 'record_answer' were required anywhere.
-    // Runtime companion: no tool entry in the seed's static data references it.
+  it('no payment rail is accidentally named "record_answer" (data hygiene; the real record_answer-is-gone check is the compile-time guard at the top of this file)', () => {
     expect(MERIDIAN.rails.every((r) => r.id !== 'record_answer')).toBe(true);
   });
 });

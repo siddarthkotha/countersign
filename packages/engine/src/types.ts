@@ -221,6 +221,11 @@ export interface Evidence {
 
 // ---------- Engine output ----------
 
+// NOTE (naming clarification, no state rename): OUT_OF_SCOPE is reached for every verdict
+// NO_ACTION -- not only an honest off-script utterance ("I'm not the CEO, this is a demo"),
+// but also a call that goes dead mid-check with no open request (invariant I4; see
+// fsm.ts's deriveState and corpus/hangup-mid-check.json). Both land in the same terminal
+// state/goal since neither has anything left to route.
 export type EngineState =
   | 'INTAKE'
   | 'CLAIM'

@@ -5,8 +5,8 @@
 // machinery `evaluate` composes (that's evaluate.test.ts's job).
 import { describe, expect, it } from 'vitest';
 import { decide, RULES_DOC } from '../src/rules';
-import type { RuleContext, RuleMutant } from '../src/rules';
-import { requiredActions } from '../src/fsm';
+import type { DecideResult, RuleContext, RuleMutant } from '../src/rules';
+import { phrasingGoal, requiredActions } from '../src/fsm';
 import { MERIDIAN } from '../src/seed/meridian';
 import type { Evidence, EvidenceKind, EvidenceStatus } from '../src/types';
 
@@ -36,7 +36,6 @@ function ctx(overrides?: Partial<RuleContext>): RuleContext {
     max_challenges: 3,
     new_beneficiary: false,
     amendment_only: false,
-    exposure_usd: 0,
     evaluation_incomplete: false,
     critical_confirmed: true,
     identity_switch_stale: false,
@@ -182,7 +181,7 @@ describe('decide -- rule table (first match wins)', () => {
 
   it('row 9: exposure across versions over the high-value line -> ESCALATE, reasons contain EXPOSURE_LIMIT', () => {
     const evidence = [...stageEvidence(), ev('ev-exposure', 'exposure_check_result', 'FAIL', { facts: { exposure_usd: 60_000, current_usd: 21_000 } })];
-    const r = decide(evidence, SEED, ctx({ amendment_only: true, exposure_usd: 60_000 }));
+    const r = decide(evidence, SEED, ctx({ amendment_only: true }));
     expect(r.verdict).toBe('ESCALATE');
     expect(r.rule_hit).toBe(9);
     expect(r.reasons).toContain('EXPOSURE_LIMIT');
@@ -293,11 +292,78 @@ describe('decide -- mutants (each proves a rule is load-bearing)', () => {
 
   it('ignore_exposure lets a structuring case (exposure over the line) reach STAGE', () => {
     const evidence = [...stageEvidence(), ev('ev-exposure', 'exposure_check_result', 'FAIL', { facts: { exposure_usd: 60_000, current_usd: 21_000 } })];
-    const straight = decide(evidence, SEED, ctx({ amendment_only: true, exposure_usd: 60_000 }));
+    const straight = decide(evidence, SEED, ctx({ amendment_only: true }));
     expect(straight.verdict).toBe('ESCALATE');
     expect(straight.rule_hit).toBe(9);
-    const mutated = withMutant(evidence, ctx({ amendment_only: true, exposure_usd: 60_000 }), { ignore_exposure: true });
+    const mutated = withMutant(evidence, ctx({ amendment_only: true }), { ignore_exposure: true });
     expect(mutated.verdict).toBe('STAGE');
+  });
+});
+
+describe('phrasingGoal (fsm.ts) -- CONSISTENCY_CHECK sub-branches', () => {
+  // Isolated unit tests of phrasingGoal, the same pattern rules.test.ts already uses for
+  // decide(): hand-built inputs rather than a full evaluate() conversation, since the
+  // PROBE_CONSISTENCY branch only fires in the narrow window where NO critical field
+  // (amount_usd/account_last4/beneficiary) has an outstanding unconfirmed claim (so
+  // oldestUnconfirmedCritical returns null) but a consistency_flag FAIL card exists with
+  // >=2 quotes -- e.g. a contradicted NON-critical field (deadline, escrow institution)
+  // while the critical fields were never claimed at all.
+  function decideResult(rule_hit: number): DecideResult {
+    return {
+      verdict: 'PENDING',
+      reasons: [],
+      failure_tally: 0,
+      assurance: {
+        identity_claimed: true,
+        sso_pass_current: true,
+        oob_confirmed_current: true,
+        context_pass_current: true,
+        no_contradictions: false,
+        critical_fields_confirmed: false,
+        exposure_within_limit: true,
+        challenge_requirement_met: true,
+        no_identity_switch: true,
+        not_new_beneficiary: true,
+      },
+      invariants_ok: true,
+      rule_hit,
+    };
+  }
+
+  it('with no unconfirmed critical field but a consistency_flag FAIL (>=2 quotes), the goal is PROBE_CONSISTENCY quoting both statements', () => {
+    const flag = ev('ev-consistency-deadline', 'consistency_flag', 'FAIL', {
+      quotes: [
+        { utterance_id: 'c1', text: 'by end of day' },
+        { utterance_id: 'c3', text: 'within the next ten minutes' },
+      ],
+    });
+    const goal = phrasingGoal({
+      state: 'CONSISTENCY_CHECK',
+      decideResult: decideResult(5),
+      evidence: [flag],
+      ledger: [], // no critical-field claims at all -> oldestUnconfirmedCritical is null
+      seed: SEED,
+      tools: [],
+      actions: [],
+      nextChallenge: null,
+    });
+    expect(goal.code).toBe('PROBE_CONSISTENCY');
+    expect(goal.hint).toContain('by end of day');
+    expect(goal.hint).toContain('within the next ten minutes');
+  });
+
+  it('with neither an unconfirmed critical field nor a consistency_flag FAIL, CONSISTENCY_CHECK falls through to STALL', () => {
+    const goal = phrasingGoal({
+      state: 'CONSISTENCY_CHECK',
+      decideResult: decideResult(5),
+      evidence: [],
+      ledger: [],
+      seed: SEED,
+      tools: [],
+      actions: [],
+      nextChallenge: null,
+    });
+    expect(goal.code).toBe('STALL');
   });
 });
 
