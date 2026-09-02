@@ -45,6 +45,8 @@ export function startSession(state: CapsState, now: number, id: string): void {
   } else {
     state.daily = { day, count: 1 };
   }
+  const windowStart = now - 60_000;
+  state.mints = state.mints.filter((t) => t > windowStart);
   state.mints.push(now);
 }
 

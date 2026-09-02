@@ -43,11 +43,16 @@ describe('http server', () => {
   }> {
     let counter = 0;
     const clock = 1000;
-    const ids = ['id-1', 'id-2', 'id-3', 'id-4'];
+    const ids = [
+      '11111111-1111-1111-1111-111111111111',
+      '22222222-2222-2222-2222-222222222222',
+      '33333333-3333-3333-3333-333333333333',
+      '44444444-4444-4444-4444-444444444444',
+    ];
     const { server, state } = createHttpServer(cfg(cfgOverrides), {
       fetchImpl: globalThis.fetch,
       now: () => clock,
-      randomId: () => ids[counter++] ?? `id-${counter}`,
+      randomId: () => ids[counter++] ?? `99999999-9999-9999-9999-99999999999${counter}`,
     });
     return new Promise((resolve) => {
       server.listen(0, '127.0.0.1', () => {
@@ -64,25 +69,59 @@ describe('http server', () => {
     const r1 = await fetch(`${base}/api/session/start`, { method: 'POST' });
     expect(r1.status).toBe(200);
     const b1 = await r1.json();
-    expect(b1).toEqual({ session_id: 'id-1', ws_path: '/ws/call/id-1', cap_seconds: 300 });
+    expect(b1).toEqual({
+      session_id: '11111111-1111-1111-1111-111111111111',
+      ws_path: '/ws/call/11111111-1111-1111-1111-111111111111',
+      cap_seconds: 300,
+    });
 
     const r2 = await fetch(`${base}/api/session/start`, { method: 'POST' });
     expect(r2.status).toBe(200);
     const b2 = (await r2.json()) as StartResponseBody;
-    expect(b2.session_id).toBe('id-2');
+    expect(b2.session_id).toBe('22222222-2222-2222-2222-222222222222');
 
     const r3 = await fetch(`${base}/api/session/start`, { method: 'POST' });
     expect(r3.status).toBe(429);
     const b3 = await r3.json();
     expect(b3).toEqual({ replay_only: true, reason: 'session_in_use' });
 
-    const rReset = await fetch(`${base}/api/session/id-1/reset`, { method: 'POST' });
+    const rReset = await fetch(`${base}/api/session/11111111-1111-1111-1111-111111111111/reset`, {
+      method: 'POST',
+    });
     expect(rReset.status).toBe(204);
 
     const r4 = await fetch(`${base}/api/session/start`, { method: 'POST' });
     expect(r4.status).toBe(200);
     const b4 = (await r4.json()) as StartResponseBody;
-    expect(b4.session_id).toBe('id-3');
+    expect(b4.session_id).toBe('33333333-3333-3333-3333-333333333333');
+  });
+
+  it('garbage session id returns 404', async () => {
+    const { base } = await start();
+    const r = await fetch(`${base}/api/session/not-a-uuid/reset`, { method: 'POST' });
+    expect(r.status).toBe(404);
+    const body = await r.json();
+    expect(body).toEqual({ error: 'not_found' });
+  });
+
+  it('well-formed but unknown session id returns 404', async () => {
+    const { base } = await start();
+    const r = await fetch(`${base}/api/session/99999999-9999-9999-9999-999999999999/end`, {
+      method: 'POST',
+    });
+    expect(r.status).toBe(404);
+    const body = await r.json();
+    expect(body).toEqual({ error: 'not_found' });
+  });
+
+  it('active session id returns 204 and frees the slot', async () => {
+    const { base } = await start({ max_concurrent: 1 });
+    const r1 = await fetch(`${base}/api/session/start`, { method: 'POST' });
+    const b1 = (await r1.json()) as StartResponseBody;
+    const rReset = await fetch(`${base}/api/session/${b1.session_id}/reset`, { method: 'POST' });
+    expect(rReset.status).toBe(204);
+    const r2 = await fetch(`${base}/api/session/start`, { method: 'POST' });
+    expect(r2.status).toBe(200);
   });
 
   it('health shape', async () => {

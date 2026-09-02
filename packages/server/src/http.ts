@@ -28,6 +28,8 @@ function statusForDecisionReason(reason: 'kill_switch' | 'session_in_use' | 'dai
   return reason === 'kill_switch' || reason === 'no_api_key' ? 503 : 429;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: Server; state: CapsState } {
   const state = newCapsState();
 
@@ -69,6 +71,10 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
     const sessionMatch = /^\/api\/session\/([^/]+)\/(reset|end)$/.exec(path);
     if (req.method === 'POST' && sessionMatch) {
       const id = sessionMatch[1] as string;
+      if (!UUID_RE.test(id) || !state.active.has(id)) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
       endSession(state, id);
       res.writeHead(204);
       res.end();

@@ -89,6 +89,17 @@ describe('caps', () => {
     expect(state.active.has('fresh')).toBe(true);
   });
 
+  it('startSession prunes mint timestamps older than 60s so state.mints stays bounded', () => {
+    const state = newCapsState();
+    startSession(state, 0, 'old-1');
+    endSession(state, 'old-1');
+    startSession(state, 100, 'old-2');
+    endSession(state, 'old-2');
+    // both mints above are now more than 60s in the past relative to this call
+    startSession(state, 61_000, 'fresh');
+    expect(state.mints).toEqual([61_000]);
+  });
+
   it('endSession frees a concurrency slot', () => {
     const state = newCapsState();
     const c = cfg({ max_concurrent: 1 });
