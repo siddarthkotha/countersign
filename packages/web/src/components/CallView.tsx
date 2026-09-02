@@ -243,7 +243,12 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
                   <li key={r}>{r}</li>
                 ))}
               </ul>
-              <p>{screen.banner.subline}</p>
+              {/* Task W6 (QA walk 2026-09-02, finding 3): the subline already carries the
+                  export hash short-form (first 10 characters, `state.ts`'s own `shortHash`)
+                  -- the only change here is a `title` so hovering it reveals the full hash
+                  this short form stands for. The full hash itself is never repeated on
+                  screen a second time outside the forensic section below. */}
+              <p title={screen.forensic.export_hash ?? undefined}>{screen.banner.subline}</p>
             </section>
           )}
 
@@ -314,7 +319,11 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
               ))}
             </ul>
 
-            <p>Export hash: {screen.forensic.export_hash ?? 'hash-chained evidence export not yet available'}</p>
+            {/* Task W6, finding 3: labelled "hash-chained evidence export" (LAW 4 vocabulary
+                -- never "sealed"/"immutable"), and this is now the ONE place the full hash
+                is shown as text; the banner above only ever shows the 10-character short
+                form, with the full hash reachable there via a `title` hover instead. */}
+            <p>Hash-chained evidence export: {screen.forensic.export_hash ?? 'not yet available'}</p>
             <p className="countersign">
               server verdict {screen.forensic.countersign.server_verdict}, recomputed: {screen.forensic.countersign.recomputed ? 'yes' : 'no'}
             </p>

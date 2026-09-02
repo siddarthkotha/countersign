@@ -268,8 +268,36 @@ describe('CallView', () => {
     await user.click(screen.getByRole('button', { name: 'Why?' }));
 
     const forensic = screen.getByLabelText('forensic');
-    expect(within(forensic).getByText('Export hash: hash-chained evidence export not yet available')).toBeInTheDocument();
+    expect(within(forensic).getByText('Hash-chained evidence export: not yet available')).toBeInTheDocument();
     expect(container.textContent ?? '').not.toMatch(/seal/i);
+  });
+
+  // Task W6 (QA walk 2026-09-02, finding 3): the banner's export line used to read the full
+  // hash truncated inconsistently against the forensic section's own full hash below it. Now
+  // the banner ever shows only the 10-character short form (already `state.ts`'s own
+  // `shortHash`) -- the full hash is reachable there only via a `title` hover, and stays a
+  // visible full string exactly once, in the forensic section's labelled export line.
+  it('shows only the 10-character export hash in the banner (full hash in its title), and the full hash in the forensic section', async () => {
+    const state = scenarioBFinalState();
+    const fullHash = state.forensic.export_hash;
+    expect(fullHash).not.toBeNull();
+    const exportHash = fullHash as string;
+    const shortHash = exportHash.slice(0, 10);
+
+    const user = userEvent.setup();
+    const { container } = render(<CallView screen={state} />);
+
+    const checksBoard = screen.getByLabelText('checks-board');
+    const banner = within(checksBoard).getByRole('alert');
+
+    const sublineEl = within(banner).getByText(new RegExp(`export ${shortHash}\\b`));
+    expect(sublineEl).toBeInTheDocument();
+    expect(sublineEl).toHaveAttribute('title', exportHash);
+    expect(container.textContent ?? '').not.toContain(exportHash);
+
+    await user.click(screen.getByRole('button', { name: 'Why?' }));
+    const forensic = screen.getByLabelText('forensic');
+    expect(within(forensic).getByText(`Hash-chained evidence export: ${exportHash}`)).toBeInTheDocument();
   });
 
   // Fix round 1, Important: brief requirement C asks for an auto-scrolling transcript

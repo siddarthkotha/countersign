@@ -10,12 +10,12 @@ vi.mock('../src/api', () => ({
 
 const HIDDEN_FACTS = ['Calder', 'Finch', 'First Meridian Trust', '8830', 'Zurich', 'Lena Voss', 'August 19', 'Whitmore'];
 
-function mockGetUserMedia(outcome: 'resolve' | 'reject') {
+function mockGetUserMedia(outcome: 'resolve' | 'reject', errorName = 'NotAllowedError') {
   const stop = vi.fn();
-  const fakeStream = { getTracks: () => [{ stop }] } as unknown as MediaStream;
+  const fakeStream = { getTracks: () => [{ stop, label: '' }] } as unknown as MediaStream;
   const getUserMedia = outcome === 'resolve'
     ? vi.fn().mockResolvedValue(fakeStream)
-    : vi.fn().mockRejectedValue(new Error('denied'));
+    : vi.fn().mockRejectedValue(new DOMException('denied', errorName));
   Object.defineProperty(navigator, 'mediaDevices', {
     configurable: true,
     value: { getUserMedia }
@@ -25,6 +25,9 @@ function mockGetUserMedia(outcome: 'resolve' | 'reject') {
 
 beforeEach(() => {
   vi.mocked(startSession).mockReset();
+  // Task W6: MicCheck reads navigator.permissions best-effort before getUserMedia -- absent
+  // by default in jsdom, which is also the realistic "unsupported" case these tests exercise.
+  Object.defineProperty(navigator, 'permissions', { configurable: true, value: undefined });
 });
 
 describe('Landing', () => {
@@ -64,13 +67,18 @@ describe('Landing', () => {
   });
 
   it('keeps Watch enabled and Try disabled when the mic check fails', async () => {
-    mockGetUserMedia('reject');
+    mockGetUserMedia('reject', 'NotAllowedError');
     const user = userEvent.setup();
     render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    expect(await screen.findByText(/Microphone blocked/)).toBeInTheDocument();
+    // Two elements now say "Microphone blocked" -- MicCheck's own result line, and the
+    // helper text under the button row (finding 1) -- so this waits for (then asserts on)
+    // the helper text specifically, by its stable id, rather than a substring match that
+    // would now be ambiguous.
+    await screen.findAllByText(/Microphone blocked/);
+    expect(document.getElementById('try-break-helper')).toHaveTextContent(/Microphone blocked/);
     expect(screen.getByRole('button', { name: 'Try to break it' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Watch a recorded attack' })).toBeEnabled();
   });
@@ -90,5 +98,52 @@ describe('Landing', () => {
     // MINOR (final review): announced to assistive tech, not just visible on screen.
     expect(banner).toHaveAttribute('role', 'alert');
     expect(screen.getByRole('button', { name: 'Watch a recorded attack' })).toBeEnabled();
+  });
+
+  // Task W6 (QA walk 2026-09-02, finding 1): "Try to break it" used to be disabled with zero
+  // on-page explanation. The helper text now always states the current condition, is wired
+  // to the button via aria-describedby, and doubles as the button's title (hover) -- same
+  // words, one source of truth.
+  it('always shows plain-words helper text explaining why Try to break it is locked, wired via aria-describedby and title', () => {
+    render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+    const tryButton = screen.getByRole('button', { name: 'Try to break it' });
+    expect(tryButton).toBeDisabled();
+
+    const helper = screen.getByText('Try to break it unlocks after Check microphone passes');
+    expect(helper).toHaveAttribute('id', 'try-break-helper');
+    expect(tryButton).toHaveAttribute('aria-describedby', 'try-break-helper');
+    expect(tryButton).toHaveAttribute('title', 'Try to break it unlocks after Check microphone passes');
+  });
+
+  it('updates the helper text (and the button title) to "Microphone ready" once the mic check passes', async () => {
+    mockGetUserMedia('resolve');
+    const user = userEvent.setup();
+    render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Check microphone' }));
+
+    const tryButton = await screen.findByRole('button', { name: 'Try to break it' });
+    expect(tryButton).toHaveAttribute('title', 'Microphone ready');
+    expect(document.getElementById('try-break-helper')).toHaveTextContent('Microphone ready');
+    expect(
+      screen.queryByText('Try to break it unlocks after Check microphone passes')
+    ).not.toBeInTheDocument();
+  });
+
+  it('updates the helper text to the "no microphone found" sentence for a NotFoundError', async () => {
+    mockGetUserMedia('reject', 'NotFoundError');
+    const user = userEvent.setup();
+    render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Check microphone' }));
+
+    expect(
+      await screen.findByText('No microphone found — the recorded attack works without one')
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try to break it' })).toHaveAttribute(
+      'title',
+      'No microphone found — the recorded attack works without one'
+    );
   });
 });

@@ -619,11 +619,21 @@ input {
 /* Task W5, fix round 3, item 6: list semantics restored -- a real `<ul>`/`<li>` per reason
    (fix round 2 had string-joined them into one text node, which read as a single line but
    lost the list structure). The " · " between reasons is CSS-only (`::after` on every `<li>`
-   but the last) -- it is never part of any reason's own text. */
+   but the last) -- it is never part of any reason's own text (test/CallView.test.tsx asserts
+   no `<li>`'s own textContent contains "·").
+
+   Task W6 (QA walk 2026-09-02, finding 3): the QA walker's raw text extraction of this list
+   came out with uneven spacing around the separator ("unverified ·out of band no response
+   ·context failure"). The fix moves the spacing off the `::after` string itself (which is
+   glued to the end of one `<li>`'s box, with nothing guaranteeing even space on both sides
+   of the glyph once the list wraps) and onto `gap`, a real layout property every wrapped row
+   gets identically -- the glyph keeps a small `margin-left` of its own so it reads with even
+   space on both sides: "reason · reason", never "reason ·reason". */
 .verdict-reasons {
   list-style: none;
   display: flex;
   flex-wrap: wrap;
+  gap: 0.3rem 0.55rem;
   margin: 0 0 0.4rem;
   padding: 0;
   font-family: var(--cs-font-mono);
@@ -632,7 +642,8 @@ input {
 }
 
 .verdict-reasons li:not(:last-child)::after {
-  content: ' · ';
+  content: '·';
+  margin-left: 0.55rem;
 }
 
 .banner-terminal p {
