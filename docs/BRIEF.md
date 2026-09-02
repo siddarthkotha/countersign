@@ -392,6 +392,16 @@ the repo goes public IF any auth/token handling exists.
 6. Solo over-scope → LAW 5 + the weekly plan's one-vertical-slice discipline.
 7. Evidence hallucination → LAW 4 (verbatim substrings only), engine-side consistency
    probes attaching both quotes.
+11. Hands-on judges (FOUNDER-VERIFIED 2026-09-02, support chat screenshot: an AssemblyAI staff
+   member judging the event said a cold start is "totally ok" and to host on the free tier) →
+   judges open the live link themselves: stranger-usability (G1), replay-first (D4), the 30-second
+   landing script, and a never-deadlock FSM carry more weight than the video. Hosting = Render
+   free, $0, keep-alive optional (docs/DEPLOY.md).
+12. Expert judge on "Application of technology" (same source: at least one judge works at
+   AssemblyAI) → the API use must be visibly right, not merely working: session.update per goal,
+   session resume on drops, keyterms, tool.result timing after reply.done, barge-in flush. The
+   Sep 12 judge-sim preload gets an AssemblyAI-engineer persona; README names each API feature used.
+
 
 ## 13. NAME + COMPETITIVE-LANDSCAPE ADDENDUM (2026-08-26 scoping day)
 From a 3-agent adversarial scan + a blind multi-model naming consult (full records
