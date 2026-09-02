@@ -22,6 +22,15 @@
   Motion: the board's "flip/settle" landing is a short (<=220ms) CSS animation, OFF entirely
   under prefers-reduced-motion, and it never gates when React actually paints the verdict --
   it only animates the element already on screen.
+
+  Fix round 2 (controller's visual self-review against the founder's mockup): the look is a
+  full-width TWO-COLUMN board, not a single ~900px stacked column. Call/Replay above the
+  fold are now `.keynote-grid` (transcript board left, checks board right, stacking to one
+  column under 900px) under a thin `.masthead` bar and a compact request/gates strip; the
+  footer (`.cs-footer`) is new on Replay and shared with Call. No new text/background token
+  pair was introduced by this round -- every new element still paints --cs-fg/--cs-muted/
+  --cs-accent on --cs-bg, --cs-panel or --cs-elevated, all already covered by
+  test/contrast.test.ts.
 */
 
 :root {
@@ -56,10 +65,43 @@ body {
 }
 
 main {
-  max-width: 42rem;
+  max-width: 64rem;
   margin: 0 auto;
-  padding: 2rem 1.25rem 3rem;
-  border-top: 3px solid var(--cs-accent);
+  padding: 1.25rem 1.25rem 3rem;
+}
+
+/* --- Masthead: on every screen (Task W5 fix round 2, requirement 1) --------------------- */
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding-bottom: 0.6rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 3px solid var(--cs-accent);
+}
+
+.masthead-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cs-fg);
+}
+
+.masthead-dial {
+  color: var(--cs-accent);
+  flex: none;
+}
+
+.masthead-meta {
+  font-family: var(--cs-font-mono);
+  font-size: 0.85rem;
+  color: var(--cs-muted);
 }
 
 h1 {
@@ -147,13 +189,15 @@ input {
   font-size: 0.9rem;
 }
 
-/* Call / Replay screens -- the instrument frame. */
+/* Call / Replay screens -- the instrument frame. Wide enough to read as a full-width board
+   on a typical judge viewport (fix round 2: the previous 64rem cap was reading as a ~900px
+   single column even on a 1440px screen) -- the masthead's own border now carries the top
+   accent rule, so the screen wrapper no longer needs one. */
 .call-screen,
 .replay-screen {
-  max-width: 64rem;
+  max-width: 96rem;
   margin: 0 auto;
-  padding: 1.5rem 1.25rem 3rem;
-  border-top: 3px solid var(--cs-accent);
+  padding: 1.25rem 1.5rem 3rem;
 }
 
 .replay-screen h1 {
@@ -202,19 +246,38 @@ input {
   padding: 0;
 }
 
-.bottom-line {
+/* --- Footer: Call/Replay (Task W5 fix round 2, requirement 3) -------------------------- */
+.cs-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1.5rem;
   margin-top: 1.5rem;
   padding-top: 0.75rem;
   border-top: 1px solid var(--cs-border);
+}
+
+.bottom-line {
+  margin: 0;
   color: var(--cs-muted);
   font-size: 0.9rem;
 }
 
-/* --- Keynote: the departure board ------------------------------------------------------ */
+.footer-hash {
+  margin: 0;
+  font-family: var(--cs-font-mono);
+  font-size: 0.85rem;
+  color: var(--cs-accent);
+}
+
+/* --- Keynote: the request/gates strip + the two-column board (fix round 2) ------------- */
 /* Above the fold on Call/Replay: who is calling, what they ask, the amount, the status
-   word, and the verdict line landing as a board update. Nothing here is new content -- the
-   same fields CallView.tsx already reads off ScreenState, just grouped and laid out as one
-   board instead of a stack of paragraphs. */
+   word (`.board`, unchanged content from before this round), then the full-width
+   `.keynote-grid` -- the transcript board (left) and the checks board (right, evidence
+   summary + the verdict banner landing as a board update). Nothing here is new content --
+   every field was already read off ScreenState before this round; this round only regroups
+   it into the look's actual two-column structure. */
 .call-view {
   display: flex;
   flex-direction: column;
@@ -225,6 +288,19 @@ input {
   border: 1px solid var(--cs-border);
   background: var(--cs-panel);
   padding: 0.75rem 1rem 1rem;
+}
+
+.keynote-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .keynote-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .request-header {
@@ -273,6 +349,199 @@ input {
   border-right: none;
 }
 
+/* --- Transcript board: the left column (fix round 2) ------------------------------------ */
+.transcript-board {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.board-col-title {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cs-accent);
+  border-bottom: 2px solid var(--cs-accent);
+  padding-bottom: 0.3rem;
+}
+
+.board-col-title span:first-child {
+  width: 2.5rem;
+  flex: none;
+}
+
+/* The look's LISTENING/SPEAKING/VERIFYING/AWAITING-OUT-OF-BAND/VERDICT tabs -- a second,
+   tab-shaped rendering of the SAME `agent_status` word already shown in the request-header
+   line above, never new data. Active tab differs by text weight/colour AND is the only pill
+   whose text differs from the rest in colour, so it never depends on colour alone -- the
+   words themselves ("Listening", "Verdict", ...) are what carries the state. */
+.agent-states {
+  display: flex;
+  border: 1px solid var(--cs-border);
+}
+
+.state-pill {
+  flex: 1 1 0;
+  text-align: center;
+  padding: 0.35rem 0.3rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--cs-muted);
+  border-right: 1px solid var(--cs-border);
+}
+
+.state-pill:last-child {
+  border-right: none;
+}
+
+.state-pill.active {
+  color: var(--cs-accent);
+  font-weight: 700;
+}
+
+/* --- Two-channel live trace: caller vs Countersign (fix round 2: two-line row form) ----- */
+/* Each row is a numbered board row ("01.", "02.", monospace) with the role label in amber
+   small caps on its own line and the verbatim utterance beneath it -- distinct WITHOUT
+   relying on colour alone (label text + `turn-caller`/`turn-agent` class + `data-speaker`),
+   per BRIEF D3 / Task W5 requirement C. `line.text` itself is never touched. */
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 26rem;
+  overflow-y: auto;
+  border: 1px solid var(--cs-border);
+  padding: 0.25rem 0.75rem;
+}
+
+.turn {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--cs-row-border);
+  border-left: 3px solid transparent;
+  padding-left: 0.5rem;
+}
+
+.turn:last-child {
+  border-bottom: none;
+}
+
+.turn-index {
+  flex: none;
+  width: 2rem;
+  font-family: var(--cs-font-mono);
+  font-size: 0.85rem;
+  color: var(--cs-muted);
+}
+
+.turn-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.95rem;
+}
+
+.turn-speaker {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* Task W5, fix round 2: the italic amber "note" treatment the look uses for its
+   "interrupted at 03:12" asides -- same [flagged]/[interrupted] words as before this round,
+   just restyled to match. */
+.turn-note {
+  color: var(--cs-accent);
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+.turn-caller {
+  border-left-color: var(--cs-muted);
+}
+
+.turn-caller .turn-speaker {
+  color: var(--cs-muted);
+}
+
+.turn-agent {
+  border-left-color: var(--cs-accent);
+}
+
+.turn-agent .turn-speaker {
+  color: var(--cs-accent);
+}
+
+.turn[data-highlighted='true'] {
+  background: var(--cs-elevated);
+}
+
+/* --- Checks board: the right column (fix round 2) --------------------------------------- */
+.checks-board {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.checks-board-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cs-accent);
+  border-bottom: 2px solid var(--cs-accent);
+  padding-bottom: 0.3rem;
+  margin: 0;
+}
+
+.checks-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.checks-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--cs-row-border);
+  font-size: 0.9rem;
+}
+
+.checks-mark {
+  flex: none;
+  color: var(--cs-accent);
+  font-size: 0.7rem;
+}
+
+.checks-label {
+  flex: none;
+  width: 9rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--cs-fg);
+}
+
+.checks-status {
+  flex: none;
+  width: 5rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--cs-accent);
+}
+
+.checks-detail {
+  flex: 1 1 auto;
+  color: var(--cs-muted);
+}
+
 /* The verdict line, landing as a board update. Text-only headline + reasons + subline --
    colour is decoration (the amber rule), never the carrier of the verdict itself. */
 .banner-terminal {
@@ -310,13 +579,10 @@ input {
   margin: 0 0 0.4rem;
 }
 
-.banner-terminal ul {
-  list-style: none;
+/* Task W5, fix round 2: reasons joined with " · " on one line (was a bulleted `<ul>`) --
+   same reasons array, same words, matching the look's own single-line verdict headline. */
+.verdict-reasons {
   margin: 0 0 0.4rem;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
   font-family: var(--cs-font-mono);
   font-size: 0.85rem;
   color: var(--cs-muted);
@@ -327,61 +593,6 @@ input {
   font-family: var(--cs-font-mono);
   font-size: 0.85rem;
   color: var(--cs-muted);
-}
-
-/* --- Two-channel live trace: caller vs Countersign ------------------------------------- */
-/* Each line carries a text label ("Caller" / "Countersign") AND a channel class -- the
-   distinction is never colour-only (BRIEF D3 / Task W5 requirement C). Newest sits at the
-   bottom of source order already (server appends); this just makes the two speakers read
-   apart at a glance. */
-.transcript {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  max-height: 22rem;
-  overflow-y: auto;
-  border: 1px solid var(--cs-border);
-  padding: 0.25rem 0.75rem;
-}
-
-.transcript p {
-  margin: 0;
-  padding: 0.4rem 0 0.4rem 0.6rem;
-  border-bottom: 1px solid var(--cs-row-border);
-  border-left: 3px solid transparent;
-  font-size: 0.95rem;
-}
-
-.transcript p:last-child {
-  border-bottom: none;
-}
-
-.turn-caller {
-  border-left-color: var(--cs-muted);
-}
-
-.turn-caller strong {
-  color: var(--cs-muted);
-}
-
-.turn-agent {
-  border-left-color: var(--cs-accent);
-}
-
-.turn-agent strong {
-  color: var(--cs-accent);
-}
-
-.transcript strong {
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  font-size: 0.8rem;
-  display: inline-block;
-  margin-right: 0.4rem;
-}
-
-.transcript p[data-highlighted='true'] {
-  background: var(--cs-elevated);
 }
 
 /* --- Forensic: below the fold ----------------------------------------------------------- */
@@ -468,8 +679,11 @@ input {
   text-transform: uppercase;
 }
 
+/* Task W5, fix round 2: "awaiting answer" gets the same italic amber "note" treatment as
+   the transcript's [flagged]/[interrupted] markers (`.turn-note`) -- same word as before
+   this round, restyled to match the look's notes. */
 .ungraded {
-  color: var(--cs-muted);
+  color: var(--cs-accent);
   font-style: italic;
 }
 

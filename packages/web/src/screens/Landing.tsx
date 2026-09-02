@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import MicCheck from '../components/MicCheck';
 import RoleCards from '../components/RoleCards';
+import Masthead from '../components/Masthead';
 import { startSession, type StartResult } from '../api';
 
 type StartedSession = Extract<StartResult, { session_id: string }>;
@@ -41,6 +42,11 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
 
   return (
     <main>
+      {/* Task W5, fix round 2, requirement 4/1: Landing has no session yet, so the masthead
+          renders with no props -- wordmark only, no meta line (there's nothing in client
+          state to build "session <id> · Treasury desk · state <STATUS>" from). */}
+      <Masthead />
+
       <h1>Countersign</h1>
       <p>A call can request a privileged action. It can never authorize one.</p>
 

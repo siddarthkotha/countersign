@@ -7,6 +7,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ScreenState } from '@countersign/engine';
 import CallView from '../components/CallView';
+import Masthead from '../components/Masthead';
+import Footer from '../components/Footer';
 import { connectSocketOnly, type CallClient } from '../ws/client';
 
 const SPEEDS = [1, 4, 20] as const;
@@ -59,6 +61,13 @@ export default function Replay() {
 
   return (
     <div className="replay-screen">
+      {/* Task W5, fix round 2, requirement 1: Replay has no `StartedSession`, so its "id" is
+          whichever of these already exists in client state -- the real server session id
+          once a ScreenState has arrived, falling back to the chosen recording's filename
+          (set the moment a recording is picked, before any state event) -- and omitted
+          entirely before either exists. */}
+      <Masthead sessionId={screenState?.session_id ?? selected} status={screenState?.agent_status ?? null} />
+
       <h1>Watch a recorded attack</h1>
       <p className="banner">Every system here is simulated.</p>
       <p>No microphone is used on this screen -- it replays a recorded call end to end.</p>
@@ -113,6 +122,10 @@ export default function Replay() {
       ) : (
         <p>Choose a recording to begin.</p>
       )}
+
+      {/* Task W5, fix round 2, requirement 3: Replay had no footer at all before this round
+          -- same wording and shape as Call.tsx's, via the same shared component. */}
+      <Footer exportHash={screenState?.forensic.export_hash ?? null} />
     </div>
   );
 }

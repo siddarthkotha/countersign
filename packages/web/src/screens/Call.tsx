@@ -13,6 +13,8 @@ import type { ScreenState } from '@countersign/engine';
 import CallView from '../components/CallView';
 import CallControls, { type LinkState } from '../components/CallControls';
 import SimulatedBanner from '../components/SimulatedBanner';
+import Masthead from '../components/Masthead';
+import Footer from '../components/Footer';
 import { connect, type CallClient } from '../ws/client';
 import type { StartResult } from '../api';
 
@@ -117,6 +119,12 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
 
   return (
     <div className="call-screen">
+      {/* Task W5, fix round 2, requirement 1: session id is `session.session_id` (held from
+          `StartResult`, before any call even starts -- never waits on a ScreenState). Status
+          is the same `agent_status` word CallView already renders once a state event has
+          arrived; omitted, not padded, until then. */}
+      <Masthead sessionId={session.session_id} status={screenState?.agent_status ?? null} />
+
       {!screenState && <SimulatedBanner />}
 
       <CallControls
@@ -156,7 +164,10 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
         <p>Click Start Call to begin.</p>
       )}
 
-      <p className="bottom-line">No funds can move by voice alone. Second approval required.</p>
+      {/* Task W5, fix round 2, requirement 3: same wording as before this round, now shared
+          with Replay.tsx via one component; the export hash (right side, amber monospace)
+          is new -- shown once `forensic.export_hash` exists, omitted before that. */}
+      <Footer exportHash={screenState?.forensic.export_hash ?? null} />
     </div>
   );
 }

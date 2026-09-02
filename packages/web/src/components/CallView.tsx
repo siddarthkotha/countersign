@@ -1,14 +1,29 @@
 // packages/web/src/components/CallView.tsx
-// Structure only -- no look (Task W5 picks the visual language, per design law in the W2
-// brief). Renders `ScreenState` verbatim: this component computes NOTHING about verdicts,
-// gates, or evidence -- every word on screen is a field read straight off the prop. Status
-// words are always rendered as text, never colour-only. The "simulated" banner is present
+// Renders `ScreenState` verbatim: this component computes NOTHING about verdicts, gates, or
+// evidence -- every word on screen is a field read straight off the prop. Status words are
+// always rendered as text, never colour-only. The "simulated" banner is present
 // unconditionally, rendered via the shared `SimulatedBanner` component (Task R1: the banner
 // text has one source -- Call.tsx renders the same component for every moment CallView isn't
 // on screen instead of this file keeping its own copy).
+//
+// Task W5, fix round 2: the look's real structure is a full-width two-column board, not a
+// single stacked column -- `.keynote-grid` below the request/gates strip holds the
+// transcript board (left) and the checks board (right, evidence summary + verdict banner).
+// Nothing that was on screen before this round is gone: the full evidence detail
+// (provenance, quotes), the story ledger, challenges, counterfactuals and the countersign
+// line all still live in the forensic section below the fold, unchanged from fix round 1.
+// Two fields the look's own mockup never renders and this component still must not invent:
+// `EngineState` (`screen.state`) is never shown raw -- one of its members is literally
+// `'SEALED'`, banned by LAW 1 -- and there is no tool-call log on `ScreenState.forensic` at
+// all, so the look's "TOOL CALLS" rows are omitted rather than faked.
 import { useEffect, useRef, useState } from 'react';
 import type { AssuranceChecklist, Claim, ChallengeResult, Evidence, ScreenState, Speaker } from '@countersign/engine';
 import SimulatedBanner from './SimulatedBanner';
+
+// No standalone `AgentStatus` export exists on `@countersign/engine` (an engine change is
+// out of scope for this task) -- derived locally from `ScreenState['agent_status']` instead,
+// so this type can never drift from the real field it mirrors.
+type AgentStatus = ScreenState['agent_status'];
 
 export type CallViewProps = {
   screen: ScreenState;
@@ -27,6 +42,20 @@ export type CallViewProps = {
 const SPEAKER_LABELS: Record<Speaker, string> = {
   caller: 'Caller',
   agent: 'Countersign',
+};
+
+// Task W5, fix round 2: the look's left-column state strip (LISTENING / SPEAKING /
+// VERIFYING / AWAITING OUT-OF-BAND / VERDICT) maps 1:1 onto `ScreenState['agent_status']` --
+// same five values, already rendered verbatim in the request-header's "Agent status: X"
+// line -- so this is a second, tab-shaped display of the SAME already-rendered value, not
+// new data. Order matches the look's own tab order.
+const AGENT_STATUS_ORDER: AgentStatus[] = ['LISTENING', 'SPEAKING', 'VERIFYING', 'AWAITING_OUT_OF_BAND', 'VERDICT'];
+const AGENT_STATUS_LABELS: Record<AgentStatus, string> = {
+  LISTENING: 'Listening',
+  SPEAKING: 'Speaking',
+  VERIFYING: 'Verifying',
+  AWAITING_OUT_OF_BAND: 'Awaiting out-of-band',
+  VERDICT: 'Verdict',
 };
 
 const ASSURANCE_LABELS: Record<keyof AssuranceChecklist, string> = {
@@ -76,6 +105,23 @@ function EvidenceCard({ evidence }: { evidence: Evidence }) {
   );
 }
 
+/** Task W5, fix round 2: the checks-board's compact row form of the SAME evidence card --
+ *  amber square glyph (decorative only, `aria-hidden`), label, status word, one-line detail.
+ *  The full card (provenance, quotes) still renders via `EvidenceCard` in the forensic
+ *  section below the fold; this is an addition above the fold, not a replacement. */
+function ChecksRow({ evidence }: { evidence: Evidence }) {
+  return (
+    <div className="checks-row">
+      <span className="checks-mark" aria-hidden="true">
+        ■
+      </span>
+      <span className="checks-label">{evidence.label}</span>
+      <span className="checks-status">{evidence.status}</span>
+      <span className="checks-detail">{evidence.detail}</span>
+    </div>
+  );
+}
+
 function LedgerRow({ claim }: { claim: Claim }) {
   return (
     <tr>
@@ -96,7 +142,7 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
   // transcript (same length, different last line) still re-triggers the scroll -- instant,
   // no `behavior: 'smooth'`, so there is nothing here for `prefers-reduced-motion` to guard
   // and it never delays the verdict line reaching the screen.
-  const lastLineRef = useRef<HTMLParagraphElement | null>(null);
+  const lastLineRef = useRef<HTMLDivElement | null>(null);
   const lastLineId = screen.transcript.length > 0 ? screen.transcript[screen.transcript.length - 1]!.id : null;
   useEffect(() => {
     lastLineRef.current?.scrollIntoView({ block: 'end' });
@@ -106,10 +152,10 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
     <div className="call-view">
       {screen.simulated === true && <SimulatedBanner />}
 
-      {/* Task W5, requirement B: the departure board -- who is calling, what they ask, the
-          amount, the status word, and the verdict line landing as a board update. Same
-          fields as before, grouped as one keynote board instead of a loose paragraph stack;
-          nothing added or removed. */}
+      {/* Task W5 requirement B / fix round 2: who is calling, what they ask, the amount, the
+          status word -- unchanged fields, same five request-header lines and three gate
+          lines as before this round; the verdict banner itself has moved into the checks
+          board (below) to match the look's actual structure. */}
       <div className="board" aria-label="board">
         <header className="request-header">
           <p>Claimed identity: {screen.request.claimed_identity ?? 'unknown'}</p>
@@ -124,39 +170,74 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
           <p>Device: {screen.gates.device}</p>
           <p>Consistency: {screen.gates.consistency}</p>
         </section>
-
-        {screen.banner && (
-          <section className="banner-terminal" role="alert">
-            <h2>{screen.banner.headline}</h2>
-            <ul>
-              {screen.banner.reasons.map((r) => (
-                <li key={r}>{r}</li>
-              ))}
-            </ul>
-            <p>{screen.banner.subline}</p>
-          </section>
-        )}
       </div>
 
-      {/* Task W5, requirement C: two-channel live trace. Each line still renders `line.text`
-          verbatim -- only the speaker LABEL is relabelled (SPEAKER_LABELS, above), and the
-          channel is marked by both a class (`turn-caller` / `turn-agent`, colour) and the
-          label text itself, so the two channels read apart without relying on colour alone. */}
-      <section className="transcript" aria-label="transcript">
-        {screen.transcript.map((line, i) => (
-          <p
-            key={line.id}
-            ref={i === screen.transcript.length - 1 ? lastLineRef : undefined}
-            className={`turn turn-${line.speaker}${line.highlighted ? ' highlighted' : ''}`}
-            data-highlighted={line.highlighted ? 'true' : 'false'}
-            data-speaker={line.speaker}
-          >
-            <strong>{SPEAKER_LABELS[line.speaker]}:</strong> {line.text}
-            {line.highlighted ? ' [flagged]' : ''}
-            {line.interrupted ? ' [interrupted]' : ''}
-          </p>
-        ))}
-      </section>
+      {/* Task W5, fix round 2, requirement 2: the full-width two-column board -- left is the
+          transcript board, right is the checks board (evidence summary + verdict banner).
+          Stacks to one column under 900px (styles.css). */}
+      <div className="keynote-grid">
+        <section className="transcript-board" aria-label="transcript-board">
+          <div className="board-col-title">
+            <span>Time</span>
+            <span>Transcript</span>
+          </div>
+
+          <div className="agent-states" aria-label="agent-states">
+            {AGENT_STATUS_ORDER.map((s) => (
+              <span key={s} className={`state-pill${s === screen.agent_status ? ' active' : ''}`}>
+                {AGENT_STATUS_LABELS[s]}
+              </span>
+            ))}
+          </div>
+
+          {/* Task W5, requirement C: two-channel live trace. Each line still renders
+              `line.text` verbatim -- only the speaker LABEL is relabelled (SPEAKER_LABELS,
+              above), and the channel is marked by both a class (`turn-caller`/`turn-agent`)
+              and the label text itself, so the two channels read apart without relying on
+              colour alone. The "[flagged]"/"[interrupted]" markers are the look's italic
+              amber notes (`.turn-note`), same words as before this round. */}
+          <div className="transcript" aria-label="transcript">
+            {screen.transcript.map((line, i) => (
+              <div
+                key={line.id}
+                ref={i === screen.transcript.length - 1 ? lastLineRef : undefined}
+                className={`turn turn-${line.speaker}${line.highlighted ? ' highlighted' : ''}`}
+                data-highlighted={line.highlighted ? 'true' : 'false'}
+                data-speaker={line.speaker}
+              >
+                <span className="turn-index">{String(i + 1).padStart(2, '0')}.</span>
+                <span className="turn-body">
+                  <span className="turn-speaker">{SPEAKER_LABELS[line.speaker]}</span>
+                  <span className="turn-text">{line.text}</span>
+                  {line.highlighted && <em className="turn-note">[flagged]</em>}
+                  {line.interrupted && <em className="turn-note">[interrupted]</em>}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="checks-board" aria-label="checks-board">
+          <h3 className="checks-board-title">Checks</h3>
+          <div className="checks-rows">
+            {screen.forensic.evidence.map((e) => (
+              <ChecksRow key={`checks-${e.id}`} evidence={e} />
+            ))}
+          </div>
+
+          {/* No tool-call rows here: ScreenState.forensic carries no tool-result log, so the
+              look's "TOOL CALLS" section would have to be invented data -- it is omitted
+              rather than faked. */}
+
+          {screen.banner && (
+            <section className="banner-terminal" role="alert">
+              <h2>{screen.banner.headline}</h2>
+              <p className="verdict-reasons">{screen.banner.reasons.join(' · ')}</p>
+              <p>{screen.banner.subline}</p>
+            </section>
+          )}
+        </section>
+      </div>
 
       <div className="forensic-zone">
         <button type="button" onClick={() => setShowWhy((v) => !v)}>

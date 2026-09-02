@@ -149,6 +149,54 @@ describe('Call', () => {
     expect(screen.getByLabelText('transcript')).toBeInTheDocument();
   });
 
+  // Task W5, fix round 2, requirement 1: the masthead's session id comes from
+  // `session.session_id` (StartResult) -- held before any call even starts, so it shows
+  // immediately, with no "state <STATUS>" segment until the first ScreenState arrives.
+  it('shows the masthead session id before any state, then adds the status word once a state event arrives', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+
+    expect(screen.getByText(`session ${SESSION.session_id} · Treasury desk`)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+    fake.emitState(scenarioBFinalState());
+
+    expect(await screen.findByText(`session ${SESSION.session_id} · Treasury desk · state VERDICT`)).toBeInTheDocument();
+  });
+
+  // Task W5, fix round 2, requirement 2: the two-column keynote grid renders once a state
+  // event arrives.
+  it('renders the two-column keynote grid once a state event arrives', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    const { container } = render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+
+    fake.emitState(scenarioBFinalState());
+
+    await screen.findByText(/Claimed identity:/);
+    expect(container.querySelector('.keynote-grid')).not.toBeNull();
+  });
+
+  // Task W5, fix round 2, requirement 3: the footer's export hash, amber monospace, shows
+  // once `forensic.export_hash` exists -- absent before any state has arrived.
+  it('shows the footer export hash once present, absent before any state', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+
+    expect(screen.queryByText(/Export hash:/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+    fake.emitState(scenarioBFinalState());
+
+    expect(await screen.findByText('Export hash: abc123def456')).toBeInTheDocument();
+  });
+
   it('a flush event calls playback flush via the mocked client', async () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);

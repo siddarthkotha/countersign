@@ -64,8 +64,11 @@ describe('CallView', () => {
   it('marks the contradicted/flagged transcript lines as highlighted', () => {
     render(<CallView screen={scenarioBFinalState()} />);
     const transcript = screen.getByLabelText('transcript');
-    const c2 = within(transcript).getByText(/Whitmore & Bass/).closest('p');
-    const c3 = within(transcript).getByText(/final figure moved this morning/).closest('p');
+    // Fix round 2: each row's outer element is a `<div class="turn ...">` (it now nests
+    // block content -- the speaker line and the text line -- so it can no longer be a `<p>`,
+    // which the HTML parser would auto-close around a nested block element).
+    const c2 = within(transcript).getByText(/Whitmore & Bass/).closest('.turn');
+    const c3 = within(transcript).getByText(/final figure moved this morning/).closest('.turn');
     expect(c2).toHaveAttribute('data-highlighted', 'true');
     expect(c3).toHaveAttribute('data-highlighted', 'true');
   });
@@ -128,30 +131,76 @@ describe('CallView', () => {
     render(<CallView screen={scenarioBFinalState()} />);
     const transcript = screen.getByLabelText('transcript');
 
-    const callerLine = within(transcript).getByText(/This is Robert Miller/).closest('p');
+    // Fix round 2: each row is now a numbered board row (`.turn`, a `<div>` -- see the note
+    // above) with the role label on its own line, above the verbatim text, so the label
+    // text itself no longer carries a trailing colon ("Caller", not "Caller:").
+    const callerLine = within(transcript).getByText(/This is Robert Miller/).closest('.turn');
     expect(callerLine).not.toBeNull();
     expect(callerLine).toHaveClass('turn-caller');
     expect(callerLine).toHaveAttribute('data-speaker', 'caller');
-    expect(within(callerLine as HTMLElement).getByText('Caller:')).toBeInTheDocument();
+    expect(within(callerLine as HTMLElement).getByText('Caller')).toBeInTheDocument();
 
-    const agentLine = within(transcript).getByText(/Before anything can stage/).closest('p');
+    const agentLine = within(transcript).getByText(/Before anything can stage/).closest('.turn');
     expect(agentLine).not.toBeNull();
     expect(agentLine).toHaveClass('turn-agent');
     expect(agentLine).toHaveAttribute('data-speaker', 'agent');
-    expect(within(agentLine as HTMLElement).getByText('Countersign:')).toBeInTheDocument();
+    expect(within(agentLine as HTMLElement).getByText('Countersign')).toBeInTheDocument();
 
-    // The agent is never given a human name anywhere on screen.
-    expect(within(transcript).queryByText(/Robert Miller:/)).not.toBeInTheDocument();
+    // The agent is never given a human name anywhere on screen -- no `.turn-speaker` label
+    // reads as anything but "Caller" or "Countersign".
+    expect(within(transcript).queryByText('Robert Miller', { selector: '.turn-speaker' })).not.toBeInTheDocument();
   });
 
-  // Task W5, requirement B: the verdict line lands inside the keynote board, above the fold,
-  // alongside who is calling / what they ask / the amount / the status word.
-  it('lands the verdict line inside the board region', () => {
+  // Task W5 requirement B / fix round 2: who is calling, what they ask, the amount, the
+  // status word still land in the top `.board` strip, unchanged content from before this
+  // round -- the verdict banner itself now lands in the checks board (the right column),
+  // matching the look's actual structure.
+  it('keeps the request/gates strip in the board region', () => {
     render(<CallView screen={scenarioBFinalState()} />);
     const board = screen.getByLabelText('board');
-    expect(within(board).getByRole('heading', { name: 'WIRE FROZEN' })).toBeInTheDocument();
     expect(within(board).getByText(/Claimed identity:/)).toBeInTheDocument();
     expect(within(board).getByLabelText('gates')).toBeInTheDocument();
+    expect(within(board).queryByRole('heading', { name: 'WIRE FROZEN' })).not.toBeInTheDocument();
+  });
+
+  // Task W5, fix round 2, requirement 2: the verdict banner now lands in the checks board
+  // (the right column of the two-column grid), after the evidence summary rows.
+  it('lands the verdict line inside the checks board, after the evidence summary rows', () => {
+    render(<CallView screen={scenarioBFinalState()} />);
+    const checksBoard = screen.getByLabelText('checks-board');
+    expect(within(checksBoard).getByRole('heading', { name: 'WIRE FROZEN' })).toBeInTheDocument();
+    // The reasons line joins the same reasons array with " · ", no longer a bulleted list.
+    expect(within(checksBoard).getByText(/·/)).toBeInTheDocument();
+  });
+
+  // Task W5, fix round 2, requirement 2: each evidence card CallView already renders also
+  // renders as one checks-board row above the fold (count equals the evidence array), while
+  // the full card (provenance, quotes) stays in the forensic section below the fold.
+  it('renders one checks-board row per evidence card', () => {
+    const state = scenarioBFinalState();
+    const { container } = render(<CallView screen={state} />);
+    const checksBoard = screen.getByLabelText('checks-board');
+    expect(within(checksBoard).getByText(state.forensic.evidence[0]!.label)).toBeInTheDocument();
+    expect(container.querySelectorAll('.checks-row').length).toBe(state.forensic.evidence.length);
+  });
+
+  // Task W5, fix round 2, requirement 2: the left column's agent-status tabs are a second,
+  // tab-shaped rendering of the SAME `agent_status` word already in the request-header line
+  // -- never new data -- with the current one distinguishable by more than colour (its own
+  // "active" class, on top of the accent colour).
+  it('marks the current agent status as the active tab in the transcript board', () => {
+    const state = scenarioBFinalState();
+    render(<CallView screen={state} />);
+    const transcriptBoard = screen.getByLabelText('transcript-board');
+    const activeTab = within(transcriptBoard).getByText('Verdict');
+    expect(activeTab).toHaveClass('active');
+    expect(state.agent_status).toBe('VERDICT');
+  });
+
+  // Task W5, fix round 2, requirement 2: the two-column grid container itself.
+  it('renders the two-column keynote grid', () => {
+    const { container } = render(<CallView screen={scenarioBFinalState()} />);
+    expect(container.querySelector('.keynote-grid')).not.toBeNull();
   });
 
   // Task W5, requirement B: Replay.tsx passes `defaultForensicOpen` so the forensic section
