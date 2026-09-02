@@ -58,7 +58,7 @@ function makeFakeClient() {
   let stateCb: ((state: ScreenState) => void) | null = null;
   let endedCb: ((reason: string) => void) | null = null;
   let flushCb: (() => void) | null = null;
-  let linkCb: ((state: 'lost' | 'restored') => void) | null = null;
+  let linkCb: ((leg: 'browser' | 'aai', state: 'lost' | 'restored') => void) | null = null;
   const playbackFlush = vi.fn();
   const send = vi.fn<(e: BrowserEvent) => void>();
   const close = vi.fn();
@@ -77,7 +77,7 @@ function makeFakeClient() {
     onEnded(cb: (reason: string) => void) {
       endedCb = cb;
     },
-    onLink(cb: (state: 'lost' | 'restored') => void) {
+    onLink(cb: (leg: 'browser' | 'aai', state: 'lost' | 'restored') => void) {
       linkCb = cb;
     },
     close,
@@ -95,7 +95,7 @@ function makeFakeClient() {
     emitState: (state: ScreenState) => stateCb?.(state),
     emitEnded: (reason: string) => endedCb?.(reason),
     emitFlush: () => flushCb?.(),
-    emitLink: (state: 'lost' | 'restored') => linkCb?.(state),
+    emitLink: (leg: 'browser' | 'aai', state: 'lost' | 'restored') => linkCb?.(leg, state),
     playbackFlush,
     send,
     close,
@@ -176,7 +176,7 @@ describe('Call', () => {
     expect(screen.getByRole('button', { name: 'Why?' })).toBeInTheDocument();
   });
 
-  it('shows the reconnecting status line on link:lost and clears it on link:restored, without resetting the screen', async () => {
+  it('shows the browser-leg reconnecting status line on link:lost(browser) and clears it on link:restored, without resetting the screen', async () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
@@ -186,7 +186,7 @@ describe('Call', () => {
     fake.emitState(scenarioBFinalState());
     expect(await screen.findByText(/Claimed identity:/)).toBeInTheDocument();
 
-    fake.emitLink('lost');
+    fake.emitLink('browser', 'lost');
     const statusLine = await screen.findByText('Voice link lost, security state preserved. Reconnecting…');
     expect(statusLine).toHaveAttribute('role', 'status');
     // The last known security state stays on screen through a dropped link -- only the
@@ -194,10 +194,31 @@ describe('Call', () => {
     expect(screen.getByText(/Claimed identity:/)).toBeInTheDocument();
     expect(screen.getByText('RECONNECTING')).toBeInTheDocument();
 
-    fake.emitLink('restored');
+    fake.emitLink('browser', 'restored');
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(screen.queryByText('Voice link lost, security state preserved. Reconnecting…')).not.toBeInTheDocument();
     expect(screen.getByText('LIVE')).toBeInTheDocument();
+  });
+
+  it('IMPORTANT 2 (final review): shows the DIFFERENT aai-leg status line on link:lost(aai), distinct from a browser-leg drop', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+
+    fake.emitState(scenarioBFinalState());
+    expect(await screen.findByText(/Claimed identity:/)).toBeInTheDocument();
+
+    fake.emitLink('aai', 'lost');
+    const statusLine = await screen.findByText('Voice service reconnecting. Security state preserved.');
+    expect(statusLine).toHaveAttribute('role', 'status');
+    expect(screen.queryByText('Voice link lost, security state preserved. Reconnecting…')).not.toBeInTheDocument();
+    expect(screen.getByText(/Claimed identity:/)).toBeInTheDocument();
+
+    fake.emitLink('aai', 'restored');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText('Voice service reconnecting. Security state preserved.')).not.toBeInTheDocument();
   });
 
   it('End Call sends end and POSTs the session end endpoint', async () => {

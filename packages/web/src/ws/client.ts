@@ -7,6 +7,7 @@
 import type { BrowserEvent, ScreenState, ServerEvent } from '@countersign/engine';
 import { startCapture, type CaptureHandle } from '../audio/capture';
 import { createPlayback, type PlaybackHandle } from '../audio/playback';
+import type { LinkPost } from './worker';
 
 export interface CallClient {
   send(e: BrowserEvent): void;
@@ -15,8 +16,13 @@ export interface CallClient {
   onFlush(cb: () => void): void;
   onEnded(cb: (reason: string) => void): void;
   /** Task R1: the browser<->server link dropped or was re-established while the call itself
-   *  kept running server-side. Never fires for a legitimate call end -- that's `onEnded`. */
-  onLink(cb: (state: 'lost' | 'restored') => void): void;
+   *  kept running server-side. Never fires for a legitimate call end -- that's `onEnded`.
+   *  IMPORTANT 2 (final review): `leg` says WHICH transport dropped -- `'browser'` (this
+   *  client's own WebSocket to our server, detected by src/ws/worker.ts's own reconnect
+   *  logic) or `'aai'` (server<->AssemblyAI, merely forwarded through unchanged). The two
+   *  used to be indistinguishable on screen; Call.tsx now shows a different status line for
+   *  each. */
+  onLink(cb: (leg: 'browser' | 'aai', state: 'lost' | 'restored') => void): void;
   close(): void;
 }
 
@@ -34,15 +40,20 @@ export function connectSocketOnly(ws_path: string, workerFactory: WorkerFactory 
   let audioCb: ((data: string) => void) | null = null;
   let flushCb: (() => void) | null = null;
   let endedCb: ((reason: string) => void) | null = null;
-  let linkCb: ((state: 'lost' | 'restored') => void) | null = null;
+  let linkCb: ((leg: 'browser' | 'aai', state: 'lost' | 'restored') => void) | null = null;
 
-  worker.onmessage = (event: MessageEvent<ServerEvent>) => {
+  // IMPORTANT 2 (final review): the worker posts either an ordinary `ServerEvent` (relayed
+  // verbatim from the server -- a `link` one carries `leg:'aai'` for an AAI-transport drop)
+  // or its own `LinkPost` (worker.ts's own browser<->server socket dropping, always
+  // `leg:'browser'`) -- both are `{type:'link', state, leg, ...}` shaped, so one check covers
+  // either origin.
+  worker.onmessage = (event: MessageEvent<ServerEvent | LinkPost>) => {
     const msg = event.data;
     if (msg.type === 'state') stateCb?.(msg.state);
     else if (msg.type === 'audio') audioCb?.(msg.data);
     else if (msg.type === 'flush') flushCb?.();
     else if (msg.type === 'ended') endedCb?.(msg.reason);
-    else if (msg.type === 'link') linkCb?.(msg.state);
+    else if (msg.type === 'link') linkCb?.(msg.leg, msg.state);
   };
 
   worker.postMessage({ type: '__connect', ws_path });

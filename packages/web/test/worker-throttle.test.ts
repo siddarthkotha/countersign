@@ -38,7 +38,7 @@ function makeState(t_ms: number): ScreenState {
       },
       counterfactuals: [],
       export_hash: null,
-      countersign: { browser_verdict: null, server_verdict: 'PENDING', recomputed: false },
+      countersign: { server_verdict: 'PENDING', recomputed: false },
     },
     simulated: true,
     link: 'live',

@@ -1,12 +1,19 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { ServerConfig } from './config.js';
-import { newCapsState, canStartSession, startSession, endSession, type CapsState } from './caps.js';
+import { newCapsState, canStartSession, startSession, type CapsState } from './caps.js';
 import { defaultCorpusDir, listCorpusFiles } from './replay.js';
 
 export interface HttpDeps {
   fetchImpl: typeof fetch;
   now: () => number;
   randomId: () => string;
+  /** CRITICAL 1 (final review): `/end`/`/reset` used to only touch `CapsState`
+   *  (`endSession`), never the live call itself -- a session could be "reset" while its
+   *  AssemblyAI socket and browser connection kept right on running. This is
+   *  `attachWebSocketServer`'s own `endCall` (packages/server/src/ws/browser.ts), which ends
+   *  the live `CallSession` + AAI socket + browser socket and frees the caps slot together.
+   *  Returns `false` for an id that was never active -- routed to 404, same shape as before. */
+  endCall: (session_id: string, reason: string) => boolean;
 }
 
 function applyCors(req: IncomingMessage, res: ServerResponse, cfg: ServerConfig): void {
@@ -83,11 +90,21 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
     const sessionMatch = /^\/api\/session\/([^/]+)\/(reset|end)$/.exec(path);
     if (req.method === 'POST' && sessionMatch) {
       const id = sessionMatch[1] as string;
-      if (!UUID_RE.test(id) || !state.active.has(id)) {
+      const action = sessionMatch[2] as 'reset' | 'end';
+      if (!UUID_RE.test(id)) {
         sendJson(res, 404, { error: 'not_found' });
         return;
       }
-      endSession(state, id);
+      // CRITICAL 1 (final review): both routes now end the live call (session + AAI socket +
+      // browser socket), not just the caps reservation -- `/end` is the caller hanging up;
+      // `/reset` is the operator/demo "get me a fresh slot" button, distinct only in the
+      // reason recorded.
+      const reason = action === 'end' ? 'caller_ended' : 'reset';
+      const ended = deps.endCall(id, reason);
+      if (!ended) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
       res.writeHead(204);
       res.end();
       return;

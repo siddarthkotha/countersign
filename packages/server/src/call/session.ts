@@ -31,6 +31,7 @@ import { toolSchemasFor, paramsFor } from './allowlist.js';
 import { deriveScreenState } from '../screen/state.js';
 import { validateToolArgs } from './validate.js';
 import { stallKindFor, stallLineFor, type StallKind } from './stalls.js';
+import { runOwedTerminalActions } from './terminalActions.js';
 
 export interface CallSessionOpts {
   session_id: string;
@@ -43,6 +44,11 @@ export interface CallSessionOpts {
   /** The agent's spoken persona name (BRIEF: not yet chosen by the founder). Defaults to
    *  `COUNTERSIGN_AGENT_NAME` env, then "Countersign" -- never hard-coded past that. */
   agent_name?: string;
+  /** CRITICAL 1 (final review): called on every AAI transcript event (a new caller or agent
+   *  line), so ws/browser.ts can `touch()` the caps idle clock from the AAI side too --
+   *  previously only a browser-side message reset it, so a caller who stayed on the line but
+   *  wasn't the one generating browser traffic could still be idle-reaped mid-conversation. */
+  onActivity?: () => void;
 }
 
 interface PendingToolResult {
@@ -84,6 +90,9 @@ export class CallSession {
   private terminalActionsRun = false;
   private exportHash: string | null = null;
   private countersignRecomputed = false;
+  /** Finding 5 (final review): the in-flight export-hash promise, if any -- `whenIdle()`
+   *  lets a test await it deterministically instead of a real-clock `setTimeout` guess. */
+  private pendingExport: Promise<void> | null = null;
   private readonly agentName: string;
   /** Fix round 1, finding 1: owned for the life of the call (not per-render) so consecutive
    *  STALL goals of the same kind actually get different holding lines instead of each
@@ -131,6 +140,21 @@ export class CallSession {
     this.opts.onServerEvent({ type: 'ended', reason });
   }
 
+  /** IMPORTANT 2 (final review): ws/browser.ts calls this for the browser<->server leg's own
+   *  link events (lost on close, restored on reattach) -- the AAI-leg counterpart is logged
+   *  internally by `handleAaiEvent`'s own `link` case. Kept as a public method rather than
+   *  exposing `logs.actions`/`nextActionId`/`nowT` directly: the transport layer records
+   *  WHAT happened, this class still owns HOW it's recorded (evidence, never a verdict). */
+  noteBrowserLinkChange(state: 'lost' | 'restored'): void {
+    if (this.ended) return;
+    this.logs.actions.push({
+      id: this.nextActionId(),
+      kind: 'link_changed',
+      t_ms: this.nowT(),
+      detail: `browser:${state}`,
+    });
+  }
+
   /** Task R1: lets the transport layer (ws/browser.ts) tell an ended call apart from a call
    *  that's merely between browser sockets during its grace window -- a browser reattach is
    *  offered only for the latter; a call the engine already finished never gets a second
@@ -174,6 +198,7 @@ export class CallSession {
       case 'transcript.user':
       case 'transcript.agent':
         this.logs.conversation.push(utteranceFromTranscript(evt, this.nowT()));
+        this.opts.onActivity?.();
         break;
 
       case 'reply.started':
@@ -228,7 +253,18 @@ export class CallSession {
         // browser<->server link (ws/browser.ts owns that one entirely; this is a pass-
         // through, not a state change). The engine's verdict is untouched either way, so
         // this never goes through applyEvaluate/emitState -- just forward the signal.
-        this.opts.onServerEvent({ type: 'link', state: evt.state });
+        // IMPORTANT 2 (final review): tagged `leg: 'aai'` (browser-leg drops are ws/
+        // browser.ts's own, tagged 'browser') so the UI can tell the two apart, and logged as
+        // a `link_changed` action -- evidence of what happened to the call's transport,
+        // never a verdict-bearing one (LAW 3 unaffected: no `AgentActionKind` here feeds a
+        // rule).
+        this.logs.actions.push({
+          id: this.nextActionId(),
+          kind: 'link_changed',
+          t_ms: this.nowT(),
+          detail: `aai:${evt.state}:${evt.attempt}`,
+        });
+        this.opts.onServerEvent({ type: 'link', state: evt.state, leg: 'aai' });
         break;
     }
     this.tick();
@@ -385,23 +421,15 @@ export class CallSession {
     this.last = output;
   }
 
-  private argsForTerminalTool(name: ToolName): Record<string, unknown> {
-    const request_version = this.last!.request_version;
-    switch (name) {
-      case 'freeze_transaction_rail':
-        return { rail_id: this.opts.seed.rails[0]?.id ?? null, request_version };
-      case 'alert_principal':
-        return { identity_id: this.last!.claimed_identity_id, request_version };
-      default:
-        return { request_version };
-    }
-  }
-
   /** LAW 2: STAGE is the ceiling this ever reaches on its own. The server runs the owed
    *  tools itself (the LLM never triggers a terminal action -- it only reaches ACTION state
    *  once the engine has already decided the verdict), then re-runs `evaluate` over the now-
    *  frozen logs: `countersign.recomputed` is the proof that adding the record of the
-   *  actions taken did not change the verdict that authorized them. */
+   *  actions taken did not change the verdict that authorized them.
+   *  IMPORTANT 3 (final review): the tool-running step itself now lives in
+   *  `runOwedTerminalActions` (call/terminalActions.ts), shared verbatim with replay.ts --
+   *  previously only a live call ever ran it, so a replay of the same corpus file never
+   *  showed the export/countersign a live run always reached. */
   private runTerminalActionsIfNeeded(): void {
     if (this.terminalActionsRun || !this.last) return;
     const output = this.last;
@@ -411,19 +439,22 @@ export class CallSession {
     this.terminalActionsRun = true;
     const verdictBeforeActions = output.verdict;
 
-    for (const name of output.required_actions) {
-      const args = this.argsForTerminalTool(name);
-      const result = this.opts.mock(name, args, this.opts.seed, this.mockCtx);
-      if (name === 'open_incident') this.mockCtx.incident_index += 1;
-      this.logs.tools.push({ id: this.nextToolId(), name, t_ms: this.nowT(), args, result });
-    }
+    runOwedTerminalActions(
+      this.logs.tools,
+      output,
+      this.opts.seed,
+      this.opts.mock,
+      this.mockCtx,
+      () => this.nextToolId(),
+      () => this.nowT(),
+    );
 
     this.applyEvaluate();
     const after = this.last;
     this.countersignRecomputed = after ? after.verdict === verdictBeforeActions : false;
 
     if (after) {
-      buildEvidenceExport(this.opts.session_id, after, new Date(this.opts.now()).toISOString())
+      this.pendingExport = buildEvidenceExport(this.opts.session_id, after, new Date(this.opts.now()).toISOString())
         .then((exp) => {
           // End-guard (fix round 1 minor): the session may have ended (browser closed,
           // aai error/ended) while this hash was still computing -- don't resurrect a
@@ -435,8 +466,19 @@ export class CallSession {
         .catch(() => {
           // A failed hash computation must never block or crash the call; the ScreenState
           // simply keeps export_hash null until (if ever) it succeeds.
+        })
+        .then(() => {
+          this.pendingExport = null;
         });
     }
+  }
+
+  /** Finding 5 (final review): lets a test await the export hash deterministically instead
+   *  of a real-clock `setTimeout` guess -- resolves once the terminal-action countersign's
+   *  hash computation (if one is in flight) has settled, one way or another. Resolves
+   *  immediately when nothing is pending. */
+  whenIdle(): Promise<void> {
+    return this.pendingExport ?? Promise.resolve();
   }
 
   private emitState(): void {

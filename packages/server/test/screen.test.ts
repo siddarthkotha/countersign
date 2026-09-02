@@ -80,7 +80,7 @@ describe('deriveScreenState — Scenario B end state (FREEZE)', () => {
     expect(c3?.highlighted).toBe(true);
     expect(c2?.highlighted).toBe(true);
 
-    expect(state.forensic.countersign).toEqual({ browser_verdict: null, server_verdict: 'FREEZE', recomputed: true });
+    expect(state.forensic.countersign).toEqual({ server_verdict: 'FREEZE', recomputed: true });
     expect(state.forensic.export_hash).toBe('abc123def456');
     expect(state.simulated).toBe(true);
     expect(state.link).toBe('live');

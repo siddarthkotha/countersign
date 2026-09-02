@@ -85,7 +85,10 @@ describe('Landing', () => {
     await screen.findByText('Microphone ready');
     await user.click(screen.getByRole('button', { name: 'Try to break it' }));
 
-    expect(await screen.findByText(/today's call budget is used up/)).toBeInTheDocument();
+    const banner = await screen.findByText(/today's call budget is used up/);
+    expect(banner).toBeInTheDocument();
+    // MINOR (final review): announced to assistive tech, not just visible on screen.
+    expect(banner).toHaveAttribute('role', 'alert');
     expect(screen.getByRole('button', { name: 'Watch a recorded attack' })).toBeEnabled();
   });
 });

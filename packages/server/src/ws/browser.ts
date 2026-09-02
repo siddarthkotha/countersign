@@ -18,6 +18,14 @@
 // concurrent attach while one is already live is refused (4409): this is a reconnect
 // mechanism, not multi-tenancy for one call. Grace expiry ends the session (`browser_gone`)
 // and frees the caps slot, same as an explicit close always did before this task.
+//
+// CRITICAL 1 (final review): caps used to be decoupled from live calls -- `/end`/`/reset`
+// only touched `CapsState`, never the live `CallSession`+AAI socket; the idle reaper's
+// results were discarded; and there was no per-call cap timer at all. `attachWebSocketServer`
+// now returns `{ endCall }`: the ONE place that actually ends a live call (session, AAI
+// socket, browser socket) and frees its caps slot together, used by http.ts's `/end`/`/reset`,
+// index.ts's idle reaper, and this file's own per-call cap timer (started on first attach,
+// cleared on end).
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -36,6 +44,11 @@ const STATE_THROTTLE_MS = 66;
  *  index.ts is free to thread `cfg.browser_grace_ms` through later; until it does, every
  *  caller (including production) gets the documented default. */
 const DEFAULT_BROWSER_GRACE_MS = 20000;
+
+/** Matches config.ts's `COUNTERSIGN_SESSION_CAP_SECONDS` default (300s), same reasoning as
+ *  `DEFAULT_BROWSER_GRACE_MS` above -- a plain local fallback so tests/dev callers that don't
+ *  thread `session_cap_seconds` through still get a sane cap instead of an unbounded call. */
+const DEFAULT_SESSION_CAP_SECONDS = 300;
 
 /** How much of the AAI's spoken reply to keep buffered (newest-first eviction) while a
  *  session is between browser sockets, so a reattach doesn't open on dead air. */
@@ -57,6 +70,13 @@ export interface BrowserWsDeps {
    *  actually ended. Defaults to `DEFAULT_BROWSER_GRACE_MS`; tests override it to keep grace
    *  windows short instead of waiting out the real 20s default. */
   browser_grace_ms?: number;
+  /** CRITICAL 1 (final review): the per-session minute cap (BRIEF abuse cap), in seconds --
+   *  the same number `/api/session/start` already hands the browser for its own countdown
+   *  display (`cap_seconds`). A one-shot timer started the moment a call's `CallEntry` is
+   *  first created ends it with reason `cap_reached` if it's still running once this many
+   *  seconds have passed, regardless of reconnects in between. Defaults to
+   *  `DEFAULT_SESSION_CAP_SECONDS`; tests override it to keep the cap short. */
+  session_cap_seconds?: number;
 }
 
 /** One call session's life, independent of any single browser socket. Lives in
@@ -69,6 +89,10 @@ interface CallEntry {
    *  replaced can never tear down the NEW socket's attachment. */
   ws: WebSocket | null;
   graceTimer: ReturnType<typeof setTimeout> | null;
+  /** CRITICAL 1 (final review): one-shot, started once when the entry is first created (not
+   *  reset by a reattach -- the cap bounds total call time, not any one socket's uptime),
+   *  cleared the moment the call actually ends. */
+  capTimer: ReturnType<typeof setTimeout> | null;
   /** Where ServerEvents actually go right now: a throttled sender to `ws` while attached, or
    *  a small buffer while detached. Swapped in place (never rebuilding CallSession's
    *  `onServerEvent`, which closes over this entry once, for the entry's whole life). */
@@ -157,6 +181,15 @@ function makeEntrySink(
         clearTimeout(entry.graceTimer);
         entry.graceTimer = null;
       }
+      // CRITICAL 1 (final review): the cap timer is one-shot for the entry's whole life --
+      // a real end reached any other way (caller_ended, idle_timeout, an AAI error, the cap
+      // itself firing) must still cancel it, or a stale cap timer could later call `endCall`
+      // on an id `activeCalls` no longer has an entry for (harmless -- `endCall` treats that
+      // as "already gone" -- but pointless).
+      if (entry.capTimer) {
+        clearTimeout(entry.capTimer);
+        entry.capTimer = null;
+      }
       activeCalls.delete(session_id);
       endSession(deps.caps, session_id);
     }
@@ -169,6 +202,12 @@ function makeEntrySink(
 function startGrace(session_id: string, deps: BrowserWsDeps, activeCalls: Map<string, CallEntry>, entry: CallEntry): void {
   entry.ws = null;
   entry.deliver = makeGraceBuffer(entry, deps.now);
+  // IMPORTANT 2 (final review): the browser<->server leg's own "lost" -- recorded on the
+  // CallSession as evidence (a `link_changed` action), distinct from the AAI leg's own
+  // (handleAaiEvent's own `link` case, tagged 'aai'). Nothing is sent down the wire here --
+  // the socket that would carry it just closed; the browser learns about its OWN drop from
+  // its own reconnect logic (src/ws/worker.ts), not a server push.
+  entry.session.noteBrowserLinkChange('lost');
   const graceMs = deps.browser_grace_ms ?? DEFAULT_BROWSER_GRACE_MS;
   // Fix round 1 (minor): `entry.session.end(...)` alone is enough -- it emits `ended`, which
   // `makeEntrySink` above already routes into `activeCalls.delete` + `endSession` for us.
@@ -220,8 +259,11 @@ function reattach(ws: WebSocket, session_id: string, deps: BrowserWsDeps, active
   entry.ws = ws;
   entry.deliver = makeThrottledSender(ws);
   touch(deps.caps, session_id, deps.now());
+  // IMPORTANT 2 (final review): the browser<->server leg's own "restored", recorded as
+  // evidence the same way `startGrace`'s "lost" is.
+  entry.session.noteBrowserLinkChange('restored');
 
-  safeSend(ws, { type: 'link', state: 'restored' });
+  safeSend(ws, { type: 'link', state: 'restored', leg: 'browser' });
   if (entry.lastState) safeSend(ws, entry.lastState);
   for (const frame of entry.audioBuffer) safeSend(ws, { type: 'audio', data: frame.data });
   entry.audioBuffer = [];
@@ -229,7 +271,13 @@ function reattach(ws: WebSocket, session_id: string, deps: BrowserWsDeps, active
   wireSocketHandlers(ws, session_id, deps, activeCalls, entry);
 }
 
-function handleCallSocket(ws: WebSocket, session_id: string, deps: BrowserWsDeps, activeCalls: Map<string, CallEntry>): void {
+function handleCallSocket(
+  ws: WebSocket,
+  session_id: string,
+  deps: BrowserWsDeps,
+  activeCalls: Map<string, CallEntry>,
+  endCall: (session_id: string, reason: string) => boolean,
+): void {
   const existing = activeCalls.get(session_id);
   if (existing) {
     if (existing.ws) {
@@ -265,6 +313,7 @@ function handleCallSocket(ws: WebSocket, session_id: string, deps: BrowserWsDeps
   const entry = {
     ws,
     graceTimer: null,
+    capTimer: null,
     deliver: makeThrottledSender(ws),
     lastState: null,
     audioBuffer: [],
@@ -278,9 +327,21 @@ function handleCallSocket(ws: WebSocket, session_id: string, deps: BrowserWsDeps
     now: deps.now,
     onServerEvent: makeEntrySink(session_id, deps, activeCalls, entry),
     mock: mockToolResult,
+    // CRITICAL 1 (final review): every AAI transcript event also counts as activity, not
+    // just a browser message -- a caller who's talking but whose browser happens to be
+    // between keepalive frames must never look idle.
+    onActivity: () => touch(deps.caps, session_id, deps.now()),
   });
   entry.session = session;
   activeCalls.set(session_id, entry);
+
+  // CRITICAL 1 (final review): the per-session minute cap, started once on this first
+  // attach (never reset by a later reattach -- it bounds the call's total lifetime, not any
+  // one socket's uptime) and cleared by `makeEntrySink` the moment the call actually ends.
+  const capSeconds = deps.session_cap_seconds ?? DEFAULT_SESSION_CAP_SECONDS;
+  entry.capTimer = setTimeout(() => {
+    endCall(session_id, 'cap_reached');
+  }, capSeconds * 1000);
 
   wireSocketHandlers(ws, session_id, deps, activeCalls, entry);
 }
@@ -309,12 +370,57 @@ function handleReplaySocket(ws: WebSocket, file: string, speedParam: string | nu
     });
 }
 
-export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): void {
+export interface BrowserWsApi {
+  /** CRITICAL 1 (final review): the ONE place that ends a live call -- the `CallSession`
+   *  (which closes the AAI socket, per `CallSession.end`), the attached browser socket (if
+   *  any), and the caps slot, together. Used by http.ts's `/end`/`/reset`, index.ts's idle
+   *  reaper, and this file's own per-call cap timer. Returns `false` (no-op) for an id with
+   *  no live call AND no caps-active entry -- there's nothing to end. Falls back to freeing
+   *  a bare caps slot for an id that's `canStartSession`-active but never actually attached a
+   *  `/ws/call/:id` socket yet (a session minted via `/api/session/start` and reset/ended
+   *  before the browser ever opened its WebSocket) -- there is no live `CallEntry` for
+   *  `endCall` to act on in that case, only the caps reservation to release. */
+  endCall(session_id: string, reason: string): boolean;
+}
+
+export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): BrowserWsApi {
   const wss = new WebSocketServer({ noServer: true });
   // One map per `attachWebSocketServer` call (i.e. per server), not module-global -- each
   // test spins up its own server via its own call, so their in-grace sessions never bleed
   // into each other.
   const activeCalls = new Map<string, CallEntry>();
+
+  function endCall(session_id: string, reason: string): boolean {
+    const entry = activeCalls.get(session_id);
+    if (entry) {
+      const ws = entry.ws;
+      // `entry.session.end(reason)` emits `ended`, which `makeEntrySink` already routes into
+      // clearing both timers, `activeCalls.delete`, and `endSession` -- idempotent, so a
+      // call that already ended between the caller's check and this call is a harmless no-op.
+      entry.session.end(reason);
+      // The AAI socket is closed by `CallSession.end` itself; the browser socket is a
+      // transport `CallSession` knows nothing about, so it's closed here instead -- a
+      // server-initiated end (idle timeout, cap reached, an operator's `/reset`) must not
+      // leave a live-looking browser socket open past the call it belonged to.
+      if (ws) {
+        try {
+          ws.close();
+        } catch {
+          // already gone -- nothing to close
+        }
+      }
+      return true;
+    }
+    // No live CallEntry (never attached a `/ws/call/:id` socket, or already fully ended) --
+    // if the id is still holding a caps slot (minted by `/api/session/start` but never
+    // attached), free that slot directly so `/reset`/`/end` still work before a browser ever
+    // opens its WebSocket, same as before this fix.
+    if (deps.caps.active.has(session_id)) {
+      endSession(deps.caps, session_id);
+      return true;
+    }
+    return false;
+  }
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url ?? '/', 'http://internal');
@@ -323,7 +429,7 @@ export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): void
 
     if (callMatch) {
       const id = decodeURIComponent(callMatch[1]!);
-      wss.handleUpgrade(req, socket, head, (ws) => handleCallSocket(ws, id, deps, activeCalls));
+      wss.handleUpgrade(req, socket, head, (ws) => handleCallSocket(ws, id, deps, activeCalls, endCall));
       return;
     }
     if (replayMatch) {
@@ -340,4 +446,6 @@ export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): void
     // happened to collapse a given traversal attempt.
     wss.handleUpgrade(req, socket, head, (ws) => ws.close(4404, 'not found'));
   });
+
+  return { endCall };
 }

@@ -38,8 +38,11 @@ export interface ToolLogEntry {
 }
 
 /** v2: things the AGENT side did, written by the server when the LLM's reply for a goal
- *  completes. Never written by the LLM itself. */
-export type AgentActionKind = 'challenge_issued' | 'readback_issued' | 'session_config_updated';
+ *  completes. Never written by the LLM itself.
+ *  `link_changed` (IMPORTANT 2, final review): a transport-leg link event -- server<->
+ *  AssemblyAI or browser<->server -- recorded as evidence of what happened to the call's
+ *  transport, distinct from a verdict-bearing action; see `detail` below. */
+export type AgentActionKind = 'challenge_issued' | 'readback_issued' | 'session_config_updated' | 'link_changed';
 
 export interface AgentAction {
   id: string;
@@ -55,7 +58,8 @@ export interface AgentAction {
   spec?: ChallengeSpec; // challenge_issued
   field?: ClaimField; // readback_issued: what the agent read back
   value?: string; // readback_issued: what the agent read back
-  detail?: string; // session_config_updated: e.g. "keyterms+=First Meridian Trust"
+  detail?: string; // session_config_updated: e.g. "keyterms+=First Meridian Trust";
+  // link_changed: "<leg>:<state>[:attempt]", e.g. "aai:lost:2" or "browser:restored"
 }
 
 export type CallOriginKind = 'registered_device' | 'internal_line' | 'unverified_voip';
@@ -340,10 +344,12 @@ export interface CorpusFile {
 // hash, the countersign re-run result). Living here keeps server, browser, and tests all
 // importing one shared definition instead of three drifting copies.
 
-/** What the browser is shown at any instant. The browser renders this; it never computes
- *  a verdict of its own -- `forensic.countersign.browser_verdict` is always null (v1: the
- *  browser has no independent verdict to compare; reserved so a future browser-side replay
- *  check has somewhere to put one without a type change). */
+/** What the browser is shown at any instant. The browser renders this; it never computes a
+ *  verdict of its own -- `forensic.countersign` only ever carries the server's own verdict
+ *  and whether re-running `evaluate` over the frozen logs reproduced it (MINOR, final
+ *  review: the v1-reserved `browser_verdict` slot was removed -- it was always null and
+ *  never rendered; the browser has no independent verdict to compare, and nothing else here
+ *  needed the type to reserve a place for one). */
 export interface ScreenState {
   session_id: string;
   t_ms: number;
@@ -367,7 +373,7 @@ export interface ScreenState {
     assurance: AssuranceChecklist;
     counterfactuals: { flip: string; verdict: Verdict; state: EngineState }[];
     export_hash: string | null;
-    countersign: { browser_verdict: null; server_verdict: Verdict; recomputed: boolean };
+    countersign: { server_verdict: Verdict; recomputed: boolean };
   };
   simulated: true;
   link: 'live' | 'replay' | 'lost';
@@ -392,4 +398,9 @@ export type ServerEvent =
   // forward the AAI-transport-level `AaiEvent{type:'link'}` (server<->AssemblyAI) down to a
   // browser that stayed connected the whole time; the engine's verdict is untouched either
   // way, only the transport dropped.
-  | { type: 'link'; state: 'lost' | 'restored' };
+  // `leg` (IMPORTANT 2, final review): which transport actually dropped -- 'browser' (the
+  // browser<->server WebSocket itself) or 'aai' (server<->AssemblyAI, merely forwarded).
+  // Previously indistinguishable on the wire, which meant the UI's "voice link lost" line
+  // and the recorded evidence couldn't say which one happened; additive, so an older client
+  // ignoring `leg` still reads `state` exactly as before.
+  | { type: 'link'; state: 'lost' | 'restored'; leg: 'browser' | 'aai' };

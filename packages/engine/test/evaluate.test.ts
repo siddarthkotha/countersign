@@ -139,6 +139,13 @@ describe('evaluate -- Scenario B (Miller fraud) end to end', () => {
     expect(out.allowed_tools).not.toContain('stage_payment_for_second_approval');
   });
 
+  it('IMPORTANT 4 (final review): ACTION never offers ANY tool to the LLM -- the server runs required_actions itself', () => {
+    expect(out.state).toBe('ACTION');
+    expect(out.allowed_tools).toEqual([]);
+    // required_actions (what the server itself still owes) is untouched by this change.
+    expect(out.required_actions.length).toBeGreaterThan(0);
+  });
+
   it('LAW 4: every evidence quote is a verbatim substring of the utterance it cites', () => {
     for (const e of out.evidence) {
       for (const q of e.quotes) {
@@ -187,6 +194,9 @@ describe('evaluate -- Scenario A (Dana, legitimate) end to end', () => {
     expect(out.required_actions[0]).toBe('stage_payment_for_second_approval');
     expect(Object.values(out.assurance).every((v) => v === true)).toBe(true);
     expect(out.reasons).toEqual([]);
+    // IMPORTANT 4 (final review): STAGE's ACTION state offers the LLM no tools either --
+    // `stage_payment_for_second_approval` is only ever run by the server itself.
+    expect(out.allowed_tools).toEqual([]);
   });
 
   it('every critical field was confirmed by the caller, not assumed', () => {

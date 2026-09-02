@@ -30,15 +30,22 @@ const ACTION_ALLOWLIST: Record<'STAGE' | 'FREEZE' | 'ESCALATE', ToolName[]> = {
   ESCALATE: ['open_incident', 'alert_principal', 'seal_evidence_record'],
 };
 
-export function allowedTools(state: EngineState, verdict: Verdict): ToolName[] {
+export function allowedTools(state: EngineState, _verdict: Verdict): ToolName[] {
   if (state === 'CHALLENGE') return [];
   if (state === 'EVIDENCE' || state === 'CONSISTENCY_CHECK') {
     return ['get_request_history', 'check_sso_context', 'verify_out_of_band'];
   }
-  if (state === 'ACTION' && (verdict === 'STAGE' || verdict === 'FREEZE' || verdict === 'ESCALATE')) {
-    return ACTION_ALLOWLIST[verdict];
-  }
-  // INTAKE, CLAIM, DECISION, SEALED, OUT_OF_SCOPE: nothing to call.
+  // Review finding (IMPORTANT 4, final review): ACTION's terminal tools (stage/freeze/
+  // incident/alert/seal) are NEVER offered to the LLM -- the server runs them itself the
+  // instant a verdict turns terminal (call/session.ts's runTerminalActionsIfNeeded, which
+  // never goes through a tool.call at all), before the LLM could ever be handed a live
+  // ASSISTANT-callable schema for one. Exposing them here was a standing (harmless in
+  // practice, since the server never wired an ACTION-state tool.call through) but wrong-by-
+  // design widening of what the voice channel could ever reach -- LAW 2 says voice never
+  // releases the wire, and the ceiling for what the LLM is even OFFERED should say the same.
+  // `ACTION_ALLOWLIST` below is unchanged and still drives `requiredActions` -- the server's
+  // own list of what it must run, not what it hands to the model.
+  // INTAKE, CLAIM, DECISION, ACTION, SEALED, OUT_OF_SCOPE: nothing to call.
   return [];
 }
 

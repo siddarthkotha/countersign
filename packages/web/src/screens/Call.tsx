@@ -35,15 +35,21 @@ const ENDED_REASON_WORDS: Record<string, string> = {
   aai_ended: 'the voice service closed the session',
   caller_ended: 'the call was ended',
   replay_complete: 'the recording finished',
-  // Task R1: the server gave up waiting for the browser to come back (packages/server/src/
-  // ws/browser.ts's grace window, COUNTERSIGN_BROWSER_GRACE_MS) -- reached only if this
-  // client's own reconnect attempts (src/ws/worker.ts) already exhausted first, since a
-  // successful reattach never produces an `ended` event at all.
-  browser_gone: 'the connection could not be restored in time',
-  link_lost: 'the connection could not be restored in time',
+};
+
+// MINOR (final review): `browser_gone`/`link_lost` are the two reasons that only ever fire
+// AFTER this client's own reconnect attempts (src/ws/worker.ts) already exhausted first
+// (Task R1's grace window on `browser_gone`; the AAI-leg's bounded resume on `link_lost`) --
+// full, standalone sentences (not `ENDED_REASON_WORDS` fragments) say WHICH side gave up,
+// since "the connection could not be restored" used to read identically for either.
+const FULL_ENDED_SENTENCES: Record<string, string> = {
+  browser_gone: 'Your browser stayed disconnected too long; the call was closed.',
+  link_lost: 'The voice service could not be reached again; the call was closed.',
 };
 
 function endedReasonToPlainWords(reason: string): string {
+  const fullSentence = FULL_ENDED_SENTENCES[reason];
+  if (fullSentence) return fullSentence;
   if (reason.startsWith('aai_error')) {
     return 'The call ended: the voice service closed the session';
   }
@@ -53,6 +59,10 @@ function endedReasonToPlainWords(reason: string): string {
 
 export default function Call({ session, onStartOver, onWatch }: CallProps) {
   const [link, setLink] = useState<LinkState>('idle');
+  // IMPORTANT 2 (final review): which transport dropped -- 'browser' or 'aai' -- so the
+  // status line can say WHICH side is reconnecting instead of one message covering both.
+  // Meaningless once `link !== 'reconnecting'`; only read while rendering that line.
+  const [linkLeg, setLinkLeg] = useState<'browser' | 'aai' | null>(null);
   const [screenState, setScreenState] = useState<ScreenState | null>(null);
   const [endedReason, setEndedReason] = useState<string | null>(null);
   const [micError, setMicError] = useState(false);
@@ -75,9 +85,10 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
         setEndedReason(reason);
         setLink('ended');
       });
-      client.onLink((state) => {
+      client.onLink((leg, state) => {
         // The AssemblyAI session and the evidence stay put on the server through a dropped
         // link (Task R1) -- only the chip/status line move; nothing about screenState resets.
+        setLinkLeg(state === 'lost' ? leg : null);
         setLink(state === 'lost' ? 'reconnecting' : 'live');
       });
       clientRef.current = client;
@@ -127,7 +138,15 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
         </div>
       )}
 
-      {link === 'reconnecting' && <p role="status">Voice link lost, security state preserved. Reconnecting…</p>}
+      {/* IMPORTANT 2 (final review): which side is reconnecting used to be indistinguishable
+         -- 'browser' (this client's own connection to our server) reads differently from
+         'aai' (our server's connection to the voice service, merely relayed) on purpose. */}
+      {link === 'reconnecting' && linkLeg === 'aai' && (
+        <p role="status">Voice service reconnecting. Security state preserved.</p>
+      )}
+      {link === 'reconnecting' && linkLeg !== 'aai' && (
+        <p role="status">Voice link lost, security state preserved. Reconnecting…</p>
+      )}
 
       {endedReason && <p role="status">{endedReasonToPlainWords(endedReason)}</p>}
 

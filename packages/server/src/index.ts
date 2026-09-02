@@ -23,15 +23,21 @@ const cfg = useFakeAai && !loadedCfg.assemblyai_api_key
   ? { ...loadedCfg, assemblyai_api_key: 'fake-aai-dev-mode' }
   : loadedCfg;
 
+// CRITICAL 1 (final review): http.ts's `/end`/`/reset` need `attachWebSocketServer`'s own
+// `endCall`, but `attachWebSocketServer` needs the `server` object `createHttpServer`
+// returns -- a real circular dependency. This holder breaks it: `createHttpServer` gets a
+// deps-level `endCall` that just forwards to whatever `endCallImpl` currently is (still null
+// during the brief window before `attachWebSocketServer` runs below, which only matters if
+// an HTTP request somehow arrived before that -- impossible here, since nothing calls
+// `server.listen` until after both are wired).
+let endCallImpl: ((session_id: string, reason: string) => boolean) | null = null;
+
 const { server, state } = createHttpServer(cfg, {
   fetchImpl: fetch,
   now: () => Date.now(),
   randomId: () => randomUUID(),
+  endCall: (id, reason) => (endCallImpl ? endCallImpl(id, reason) : false),
 });
-
-setInterval(() => {
-  reapIdle(state, cfg, Date.now());
-}, 5000).unref();
 
 // COUNTERSIGN_FAKE_AAI=1 (founder ruling, Task S2): every call session gets a scripted
 // FakeAaiSocket instead of a real AssemblyAI connection, so `npm run dev:server` runs the
@@ -134,7 +140,7 @@ function createAai(_session_id: string): AaiSocket {
   return new PendingAaiSocket(connecting);
 }
 
-attachWebSocketServer(server, {
+const { endCall } = attachWebSocketServer(server, {
   caps: state,
   now: () => Date.now(),
   createAai,
@@ -143,7 +149,20 @@ attachWebSocketServer(server, {
   // for COUNTERSIGN_BROWSER_GRACE_MS -- the env var parsed into `cfg` but was never actually
   // read anywhere.
   browser_grace_ms: cfg.browser_grace_ms,
+  // CRITICAL 1 (final review): same class of bug as browser_grace_ms above -- the per-call
+  // cap timer needs the real configured cap, not ws/browser.ts's own deps-level default.
+  session_cap_seconds: cfg.session_cap_seconds,
 });
+endCallImpl = endCall;
+
+// CRITICAL 1 (final review): `reapIdle`'s returned ids used to be discarded here -- the idle
+// reaper freed the CAPS slot (inside `reapIdle` itself) but never actually ended the live
+// call it belonged to, so an AssemblyAI socket (and its meter) could keep running past its
+// own idle timeout. Now every id it returns gets a real `endCall`.
+setInterval(() => {
+  const idle = reapIdle(state, cfg, Date.now());
+  for (const id of idle) endCall(id, 'idle_timeout');
+}, 5000).unref();
 
 if (useFakeAai) {
   console.log('COUNTERSIGN_FAKE_AAI=1 -- call sessions use a scripted fake AssemblyAI socket, no API key required');

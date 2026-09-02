@@ -32,11 +32,12 @@ describe('ws/browser — /ws/call/:id', () => {
     for (const close of closers.splice(0)) await close();
   });
 
-  async function start(opts: { browser_grace_ms?: number } = {}): Promise<{
+  async function start(opts: { browser_grace_ms?: number; session_cap_seconds?: number } = {}): Promise<{
     base: string;
     wsBase: string;
     state: CapsState;
     aaiInstances: Map<string, FakeAaiSocket>;
+    endCall: (session_id: string, reason: string) => boolean;
   }> {
     const ids = ['id-1', 'id-2', 'id-3'];
     let counter = 0;
@@ -46,9 +47,13 @@ describe('ws/browser — /ws/call/:id', () => {
       fetchImpl: globalThis.fetch,
       now: () => Date.now(),
       randomId: () => ids[counter++] ?? `id-${counter}`,
+      // These tests exercise `endCall` directly (returned by `attachWebSocketServer` below,
+      // captured into `wsApi` after both are constructed) rather than through http.ts's
+      // routes -- http.test.ts already covers the http.ts side of the CRITICAL 1 wiring.
+      endCall: (id, reason) => wsApi.endCall(id, reason),
     });
 
-    attachWebSocketServer(server, {
+    const wsApi = attachWebSocketServer(server, {
       caps: state,
       now: () => Date.now(),
       createAai: (session_id) => {
@@ -57,6 +62,7 @@ describe('ws/browser — /ws/call/:id', () => {
         return aai;
       },
       ...(opts.browser_grace_ms !== undefined ? { browser_grace_ms: opts.browser_grace_ms } : {}),
+      ...(opts.session_cap_seconds !== undefined ? { session_cap_seconds: opts.session_cap_seconds } : {}),
     });
 
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -68,6 +74,7 @@ describe('ws/browser — /ws/call/:id', () => {
       wsBase: `ws://127.0.0.1:${addr.port}`,
       state,
       aaiInstances,
+      endCall: wsApi.endCall,
     };
   }
 
@@ -83,6 +90,23 @@ describe('ws/browser — /ws/call/:id', () => {
     const out: ServerEvent[] = [];
     ws.on('message', (data) => out.push(JSON.parse(data.toString()) as ServerEvent));
     return out;
+  }
+
+  /** Finding 5 (final review): replaces a fixed `setTimeout(resolve, N)` guess with an actual
+   *  wait on the condition the test cares about -- a real socket/timer integration test still
+   *  needs SOME real wait (there is no fake-timer story for a live `ws`/`http` server), but a
+   *  fixed guess is either too short (flaky under load) or wastefully long; polling converges
+   *  the instant the condition is true and only times out (loudly, not silently) if it never
+   *  is. Never shorter than the real thing it's waiting on -- `stepMs` is a poll interval, not
+   *  a substitute deadline. */
+  async function pollUntil(cond: () => boolean, timeoutMs = 3000, stepMs = 5): Promise<void> {
+    const start = Date.now();
+    while (!cond()) {
+      if (Date.now() - start > timeoutMs) {
+        throw new Error(`pollUntil: condition still false after ${timeoutMs}ms`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, stepMs));
+    }
   }
 
   /** Attaches the message collector in the SAME tick as the socket is constructed, before
@@ -119,7 +143,7 @@ describe('ws/browser — /ws/call/:id', () => {
     const messages = collectMessages(ws);
     ws.send(JSON.stringify({ type: 'start' }));
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await pollUntil(() => messages.some((m) => m.type === 'state'));
 
     expect(aaiInstances.has(session_id)).toBe(true);
     expect(messages.some((m) => m.type === 'state')).toBe(true);
@@ -145,7 +169,7 @@ describe('ws/browser — /ws/call/:id', () => {
       timestamps.push(Date.now());
     });
     ws.send(JSON.stringify({ type: 'start' }));
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await pollUntil(() => messages.some((m) => m.type === 'state'));
 
     const aai = aaiInstances.get(session_id)!;
     // Fire a burst of user transcripts well within one 66ms throttle window -- each one
@@ -154,15 +178,25 @@ describe('ws/browser — /ws/call/:id', () => {
       aai.emit({ type: 'transcript.user', item_id: `burst-${i}`, text: `hello ${i}` });
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    try {
+      // Finding 5 (final review): this asserts an UPPER bound (no more than one trailing
+      // coalesced flush), which a poll-until-true can't express -- proving an absence needs
+      // waiting out the real window, not racing to the first true. 300ms is a real wait
+      // (comfortably longer than the 66ms window it's proving nothing extra fires inside),
+      // not a shorter-than-necessary guess.
+      await new Promise((resolve) => setTimeout(resolve, 300));
 
-    const stateEvents = messages.filter((m) => m.type === 'state');
-    // Everything fired inside one throttle window: at most 2 sends (one immediate leading
-    // send, one trailing coalesced flush) -- never one per burst event.
-    expect(stateEvents.length).toBeLessThanOrEqual(2);
-    expect(stateEvents.length).toBeGreaterThanOrEqual(1);
-
-    ws.close();
+      const stateEvents = messages.filter((m) => m.type === 'state');
+      // Everything fired inside one throttle window: at most 2 sends (one immediate leading
+      // send, one trailing coalesced flush) -- never one per burst event.
+      expect(stateEvents.length).toBeLessThanOrEqual(2);
+      expect(stateEvents.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      // Finding 5 (final review): cleanup runs even if the assertion above throws -- an
+      // uncleaned socket left open after a failed assertion is what turned one flaky
+      // assertion into a cascading 10s `afterEach` hook timeout on the NEXT test too.
+      ws.close();
+    }
   });
 
   it('keeps the caps slot (and the session alive) during the grace window after the browser socket closes', async () => {
@@ -187,7 +221,7 @@ describe('ws/browser — /ws/call/:id', () => {
 
     const ws = await connect(`${wsBase}${ws_path}`);
     ws.close();
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await pollUntil(() => !state.active.has(session_id));
 
     expect(state.active.has(session_id)).toBe(false);
   });
@@ -197,19 +231,23 @@ describe('ws/browser — /ws/call/:id', () => {
     const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
     const { session_id, ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
 
-    const ws1 = await connect(`${wsBase}${ws_path}`);
+    const { ws: ws1, messages: messages1 } = await connectAndCollect(`${wsBase}${ws_path}`);
     ws1.send(JSON.stringify({ type: 'start' }));
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await pollUntil(() => messages1.some((m) => m.type === 'state'));
     ws1.close();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // No externally observable condition distinguishes "the server has processed this
+    // socket's close (and entered the grace window)" from "still attached" -- `state.active`
+    // reads true in both. A short real wait for the close to propagate is the only option
+    // here (same as before this fix); 40ms is generous for a same-machine loopback close.
+    await new Promise((resolve) => setTimeout(resolve, 40));
 
     // Still within grace: slot held, session alive.
     expect(state.active.has(session_id)).toBe(true);
 
     const { ws: ws2, messages } = await connectAndCollect(`${wsBase}${ws_path}`);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await pollUntil(() => messages.some((m) => m.type === 'state'));
 
-    expect(messages[0]).toEqual({ type: 'link', state: 'restored' });
+    expect(messages[0]).toEqual({ type: 'link', state: 'restored', leg: 'browser' });
     const stateMsg = messages.find((m) => m.type === 'state');
     expect(stateMsg?.type).toBe('state');
     if (stateMsg?.type === 'state') expect(stateMsg.state.session_id).toBe(session_id);
@@ -220,8 +258,9 @@ describe('ws/browser — /ws/call/:id', () => {
 
     // Live events keep flowing to the reattached socket.
     const aai = aaiInstances.get(session_id)!;
+    const stateCountBefore = messages.filter((m) => m.type === 'state').length;
     aai.emit({ type: 'transcript.user', item_id: 'after-reattach', text: 'hello again' });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await pollUntil(() => messages.filter((m) => m.type === 'state').length > stateCountBefore);
     expect(messages.some((m) => m.type === 'state')).toBe(true);
 
     ws2.close();
@@ -240,5 +279,80 @@ describe('ws/browser — /ws/call/:id', () => {
 
     expect(closeCode).toBe(4409);
     ws1.close();
+  });
+
+  it('CRITICAL 1 (final review): endCall ends a LIVE call -- the browser gets `ended`, its socket closes, and the caps slot frees', async () => {
+    const { base, wsBase, state, endCall } = await start();
+    const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
+    const { session_id, ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
+
+    const { ws, messages } = await connectAndCollect(`${wsBase}${ws_path}`);
+    ws.send(JSON.stringify({ type: 'start' }));
+    await pollUntil(() => messages.some((m) => m.type === 'state'));
+
+    const closeCode = new Promise<number>((resolve) => ws.once('close', (code) => resolve(code)));
+
+    // Simulates what index.ts's idle reaper does with `reapIdle`'s returned ids -- this is
+    // the exact bug CRITICAL 1 fixed: previously only `CapsState` was touched, and the live
+    // `CallSession` (and its AAI socket, and the attached browser socket) kept right on
+    // running past the reason it was supposed to end for.
+    const ended = endCall(session_id, 'idle_timeout');
+    expect(ended).toBe(true);
+
+    await pollUntil(() => messages.some((m) => m.type === 'ended'));
+    expect(messages.find((m) => m.type === 'ended')).toEqual({ type: 'ended', reason: 'idle_timeout' });
+    // The browser socket itself is closed by `endCall`, not left dangling for the client to
+    // notice on its own.
+    await closeCode;
+    expect(state.active.has(session_id)).toBe(false);
+
+    // A second call is a no-op, not an error -- the call already ended.
+    expect(endCall(session_id, 'idle_timeout')).toBe(false);
+  });
+
+  it('CRITICAL 1 (final review): endCall on an id that only ever held a caps reservation (never attached a socket) still frees the slot', async () => {
+    const { base, state, endCall } = await start();
+    const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
+    const { session_id } = (await startRes.json()) as { session_id: string; ws_path: string };
+    expect(state.active.has(session_id)).toBe(true);
+
+    expect(endCall(session_id, 'reset')).toBe(true);
+    expect(state.active.has(session_id)).toBe(false);
+
+    // Unknown id entirely: no-op, not an error.
+    expect(endCall('never-existed', 'reset')).toBe(false);
+  });
+
+  it('CRITICAL 1 (final review): the per-call cap timer ends a live call with reason cap_reached once its total time is up', async () => {
+    // 60ms cap -- short enough for a fast real-timer test, long enough to reliably outlast
+    // the initial connect/start handshake above it.
+    const { base, wsBase, state } = await start({ session_cap_seconds: 0.06 });
+    const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
+    const { session_id, ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
+
+    const { ws, messages } = await connectAndCollect(`${wsBase}${ws_path}`);
+    ws.send(JSON.stringify({ type: 'start' }));
+
+    await pollUntil(() => messages.some((m) => m.type === 'ended'));
+    expect(messages.find((m) => m.type === 'ended')).toEqual({ type: 'ended', reason: 'cap_reached' });
+    expect(state.active.has(session_id)).toBe(false);
+  });
+
+  it('IMPORTANT 2 (final review): an AAI-leg link event forwards to the browser tagged leg:"aai" (distinct from a browser-leg reattach\'s leg:"browser")', async () => {
+    const { base, wsBase, aaiInstances } = await start({ browser_grace_ms: 2000 });
+    const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
+    const { session_id, ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
+
+    const { ws, messages } = await connectAndCollect(`${wsBase}${ws_path}`);
+    ws.send(JSON.stringify({ type: 'start' }));
+    await pollUntil(() => messages.some((m) => m.type === 'state'));
+
+    const aai = aaiInstances.get(session_id)!;
+    aai.emit({ type: 'link', state: 'lost', attempt: 1 });
+    await pollUntil(() => messages.some((m) => m.type === 'link'));
+
+    expect(messages.find((m) => m.type === 'link')).toEqual({ type: 'link', state: 'lost', leg: 'aai' });
+
+    ws.close();
   });
 });

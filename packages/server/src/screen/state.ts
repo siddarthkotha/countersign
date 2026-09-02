@@ -174,7 +174,7 @@ export function deriveScreenState(input: ScreenStateInput): ScreenState {
       assurance: output.assurance,
       counterfactuals: counterfactuals(engineInput),
       export_hash,
-      countersign: { browser_verdict: null, server_verdict: output.verdict, recomputed },
+      countersign: { server_verdict: output.verdict, recomputed },
     },
     simulated: true,
     link,

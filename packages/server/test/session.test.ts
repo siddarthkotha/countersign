@@ -61,14 +61,6 @@ function driveScenarioBThroughA4(session: CallSession, aai: FakeAaiSocket, clock
   aai.emit({ type: 'reply.started', reply_id: 'tools-1' });
 }
 
-/** `buildEvidenceExport` hashes via `crypto.subtle.digest`, which resolves on a real
- *  Node task, not a plain microtask -- a chain of `await Promise.resolve()` isn't enough
- *  to observe it settle, so this waits on the real (unfaked, injected-clock-independent)
- *  event loop instead. */
-async function waitForRealTick(ms = 20): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 describe('CallSession — Scenario B (Robert Miller, fraudulent) replayed as live AAI events', () => {
   it('reproduces the recorded conversation/tools, reaches FREEZE, and countersigns the terminal actions', async () => {
     const clock = { now: 0 };
@@ -149,7 +141,10 @@ describe('CallSession — Scenario B (Robert Miller, fraudulent) replayed as liv
     expect(session.last?.state).toBe('SEALED'); // seal_evidence_record has now run
 
     // ---- the countersign: re-running evaluate over the frozen logs reproduced FREEZE ----
-    await waitForRealTick();
+    // Finding 5 (final review): `whenIdle()` resolves once the export-hash promise actually
+    // settles, deterministically -- no more real-clock `setTimeout` guess for
+    // `buildEvidenceExport`'s `crypto.subtle.digest` call to have finished by.
+    await session.whenIdle();
     const lastState = [...sent].reverse().find((e) => e.type === 'state');
     expect(lastState?.type).toBe('state');
     if (lastState?.type === 'state') {

@@ -86,6 +86,48 @@ describe('ws/browser — /ws/replay/:file', () => {
     ws.close();
   }, 10000);
 
+  it('IMPORTANT 3 (final review): scenario-b ends with a non-null export_hash and recomputed true, same as a live run', async () => {
+    const { wsBase } = await start();
+    const ws = new WebSocket(`${wsBase}/ws/replay/scenario-b-miller-fraud?speed=50`);
+    await new Promise<void>((resolve, reject) => {
+      ws.once('open', () => resolve());
+      ws.once('error', reject);
+    });
+
+    const events = await collectUntilEnded(ws);
+    const stateEvents = events.filter((e) => e.type === 'state');
+    const last = stateEvents.at(-1);
+    expect(last?.type).toBe('state');
+    if (last?.type === 'state') {
+      expect(last.state.verdict).toBe('FREEZE');
+      expect(last.state.forensic.export_hash).not.toBeNull();
+      expect(last.state.forensic.countersign).toEqual({ server_verdict: 'FREEZE', recomputed: true });
+    }
+
+    ws.close();
+  }, 10000);
+
+  it('IMPORTANT 3 (final review): scenario-a (STAGE) also ends with a non-null export_hash and recomputed true', async () => {
+    const { wsBase } = await start();
+    const ws = new WebSocket(`${wsBase}/ws/replay/scenario-a-dana-legitimate?speed=50`);
+    await new Promise<void>((resolve, reject) => {
+      ws.once('open', () => resolve());
+      ws.once('error', reject);
+    });
+
+    const events = await collectUntilEnded(ws);
+    const stateEvents = events.filter((e) => e.type === 'state');
+    const last = stateEvents.at(-1);
+    expect(last?.type).toBe('state');
+    if (last?.type === 'state') {
+      expect(last.state.verdict).toBe('STAGE');
+      expect(last.state.forensic.export_hash).not.toBeNull();
+      expect(last.state.forensic.countersign).toEqual({ server_verdict: 'STAGE', recomputed: true });
+    }
+
+    ws.close();
+  }, 10000);
+
   it('rejects a replay path containing ".." with close code 4404', async () => {
     const { wsBase } = await start();
     const ws = new WebSocket(`${wsBase}/ws/replay/..`);

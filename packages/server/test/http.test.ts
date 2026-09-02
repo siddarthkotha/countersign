@@ -50,11 +50,25 @@ describe('http server', () => {
       '33333333-3333-3333-3333-333333333333',
       '44444444-4444-4444-4444-444444444444',
     ];
+    // These http.test.ts cases never open a `/ws/call/:id` socket -- there is no live
+    // `CallSession` here, only the caps reservation `/api/session/start` made. A minimal
+    // `endCall` stub (free the caps slot if it's active) exercises exactly what http.ts's
+    // `/end`/`/reset` routes actually need from it (CRITICAL 1, final review); `ws/browser.
+    // test.ts` covers the real `endCall` -- ending a live call, not just a reservation.
+    let stateRef: CapsState;
     const { server, state } = createHttpServer(cfg(cfgOverrides), {
       fetchImpl: globalThis.fetch,
       now: () => clock,
       randomId: () => ids[counter++] ?? `99999999-9999-9999-9999-99999999999${counter}`,
+      endCall: (id) => {
+        if (stateRef.active.has(id)) {
+          stateRef.active.delete(id);
+          return true;
+        }
+        return false;
+      },
     });
+    stateRef = state;
     return new Promise((resolve) => {
       server.listen(0, '127.0.0.1', () => {
         const addr = server.address() as AddressInfo;

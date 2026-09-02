@@ -88,8 +88,12 @@ export const RECONNECT_BACKOFF_MS = [500, 1000, 2000, 4000];
  *  frames were dropped (capture kept running, nowhere to send them) during this down cycle
  *  -- a worker->main-thread-only detail, not part of the wire protocol between browser and
  *  server, so it's additive here rather than on the shared `ServerEvent` type. `dropped_frames`
- *  resets to 0 the moment a `restored` carries the count for its cycle. */
-export type LinkPost = { type: 'link'; state: 'lost' | 'restored'; dropped_frames: number };
+ *  resets to 0 the moment a `restored` carries the count for its cycle.
+ *  IMPORTANT 2 (final review): `leg` is always `'browser'` here -- this IS the
+ *  browser<->server leg dropping (worker.ts's own socket to our server), distinct from the
+ *  AAI leg's own `link` events, which arrive as ordinary `ServerEvent`s (already carrying
+ *  `leg:'aai'`) forwarded straight through by `s.onmessage` below, never constructed here. */
+export type LinkPost = { type: 'link'; state: 'lost' | 'restored'; leg: 'browser'; dropped_frames: number };
 
 export interface ConnectionHandle {
   /** Forwards a BrowserEvent to the live socket; silently dropped while the link is down --
@@ -129,7 +133,7 @@ export function createConnection(
     };
     s.onopen = () => {
       if (attempt > 0) {
-        const restored: LinkPost = { type: 'link', state: 'restored', dropped_frames: droppedFrames };
+        const restored: LinkPost = { type: 'link', state: 'restored', leg: 'browser', dropped_frames: droppedFrames };
         post(restored);
         droppedFrames = 0;
       }
@@ -139,7 +143,7 @@ export function createConnection(
       socket = null;
       if (intentionalClose) return;
       if (attempt === 0) {
-        const lost: LinkPost = { type: 'link', state: 'lost', dropped_frames: droppedFrames };
+        const lost: LinkPost = { type: 'link', state: 'lost', leg: 'browser', dropped_frames: droppedFrames };
         post(lost);
       }
       retry();

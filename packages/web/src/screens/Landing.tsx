@@ -59,7 +59,7 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
       </div>
 
       {unavailableReason && (
-        <p className="banner">Live calls are unavailable right now: {unavailableReason}</p>
+        <p className="banner" role="alert">Live calls are unavailable right now: {unavailableReason}</p>
       )}
 
       <MicCheck onResult={setMicOk} />
