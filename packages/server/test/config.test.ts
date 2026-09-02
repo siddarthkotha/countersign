@@ -42,3 +42,20 @@ describe('loadConfig — allowed_origins', () => {
     ).toEqual(['https://a.example', 'https://b.example']);
   });
 });
+
+// Origin fix round 1 (task-origin-fix1-brief.md #2): X-Forwarded-Proto/X-Forwarded-Host are
+// only ever honoured (origin.ts's selfOrigin) when this is explicitly on -- default off
+// everywhere except render.yaml, which sets it to "1" because Render's edge is the one
+// process actually setting those headers.
+describe('loadConfig — trust_proxy', () => {
+  it('defaults to false when COUNTERSIGN_TRUST_PROXY is unset', () => {
+    expect(loadConfig({}).trust_proxy).toBe(false);
+  });
+
+  it('is true only for the exact value "1"', () => {
+    expect(loadConfig({ COUNTERSIGN_TRUST_PROXY: '1' }).trust_proxy).toBe(true);
+    expect(loadConfig({ COUNTERSIGN_TRUST_PROXY: 'true' }).trust_proxy).toBe(false);
+    expect(loadConfig({ COUNTERSIGN_TRUST_PROXY: '0' }).trust_proxy).toBe(false);
+    expect(loadConfig({ COUNTERSIGN_TRUST_PROXY: '' }).trust_proxy).toBe(false);
+  });
+});

@@ -26,6 +26,7 @@ function cfg(overrides: Partial<ServerConfig> = {}): ServerConfig {
     mint_rate_per_minute: 100,
     kill_switch: false,
     allowed_origins: ['http://localhost:5173'],
+    trust_proxy: false,
     browser_grace_ms: 20000,
     ...overrides,
   };
@@ -191,8 +192,8 @@ describe('http server', () => {
     expect(r.headers.get('access-control-allow-origin')).toBe(base);
   });
 
-  it('CORS: allows this server\'s own origin via X-Forwarded-Proto/X-Forwarded-Host (how Render presents it)', async () => {
-    const { base } = await start();
+  it('CORS: allows this server\'s own origin via X-Forwarded-Proto/X-Forwarded-Host when COUNTERSIGN_TRUST_PROXY is on (how Render presents it)', async () => {
+    const { base } = await start({ trust_proxy: true });
     const r = await fetch(`${base}/api/session/start`, {
       method: 'OPTIONS',
       headers: {
@@ -204,8 +205,8 @@ describe('http server', () => {
     expect(r.headers.get('access-control-allow-origin')).toBe('https://countersign-abc123.onrender.com');
   });
 
-  it('CORS: a foreign origin is still denied even when X-Forwarded headers are present', async () => {
-    const { base } = await start();
+  it('CORS: a foreign origin is still denied even when X-Forwarded headers are present and trusted', async () => {
+    const { base } = await start({ trust_proxy: true });
     const r = await fetch(`${base}/api/session/start`, {
       method: 'OPTIONS',
       headers: {
@@ -215,6 +216,92 @@ describe('http server', () => {
       },
     });
     expect(r.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  // Requirement (task-origin-fix1-brief.md #2): X-Forwarded-* is only ever honoured when
+  // COUNTERSIGN_TRUST_PROXY=1 -- without it (the default everywhere except render.yaml), a
+  // direct caller can't lie about its own origin by forging a forwarded header.
+  it('CORS: X-Forwarded-Proto/X-Forwarded-Host are ignored when COUNTERSIGN_TRUST_PROXY is off (the default)', async () => {
+    const { base } = await start({ trust_proxy: false });
+
+    // The forged forwarded host is NOT trusted, so it must not be treated as same-origin.
+    const rForged = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://countersign-abc123.onrender.com',
+        'X-Forwarded-Proto': 'https',
+        'X-Forwarded-Host': 'countersign-abc123.onrender.com',
+      },
+    });
+    expect(rForged.headers.get('access-control-allow-origin')).toBeNull();
+
+    // The server's REAL own origin (plain Host header) still works, forwarded headers or not.
+    const rReal = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: base,
+        'X-Forwarded-Proto': 'https',
+        'X-Forwarded-Host': 'countersign-abc123.onrender.com',
+      },
+    });
+    expect(rReal.headers.get('access-control-allow-origin')).toBe(base);
+  });
+
+  // Requirement (task-origin-fix1-brief.md #5, exact case): a Render-shaped deployed hostname,
+  // trusted forwarded headers, matching a browser Origin with no port.
+  it('CORS: Host countersign-bf8q.onrender.com + trusted X-Forwarded-Proto https matches Origin https://countersign-bf8q.onrender.com', async () => {
+    const { base } = await start({ trust_proxy: true });
+    const r = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://countersign-bf8q.onrender.com',
+        'X-Forwarded-Proto': 'https',
+        'X-Forwarded-Host': 'countersign-bf8q.onrender.com',
+      },
+    });
+    expect(r.headers.get('access-control-allow-origin')).toBe('https://countersign-bf8q.onrender.com');
+  });
+
+  // Requirement (task-origin-fix1-brief.md #5): a Host header that spells out the scheme's
+  // default port explicitly (":443" for https) must still match a browser Origin, which never
+  // includes a default port.
+  it('CORS: Host with explicit :443 matches an Origin with no port, when trusted', async () => {
+    const { base } = await start({ trust_proxy: true });
+    const r = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://countersign-bf8q.onrender.com',
+        'X-Forwarded-Proto': 'https',
+        'X-Forwarded-Host': 'countersign-bf8q.onrender.com:443',
+      },
+    });
+    expect(r.headers.get('access-control-allow-origin')).toBe('https://countersign-bf8q.onrender.com');
+  });
+
+  // Minor finding (task-origin-review.md): comparison is case-insensitive, so a mixed-case
+  // forwarded Host still recognizes the same origin a lowercase browser Origin sends.
+  it('CORS: a mixed-case forwarded Host still matches a lowercase Origin, when trusted', async () => {
+    const { base } = await start({ trust_proxy: true });
+    const r = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://countersign-bf8q.onrender.com',
+        'X-Forwarded-Proto': 'https',
+        'X-Forwarded-Host': 'Countersign-Bf8Q.Onrender.com',
+      },
+    });
+    expect(r.headers.get('access-control-allow-origin')).toBe('https://countersign-bf8q.onrender.com');
+  });
+
+  // Minor finding (task-origin-review.md): a configured allowlist entry with a trailing slash
+  // still matches a browser Origin, which never carries one.
+  it('CORS: a configured allowlist entry with a trailing slash still matches', async () => {
+    const { base } = await start({ allowed_origins: ['https://extra.example/'] });
+    const r = await fetch(`${base}/api/session/start`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://extra.example' },
+    });
+    expect(r.headers.get('access-control-allow-origin')).toBe('https://extra.example');
   });
 
   it('CORS: a configured extra origin is still allowed alongside same-origin', async () => {

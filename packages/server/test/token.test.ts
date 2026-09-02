@@ -13,6 +13,7 @@ function cfg(overrides: Partial<ServerConfig> = {}): ServerConfig {
     mint_rate_per_minute: 6,
     kill_switch: false,
     allowed_origins: ['http://localhost:5173'],
+    trust_proxy: false,
     browser_grace_ms: 20000,
     ...overrides,
   };

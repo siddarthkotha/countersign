@@ -46,11 +46,22 @@ describe('ws/browser — /ws/replay/:file', () => {
       caps: newCapsState(),
       now: () => Date.now(),
       createAai: () => new FakeAaiSocket(),
+      // Origin fix round 1: attachWebSocketServer's upgrade handler now gates on Origin
+      // before it even looks at the path -- this replay-only test server never sets
+      // COUNTERSIGN_TRUST_PROXY, and no custom allowlist matters here, only same-origin.
+      cfg: { allowed_origins: [], trust_proxy: false },
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const addr = server.address() as AddressInfo;
     closers.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
     return { wsBase: `ws://127.0.0.1:${addr.port}` };
+  }
+
+  /** Same-origin `Origin` header for a WS connection to this test's own server -- see
+   *  browser-ws.test.ts's identical helper for the full reasoning (no TLS/proxy trust in
+   *  this test server, so it's always plain `http://<host>`). */
+  function selfOriginFor(wsBase: string): string {
+    return wsBase.replace(/^ws:/, 'http:');
   }
 
   function collectUntilEnded(ws: WebSocket): Promise<ServerEvent[]> {
@@ -66,7 +77,7 @@ describe('ws/browser — /ws/replay/:file', () => {
 
   it('streams scenario-a at speed=50 and ends on a STAGE state with link "replay"', async () => {
     const { wsBase } = await start();
-    const ws = new WebSocket(`${wsBase}/ws/replay/scenario-a-dana-legitimate?speed=50`);
+    const ws = new WebSocket(`${wsBase}/ws/replay/scenario-a-dana-legitimate?speed=50`, { origin: selfOriginFor(wsBase) });
     await new Promise<void>((resolve, reject) => {
       ws.once('open', () => resolve());
       ws.once('error', reject);
@@ -88,7 +99,7 @@ describe('ws/browser — /ws/replay/:file', () => {
 
   it('IMPORTANT 3 (final review): scenario-b ends with a non-null export_hash and recomputed true, same as a live run', async () => {
     const { wsBase } = await start();
-    const ws = new WebSocket(`${wsBase}/ws/replay/scenario-b-miller-fraud?speed=50`);
+    const ws = new WebSocket(`${wsBase}/ws/replay/scenario-b-miller-fraud?speed=50`, { origin: selfOriginFor(wsBase) });
     await new Promise<void>((resolve, reject) => {
       ws.once('open', () => resolve());
       ws.once('error', reject);
@@ -109,7 +120,7 @@ describe('ws/browser — /ws/replay/:file', () => {
 
   it('IMPORTANT 3 (final review): scenario-a (STAGE) also ends with a non-null export_hash and recomputed true', async () => {
     const { wsBase } = await start();
-    const ws = new WebSocket(`${wsBase}/ws/replay/scenario-a-dana-legitimate?speed=50`);
+    const ws = new WebSocket(`${wsBase}/ws/replay/scenario-a-dana-legitimate?speed=50`, { origin: selfOriginFor(wsBase) });
     await new Promise<void>((resolve, reject) => {
       ws.once('open', () => resolve());
       ws.once('error', reject);
@@ -130,7 +141,7 @@ describe('ws/browser — /ws/replay/:file', () => {
 
   it('rejects a replay path containing ".." with close code 4404', async () => {
     const { wsBase } = await start();
-    const ws = new WebSocket(`${wsBase}/ws/replay/..`);
+    const ws = new WebSocket(`${wsBase}/ws/replay/..`, { origin: selfOriginFor(wsBase) });
     const closeCode = await new Promise<number>((resolve) => {
       ws.once('close', (code) => resolve(code));
     });
@@ -139,7 +150,7 @@ describe('ws/browser — /ws/replay/:file', () => {
 
   it('rejects an unknown corpus file with close code 4404', async () => {
     const { wsBase } = await start();
-    const ws = new WebSocket(`${wsBase}/ws/replay/not-a-real-corpus-file`);
+    const ws = new WebSocket(`${wsBase}/ws/replay/not-a-real-corpus-file`, { origin: selfOriginFor(wsBase) });
     const closeCode = await new Promise<number>((resolve) => {
       ws.once('close', (code) => resolve(code));
     });

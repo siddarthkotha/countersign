@@ -33,7 +33,9 @@ import { MERIDIAN, mockToolResult } from '@countersign/engine';
 import type { BrowserEvent, CallContext, SeedConfig, ServerEvent } from '@countersign/engine';
 import { endSession, touch, type CapsState } from '../caps.js';
 import type { AaiSocket } from '../aai/types.js';
+import type { ServerConfig } from '../config.js';
 import { CallSession } from '../call/session.js';
+import { isAllowedOrigin } from '../origin.js';
 import { defaultCorpusDir, loadCorpusFile, runReplay } from '../replay.js';
 import { makeThrottle, THROTTLE_WINDOW_MS } from './throttle.js';
 
@@ -56,6 +58,14 @@ const AUDIO_BUFFER_MS = 3000;
 export interface BrowserWsDeps {
   caps: CapsState;
   now: () => number;
+  /** CRITICAL (task-origin-review.md): the CORS allowlist + proxy-trust bit, shared with
+   *  http.ts's `applyCors` via origin.ts's `isAllowedOrigin`/`selfOrigin`. Browsers don't
+   *  apply the Same-Origin Policy to WebSocket upgrades (no preflight), so this is the ONLY
+   *  gate on which pages can open `/ws/call/:id` or `/ws/replay/:file` at all -- see the
+   *  `server.on('upgrade', ...)` handler below. Only the two fields `isAllowedOrigin` actually
+   *  reads, not the full `ServerConfig`, to match this interface's existing narrow-deps style
+   *  (`seed`/`corpusDir`/`buildCallContext` above). */
+  cfg: Pick<ServerConfig, 'allowed_origins' | 'trust_proxy'>;
   /** Creates the AAI connection for one call session. index.ts supplies a `FakeAaiSocket`
    *  factory under `COUNTERSIGN_FAKE_AAI=1`; the real adapter (S3) plugs in here too. */
   createAai: (session_id: string) => AaiSocket;
@@ -403,6 +413,23 @@ export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): Brow
   }
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    // CRITICAL (task-origin-review.md): the only origin gate for a WebSocket upgrade at
+    // all -- browsers apply no Same-Origin Policy to `new WebSocket(...)`, so without this
+    // any page on any origin that learns a live session id could open `/ws/call/:id`
+    // directly. Checked BEFORE any path match, so a disallowed origin gets a raw HTTP 403
+    // and never learns anything about which paths exist. A missing `Origin` header is
+    // treated the same as a disallowed one -- `isAllowedOrigin` already returns false for it
+    // (real browsers always send `Origin` on a WS upgrade; a non-browser client without one
+    // is exactly the case this check exists to keep out). `socket.write` + `socket.destroy`
+    // (a raw HTTP 403) rather than completing the WS handshake and closing after -- closing
+    // post-handshake would send a normal WS close frame, not an HTTP 403, and would burn a
+    // real upgrade on a request that was never going to be allowed to make one.
+    if (!isAllowedOrigin(req, deps.cfg)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
     const url = new URL(req.url ?? '/', 'http://internal');
     const callMatch = /^\/ws\/call\/([^/]+)$/.exec(url.pathname);
     const replayMatch = /^\/ws\/replay\/([^/]+)$/.exec(url.pathname);

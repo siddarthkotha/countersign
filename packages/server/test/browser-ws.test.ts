@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import type { AddressInfo } from 'node:net';
+import { connect as netConnect, type AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import WebSocket from 'ws';
 import { createHttpServer } from '../src/http.js';
@@ -20,6 +20,7 @@ function cfg(overrides: Partial<ServerConfig> = {}): ServerConfig {
     mint_rate_per_minute: 100,
     kill_switch: false,
     allowed_origins: ['http://localhost:5173'],
+    trust_proxy: false,
     browser_grace_ms: 20000,
     ...overrides,
   };
@@ -32,7 +33,9 @@ describe('ws/browser — /ws/call/:id', () => {
     for (const close of closers.splice(0)) await close();
   });
 
-  async function start(opts: { browser_grace_ms?: number; session_cap_seconds?: number } = {}): Promise<{
+  async function start(
+    opts: { browser_grace_ms?: number; session_cap_seconds?: number; allowed_origins?: string[]; trust_proxy?: boolean } = {}
+  ): Promise<{
     base: string;
     wsBase: string;
     state: CapsState;
@@ -43,7 +46,16 @@ describe('ws/browser — /ws/call/:id', () => {
     let counter = 0;
     const aaiInstances = new Map<string, FakeAaiSocket>();
 
-    const { server, state } = createHttpServer(cfg(), {
+    // Origin fix round 1: one shared ServerConfig for both createHttpServer (CORS) and
+    // attachWebSocketServer (the WS upgrade's own origin gate) -- same object http.ts and
+    // ws/browser.ts both read through origin.ts, not two independently-built configs that
+    // could drift apart.
+    const serverCfg = cfg({
+      ...(opts.allowed_origins !== undefined ? { allowed_origins: opts.allowed_origins } : {}),
+      ...(opts.trust_proxy !== undefined ? { trust_proxy: opts.trust_proxy } : {}),
+    });
+
+    const { server, state } = createHttpServer(serverCfg, {
       fetchImpl: globalThis.fetch,
       now: () => Date.now(),
       randomId: () => ids[counter++] ?? `id-${counter}`,
@@ -61,6 +73,7 @@ describe('ws/browser — /ws/call/:id', () => {
         aaiInstances.set(session_id, aai);
         return aai;
       },
+      cfg: serverCfg,
       ...(opts.browser_grace_ms !== undefined ? { browser_grace_ms: opts.browser_grace_ms } : {}),
       ...(opts.session_cap_seconds !== undefined ? { session_cap_seconds: opts.session_cap_seconds } : {}),
     });
@@ -78,9 +91,20 @@ describe('ws/browser — /ws/call/:id', () => {
     };
   }
 
-  function connect(url: string): Promise<WebSocket> {
+  /** The `Origin` header a real browser on the same host+port as `url` would send on a WS
+   *  upgrade -- these tests' server never sets COUNTERSIGN_TRUST_PROXY, so its own origin is
+   *  always its plain `http://<host>` (never `wss:`/`https:` here, this is a loopback test
+   *  server with no TLS). Used as the DEFAULT origin for `connect`/`connectAndCollect` so
+   *  every existing same-origin test keeps working unchanged; the dedicated origin-check
+   *  tests below pass a different `origin` explicitly. */
+  function selfOriginFor(url: string): string {
+    const u = new URL(url);
+    return `${u.protocol === 'wss:' ? 'https:' : 'http:'}//${u.host}`;
+  }
+
+  function connect(url: string, origin: string | null = selfOriginFor(url)): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url);
+      const ws = new WebSocket(url, origin !== null ? { origin } : undefined);
       ws.once('open', () => resolve(ws));
       ws.once('error', reject);
     });
@@ -114,9 +138,12 @@ describe('ws/browser — /ws/call/:id', () => {
    *  latest state, buffered audio) the instant the connection completes, so collecting only
    *  starts from `await connect()`'s resolution (like the other tests here, which never race
    *  because the server has nothing to say until they send `start`) would lose it. */
-  function connectAndCollect(url: string): Promise<{ ws: WebSocket; messages: ServerEvent[] }> {
+  function connectAndCollect(
+    url: string,
+    origin: string | null = selfOriginFor(url)
+  ): Promise<{ ws: WebSocket; messages: ServerEvent[] }> {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url);
+      const ws = new WebSocket(url, origin !== null ? { origin } : undefined);
       const messages: ServerEvent[] = [];
       ws.on('message', (data) => messages.push(JSON.parse(data.toString()) as ServerEvent));
       ws.once('open', () => resolve({ ws, messages }));
@@ -126,7 +153,7 @@ describe('ws/browser — /ws/call/:id', () => {
 
   it('closes with 4404 for an id nobody started', async () => {
     const { wsBase } = await start();
-    const ws = new WebSocket(`${wsBase}/ws/call/nonexistent-id`);
+    const ws = await connect(`${wsBase}/ws/call/nonexistent-id`);
     const closeCode = await new Promise<number>((resolve) => {
       ws.once('close', (code) => resolve(code));
     });
@@ -276,7 +303,7 @@ describe('ws/browser — /ws/call/:id', () => {
     const { ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
 
     const ws1 = await connect(`${wsBase}${ws_path}`);
-    const ws2 = new WebSocket(`${wsBase}${ws_path}`);
+    const ws2 = new WebSocket(`${wsBase}${ws_path}`, { origin: selfOriginFor(wsBase) });
     const closeCode = await new Promise<number>((resolve) => {
       ws2.once('close', (code) => resolve(code));
     });
@@ -358,5 +385,71 @@ describe('ws/browser — /ws/call/:id', () => {
     expect(messages.find((m) => m.type === 'link')).toEqual({ type: 'link', state: 'lost', leg: 'aai' });
 
     ws.close();
+  });
+
+  // CRITICAL (task-origin-review.md): the WS upgrade path's own origin gate, tested at the
+  // raw TCP level rather than through the `ws` client library -- the requirement is
+  // specifically that a disallowed origin gets a raw `HTTP/1.1 403 Forbidden` response and
+  // the socket destroyed BEFORE any WS handshake completes (never a normal WS close frame,
+  // which is what closing post-handshake would send instead). A hand-rolled HTTP/1.1 upgrade
+  // request is the only way to observe that exact byte-level behaviour and to send NO Origin
+  // header at all (the `ws` client library always sends one when `options.origin` is set, and
+  // never a way to omit `Host`/other required headers while still testing this precisely).
+  function rawUpgradeRequest(wsBase: string, path: string, origin: string | undefined): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const u = new URL(`${wsBase}${path}`.replace(/^wss?:/, 'http:'));
+      const socket = netConnect(Number(u.port), u.hostname, () => {
+        const headers = [
+          `Host: ${u.host}`,
+          'Connection: Upgrade',
+          'Upgrade: websocket',
+          'Sec-WebSocket-Version: 13',
+          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+          ...(origin !== undefined ? [`Origin: ${origin}`] : []),
+        ].join('\r\n');
+        socket.write(`GET ${u.pathname}${u.search} HTTP/1.1\r\n${headers}\r\n\r\n`);
+      });
+      let raw = '';
+      socket.on('data', (chunk) => {
+        raw += chunk.toString('utf8');
+      });
+      socket.once('close', () => resolve(raw));
+      socket.once('error', reject);
+      // A same-origin/allowed request completes the WS handshake and then just sits there
+      // (no close code the server will send unprompted) -- destroy it after a short window so
+      // this promise still resolves with whatever response line it got.
+      setTimeout(() => socket.destroy(), 200);
+    });
+  }
+
+  it('CRITICAL: a same-origin WS upgrade request completes the handshake (HTTP/1.1 101)', async () => {
+    const { wsBase } = await start();
+    const raw = await rawUpgradeRequest(wsBase, '/ws/call/nonexistent-id', selfOriginFor(wsBase));
+    expect(raw.split('\r\n')[0]).toBe('HTTP/1.1 101 Switching Protocols');
+  });
+
+  it('CRITICAL: a foreign-origin WS upgrade request gets a raw 403 and the socket is destroyed, never a WS handshake', async () => {
+    const { wsBase } = await start();
+    const raw = await rawUpgradeRequest(wsBase, '/ws/call/nonexistent-id', 'http://evil.example');
+    expect(raw.split('\r\n')[0]).toBe('HTTP/1.1 403 Forbidden');
+    expect(raw).not.toContain('101 Switching Protocols');
+  });
+
+  it('CRITICAL: a WS upgrade request with a configured extra origin succeeds (HTTP/1.1 101)', async () => {
+    const { wsBase } = await start({ allowed_origins: ['https://extra.example'] });
+    const raw = await rawUpgradeRequest(wsBase, '/ws/call/nonexistent-id', 'https://extra.example');
+    expect(raw.split('\r\n')[0]).toBe('HTTP/1.1 101 Switching Protocols');
+  });
+
+  it('CRITICAL: a WS upgrade request with NO Origin header at all is denied with a raw 403 (browsers always send one)', async () => {
+    const { wsBase } = await start();
+    const raw = await rawUpgradeRequest(wsBase, '/ws/call/nonexistent-id', undefined);
+    expect(raw.split('\r\n')[0]).toBe('HTTP/1.1 403 Forbidden');
+  });
+
+  it('CRITICAL: the origin gate also covers /ws/replay, not just /ws/call', async () => {
+    const { wsBase } = await start();
+    const raw = await rawUpgradeRequest(wsBase, '/ws/replay/scenario-a-dana-legitimate?speed=50', 'http://evil.example');
+    expect(raw.split('\r\n')[0]).toBe('HTTP/1.1 403 Forbidden');
   });
 });

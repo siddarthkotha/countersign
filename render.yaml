@@ -41,6 +41,12 @@ services:
       # config either way. See docs/DEPLOY.md §3.
       - key: COUNTERSIGN_ALLOWED_ORIGINS
         value: ""
+      # Render's edge terminates TLS and sets X-Forwarded-Proto/X-Forwarded-Host in front of
+      # this service -- trusted here (and ONLY here; local/dev never sets this) so same-origin
+      # recognition (origin.ts) reads the real deployed scheme/host, not a guess. See
+      # docs/DEPLOY.md.
+      - key: COUNTERSIGN_TRUST_PROXY
+        value: "1"
       - key: COUNTERSIGN_SESSION_CAP_SECONDS
         value: "300"
       - key: COUNTERSIGN_MAX_CONCURRENT

@@ -98,6 +98,13 @@ of this service, or a second front end (e.g. a staging site) that needs to call 
 backend from a different origin — same-origin coverage for this service's own URL stays on
 either way.
 
+Same-origin recognition trusts the `Host`/`X-Forwarded-Proto`/`X-Forwarded-Host` headers a
+proxy in front of this service sets — but only when `COUNTERSIGN_TRUST_PROXY=1` is actually
+set, which `render.yaml` does (Render's edge is the trusted proxy setting those headers).
+Never set this locally: with it off (the default everywhere except Render), the server
+figures out its own origin from the plain `Host` header and whether the connection itself is
+TLS, so a direct caller can't lie about its origin by forging a forwarded header.
+
 ## 4. The kill switch
 
 `COUNTERSIGN_KILL_SWITCH` is a Render environment variable, not a live in-app toggle (there

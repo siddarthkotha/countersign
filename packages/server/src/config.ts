@@ -8,6 +8,14 @@ export interface ServerConfig {
   mint_rate_per_minute: number;
   kill_switch: boolean;
   allowed_origins: string[];
+  /** Origin fix round 1 (IMPORTANT finding, task-origin-review.md): whether `X-Forwarded-
+   *  Proto`/`X-Forwarded-Host` (origin.ts's `selfOrigin`) are trusted at all. Default false --
+   *  those headers are only meaningful when a trusted proxy in front of this process sets
+   *  them (Render's edge does, which is why render.yaml sets `COUNTERSIGN_TRUST_PROXY=1`);
+   *  trusting them unconditionally would let any direct caller lie about its own origin.
+   *  Local dev never sets this, so `selfOrigin` there always falls back to the plain `Host`
+   *  header and this request's own socket scheme. */
+  trust_proxy: boolean;
   /** Task R1: how long a call session keeps running server-side (AAI socket up, engine
    *  evaluating, evidence intact) after its browser WebSocket drops, waiting for the same
    *  session id to reattach before the call is actually ended (`browser_gone`) and the caps
@@ -52,6 +60,7 @@ export function loadConfig(env: Record<string, string | undefined>): ServerConfi
     mint_rate_per_minute: intFromEnv(env.COUNTERSIGN_MINT_RATE, 6),
     kill_switch: env.COUNTERSIGN_KILL_SWITCH === '1',
     allowed_origins,
+    trust_proxy: env.COUNTERSIGN_TRUST_PROXY === '1',
     browser_grace_ms: intFromEnv(env.COUNTERSIGN_BROWSER_GRACE_MS, 20000),
   };
 }
