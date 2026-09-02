@@ -2,11 +2,11 @@
 #
 # Render's Free plan suspends the service after 15 minutes with no traffic and takes about a
 # minute to wake back up on the next request (verified docs/hosting-render-check-2026-09-02.md).
-# That is a dead-on-arrival demo if a judge's first click is what wakes it up. The real fix is
-# switching `plan: free` to `plan: starter` in render.yaml before judging week (docs/DEPLOY.md
-# has the one-line switch) -- an always-on plan never spins down, so this workflow becomes
-# unnecessary once that switch happens. Until then, this is the fallback: a periodic ping to
-# /health keeps the free instance awake during active build/rehearsal hours.
+# An event judge confirmed on 2026-09-02 that a cold start is acceptable, so the free plan is
+# the plan for the whole hackathon (render.yaml). This workflow is an OPTIONAL convenience: a
+# periodic ping to /health keeps the free instance awake during active build/rehearsal hours,
+# so nobody waits a minute on the first click. `plan: starter` (always-on, $7/mo) remains an
+# optional upgrade described in docs/DEPLOY.md; it would make this workflow unnecessary.
 #
 # DISABLED BY DEFAULT: the `schedule` trigger below is commented out, so this workflow only
 # ever runs when someone manually triggers it (`workflow_dispatch`, in the Actions tab, or
