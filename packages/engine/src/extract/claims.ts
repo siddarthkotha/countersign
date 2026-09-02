@@ -91,8 +91,17 @@ function trimName(raw: string): string {
   return (cut === -1 ? raw : raw.slice(0, cut)).trimEnd();
 }
 
-export function extractCuedNames(text: string): CuedNameHit[] {
-  const hits: { index: number; hit: CuedNameHit }[] = [];
+interface RawCuedNameMatch {
+  field: CuedNameField;
+  index: number; // char offset of the (trimmed) name within `text`
+  name: string;
+}
+
+/** Shared scan used by both `extractCuedNames` and `cuedNameSpans` so the two never drift
+ *  apart -- a name the ledger records as an approver/counsel/escrow/beneficiary is exactly
+ *  the same span the identity extractor is told to ignore. */
+function collectCuedNameMatches(text: string): RawCuedNameMatch[] {
+  const matches: RawCuedNameMatch[] = [];
   for (const { field, re } of CUE_PATTERNS) {
     re.lastIndex = 0;
     let m: RegExpExecArray | null;
@@ -101,9 +110,26 @@ export function extractCuedNames(text: string): CuedNameHit[] {
       const name = trimName(rawName);
       if (name.length === 0) continue;
       const nameStart = m.index + m[0].indexOf(rawName);
-      hits.push({ index: nameStart, hit: { field, value: name, quote: text.slice(nameStart, nameStart + name.length) } });
+      matches.push({ field, index: nameStart, name });
     }
   }
-  hits.sort((a, b) => a.index - b.index);
-  return hits.map((h) => h.hit);
+  matches.sort((a, b) => a.index - b.index);
+  return matches;
+}
+
+export function extractCuedNames(text: string): CuedNameHit[] {
+  return collectCuedNameMatches(text).map(({ field, index, name }) => ({
+    field,
+    value: name,
+    quote: text.slice(index, index + name.length),
+  }));
+}
+
+/** Character spans (start inclusive, end exclusive) of every name captured by a cued-name
+ *  pattern -- "approved by X", "counsel is X", "escrow ... X", "pay/wire/send/transfer to
+ *  X", "beneficiary/vendor is X", etc. `extractIdentityClaim` (src/extract/identity.ts)
+ *  skips any name match that falls inside one of these spans: a named approver, counsel,
+ *  escrow institution, or beneficiary is never the caller's own identity claim. */
+export function cuedNameSpans(text: string): { start: number; end: number }[] {
+  return collectCuedNameMatches(text).map(({ index, name }) => ({ start: index, end: index + name.length }));
 }

@@ -36,6 +36,23 @@ describe('extractIdentityClaim', () => {
   it('returns null for unknown names', () => {
     expect(extractIdentityClaim('This is Steve from IT', MERIDIAN)).toBeNull();
   });
+
+  // RULING (identity-cue fix): a bare name mention is not a self-identification. A named
+  // approver/counsel/escrow/beneficiary elsewhere in the sentence is never the caller.
+  it.each([
+    ['This is Robert Miller. I am about to close', 'robert-miller'],
+    ["Actually, I'm Dana Whitfield", 'dana-whitfield'],
+    ['Robert Miller here', 'robert-miller'],
+    ['Dana Whitfield, corporate treasury', 'dana-whitfield'],
+    ['no, it was approved by Elena Park', null],
+    ['Marcus Obi approved it yesterday', null],
+    ['counsel is Calder & Finch and Marcus said go', null],
+    ['Mr. Miller here', 'robert-miller'],
+    ['I spoke with Dana Whitfield earlier', null],
+  ])('%s → %s', (text, identity_id) => {
+    const hit = extractIdentityClaim(text, MERIDIAN);
+    expect(hit?.identity_id ?? null).toBe(identity_id);
+  });
 });
 
 describe('extractPressure', () => {
