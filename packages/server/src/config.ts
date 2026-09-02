@@ -8,6 +8,11 @@ export interface ServerConfig {
   mint_rate_per_minute: number;
   kill_switch: boolean;
   allowed_origins: string[];
+  /** Task R1: how long a call session keeps running server-side (AAI socket up, engine
+   *  evaluating, evidence intact) after its browser WebSocket drops, waiting for the same
+   *  session id to reattach before the call is actually ended (`browser_gone`) and the caps
+   *  slot freed. */
+  browser_grace_ms: number;
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -39,5 +44,6 @@ export function loadConfig(env: Record<string, string | undefined>): ServerConfi
     mint_rate_per_minute: intFromEnv(env.COUNTERSIGN_MINT_RATE, 6),
     kill_switch: env.COUNTERSIGN_KILL_SWITCH === '1',
     allowed_origins,
+    browser_grace_ms: intFromEnv(env.COUNTERSIGN_BROWSER_GRACE_MS, 20000),
   };
 }

@@ -5,6 +5,19 @@
 // audio, no caps session). Reuses the http.ts server for the WebSocket upgrade and the
 // CapsState it returned, per the plan ("the server is the only authority" -- this file owns
 // no state of its own beyond per-connection throttling).
+//
+// Task R1 (browser reconnect -- "voice link lost, security state preserved"): the call
+// itself (the AssemblyAI session, the engine, the evidence) lives on the server and does NOT
+// end just because a browser WebSocket drops. `activeCalls` (module-local to one
+// `attachWebSocketServer` call) tracks one `CallEntry` per live-or-in-grace session id,
+// independent of any one browser socket. On close, the entry keeps its `CallSession` running,
+// swaps its delivery target to a small buffer (audio only, last ~3s), and starts a grace
+// timer (`browser_grace_ms`, default 20 000). A new socket for the same id within the grace
+// window reattaches to the SAME session -- `link:'restored'` first, then the latest
+// ScreenState, then any buffered audio, then live events -- and cancels the timer. A second
+// concurrent attach while one is already live is refused (4409): this is a reconnect
+// mechanism, not multi-tenancy for one call. Grace expiry ends the session (`browser_gone`)
+// and frees the caps slot, same as an explicit close always did before this task.
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -16,6 +29,17 @@ import { CallSession } from '../call/session.js';
 import { defaultCorpusDir, loadCorpusFile, runReplay } from '../replay.js';
 
 const STATE_THROTTLE_MS = 66;
+
+/** Matches config.ts's own `COUNTERSIGN_BROWSER_GRACE_MS` default -- kept as a local literal
+ *  rather than importing ServerConfig here so `BrowserWsDeps.browser_grace_ms` stays a plain
+ *  optional (deps-only) knob, same shape as `seed`/`corpusDir`/`buildCallContext` above it.
+ *  index.ts is free to thread `cfg.browser_grace_ms` through later; until it does, every
+ *  caller (including production) gets the documented default. */
+const DEFAULT_BROWSER_GRACE_MS = 20000;
+
+/** How much of the AAI's spoken reply to keep buffered (newest-first eviction) while a
+ *  session is between browser sockets, so a reattach doesn't open on dead air. */
+const AUDIO_BUFFER_MS = 3000;
 
 export interface BrowserWsDeps {
   caps: CapsState;
@@ -29,6 +53,31 @@ export interface BrowserWsDeps {
    *  selection (Dana vs. "Robert Miller") is a later task's concern -- S2 just needs
    *  somewhere honest to put a default rather than inventing one inline. */
   buildCallContext?: (session_id: string) => CallContext;
+  /** Task R1: milliseconds a call session survives a dropped browser socket before it's
+   *  actually ended. Defaults to `DEFAULT_BROWSER_GRACE_MS`; tests override it to keep grace
+   *  windows short instead of waiting out the real 20s default. */
+  browser_grace_ms?: number;
+}
+
+/** One call session's life, independent of any single browser socket. Lives in
+ *  `activeCalls` from the moment a fresh `/ws/call/:id` attach creates the `CallSession`
+ *  until the session actually ends (grace expiry, or the session ending itself). */
+interface CallEntry {
+  session: CallSession;
+  /** The currently attached browser socket, or null while in the grace window between
+   *  sockets. Checked on `ws.on('close')` so a stale close from a socket a reattach already
+   *  replaced can never tear down the NEW socket's attachment. */
+  ws: WebSocket | null;
+  graceTimer: ReturnType<typeof setTimeout> | null;
+  /** Where ServerEvents actually go right now: a throttled sender to `ws` while attached, or
+   *  a small buffer while detached. Swapped in place (never rebuilding CallSession's
+   *  `onServerEvent`, which closes over this entry once, for the entry's whole life). */
+  deliver: (e: ServerEvent) => void;
+  /** The most recent `state` ServerEvent, kept even while attached -- what a reattach
+   *  replays immediately, before any live event. */
+  lastState: Extract<ServerEvent, { type: 'state' }> | null;
+  /** Reply audio buffered while detached, oldest first, capped to `AUDIO_BUFFER_MS`. */
+  audioBuffer: { data: string; t: number }[];
 }
 
 function defaultCallContext(session_id: string): CallContext {
@@ -76,7 +125,121 @@ function makeThrottledSender(ws: WebSocket): (e: ServerEvent) => void {
   };
 }
 
-function handleCallSocket(ws: WebSocket, session_id: string, deps: BrowserWsDeps): void {
+/** While detached (grace window), only `audio` is worth keeping -- `state` is captured
+ *  separately (in `entry.lastState`, updated centrally so it's current whether attached or
+ *  not) and `flush`/`link`/`ended` are transient signals nobody is around to receive; the
+ *  buffer's whole job is "don't open a reattach on dead air." */
+function makeGraceBuffer(entry: CallEntry, now: () => number): (e: ServerEvent) => void {
+  return (e: ServerEvent) => {
+    if (e.type !== 'audio') return;
+    const t = now();
+    entry.audioBuffer.push({ data: e.data, t });
+    const cutoff = t - AUDIO_BUFFER_MS;
+    while (entry.audioBuffer.length > 0 && entry.audioBuffer[0]!.t < cutoff) {
+      entry.audioBuffer.shift();
+    }
+  };
+}
+
+/** The CallSession's fixed `onServerEvent` for the entry's whole life: tracks `lastState`
+ *  regardless of attachment, runs the (attached-or-detached-agnostic) cleanup a real `ended`
+ *  event always needs, then hands the event to whichever `deliver` is current. */
+function makeEntrySink(
+  session_id: string,
+  deps: BrowserWsDeps,
+  activeCalls: Map<string, CallEntry>,
+  entry: CallEntry,
+): (e: ServerEvent) => void {
+  return (e: ServerEvent) => {
+    if (e.type === 'state') entry.lastState = e;
+    if (e.type === 'ended') {
+      if (entry.graceTimer) {
+        clearTimeout(entry.graceTimer);
+        entry.graceTimer = null;
+      }
+      activeCalls.delete(session_id);
+      endSession(deps.caps, session_id);
+    }
+    entry.deliver(e);
+  };
+}
+
+/** Detach: the browser socket is gone but the call keeps running. Swaps delivery to the
+ *  grace buffer and starts the timer that, with no reattach, actually ends the call. */
+function startGrace(session_id: string, deps: BrowserWsDeps, activeCalls: Map<string, CallEntry>, entry: CallEntry): void {
+  entry.ws = null;
+  entry.deliver = makeGraceBuffer(entry, deps.now);
+  const graceMs = deps.browser_grace_ms ?? DEFAULT_BROWSER_GRACE_MS;
+  entry.graceTimer = setTimeout(() => {
+    activeCalls.delete(session_id);
+    entry.session.end('browser_gone');
+    endSession(deps.caps, session_id);
+  }, graceMs);
+}
+
+/** Wires message/close handling for whichever socket -- fresh or reattached -- is currently
+ *  `entry.ws`. `entry.ws !== ws` in the close handler guards against a stale close firing
+ *  for a socket a reattach already replaced. */
+function wireSocketHandlers(ws: WebSocket, session_id: string, deps: BrowserWsDeps, activeCalls: Map<string, CallEntry>, entry: CallEntry): void {
+  ws.on('message', (data) => {
+    touch(deps.caps, session_id, deps.now());
+    let msg: BrowserEvent;
+    try {
+      msg = JSON.parse(data.toString()) as BrowserEvent;
+    } catch {
+      return;
+    }
+    entry.session.handleBrowser(msg);
+  });
+
+  ws.on('close', () => {
+    if (entry.ws !== ws) return;
+    if (entry.session.hasEnded()) {
+      // The call already finished (caller_ended, an AAI error, ...) -- this close is just
+      // the browser catching up to that, not a drop worth a grace window.
+      activeCalls.delete(session_id);
+      endSession(deps.caps, session_id);
+      return;
+    }
+    startGrace(session_id, deps, activeCalls, entry);
+  });
+}
+
+/** A new socket for a session id already in `activeCalls`, still in its grace window
+ *  (`entry.ws === null` -- the caller in `handleCallSocket` already refused the case where
+ *  something is still attached, with 4409). Cancels the grace timer, re-attaches live
+ *  delivery, and replays what the reattaching browser missed: `link:'restored'`, the latest
+ *  ScreenState, then any buffered audio -- all before any new live event can arrive. */
+function reattach(ws: WebSocket, session_id: string, deps: BrowserWsDeps, activeCalls: Map<string, CallEntry>, entry: CallEntry): void {
+  if (entry.graceTimer) {
+    clearTimeout(entry.graceTimer);
+    entry.graceTimer = null;
+  }
+  entry.ws = ws;
+  entry.deliver = makeThrottledSender(ws);
+  touch(deps.caps, session_id, deps.now());
+
+  safeSend(ws, { type: 'link', state: 'restored' });
+  if (entry.lastState) safeSend(ws, entry.lastState);
+  for (const frame of entry.audioBuffer) safeSend(ws, { type: 'audio', data: frame.data });
+  entry.audioBuffer = [];
+
+  wireSocketHandlers(ws, session_id, deps, activeCalls, entry);
+}
+
+function handleCallSocket(ws: WebSocket, session_id: string, deps: BrowserWsDeps, activeCalls: Map<string, CallEntry>): void {
+  const existing = activeCalls.get(session_id);
+  if (existing) {
+    if (existing.ws) {
+      // Someone is already attached and live: this is a reconnect mechanism for ONE browser
+      // at a time, not multi-tenancy for a single call.
+      ws.close(4409, 'already connected');
+      return;
+    }
+    reattach(ws, session_id, deps, activeCalls, existing);
+    return;
+  }
+
   if (!deps.caps.active.has(session_id)) {
     ws.close(4404, 'unknown session');
     return;
@@ -84,7 +247,6 @@ function handleCallSocket(ws: WebSocket, session_id: string, deps: BrowserWsDeps
 
   const seed = deps.seed ?? MERIDIAN;
   const call = (deps.buildCallContext ?? defaultCallContext)(session_id);
-  const send = makeThrottledSender(ws);
 
   let aai: AaiSocket;
   try {
@@ -94,31 +256,31 @@ function handleCallSocket(ws: WebSocket, session_id: string, deps: BrowserWsDeps
     return;
   }
 
+  // `entry` is referenced by `onServerEvent` below before `session` exists -- built via a
+  // placeholder assigned immediately after construction, same pattern the grace/reattach
+  // helpers above rely on (the entry outlives any one socket, so it can't be built from a
+  // session that isn't constructed yet).
+  const entry = {
+    ws,
+    graceTimer: null,
+    deliver: makeThrottledSender(ws),
+    lastState: null,
+    audioBuffer: [],
+  } as unknown as CallEntry;
+
   const session = new CallSession({
     session_id,
     seed,
     call,
     aai,
     now: deps.now,
-    onServerEvent: send,
+    onServerEvent: makeEntrySink(session_id, deps, activeCalls, entry),
     mock: mockToolResult,
   });
+  entry.session = session;
+  activeCalls.set(session_id, entry);
 
-  ws.on('message', (data) => {
-    touch(deps.caps, session_id, deps.now());
-    let msg: BrowserEvent;
-    try {
-      msg = JSON.parse(data.toString()) as BrowserEvent;
-    } catch {
-      return;
-    }
-    session.handleBrowser(msg);
-  });
-
-  ws.on('close', () => {
-    session.end('browser_closed');
-    endSession(deps.caps, session_id);
-  });
+  wireSocketHandlers(ws, session_id, deps, activeCalls, entry);
 }
 
 function handleReplaySocket(ws: WebSocket, file: string, speedParam: string | null, deps: BrowserWsDeps): void {
@@ -147,6 +309,10 @@ function handleReplaySocket(ws: WebSocket, file: string, speedParam: string | nu
 
 export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): void {
   const wss = new WebSocketServer({ noServer: true });
+  // One map per `attachWebSocketServer` call (i.e. per server), not module-global -- each
+  // test spins up its own server via its own call, so their in-grace sessions never bleed
+  // into each other.
+  const activeCalls = new Map<string, CallEntry>();
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url ?? '/', 'http://internal');
@@ -155,7 +321,7 @@ export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): void
 
     if (callMatch) {
       const id = decodeURIComponent(callMatch[1]!);
-      wss.handleUpgrade(req, socket, head, (ws) => handleCallSocket(ws, id, deps));
+      wss.handleUpgrade(req, socket, head, (ws) => handleCallSocket(ws, id, deps, activeCalls));
       return;
     }
     if (replayMatch) {

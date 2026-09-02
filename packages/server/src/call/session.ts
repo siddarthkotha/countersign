@@ -131,6 +131,14 @@ export class CallSession {
     this.opts.onServerEvent({ type: 'ended', reason });
   }
 
+  /** Task R1: lets the transport layer (ws/browser.ts) tell an ended call apart from a call
+   *  that's merely between browser sockets during its grace window -- a browser reattach is
+   *  offered only for the latter; a call the engine already finished never gets a second
+   *  life just because a new socket showed up for its id. */
+  hasEnded(): boolean {
+    return this.ended;
+  }
+
   // ---------- internals ----------
 
   private nowT(): number {
@@ -210,6 +218,15 @@ export class CallSession {
       case 'session.ended':
         this.end('aai_ended');
         return;
+
+      case 'link':
+        // S3's AAI-transport reconnect (server<->AssemblyAI dropped and resumed) surfaced
+        // to whichever browser is currently attached -- distinct from Task R1's own
+        // browser<->server link (ws/browser.ts owns that one entirely; this is a pass-
+        // through, not a state change). The engine's verdict is untouched either way, so
+        // this never goes through applyEvaluate/emitState -- just forward the signal.
+        this.opts.onServerEvent({ type: 'link', state: evt.state });
+        break;
     }
     this.tick();
   }

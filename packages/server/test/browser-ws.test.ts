@@ -20,6 +20,7 @@ function cfg(overrides: Partial<ServerConfig> = {}): ServerConfig {
     mint_rate_per_minute: 100,
     kill_switch: false,
     allowed_origins: ['http://localhost:5173'],
+    browser_grace_ms: 20000,
     ...overrides,
   };
 }
@@ -31,7 +32,7 @@ describe('ws/browser — /ws/call/:id', () => {
     for (const close of closers.splice(0)) await close();
   });
 
-  async function start(): Promise<{
+  async function start(opts: { browser_grace_ms?: number } = {}): Promise<{
     base: string;
     wsBase: string;
     state: CapsState;
@@ -55,6 +56,7 @@ describe('ws/browser — /ws/call/:id', () => {
         aaiInstances.set(session_id, aai);
         return aai;
       },
+      ...(opts.browser_grace_ms !== undefined ? { browser_grace_ms: opts.browser_grace_ms } : {}),
     });
 
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -81,6 +83,21 @@ describe('ws/browser — /ws/call/:id', () => {
     const out: ServerEvent[] = [];
     ws.on('message', (data) => out.push(JSON.parse(data.toString()) as ServerEvent));
     return out;
+  }
+
+  /** Attaches the message collector in the SAME tick as the socket is constructed, before
+   *  `open` fires -- a reattach can have the server writing its replay (link:restored, the
+   *  latest state, buffered audio) the instant the connection completes, so collecting only
+   *  starts from `await connect()`'s resolution (like the other tests here, which never race
+   *  because the server has nothing to say until they send `start`) would lose it. */
+  function connectAndCollect(url: string): Promise<{ ws: WebSocket; messages: ServerEvent[] }> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(url);
+      const messages: ServerEvent[] = [];
+      ws.on('message', (data) => messages.push(JSON.parse(data.toString()) as ServerEvent));
+      ws.once('open', () => resolve({ ws, messages }));
+      ws.once('error', reject);
+    });
   }
 
   it('closes with 4404 for an id nobody started', async () => {
@@ -148,8 +165,8 @@ describe('ws/browser — /ws/call/:id', () => {
     ws.close();
   });
 
-  it('releases the caps slot when the browser socket closes', async () => {
-    const { base, wsBase, state } = await start();
+  it('keeps the caps slot (and the session alive) during the grace window after the browser socket closes', async () => {
+    const { base, wsBase, state } = await start({ browser_grace_ms: 500 });
     const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
     const { session_id, ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
     expect(state.active.has(session_id)).toBe(true);
@@ -158,6 +175,70 @@ describe('ws/browser — /ws/call/:id', () => {
     ws.close();
     await new Promise((resolve) => setTimeout(resolve, 50));
 
+    // Well within the 500ms grace window: the slot is still taken -- a browser drop does not
+    // end the call (the AssemblyAI session and the evidence live on the server).
+    expect(state.active.has(session_id)).toBe(true);
+  });
+
+  it('ends the session and frees the caps slot once the grace window expires with no reattach', async () => {
+    const { base, wsBase, state } = await start({ browser_grace_ms: 150 });
+    const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
+    const { session_id, ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
+
+    const ws = await connect(`${wsBase}${ws_path}`);
+    ws.close();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
     expect(state.active.has(session_id)).toBe(false);
+  });
+
+  it('a reattach within the grace window receives link:restored then the latest state, and the call keeps running', async () => {
+    const { base, wsBase, state, aaiInstances } = await start({ browser_grace_ms: 2000 });
+    const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
+    const { session_id, ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
+
+    const ws1 = await connect(`${wsBase}${ws_path}`);
+    ws1.send(JSON.stringify({ type: 'start' }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    ws1.close();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    // Still within grace: slot held, session alive.
+    expect(state.active.has(session_id)).toBe(true);
+
+    const { ws: ws2, messages } = await connectAndCollect(`${wsBase}${ws_path}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(messages[0]).toEqual({ type: 'link', state: 'restored' });
+    const stateMsg = messages.find((m) => m.type === 'state');
+    expect(stateMsg?.type).toBe('state');
+    if (stateMsg?.type === 'state') expect(stateMsg.state.session_id).toBe(session_id);
+
+    // The same underlying call session (and its AAI socket) is still the one that was
+    // started before the drop -- a reattach never spins up a second AssemblyAI connection.
+    expect(aaiInstances.size).toBe(1);
+
+    // Live events keep flowing to the reattached socket.
+    const aai = aaiInstances.get(session_id)!;
+    aai.emit({ type: 'transcript.user', item_id: 'after-reattach', text: 'hello again' });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(messages.some((m) => m.type === 'state')).toBe(true);
+
+    ws2.close();
+  });
+
+  it('refuses a second concurrent attach for the same id with 4409 while the first is still live', async () => {
+    const { base, wsBase } = await start();
+    const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
+    const { ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
+
+    const ws1 = await connect(`${wsBase}${ws_path}`);
+    const ws2 = new WebSocket(`${wsBase}${ws_path}`);
+    const closeCode = await new Promise<number>((resolve) => {
+      ws2.once('close', (code) => resolve(code));
+    });
+
+    expect(closeCode).toBe(4409);
+    ws1.close();
   });
 });

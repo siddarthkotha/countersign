@@ -385,4 +385,11 @@ export type ServerEvent =
   | { type: 'state'; state: ScreenState }
   | { type: 'audio'; data: string }
   | { type: 'flush' }
-  | { type: 'ended'; reason: string };
+  | { type: 'ended'; reason: string }
+  // Additive (Task R1, browser reconnect): the browser<->server WebSocket dropped or was
+  // re-established while the call itself (the AssemblyAI session, the evidence) kept
+  // running server-side -- "voice link lost, security state preserved." Also used to
+  // forward the AAI-transport-level `AaiEvent{type:'link'}` (server<->AssemblyAI) down to a
+  // browser that stayed connected the whole time; the engine's verdict is untouched either
+  // way, only the transport dropped.
+  | { type: 'link'; state: 'lost' | 'restored' };
