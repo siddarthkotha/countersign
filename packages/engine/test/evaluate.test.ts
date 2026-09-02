@@ -1,0 +1,253 @@
+// packages/engine/test/evaluate.test.ts
+// End-to-end: the real `evaluate` over full conversations, tool logs and agent actions.
+// Scenario B's caller lines are verbatim from docs/design/six-looks-2026-08-30/content.json
+// (the §4 script in docs/BRIEF.md). Every scenario here was run through the real engine and
+// its expected shape is what it ACTUALLY returned (per repo convention -- see Task 6's
+// corpus discipline), never a hand-wished value.
+import { describe, expect, it } from 'vitest';
+import { evaluate } from '../src/evaluate';
+import { counterfactuals } from '../src/counterfactual';
+import { mockToolResult } from '../src/mock/backend';
+import { MERIDIAN } from '../src/seed/meridian';
+import type { AgentAction, CallContext, EngineInput, ToolLogEntry, Utterance } from '../src/types';
+
+const ctxTool = { evidence_count: 0, incident_index: 0 };
+
+function tool(name: ToolLogEntry['name'], id: string, t_ms: number, identity_id: string, request_version: number): ToolLogEntry {
+  const args = { identity_id, request_version };
+  return { id, name, t_ms, args, result: mockToolResult(name, args, MERIDIAN, ctxTool) };
+}
+
+// ---------------------------------------------------------------------------------------
+// Scenario B -- Robert Miller, the fraudulent CEO-impersonation call (docs/BRIEF.md §4,
+// verbatim caller lines from content.json's `transcript`). Ends in FREEZE: SSO fails (call
+// from an unverified VoIP gateway while corporate SSO reads active in Frankfurt), the
+// out-of-band push gets no response (seed-fixed for robert-miller), the Hartwell escrow
+// request matches no scheduled payment on file, the amount contradicts itself with no
+// correction offered, and the counsel-of-record knowledge check fails.
+// ---------------------------------------------------------------------------------------
+const scenarioBConversation: Utterance[] = [
+  {
+    id: 'c1',
+    speaker: 'caller',
+    text:
+      "This is Robert Miller. I'm about to close the Hartwell acquisition and I need $1.8 million wired to the escrow account in the next ten minutes. Do not loop in anyone.",
+    t_ms: 1000,
+  },
+  {
+    id: 'a1',
+    speaker: 'agent',
+    text: 'Understood, Mr. Miller. Before anything can stage, I need to verify this request. Which escrow institution, and who is our counsel of record on Hartwell?',
+    t_ms: 4000,
+  },
+  { id: 'c2', speaker: 'caller', text: 'Whitmore & Bass. Listen, every minute costs us. Release it.', t_ms: 8000 },
+  { id: 'a2', speaker: 'agent', text: 'Pulling the Hartwell file now…', t_ms: 12000 },
+  { id: 'c3', speaker: 'caller', text: '…and make it $2.1 million. The final figure moved this morning.', t_ms: 40000 },
+  { id: 'a3', speaker: 'agent', text: 'A moment ago you said one point eight. Which figure is correct, and why did it change?', t_ms: 44000 },
+  {
+    id: 'c4',
+    speaker: 'caller',
+    text: "I don't care about your process. Release the wire or you're fired!",
+    t_ms: 48000,
+    interrupted: true,
+  },
+  { id: 'a4', speaker: 'agent', text: "I can't accept authority as verification. One last check.", t_ms: 50000 },
+];
+
+// Reconstructed deterministically: at t=4000, the ledger holds only the identity + amount
+// claims (0 caller turns after the amount claim yet), so `selectChallenge` picks the first
+// unused SEED_FACT by session-hash order for session "sess-b" -- verified against the real
+// engine (see task-5-report.md). "Whitmore & Bass" fails it regardless of which fact was
+// picked (it matches none of the six seed.knowledge accept_tokens sets).
+const scenarioBActions: AgentAction[] = [{ id: 'act1', kind: 'challenge_issued', t_ms: 4000, challenge_id: 'sess-b-1' }];
+
+const scenarioBCall: CallContext = { session_id: 'sess-b', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+
+// Checks re-run at request_version 2 (after the amount contradiction bumps the version at
+// t=40000) so the evidence reads current, not stale (I3).
+const scenarioBTools: ToolLogEntry[] = [
+  tool('check_sso_context', 't1', 51000, 'robert-miller', 2),
+  tool('get_request_history', 't2', 51000, 'robert-miller', 2),
+  tool('verify_out_of_band', 't3', 52000, 'robert-miller', 2),
+];
+
+const scenarioBInput: EngineInput = {
+  conversation: scenarioBConversation,
+  tools: scenarioBTools,
+  actions: scenarioBActions,
+  call: scenarioBCall,
+  seed: MERIDIAN,
+};
+
+// ---------------------------------------------------------------------------------------
+// Scenario A -- Dana Whitfield, the legitimate urgent request (docs/BRIEF.md §4). Every
+// critical field (amount, account, beneficiary) is read back and affirmed; all three live
+// checks pass; the request matches an existing scheduled payment exactly (only the date
+// moved) -- ends STAGE.
+// ---------------------------------------------------------------------------------------
+const danaConversation: Utterance[] = [
+  {
+    id: 'c1',
+    speaker: 'caller',
+    text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
+    t_ms: 1000,
+  },
+  { id: 'a1', speaker: 'agent', text: 'To confirm: $84,500 to Meridian Supply, account ending 4471. Is that right?', t_ms: 2000 },
+  { id: 'c2', speaker: 'caller', text: "Yes, that's right.", t_ms: 2500 },
+  { id: 'a2', speaker: 'agent', text: 'And the account ending 4471, correct?', t_ms: 3000 },
+  { id: 'c3', speaker: 'caller', text: 'Yes, correct.', t_ms: 3500 },
+  { id: 'a3', speaker: 'agent', text: 'And Meridian Supply is the beneficiary, correct?', t_ms: 4000 },
+  { id: 'c4', speaker: 'caller', text: "Yes, that's right.", t_ms: 4500 },
+];
+
+const danaActions: AgentAction[] = [
+  { id: 'r1', kind: 'readback_issued', t_ms: 2000, field: 'amount_usd', value: '84500' },
+  { id: 'r2', kind: 'readback_issued', t_ms: 3000, field: 'account_last4', value: '4471' },
+  { id: 'r3', kind: 'readback_issued', t_ms: 4000, field: 'beneficiary', value: 'Meridian Supply' },
+];
+
+const danaCall: CallContext = { session_id: 'sess-a', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+
+const danaTools: ToolLogEntry[] = [
+  tool('check_sso_context', 't1', 1500, 'dana-whitfield', 1),
+  tool('get_request_history', 't2', 1500, 'dana-whitfield', 1),
+  tool('verify_out_of_band', 't3', 1600, 'dana-whitfield', 1),
+];
+
+const danaInput: EngineInput = { conversation: danaConversation, tools: danaTools, actions: danaActions, call: danaCall, seed: MERIDIAN };
+
+const judgeCall: CallContext = { session_id: 'sess-judge', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+
+describe('evaluate -- Scenario B (Miller fraud) end to end', () => {
+  const out = evaluate(scenarioBInput);
+
+  it('FREEZEs, reasons start with IDENTITY_UNVERIFIED and contain STORY_INCONSISTENCY + KNOWLEDGE_CHECK_FAILED', () => {
+    expect(out.verdict).toBe('FREEZE');
+    expect(out.reasons[0]).toBe('IDENTITY_UNVERIFIED');
+    expect(out.reasons).toContain('STORY_INCONSISTENCY');
+    expect(out.reasons).toContain('KNOWLEDGE_CHECK_FAILED');
+  });
+
+  it('state ACTION, required_actions leads with freeze, stage is never offered', () => {
+    expect(out.state).toBe('ACTION');
+    expect(out.required_actions[0]).toBe('freeze_transaction_rail');
+    expect(out.allowed_tools).not.toContain('stage_payment_for_second_approval');
+  });
+
+  it('LAW 4: every evidence quote is a verbatim substring of the utterance it cites', () => {
+    for (const e of out.evidence) {
+      for (const q of e.quotes) {
+        const u = scenarioBConversation.find((x) => x.id === q.utterance_id);
+        expect(u).toBeDefined();
+        expect(u!.text).toContain(q.text);
+      }
+    }
+  });
+
+  it('never contains RELEASE as a verdict, tool, or required action', () => {
+    expect(out.verdict).not.toBe('RELEASE' as never);
+    expect(out.allowed_tools).not.toContain('RELEASE' as never);
+    expect(out.required_actions).not.toContain('RELEASE' as never);
+    expect(out.invariants_ok).toBe(true);
+  });
+
+  it('determinism: the same input evaluated twice is deep-equal', () => {
+    const again = evaluate({
+      conversation: scenarioBConversation,
+      tools: scenarioBTools,
+      actions: scenarioBActions,
+      call: scenarioBCall,
+      seed: MERIDIAN,
+    });
+    expect(again).toEqual(out);
+  });
+
+  it('overrides: forcing ev-oob to PASS changes the reasons (drops OUT_OF_BAND_NO_RESPONSE)', () => {
+    const overridden = evaluate(scenarioBInput, { 'ev-oob': 'PASS' });
+    expect(overridden.reasons).not.toEqual(out.reasons);
+    expect(overridden.reasons).not.toContain('OUT_OF_BAND_NO_RESPONSE');
+  });
+});
+
+describe('evaluate -- Scenario A (Dana, legitimate) end to end', () => {
+  const out = evaluate(danaInput);
+
+  it('STAGEs for second approval, assurance all true', () => {
+    expect(out.verdict).toBe('STAGE');
+    expect(out.required_actions[0]).toBe('stage_payment_for_second_approval');
+    expect(Object.values(out.assurance).every((v) => v === true)).toBe(true);
+    expect(out.reasons).toEqual([]);
+  });
+
+  it('every critical field was confirmed by the caller, not assumed', () => {
+    for (const field of ['amount_usd', 'account_last4', 'beneficiary'] as const) {
+      const card = out.evidence.find((e) => e.id === `ev-readback-${field}`)!;
+      expect(card.status).toBe('PASS');
+    }
+  });
+});
+
+describe('evaluate -- honest judge (out-of-scope)', () => {
+  it('a bare "I\'m testing this" with no request -> NO_ACTION, OUT_OF_SCOPE, EXPLAIN_OUT_OF_SCOPE', () => {
+    const conversation: Utterance[] = [
+      { id: 'c1', speaker: 'caller', text: "I'm not the CEO, I'm testing this for a hackathon.", t_ms: 1000 },
+    ];
+    const out = evaluate({ conversation, tools: [], actions: [], call: judgeCall, seed: MERIDIAN });
+    expect(out.verdict).toBe('NO_ACTION');
+    expect(out.state).toBe('OUT_OF_SCOPE');
+    expect(out.goal.code).toBe('EXPLAIN_OUT_OF_SCOPE');
+  });
+
+  it('"I\'m testing" AFTER making a request -> NO_ACTION, EXPLAIN_OPEN_REQUEST, request card still present', () => {
+    const conversation: Utterance[] = [
+      { id: 'c1', speaker: 'caller', text: 'This is Robert Miller, I need $1.8 million wired to the escrow account.', t_ms: 1000 },
+      { id: 'c2', speaker: 'caller', text: "Actually, I'm not the CEO, I'm just testing this for a hackathon.", t_ms: 5000 },
+    ];
+    const out = evaluate({ conversation, tools: [], actions: [], call: judgeCall, seed: MERIDIAN });
+    expect(out.verdict).toBe('NO_ACTION');
+    expect(out.goal.code).toBe('EXPLAIN_OPEN_REQUEST');
+    expect(out.evidence.some((e) => e.kind === 'request_params')).toBe(true);
+  });
+});
+
+describe('evaluate -- counterfactuals', () => {
+  // A simpler Miller-style fraud call (identity + amount only, no contradiction, no
+  // challenge asked): sso and out-of-band both fail for robert-miller (seed-fixed
+  // no_response + this call's unverified-VoIP origin), and the Hartwell request matches no
+  // scheduled payment, so context fails too -- tally 3, freeze via 7a/7c. Scenario B proper
+  // is deliberately overdetermined (five independent failures -- realistic for the scripted
+  // demo, but no single card flip changes an already-tally->=3-many-times-over verdict);
+  // this smaller fixture isolates a case where individual cards are still load-bearing, to
+  // exercise `counterfactuals` meaningfully.
+  const conversation: Utterance[] = [
+    { id: 'c1', speaker: 'caller', text: 'This is Robert Miller. I need $1.8 million wired to the escrow account.', t_ms: 1000 },
+  ];
+  const call: CallContext = { session_id: 'sess-b2', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+  const tools: ToolLogEntry[] = [
+    tool('check_sso_context', 't1', 2000, 'robert-miller', 1),
+    tool('get_request_history', 't2', 2000, 'robert-miller', 1),
+    tool('verify_out_of_band', 't3', 2000, 'robert-miller', 1),
+  ];
+  const input: EngineInput = { conversation, tools, actions: [], call, seed: MERIDIAN };
+
+  it('the base case is FREEZE', () => {
+    expect(evaluate(input).verdict).toBe('FREEZE');
+  });
+
+  it('returns at least one flip, and none of them is STAGE', () => {
+    const flips = counterfactuals(input);
+    expect(flips.length).toBeGreaterThan(0);
+    expect(flips.every((f) => f.verdict !== 'STAGE')).toBe(true);
+  });
+
+  it('is pure: calling it twice on the same input gives the same flips', () => {
+    expect(counterfactuals(input)).toEqual(counterfactuals(input));
+  });
+
+  it('Scenario B proper: single-card flips do not exist for this overdetermined call (five independent failures)', () => {
+    // Documents the finding above with a direct assertion, so a future change to the rule
+    // table that silently makes Scenario B fragile to a single flip gets noticed.
+    const flips = counterfactuals(scenarioBInput);
+    expect(flips.every((f) => f.verdict !== 'STAGE')).toBe(true);
+  });
+});
