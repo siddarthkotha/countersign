@@ -170,10 +170,12 @@ function startGrace(session_id: string, deps: BrowserWsDeps, activeCalls: Map<st
   entry.ws = null;
   entry.deliver = makeGraceBuffer(entry, deps.now);
   const graceMs = deps.browser_grace_ms ?? DEFAULT_BROWSER_GRACE_MS;
+  // Fix round 1 (minor): `entry.session.end(...)` alone is enough -- it emits `ended`, which
+  // `makeEntrySink` above already routes into `activeCalls.delete` + `endSession` for us.
+  // Doing both here too was dead-redundant, not a second safety net (this timer only ever
+  // fires once, and `CallSession.end` is itself idempotent).
   entry.graceTimer = setTimeout(() => {
-    activeCalls.delete(session_id);
     entry.session.end('browser_gone');
-    endSession(deps.caps, session_id);
   }, graceMs);
 }
 
@@ -195,10 +197,10 @@ function wireSocketHandlers(ws: WebSocket, session_id: string, deps: BrowserWsDe
   ws.on('close', () => {
     if (entry.ws !== ws) return;
     if (entry.session.hasEnded()) {
-      // The call already finished (caller_ended, an AAI error, ...) -- this close is just
-      // the browser catching up to that, not a drop worth a grace window.
-      activeCalls.delete(session_id);
-      endSession(deps.caps, session_id);
+      // The call already finished (caller_ended, an AAI error, ...) -- that `ended` event
+      // already ran makeEntrySink's cleanup (activeCalls.delete + endSession) when it fired,
+      // so this close is just the browser catching up to it, not a drop worth a grace window
+      // or a second cleanup.
       return;
     }
     startGrace(session_id, deps, activeCalls, entry);

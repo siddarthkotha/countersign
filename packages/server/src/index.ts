@@ -138,6 +138,11 @@ attachWebSocketServer(server, {
   caps: state,
   now: () => Date.now(),
   createAai,
+  // Task R1 fix round 1: without this, a dropped browser socket always got the deps-level
+  // default (ws/browser.ts's DEFAULT_BROWSER_GRACE_MS) regardless of what an operator set
+  // for COUNTERSIGN_BROWSER_GRACE_MS -- the env var parsed into `cfg` but was never actually
+  // read anywhere.
+  browser_grace_ms: cfg.browser_grace_ms,
 });
 
 if (useFakeAai) {
