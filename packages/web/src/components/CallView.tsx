@@ -3,9 +3,12 @@
 // brief). Renders `ScreenState` verbatim: this component computes NOTHING about verdicts,
 // gates, or evidence -- every word on screen is a field read straight off the prop. Status
 // words are always rendered as text, never colour-only. The "simulated" banner is present
-// unconditionally.
+// unconditionally, rendered via the shared `SimulatedBanner` component (Task R1: the banner
+// text has one source -- Call.tsx renders the same component for every moment CallView isn't
+// on screen instead of this file keeping its own copy).
 import { useState } from 'react';
 import type { AssuranceChecklist, Claim, ChallengeResult, Evidence, ScreenState } from '@countersign/engine';
+import SimulatedBanner from './SimulatedBanner';
 
 export type CallViewProps = {
   screen: ScreenState;
@@ -74,7 +77,7 @@ export default function CallView({ screen }: CallViewProps) {
 
   return (
     <div className="call-view">
-      {screen.simulated === true && <p className="banner">Every system here is simulated.</p>}
+      {screen.simulated === true && <SimulatedBanner />}
 
       <header className="request-header">
         <p>Claimed identity: {screen.request.claimed_identity ?? 'unknown'}</p>

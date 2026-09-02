@@ -14,6 +14,9 @@ export interface CallClient {
   onAudio(cb: (base64: string) => void): void;
   onFlush(cb: () => void): void;
   onEnded(cb: (reason: string) => void): void;
+  /** Task R1: the browser<->server link dropped or was re-established while the call itself
+   *  kept running server-side. Never fires for a legitimate call end -- that's `onEnded`. */
+  onLink(cb: (state: 'lost' | 'restored') => void): void;
   close(): void;
 }
 
@@ -31,6 +34,7 @@ export function connectSocketOnly(ws_path: string, workerFactory: WorkerFactory 
   let audioCb: ((data: string) => void) | null = null;
   let flushCb: (() => void) | null = null;
   let endedCb: ((reason: string) => void) | null = null;
+  let linkCb: ((state: 'lost' | 'restored') => void) | null = null;
 
   worker.onmessage = (event: MessageEvent<ServerEvent>) => {
     const msg = event.data;
@@ -38,6 +42,7 @@ export function connectSocketOnly(ws_path: string, workerFactory: WorkerFactory 
     else if (msg.type === 'audio') audioCb?.(msg.data);
     else if (msg.type === 'flush') flushCb?.();
     else if (msg.type === 'ended') endedCb?.(msg.reason);
+    else if (msg.type === 'link') linkCb?.(msg.state);
   };
 
   worker.postMessage({ type: '__connect', ws_path });
@@ -57,6 +62,9 @@ export function connectSocketOnly(ws_path: string, workerFactory: WorkerFactory 
     },
     onEnded(cb) {
       endedCb = cb;
+    },
+    onLink(cb) {
+      linkCb = cb;
     },
     close() {
       worker.postMessage({ type: 'end' } satisfies BrowserEvent);

@@ -35,6 +35,12 @@ const ENDED_REASON_WORDS: Record<string, string> = {
   aai_ended: 'the voice service closed the session',
   caller_ended: 'the call was ended',
   replay_complete: 'the recording finished',
+  // Task R1: the server gave up waiting for the browser to come back (packages/server/src/
+  // ws/browser.ts's grace window, COUNTERSIGN_BROWSER_GRACE_MS) -- reached only if this
+  // client's own reconnect attempts (src/ws/worker.ts) already exhausted first, since a
+  // successful reattach never produces an `ended` event at all.
+  browser_gone: 'the connection could not be restored in time',
+  link_lost: 'the connection could not be restored in time',
 };
 
 function endedReasonToPlainWords(reason: string): string {
@@ -68,6 +74,11 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
       client.onEnded((reason) => {
         setEndedReason(reason);
         setLink('ended');
+      });
+      client.onLink((state) => {
+        // The AssemblyAI session and the evidence stay put on the server through a dropped
+        // link (Task R1) -- only the chip/status line move; nothing about screenState resets.
+        setLink(state === 'lost' ? 'reconnecting' : 'live');
       });
       clientRef.current = client;
       client.send({ type: 'start' });
@@ -115,6 +126,8 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
           </button>
         </div>
       )}
+
+      {link === 'reconnecting' && <p role="status">Voice link lost, security state preserved. Reconnecting…</p>}
 
       {endedReason && <p role="status">{endedReasonToPlainWords(endedReason)}</p>}
 
