@@ -180,6 +180,11 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
   let reasons: VerdictReason[] = [];
   let rule_hit: number;
 
+  // Named once, used by rows 4 and 5: freeze is allowed to fire on raw, unconfirmed evidence
+  // (the fail-safe note above), so both the challenge row and the readback row must yield to
+  // it rather than stalling a caller who's already freeze-eligible in a loop.
+  const freezeGate = !freezeEligible;
+
   // Row 1 / 2: out of scope.
   if (outOfScopeEv && outOfScopeEv.status === 'FLAG') {
     verdict = 'NO_ACTION';
@@ -194,20 +199,23 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
   // Row 4 (ruling 2026-09-02): a challenge is still required for the risk level and one can
   // still be asked -> ask it before reading back an unconfirmed critical field, so the
   // agent's first question on a risky call is the interrogation, not a readback. Guarded by
-  // !freezeEligible (freeze keeps strict priority over both this row and row 5 -- see the
+  // freezeGate (freeze keeps strict priority over both this row and row 5 -- see the
   // fail-safe note above) and by !ctx.identity_switch_stale: a mid-call identity switch must
   // be re-established from scratch (row 6) before any challenge is put to "whoever is on the
   // line now" -- asking a knowledge question here would trust the abandoned claim's context,
   // exactly what row 6 exists to prevent.
-  else if (!freezeEligible && !ctx.identity_switch_stale && passedChallenges < need && challengesRemaining) {
+  else if (freezeGate && !ctx.identity_switch_stale && passedChallenges < need && challengesRemaining) {
     verdict = 'PENDING';
     rule_hit = 4;
   }
   // Row 5: a critical field is claimed but not yet confirmed (unless freeze is already
   // warranted on the raw evidence -- see the fail-safe note above). Reached once any
   // required challenge for this risk level has already been asked (row 4), or none is
-  // required (need 0).
-  else if (!freezeEligible && !mutant?.skip_readback_gate && !ctx.critical_confirmed) {
+  // required (need 0). Also guarded by !ctx.identity_switch_stale -- fix round (review of
+  // d672070), same reasoning as row 4: reading an amount back to "whoever is on the line
+  // now" would trust the abandoned claim's context just as much as challenging them would,
+  // so row 6 (re-establish identity from scratch) must win here too, not just at row 4.
+  else if (freezeGate && !ctx.identity_switch_stale && !mutant?.skip_readback_gate && !ctx.critical_confirmed) {
     verdict = 'PENDING';
     rule_hit = 5;
   }

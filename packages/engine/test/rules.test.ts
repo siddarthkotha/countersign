@@ -100,6 +100,15 @@ describe('decide -- rule table (first match wins)', () => {
     expect(r.rule_hit).toBe(6);
   });
 
+  it('row 5 is also skipped when an identity switch is in progress, even with an unconfirmed critical field (fix round, review of d672070)', () => {
+    // Same shape as the row-4-is-skipped test above, but this time critical_confirmed is
+    // false too -- proving the readback row doesn't leak through and read an amount back to
+    // "whoever is on the line now" just because no challenge was owed. Row 6 must still win.
+    const r = decide([IDENTITY, REQUEST], SEED, ctx({ identity_switch_stale: true, critical_confirmed: false }));
+    expect(r.verdict).toBe('PENDING');
+    expect(r.rule_hit).toBe(6);
+  });
+
   it('row 5: a critical field is claimed but not confirmed (challenge requirement already met) -> PENDING, rule_hit 5', () => {
     // challenges_issued: 3 exhausts row 4's "challenges remain" condition so this isolates
     // row 5's own gate rather than being pre-empted by row 4.

@@ -439,6 +439,22 @@ describe('evaluate -- challenge-first ordering (ruling 2026-09-02)', () => {
     expect(out.state).toBe('CLAIM');
     expect(out.goal.code).toBe('RE_ELICIT_AFTER_SWITCH');
   });
+
+  it('a mid-call identity switch that happens BEFORE any readback still yields RE_ELICIT_AFTER_SWITCH, never a readback addressed to the abandoned claim (fix round, review of d672070)', () => {
+    // The bug this closes: with no !ctx.identity_switch_stale guard on row 5, an identity
+    // switch that arrives before amount_usd/account/beneficiary are ever confirmed would let
+    // row 5 (readback) leak through and read the abandoned claim's amount back to "whoever
+    // is on the line now" instead of row 6 re-establishing identity from scratch.
+    const conversation: Utterance[] = [
+      danaConversation[0]!, // claims Dana, states amount/account/beneficiary -- unconfirmed
+      { id: 'c2', speaker: 'caller', text: "Actually -- hold on -- this is Robert Miller speaking, I'll take it from here.", t_ms: 1500 },
+    ];
+    const call: CallContext = { session_id: 'sess-switch-early', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const out = evaluate({ conversation, tools: [], actions: [], call, seed: MERIDIAN });
+    expect(out.verdict).toBe('PENDING');
+    expect(out.state).toBe('CLAIM');
+    expect(out.goal.code).toBe('RE_ELICIT_AFTER_SWITCH');
+  });
 });
 
 // ---------------------------------------------------------------------------------------
