@@ -11,7 +11,7 @@
 // before it ever reaches the filesystem, and the resolved path is re-checked (both lexically
 // and via `realpathSync`, so a symlink planted inside dist can't point somewhere else) to
 // fall inside `distRoot` -- belt and suspenders against traversal.
-import { createReadStream, existsSync, realpathSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, fstatSync, realpathSync, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
 
@@ -62,22 +62,19 @@ function sendNotFound(res: ServerResponse, method: string | undefined): void {
 }
 
 function sendFile(res: ServerResponse, filePath: string, cacheControl: string, method: string | undefined): void {
-  const stat = statSync(filePath);
-  res.writeHead(200, {
-    'Content-Type': contentTypeFor(filePath),
-    'Content-Length': stat.size,
-    'Cache-Control': cacheControl,
-  });
-  if (method === 'HEAD') {
-    res.end();
-    return;
-  }
+  // D1 fix round 2: round 1 still opened a TOCTOU window -- it read `statSync(filePath)`
+  // (a fresh, unguarded, synchronous fs call) *before* creating the stream or writing any
+  // header, in the exact same "file disappears between handle()'s existsSync check and this
+  // call" race the original finding described; that throw was uncaught and could crash the
+  // process. Fixed by reordering: create the stream and attach its 'error' handler FIRST
+  // (before any header goes out, so the `!res.headersSent` branch below is finally reachable
+  // rather than dead code), and get the size from `fstatSync` on the stream's own open file
+  // descriptor (its 'open' event) instead of a second `statSync(filePath)` call -- fstat on
+  // an already-open fd can't be invalidated by the file disappearing afterward (POSIX keeps
+  // an open fd's inode alive even once its directory entry is removed), so there is no
+  // remaining stat-time race at all, not just a caught one.
   const stream = createReadStream(filePath);
-  // D1 fix round 1 #4: an unhandled 'error' on a piped ReadStream is an uncaught exception
-  // that can crash the whole process -- e.g. the file disappearing between the existsSync
-  // check above and this read (a redeploy overwriting dist/ mid-request). Degrade to failing
-  // just this one request instead: if headers haven't gone out yet, send a 404; if the 200
-  // header is already flushed, the only safe move left is to tear down the connection.
+
   stream.on('error', () => {
     if (!res.headersSent) {
       sendNotFound(res, method);
@@ -85,7 +82,35 @@ function sendFile(res: ServerResponse, filePath: string, cacheControl: string, m
       res.destroy();
     }
   });
-  stream.pipe(res);
+
+  stream.on('open', (fd: number) => {
+    let size: number;
+    try {
+      size = fstatSync(fd).size;
+    } catch {
+      // Vanishingly unlikely with an already-open fd, but every synchronous fs call in this
+      // file degrades instead of throwing -- no exception here should be different.
+      if (!res.headersSent) sendNotFound(res, method);
+      else res.destroy();
+      stream.destroy();
+      return;
+    }
+
+    res.writeHead(200, {
+      'Content-Type': contentTypeFor(filePath),
+      'Content-Length': size,
+      'Cache-Control': cacheControl,
+    });
+
+    if (method === 'HEAD') {
+      // Headers only, no body -- close the fd without reading/piping any data.
+      res.end();
+      stream.destroy();
+      return;
+    }
+
+    stream.pipe(res);
+  });
 }
 
 /** Decodes and safety-checks a raw URL path (query string already stripped by the caller),
