@@ -245,9 +245,135 @@ describe('evaluate -- counterfactuals', () => {
   });
 
   it('Scenario B proper: single-card flips do not exist for this overdetermined call (five independent failures)', () => {
-    // Documents the finding above with a direct assertion, so a future change to the rule
-    // table that silently makes Scenario B fragile to a single flip gets noticed.
+    // Documents the finding above with a direct assertion (review finding, fix round 1: was
+    // only asserting no-STAGE; now also asserts the flip list itself is empty), so a future
+    // change to the rule table that silently makes Scenario B fragile to a single flip gets
+    // noticed either way -- if it starts producing flips at all, or if any of them is STAGE.
     const flips = counterfactuals(scenarioBInput);
+    expect(flips.length).toBe(0);
     expect(flips.every((f) => f.verdict !== 'STAGE')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Review finding 2/3 (fix round 1): goal.keyterms / goal.turn_detection_hint had zero
+// tests, and keyterms only carried the normalized money string, dropping the caller's
+// verbatim spoken amount.
+// ---------------------------------------------------------------------------------------
+describe('evaluate -- goal.keyterms', () => {
+  const out = evaluate(scenarioBInput);
+
+  it('contains every seed.keyterms entry', () => {
+    for (const k of MERIDIAN.keyterms) expect(out.goal.keyterms).toContain(k);
+  });
+
+  it('contains BOTH the verbatim amount quote and the normalized money string', () => {
+    expect(out.goal.keyterms).toContain('$1.8 million'); // verbatim, as first stated
+    expect(out.goal.keyterms).toContain('$1,800,000'); // normalized
+    // the amount changed mid-call (the contradiction) -- both forms of the later figure too.
+    expect(out.goal.keyterms).toContain('$2.1 million');
+    expect(out.goal.keyterms).toContain('$2,100,000');
+  });
+
+  it("contains the caller's quoted names, e.g. \"Whitmore & Bass\" (from the knowledge-check card's captured reply, not a ledger claim -- the cue-pattern extractor never matched that line)", () => {
+    expect(out.goal.keyterms.some((k) => k.includes('Whitmore & Bass'))).toBe(true);
+  });
+
+  it("contains the caller's claimed identity name", () => {
+    expect(out.goal.keyterms).toContain('Robert Miller');
+  });
+});
+
+describe('evaluate -- goal.turn_detection_hint', () => {
+  const challengeCall: CallContext = { session_id: 'sess-challenge', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+  const readbackCall: CallContext = { session_id: 'sess-readback', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+  const evidenceCall: CallContext = { session_id: 'sess-evidence', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+
+  // Amount close to (not exactly) the scheduled payment: context PASSes but amendment_only
+  // is false, so the challenge requirement is need=1 -- with no challenge yet asked, this
+  // lands in CHALLENGE (row 8).
+  const closeAmountConversation: Utterance[] = [
+    {
+      id: 'c1',
+      speaker: 'caller',
+      text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,600, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
+      t_ms: 1000,
+    },
+    { id: 'a1', speaker: 'agent', text: 'Confirming.', t_ms: 2000 },
+    { id: 'c2', speaker: 'caller', text: "Yes, that's right.", t_ms: 2500 },
+    { id: 'a2', speaker: 'agent', text: 'And?', t_ms: 3000 },
+    { id: 'c3', speaker: 'caller', text: 'Yes, correct.', t_ms: 3500 },
+    { id: 'a3', speaker: 'agent', text: 'And?', t_ms: 4000 },
+    { id: 'c4', speaker: 'caller', text: "Yes, that's right.", t_ms: 4500 },
+  ];
+  const readbackActions: AgentAction[] = [
+    { id: 'r1', kind: 'readback_issued', t_ms: 2000, field: 'amount_usd', value: '84600' },
+    { id: 'r2', kind: 'readback_issued', t_ms: 3000, field: 'account_last4', value: '4471' },
+    { id: 'r3', kind: 'readback_issued', t_ms: 4000, field: 'beneficiary', value: 'Meridian Supply' },
+  ];
+  const closeAmountTools: ToolLogEntry[] = [
+    tool('check_sso_context', 't1', 1500, 'dana-whitfield', 1),
+    tool('get_request_history', 't2', 1500, 'dana-whitfield', 1),
+    tool('verify_out_of_band', 't3', 1600, 'dana-whitfield', 1),
+  ];
+
+  it('CHALLENGE state -> patient', () => {
+    const out = evaluate({ conversation: closeAmountConversation, tools: closeAmountTools, actions: readbackActions, call: challengeCall, seed: MERIDIAN });
+    expect(out.state).toBe('CHALLENGE');
+    expect(out.goal.code).toBe('ASK_CHALLENGE');
+    expect(out.goal.turn_detection_hint).toBe('patient');
+  });
+
+  it('CONSISTENCY_CHECK / READBACK goal (no readback actions issued yet) -> patient', () => {
+    const out = evaluate({ conversation: closeAmountConversation, tools: closeAmountTools, actions: [], call: readbackCall, seed: MERIDIAN });
+    expect(out.state).toBe('CONSISTENCY_CHECK');
+    expect(out.goal.code).toBe('READBACK');
+    expect(out.goal.turn_detection_hint).toBe('patient');
+  });
+
+  it('EVIDENCE state (checks not yet run) -> default', () => {
+    const out = evaluate({ conversation: closeAmountConversation, tools: [], actions: readbackActions, call: evidenceCall, seed: MERIDIAN });
+    expect(out.state).toBe('EVIDENCE');
+    expect(out.goal.turn_detection_hint).toBe('default');
+  });
+
+  it('ACTION/FREEZE (Scenario B) -> default', () => {
+    expect(evaluate(scenarioBInput).goal.turn_detection_hint).toBe('default');
+  });
+
+  it('ACTION/STAGE (Dana) -> default', () => {
+    expect(evaluate(danaInput).goal.turn_detection_hint).toBe('default');
+  });
+
+  it('OUT_OF_SCOPE (honest judge) -> default', () => {
+    const conversation: Utterance[] = [
+      { id: 'c1', speaker: 'caller', text: "I'm not the CEO, I'm testing this for a hackathon.", t_ms: 1000 },
+    ];
+    const out = evaluate({ conversation, tools: [], actions: [], call: judgeCall, seed: MERIDIAN });
+    expect(out.state).toBe('OUT_OF_SCOPE');
+    expect(out.goal.turn_detection_hint).toBe('default');
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Review finding 1 (fix round 1): a `challenge_issued` action whose stored challenge_id
+// cannot be reconstructed from the ledger (log drift) was silently dropped. Now it surfaces
+// as a FLAG knowledge_check_result card, treated as UNANSWERED (amendment §D step 3).
+// ---------------------------------------------------------------------------------------
+describe('evaluate -- challenge log drift', () => {
+  it('an unreconstructable challenge_issued action produces a FLAG card, not a silent drop', () => {
+    const conversation: Utterance[] = [
+      { id: 'c1', speaker: 'caller', text: 'This is Robert Miller. I need $1.8 million wired to the escrow account.', t_ms: 1000 },
+    ];
+    const actions: AgentAction[] = [{ id: 'a1', kind: 'challenge_issued', t_ms: 2000, challenge_id: 'totally-bogus-id' }];
+    const call: CallContext = { session_id: 'sess-drift', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const out = evaluate({ conversation, tools: [], actions, call, seed: MERIDIAN });
+
+    const card = out.evidence.find((e) => e.id === 'ev-knowledge-totally-bogus-id');
+    expect(card).toBeDefined();
+    expect(card!.status).toBe('FLAG');
+    expect(card!.facts).toMatchObject({ kind: 'DRIFT', result: 'UNANSWERED' });
+    // it counts 0.5 toward the tally, like other unanswered/ambiguous challenge cards.
+    expect(out.failure_tally).toBe(0.5);
   });
 });

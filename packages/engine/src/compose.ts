@@ -30,13 +30,26 @@ function displayValue(field: ClaimField, value: string | number): string {
 
 // ---------- issued-challenge reconstruction (composition step 3) ----------
 
+/** Sentinel: a real `selectChallenge` spec's `ask` is never the empty string (every
+ *  LIVE_COMMITMENT/TRAP_FACT/RELATIONAL ask is a template literal with content, and every
+ *  seed.knowledge SEED_FACT entry has a non-empty `ask`). `reconstructIssued` uses `ask: ''`
+ *  to mark a log-drift placeholder so `buildKnowledgeEvidence` can detect it without a
+ *  second return value or parameter -- keeps both functions' signatures unchanged for
+ *  downstream callers (evaluate.ts, and anything Task 6's corpus/replay tooling calls
+ *  directly). */
+function isDrift(spec: ChallengeSpec): boolean {
+  return spec.ask === '';
+}
+
 /** Rebuilds the sequence of `ChallengeSpec`s that were actually issued, purely from the
  *  `challenge_issued` actions and the ledger -- never trusting a stored spec, since none is
  *  stored (the server only logs the action). Deterministic: re-runs `selectChallenge` as of
  *  each action's t_ms (claims with t_ms <= action.t_ms only). If the rebuilt spec's
  *  challenge_id doesn't match the action's (log drift -- e.g. a replayed/edited corpus
- *  file), that action is dropped: there is no reliable spec to grade against, so it cannot
- *  contribute a knowledge_check_result card. */
+ *  file, or a server/engine version mismatch), a placeholder spec is kept instead of
+ *  dropping the action: there is no reliable spec to grade the caller's answer against, so
+ *  it is treated as UNANSWERED (amendment §D step 3) by `buildKnowledgeEvidence`, never
+ *  silently vanished from the evidence record. */
 export function reconstructIssued(
   claims: Claim[],
   actions: AgentAction[],
@@ -52,8 +65,19 @@ export function reconstructIssued(
     const rebuilt = selectChallenge(claimsAsOf, issued, {}, seed, session_id, conversationAsOf);
     if (rebuilt && rebuilt.challenge_id === action.challenge_id) {
       issued.push(rebuilt);
+      continue;
     }
-    // else: log drift. Skip -- no reliable spec to grade this action against.
+    // Log drift: the action names a challenge_id no reconstruction produces. Keep a
+    // placeholder spec (`ask: ''`, the drift sentinel -- never graded normally, since its
+    // deliberately empty expect.accept_tokens would otherwise vacuously PASS) so the drift
+    // itself is visible as a FLAG card rather than disappearing.
+    issued.push({
+      challenge_id: action.challenge_id ?? `drift-${action.id}`,
+      kind: 'SEED_FACT',
+      field: 'purpose',
+      ask: '',
+      expect: { accept_tokens: [] },
+    });
   }
   return issued;
 }
@@ -81,17 +105,22 @@ export function buildKnowledgeEvidence(
 ): Evidence[] {
   const out: Evidence[] = [];
   for (const spec of issued) {
-    const graded = results[spec.challenge_id];
+    const drifted = isDrift(spec);
+    // A drifted placeholder is never graded by the real grader (its expect.accept_tokens is
+    // deliberately empty, which would otherwise vacuously PASS) -- it is forced UNANSWERED.
+    const graded = drifted ? { result: 'UNANSWERED' as ChallengeResult, eligible_utterance_ids: [] as string[] } : results[spec.challenge_id];
     if (!graded) continue;
     const issuedAction = actions.find((a) => a.kind === 'challenge_issued' && a.challenge_id === spec.challenge_id);
     out.push({
       id: `ev-knowledge-${spec.challenge_id}`,
       kind: 'knowledge_check_result',
       t_ms: issuedAction?.t_ms ?? 0,
-      label: labelForChallenge(spec),
+      label: drifted ? 'Knowledge check (log drift)' : labelForChallenge(spec),
       status: statusForResult(graded.result),
-      detail: `${spec.kind} check on ${spec.field}: ${graded.result.toLowerCase()}.`,
-      facts: { kind: spec.kind, result: graded.result, field: spec.field },
+      detail: drifted
+        ? 'The issued challenge could not be reconstructed from the ledger (log drift); treated as unanswered.'
+        : `${spec.kind} check on ${spec.field}: ${graded.result.toLowerCase()}.`,
+      facts: { kind: drifted ? 'DRIFT' : spec.kind, result: graded.result, field: spec.field },
       quotes: graded.quote ? [graded.quote] : [],
       source: 'transcript',
       provenance: 'POLICY_DERIVED',

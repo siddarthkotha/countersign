@@ -159,18 +159,20 @@ describe('decide -- rule table (first match wins)', () => {
     expect(r.rule_hit).toBe(8);
   });
 
-  it('row 9: exposure across versions over the high-value line -> ESCALATE', () => {
+  it('row 9: exposure across versions over the high-value line -> ESCALATE, reasons contain EXPOSURE_LIMIT', () => {
     const evidence = [...stageEvidence(), ev('ev-exposure', 'exposure_check_result', 'FAIL', { facts: { exposure_usd: 60_000, current_usd: 21_000 } })];
     const r = decide(evidence, SEED, ctx({ amendment_only: true, exposure_usd: 60_000 }));
     expect(r.verdict).toBe('ESCALATE');
     expect(r.rule_hit).toBe(9);
+    expect(r.reasons).toContain('EXPOSURE_LIMIT');
   });
 
-  it('row 10: a first-time beneficiary -> ESCALATE regardless of amount', () => {
+  it('row 10: a first-time beneficiary -> ESCALATE regardless of amount, reasons contain NEW_BENEFICIARY', () => {
     // challenges exhausted so row 8's "need=2, 0 passed" doesn't intercept it first.
     const r = decide(stageEvidence(), SEED, ctx({ amendment_only: true, new_beneficiary: true, challenges_issued: 3 }));
     expect(r.verdict).toBe('ESCALATE');
     expect(r.rule_hit).toBe(10);
+    expect(r.reasons).toContain('NEW_BENEFICIARY');
   });
 
   it('row 11: every AssuranceChecklist item true -> STAGE, empty reasons', () => {

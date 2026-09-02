@@ -102,13 +102,27 @@ function oldestUnconfirmedCritical(claims: Claim[]): { field: ClaimField; claim:
   return best;
 }
 
-function buildKeyterms(seed: SeedConfig, claims: Claim[]): string[] {
+/** seed keyterms + every proper noun/amount the caller has stated, fed to `session.update`
+ *  as listening vocabulary. For an amount, BOTH forms go in -- the caller's verbatim quote
+ *  (e.g. "$1.8 million" or "one point eight million") and the normalized display string
+ *  (e.g. "$1,800,000") -- since either could be what the speech recognizer needs boosted
+ *  (review finding, fix round 1: the normalized string alone dropped the spoken form).
+ *  Also pulls in every evidence quote (e.g. a knowledge-challenge card's captured reply),
+ *  since a caller-said proper noun doesn't always become a ledger claim (no cue pattern
+ *  matched it) but was still said on the call and is still worth boosting. */
+function buildKeyterms(seed: SeedConfig, claims: Claim[], evidence: Evidence[]): string[] {
   const names = new Set<string>(seed.keyterms);
   for (const c of claims) {
     if (c.field === 'amount_usd') {
       names.add(money(Number(c.value)));
+      names.add(c.quote.text);
     } else if (typeof c.value === 'string' && c.value.length > 0) {
       names.add(c.quote.text);
+    }
+  }
+  for (const e of evidence) {
+    for (const q of e.quotes) {
+      if (q.text.trim().length > 0) names.add(q.text);
     }
   }
   return [...names];
@@ -131,7 +145,7 @@ function goal(code: GoalCode, hint: string, keyterms: string[], patient: boolean
 
 export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
   const { state, decideResult, evidence, ledger, seed, tools, nextChallenge } = input;
-  const keyterms = buildKeyterms(seed, ledger);
+  const keyterms = buildKeyterms(seed, ledger, evidence);
   const patient = state === 'CHALLENGE' || (state === 'CONSISTENCY_CHECK' && decideResult.rule_hit === 4);
 
   if (state === 'OUT_OF_SCOPE') {

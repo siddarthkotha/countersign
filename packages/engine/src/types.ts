@@ -225,7 +225,12 @@ export type VerdictReason =
   | 'STORY_INCONSISTENCY'
   | 'OUT_OF_BAND_NO_RESPONSE'
   | 'KNOWLEDGE_CHECK_FAILED'
-  | 'OUT_OF_SCOPE';
+  | 'OUT_OF_SCOPE'
+  // v2 fix round 1 (review finding, minor): rows 9/10 could ESCALATE with reasons: [] --
+  // these give the anti-structuring and first-time-beneficiary escalations their own
+  // reason codes, appended after URGENCY_ESCALATION in the ordered reasons list.
+  | 'EXPOSURE_LIMIT'
+  | 'NEW_BENEFICIARY';
 
 export type GoalCode =
   | 'GREET'
@@ -312,5 +317,6 @@ export interface CorpusFile {
     reasons: VerdictReason[];
     failure_tally: number;
     request_version: number; // v2
+    assurance?: Partial<AssuranceChecklist>; // v2 (Task 6): required for STAGE/ESCALATE files
   };
 }

@@ -73,7 +73,10 @@ function computeTally(
 
   const knowledgeCards = findAll(evidence, 'knowledge_check_result');
   const knowledgeFailTally = knowledgeCards.filter((e) => e.status === 'FAIL').length;
-  const knowledgeAmbiguousTally = knowledgeCards.filter((e) => e.status === 'FLAG' && e.facts.result !== 'UNANSWERED').length * 0.5;
+  // AMBIGUOUS, REFUSED, UNANSWERED (a non-response to a challenge) and a log-drift card
+  // (facts.kind === 'DRIFT') all surface as FLAG and all count 0.5: evasion, silence, and
+  // an unreconstructable log entry are each "not a pass" without being fatal on their own.
+  const knowledgeAmbiguousTally = knowledgeCards.filter((e) => e.status === 'FLAG').length * 0.5;
 
   let tally = 0;
   if (ssoFail) tally += 1;
@@ -93,6 +96,8 @@ function orderedFreezeReasons(
   hasContradiction: boolean,
   knowledgeFailOrRelevant: boolean,
   pressureFlag: boolean,
+  exposureFail: boolean,
+  newBeneficiary: boolean,
 ): VerdictReason[] {
   const reasons: VerdictReason[] = [];
   if (ssoFail) reasons.push('IDENTITY_UNVERIFIED');
@@ -101,6 +106,8 @@ function orderedFreezeReasons(
   if (hasContradiction) reasons.push('STORY_INCONSISTENCY');
   if (knowledgeFailOrRelevant) reasons.push('KNOWLEDGE_CHECK_FAILED');
   if (pressureFlag) reasons.push('URGENCY_ESCALATION');
+  if (exposureFail) reasons.push('EXPOSURE_LIMIT');
+  if (newBeneficiary) reasons.push('NEW_BENEFICIARY');
   return reasons;
 }
 
@@ -203,7 +210,7 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
   // Row 7: freeze conditions.
   else if (freezeEligible) {
     verdict = 'FREEZE';
-    reasons = orderedFreezeReasons(ssoFail, oobFail, contextFail, hasContradiction, anyKnowledgeFail, pressureFlag);
+    reasons = orderedFreezeReasons(ssoFail, oobFail, contextFail, hasContradiction, anyKnowledgeFail, pressureFlag, exposureFail, ctx.new_beneficiary);
     rule_hit = 7;
   }
   // Row 8: not enough passed challenges yet, and more can be asked.
@@ -214,13 +221,13 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
   // Row 9: structuring -- exposure across versions over the high-value line.
   else if (exposureFail) {
     verdict = 'ESCALATE';
-    reasons = orderedFreezeReasons(ssoFail, oobFail, contextFail, hasContradiction, anyKnowledgeFail, pressureFlag);
+    reasons = orderedFreezeReasons(ssoFail, oobFail, contextFail, hasContradiction, anyKnowledgeFail, pressureFlag, exposureFail, ctx.new_beneficiary);
     rule_hit = 9;
   }
   // Row 10: a first-time beneficiary, regardless of amount.
   else if (ctx.new_beneficiary) {
     verdict = 'ESCALATE';
-    reasons = orderedFreezeReasons(ssoFail, oobFail, contextFail, hasContradiction, anyKnowledgeFail, pressureFlag);
+    reasons = orderedFreezeReasons(ssoFail, oobFail, contextFail, hasContradiction, anyKnowledgeFail, pressureFlag, exposureFail, ctx.new_beneficiary);
     rule_hit = 10;
   }
   // Row 11: everything affirmative -> stage.
@@ -237,7 +244,7 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
   // Row 13: otherwise, human callback.
   else {
     verdict = 'ESCALATE';
-    reasons = orderedFreezeReasons(ssoFail, oobFail, contextFail, hasContradiction, anyKnowledgeFail, pressureFlag);
+    reasons = orderedFreezeReasons(ssoFail, oobFail, contextFail, hasContradiction, anyKnowledgeFail, pressureFlag, exposureFail, ctx.new_beneficiary);
     rule_hit = 13;
   }
 
@@ -292,7 +299,7 @@ Rule table (evidence-first, first match wins):
    7c. three or more independent checks have failed;
    7d. the account-relation challenge failed alongside a failed out-of-band check;
    7e. the deliberate-misstatement challenge failed alongside any failed check.
-   Reasons are always ordered: identity, out-of-band, context, story consistency, knowledge check, urgency pressure.
+   Reasons are always ordered: identity, out-of-band, context, story consistency, knowledge check, urgency pressure, exposure limit, new beneficiary.
 8. Not enough passed challenges yet for the risk level, and challenges remain to ask -> hold; ask the next challenge.
 9. Distinct amounts stated across the call add up past the high-value threshold while the current amount alone reads under it -> escalate for a human callback (this guards against splitting one large request into smaller-looking pieces).
 10. A first-time beneficiary not on record -> escalate for a human callback, regardless of amount.
