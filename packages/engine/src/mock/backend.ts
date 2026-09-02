@@ -30,7 +30,7 @@ export function mockToolResult(
     case 'check_sso_context': {
       const identity = findIdentity(seed, args.identity_id);
       if (!identity) return { error: 'unknown_identity', request_version };
-      return { session_active: identity.sso.active, geo: identity.sso.geo, device: identity.sso.device };
+      return { session_active: identity.sso.active, geo: identity.sso.geo, device: identity.sso.device, request_version };
     }
 
     case 'get_request_history': {
@@ -60,21 +60,21 @@ export function mockToolResult(
     }
 
     case 'stage_payment_for_second_approval':
-      return { staged: true, approver_id: seed.second_approver_id, status: 'SECOND_APPROVAL_PENDING' };
+      return { staged: true, approver_id: seed.second_approver_id, status: 'SECOND_APPROVAL_PENDING', request_version };
 
     case 'freeze_transaction_rail':
-      return { frozen: true, rail_id: args.rail_id };
+      return { frozen: true, rail_id: args.rail_id, request_version };
 
     case 'open_incident':
-      return { incident_id: `INC-${seed.incident_seed + ctx.incident_index}` };
+      return { incident_id: `INC-${seed.incident_seed + ctx.incident_index}`, request_version };
 
     case 'alert_principal': {
       const identity = findIdentity(seed, args.identity_id);
-      return { sent: true, devices: identity ? identity.registered_devices.length : 0 };
+      return { sent: true, devices: identity ? identity.registered_devices.length : 0, request_version };
     }
 
     case 'seal_evidence_record':
-      return { exported: true };
+      return { exported: true, request_version };
 
     default: {
       const _exhaustive: never = name;

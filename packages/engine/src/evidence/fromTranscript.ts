@@ -157,6 +157,10 @@ export function evidenceFromTranscript(conversation: Utterance[], seed: SeedConf
   // ---- injection_marker (first hit only; content, never proof) ----
   for (const u of callerUtterances) {
     const lower = u.text.toLowerCase();
+    // `phrase` (facts) stays the lower-case lexicon entry, matched case-insensitively --
+    // that is the raw, machine-comparable fact (LAW 4). `quote` (below) is sliced from the
+    // ORIGINAL utterance text at the matched index, so it keeps the caller's actual casing
+    // verbatim, even though the match itself was case-insensitive.
     let matched: { phrase: string; quote: string } | null = null;
     for (const phrase of seed.injection_lexicon) {
       const idx = lower.indexOf(phrase.toLowerCase());

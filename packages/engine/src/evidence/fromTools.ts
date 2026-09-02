@@ -23,6 +23,12 @@ function money(n: number): string {
   return `$${n.toLocaleString('en-US')}`;
 }
 
+/** A missing/null field in a tool result renders as "unknown" in facts/detail, never the
+ *  literal string "undefined" that `String(undefined)` would produce. */
+function stringOrUnknown(v: unknown): string {
+  return v !== undefined && v !== null ? String(v) : 'unknown';
+}
+
 function card(
   id: string,
   kind: EvidenceKind,
@@ -86,8 +92,8 @@ function ssoEvidence(entry: ToolLogEntry, call: CallContext, ctx: ToolEvidenceCt
   if (pending) return pending;
   const r = entry.result as Record<string, unknown>;
   const sessionActive = Boolean(r.session_active);
-  const geo = String(r.geo);
-  const device = String(r.device);
+  const geo = stringOrUnknown(r.geo);
+  const device = stringOrUnknown(r.device);
   const fail = call.origin_kind === 'unverified_voip' || (sessionActive && geo !== call.origin_geo);
 
   const activeLabel = sessionActive ? `SSO active in ${geo}` : 'No active SSO session';
@@ -114,15 +120,23 @@ function oobEvidence(entry: ToolLogEntry, ctx: ToolEvidenceCtx): Evidence {
   const pending = pendingCard('ev-oob', 'oob_verification_result', 'Out-of-band verification', entry, ctx);
   if (pending) return pending;
   const r = entry.result as Record<string, unknown>;
-  const response = String(r.response);
+  // A missing/malformed response (not one of the known strings) is graded FAIL but must not
+  // be mislabeled "declined" -- that implies the caller actively refused, which we cannot
+  // claim from silence/garbage. Reserve "declined" for an explicit non-confirmed response.
+  const KNOWN_RESPONSES = new Set(['confirmed', 'no_response', 'denied']);
+  const rawResponse = r.response;
+  const response = typeof rawResponse === 'string' && KNOWN_RESPONSES.has(rawResponse) ? rawResponse : null;
   const devices = Number(r.devices ?? 0);
   const latency_ms = Number(r.latency_ms ?? 0);
   const pass = response === 'confirmed';
-  const detail = pass
-    ? `Out-of-band confirmed on ${devices} registered device(s).`
-    : response === 'no_response'
-      ? `no response from ${devices} registered devices`
-      : 'declined';
+  const detail =
+    response === null
+      ? 'no usable response'
+      : pass
+        ? `Out-of-band confirmed on ${devices} registered device(s).`
+        : response === 'no_response'
+          ? `no response from ${devices} registered devices`
+          : 'declined';
 
   return card(
     'ev-oob',

@@ -45,6 +45,8 @@ function extractNumericAmounts(text: string): RawHit[] {
     if (decimals) value = Number(`${value}.${decimals}`);
     if (hasScale) value = value * (SCALE_MULT[scaleWord!] ?? 1);
 
+    // Rounded to the nearest whole dollar (absorbs float error from decimal*scale, e.g.
+    // 1.8*1_000_000); sub-dollar cent precision is not preserved.
     hits.push({ start, end, value_usd: Math.round(value) });
   }
   return hits;

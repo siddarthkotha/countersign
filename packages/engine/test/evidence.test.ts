@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { evidenceFromTranscript } from '../src/evidence/fromTranscript';
 import { evidenceFromTools } from '../src/evidence/fromTools';
+import { mockToolResult } from '../src/mock/backend';
 import { MERIDIAN } from '../src/seed/meridian';
 import type { CallContext, ToolLogEntry, Utterance } from '../src/types';
 
@@ -222,5 +223,152 @@ describe('evidenceFromTools', () => {
     expect(dana.every((e) => e.request_version === 1)).toBe(true);
     const ctx = dana.find((e) => e.id === 'ev-context')!;
     expect(ctx.facts.amendment_only).toBe(true);
+  });
+});
+
+// Fix round 1: these route real mockToolResult() output through evidenceFromTools(), rather
+// than hand-building result objects -- the hand-built fixtures above always included
+// request_version and so masked the CRITICAL bug where check_sso_context's real mock output
+// omitted it (Number(undefined) !== ctx.request_version is always true, wedging ev-sso in
+// PENDING forever). This describe block is the reviewer-mandated regression guard for that.
+describe('evidenceFromTools integration with the REAL mock backend (mockToolResult -> evidenceFromTools)', () => {
+  const mockCtx = { evidence_count: 0, incident_index: 0 };
+
+  it('Miller over unverified VoIP with no matching payment and a no-response oob: sso FAIL, context FAIL, oob FAIL', () => {
+    const tools: ToolLogEntry[] = [
+      {
+        id: 't1',
+        name: 'check_sso_context',
+        t_ms: 1000,
+        args: { identity_id: 'robert-miller', request_version: 1 },
+        result: mockToolResult('check_sso_context', { identity_id: 'robert-miller', request_version: 1 }, MERIDIAN, mockCtx),
+      },
+      {
+        id: 't2',
+        name: 'get_request_history',
+        t_ms: 1100,
+        args: { identity_id: 'robert-miller', request_version: 1 },
+        result: mockToolResult('get_request_history', { identity_id: 'robert-miller', request_version: 1 }, MERIDIAN, mockCtx),
+      },
+      {
+        id: 't3',
+        name: 'verify_out_of_band',
+        t_ms: 1200,
+        args: { identity_id: 'robert-miller', method: 'push', request_version: 1 },
+        result: mockToolResult('verify_out_of_band', { identity_id: 'robert-miller', method: 'push', request_version: 1 }, MERIDIAN, mockCtx),
+      },
+    ];
+    const ev = evidenceFromTools(tools, voip, MERIDIAN, {
+      claimed_id: 'robert-miller',
+      amount_usd: 1_800_000,
+      beneficiary: null,
+      request_version: 1,
+    });
+    expect(ev.map((e) => [e.id, e.status])).toEqual([
+      ['ev-sso', 'FAIL'],
+      ['ev-context', 'FAIL'],
+      ['ev-oob', 'FAIL'],
+    ]);
+  });
+
+  it('Dana from her registered device with a matching scheduled payment and a confirmed oob: sso PASS, context PASS, oob PASS', () => {
+    const tools: ToolLogEntry[] = [
+      {
+        id: 't1',
+        name: 'check_sso_context',
+        t_ms: 1000,
+        args: { identity_id: 'dana-whitfield', request_version: 1 },
+        result: mockToolResult('check_sso_context', { identity_id: 'dana-whitfield', request_version: 1 }, MERIDIAN, mockCtx),
+      },
+      {
+        id: 't2',
+        name: 'get_request_history',
+        t_ms: 1100,
+        args: { identity_id: 'dana-whitfield', request_version: 1 },
+        result: mockToolResult('get_request_history', { identity_id: 'dana-whitfield', request_version: 1 }, MERIDIAN, mockCtx),
+      },
+      {
+        id: 't3',
+        name: 'verify_out_of_band',
+        t_ms: 1200,
+        args: { identity_id: 'dana-whitfield', method: 'push', request_version: 1 },
+        result: mockToolResult('verify_out_of_band', { identity_id: 'dana-whitfield', method: 'push', request_version: 1 }, MERIDIAN, mockCtx),
+      },
+    ];
+    const ev = evidenceFromTools(tools, { session_id: 's', origin_kind: 'registered_device', origin_geo: 'Austin, TX' }, MERIDIAN, {
+      claimed_id: 'dana-whitfield',
+      amount_usd: 84_500,
+      beneficiary: 'Meridian Supply',
+      request_version: 1,
+    });
+    expect(ev.map((e) => [e.id, e.status])).toEqual([
+      ['ev-sso', 'PASS'],
+      ['ev-context', 'PASS'],
+      ['ev-oob', 'PASS'],
+    ]);
+  });
+});
+
+describe('evidenceFromTools edge cases (fix round 1)', () => {
+  it('uses the LATEST tool entry when the same tool is called twice', () => {
+    const tools: ToolLogEntry[] = [
+      {
+        id: 't1',
+        name: 'check_sso_context',
+        t_ms: 1000,
+        args: { identity_id: 'robert-miller' },
+        result: { session_active: true, geo: 'Frankfurt, DE', device: 'MacBook Pro (managed)', request_version: 1 },
+      },
+      {
+        id: 't2',
+        name: 'check_sso_context',
+        t_ms: 5000,
+        args: { identity_id: 'robert-miller' },
+        result: { session_active: true, geo: 'Austin, TX', device: 'MacBook Pro (managed)', request_version: 1 },
+      },
+    ];
+    const ev = evidenceFromTools(tools, { session_id: 's', origin_kind: 'registered_device', origin_geo: 'Austin, TX' }, MERIDIAN, {
+      claimed_id: 'robert-miller',
+      amount_usd: 1_800_000,
+      beneficiary: null,
+      request_version: 1,
+    });
+    const sso = ev.find((e) => e.id === 'ev-sso')!;
+    // t1 (Frankfurt) would FAIL against origin_geo Austin, TX; t2 (Austin) PASSes -- proves
+    // the LATEST entry (t2), not the first, was graded.
+    expect(sso.status).toBe('PASS');
+    expect(sso.facts.geo).toBe('Austin, TX');
+  });
+
+  it('missing geo/device in a tool result renders "unknown", never the literal string "undefined"', () => {
+    const tools: ToolLogEntry[] = [
+      { id: 't1', name: 'check_sso_context', t_ms: 1000, args: { identity_id: 'robert-miller' }, result: { session_active: true, request_version: 1 } },
+    ];
+    const ev = evidenceFromTools(tools, voip, MERIDIAN, {
+      claimed_id: 'robert-miller',
+      amount_usd: null,
+      beneficiary: null,
+      request_version: 1,
+    });
+    const sso = ev.find((e) => e.id === 'ev-sso')!;
+    expect(sso.facts.geo).toBe('unknown');
+    expect(sso.facts.device).toBe('unknown');
+    expect(sso.detail).not.toContain('undefined');
+  });
+
+  it('a missing/malformed oob response is labeled "no usable response" and still FAILs (not "declined")', () => {
+    const tools: ToolLogEntry[] = [
+      { id: 't1', name: 'verify_out_of_band', t_ms: 1000, args: { identity_id: 'robert-miller' }, result: { devices: 2, request_version: 1 } },
+    ];
+    const ev = evidenceFromTools(tools, voip, MERIDIAN, {
+      claimed_id: 'robert-miller',
+      amount_usd: null,
+      beneficiary: null,
+      request_version: 1,
+    });
+    const oob = ev.find((e) => e.id === 'ev-oob')!;
+    expect(oob.status).toBe('FAIL');
+    expect(oob.detail).toBe('no usable response');
+    expect(oob.facts.response).toBeNull();
   });
 });

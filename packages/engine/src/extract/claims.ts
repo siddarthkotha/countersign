@@ -23,8 +23,10 @@ export interface DeadlineHit {
 }
 
 const DEADLINE_RELATIVE_RE = /\b(?:in|within)\b\s+(?:the\s+next\s+)?(\w+)\s+(minutes?|hours?)\b/i;
+// RULING (fix round 1, finding 2): "today"/"tonight"/"eod"/"end of day"/"close of business"
+// match standalone, with an optional leading "by "; weekday names always require "by ".
 const DEADLINE_ABSOLUTE_RE =
-  /\btoday\b|\btonight\b|\bby (?:friday|monday|tuesday|wednesday|thursday|end of day|eod|close of business)\b/i;
+  /\btoday\b|\btonight\b|\b(?:by\s+)?(?:end of day|eod|close of business)\b|\bby\s+(?:friday|monday|tuesday|wednesday|thursday)\b/i;
 
 export function extractDeadline(text: string): DeadlineHit | null {
   const relative = DEADLINE_RELATIVE_RE.exec(text);
@@ -52,19 +54,28 @@ export interface CuedNameHit {
 }
 
 // A name is 1-4 capitalized words, allowing "&", "and", "of", "the", ".", "'" to bind them
-// together; the run stops at a comma, period, or lower-case word that isn't a connector.
-const NAME = "[A-Z][A-Za-z.']*(?:\\s+(?:&|and|of|the|[A-Z][A-Za-z.']*))*";
+// together; the run stops at a comma, period, a lower-case word that isn't a connector, or
+// after 4 words (fix round 1, finding 3: the trailing repeat is capped at {0,3}).
+const NAME = "[A-Z][A-Za-z.']*(?:\\s+(?:&|and|of|the|[A-Z][A-Za-z.']*)){0,3}";
 
 const CUE_PATTERNS: { field: CuedNameField; re: RegExp }[] = [
   { field: 'approver', re: new RegExp(`\\bapproved by\\s+(${NAME})`, 'g') },
-  { field: 'counsel', re: new RegExp(`\\bcounsel\\b (?:is|was|of record is|of record was)?\\s*(${NAME})`, 'g') },
+  // Fix round 1, finding 1: connector is now mandatory (was `?\s*`, which let bare
+  // "counsel Jane Doe" match with no "is"/"was"/etc.), matching the beneficiary/vendor shape.
+  { field: 'counsel', re: new RegExp(`\\bcounsel\\b (?:is|was|of record is|of record was)\\s+(${NAME})`, 'g') },
   { field: 'counsel', re: new RegExp(`(${NAME})\\s+handled (?:it|the deal)\\b`, 'g') },
   { field: 'counsel', re: new RegExp(`(${NAME})\\s+(?:is|are)\\s+(?:our\\s+)?counsel\\b`, 'g') },
+  // Fix round 1, finding 4: added "is at" so "escrow is at X" (not just "escrow is X" /
+  // "escrow at X") matches; spacing is embedded per-alternative so there's no backtracking
+  // ambiguity between "is" and "at".
   {
     field: 'escrow_institution',
-    re: new RegExp(`\\bescrow\\b (?:institution |bank )?(?:is|at|with|account (?:is )?at)\\s+(${NAME})`, 'g'),
+    re: new RegExp(
+      `\\bescrow\\b\\s+(?:institution\\s+|bank\\s+)?(?:is\\s+at\\s+|is\\s+|at\\s+|with\\s+|account\\s+(?:is\\s+)?at\\s+)(${NAME})`,
+      'g',
+    ),
   },
-  { field: 'escrow_institution', re: new RegExp(`\\bescrowed\\b (?:at|with)\\s+(${NAME})`, 'g') },
+  { field: 'escrow_institution', re: new RegExp(`\\bescrowed\\b\\s+(?:at\\s+|with\\s+)(${NAME})`, 'g') },
   {
     field: 'beneficiary',
     re: new RegExp(`\\b(?:pay|wire|send|transfer)\\b\\s+(?:it\\s+|the money\\s+|the funds\\s+)?to\\s+(${NAME})`, 'g'),

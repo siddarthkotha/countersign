@@ -75,6 +75,21 @@ describe('extractDeadline', () => {
     expect(hit).toEqual({ value: 'ten minutes', quote: 'in the next ten minutes' });
     expect(text.includes(hit!.quote)).toBe(true);
   });
+
+  // Fix round 1, finding 2: today/tonight/eod/end of day/close of business are standalone
+  // (optional leading "by "); weekday names always require "by ".
+  it.each([
+    ['This needs to close today', 'today', 'today'],
+    ["I'll wire it tonight", 'tonight', 'tonight'],
+    ['it has to land by Friday', 'by friday', 'by Friday'],
+    ['this is due by end of day', 'by end of day', 'by end of day'],
+    ['wire this EOD, no exceptions', 'eod', 'EOD'],
+    ['needs to happen close of business', 'close of business', 'close of business'],
+  ])('%s → %s', (text, value, quote) => {
+    const hit = extractDeadline(text);
+    expect(hit).toEqual({ value, quote });
+    expect(text.includes(hit!.quote)).toBe(true);
+  });
 });
 
 describe('extractCuedNames', () => {
@@ -93,5 +108,47 @@ describe('extractCuedNames', () => {
   });
   it('returns [] when there is no cue', () => {
     expect(extractCuedNames('This is Robert Miller')).toEqual([]);
+  });
+
+  // Fix round 1, finding 1: bare "counsel <Name>" (no is/was/of record is/of record was) must
+  // NOT match — only a real connector counts.
+  it('does not match a bare "counsel <Name>" with no connector', () => {
+    expect(extractCuedNames('the counsel Jane Doe filed a motion')).toEqual([]);
+  });
+  it('still matches "counsel is <Name>" with the mandatory connector', () => {
+    const text = 'counsel is Calder & Finch';
+    const hits = extractCuedNames(text);
+    expect(hits).toEqual([{ field: 'counsel', value: 'Calder & Finch', quote: 'Calder & Finch' }]);
+    expect(text.includes(hits[0]!.quote)).toBe(true);
+  });
+
+  // Fix round 1, finding 3: a name run is capped at 4 words even when more capitalized
+  // words follow.
+  it('caps a name run at 4 words', () => {
+    const text = 'approved by Alpha Beta Gamma Delta Epsilon Zeta in the meeting';
+    const hits = extractCuedNames(text);
+    expect(hits).toEqual([{ field: 'approver', value: 'Alpha Beta Gamma Delta', quote: 'Alpha Beta Gamma Delta' }]);
+    expect(text.includes(hits[0]!.quote)).toBe(true);
+  });
+
+  // Fix round 1, finding 4: escrow_institution "is at" / "with" phrasing, and the "will be"
+  // beneficiary/vendor forms.
+  it('matches escrow_institution cue variants', () => {
+    const isAt = 'escrow is at First Meridian Trust';
+    expect(extractCuedNames(isAt)).toEqual([
+      { field: 'escrow_institution', value: 'First Meridian Trust', quote: 'First Meridian Trust' },
+    ]);
+    const escrowedWith = 'escrowed with First Meridian Trust';
+    expect(extractCuedNames(escrowedWith)).toEqual([
+      { field: 'escrow_institution', value: 'First Meridian Trust', quote: 'First Meridian Trust' },
+    ]);
+  });
+  it('matches the "will be" beneficiary and vendor cue forms', () => {
+    const beneficiary = 'the beneficiary will be Elena Park';
+    expect(extractCuedNames(beneficiary)).toEqual([
+      { field: 'beneficiary', value: 'Elena Park', quote: 'Elena Park' },
+    ]);
+    const vendor = 'the vendor will be Meridian Supply';
+    expect(extractCuedNames(vendor)).toEqual([{ field: 'beneficiary', value: 'Meridian Supply', quote: 'Meridian Supply' }]);
   });
 });

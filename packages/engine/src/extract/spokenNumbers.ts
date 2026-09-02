@@ -122,6 +122,8 @@ export function extractSpokenAmounts(text: string): SpokenAmountHit[] {
 
     const followedByDollars = words[end] === 'dollars' || words[end] === 'dollar';
     if (hasScale || followedByDollars) {
+      // Rounded to the nearest whole dollar (absorbs float error from fraction*scale, e.g.
+      // 2.1*1_000_000); sub-dollar cent precision is not preserved.
       hits.push({ value_usd: Math.round(value), start: tokens[i]!.start, end: tokens[end - 1]!.end });
       i = end;
     } else {
