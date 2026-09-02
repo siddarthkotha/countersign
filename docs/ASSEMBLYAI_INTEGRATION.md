@@ -66,3 +66,21 @@ name, arguments) · `reply.done` (reply_id, status) · `input.speech.started/sto
 - https://www.assemblyai.com/docs/voice-agents/voice-agent-api/api-spec/generate-voice-agent-token
 - https://www.assemblyai.com/docs/voice-agents/voice-agent-api/browser-integration
 - https://www.assemblyai.com/docs/llms.txt (filter: `?lang=typescript`)
+
+## Re-verification 2026-09-01 (Day 1, kickoff) — see docs/aai-docs-check-2026-09-01.md
+Fetched live by a Haiku errand at 9:00 PM CDT. Everything above still holds. Build-affecting
+additions, all PROVEN in that file with URLs:
+- `max_session_duration_seconds` (60–10,800) on the token mint = a server-enforced per-session
+  cap AssemblyAI itself terminates (Amendment 2's minute cap, for free).
+- `transcript.agent` carries `interrupted: true` with the text TRIMMED to what the caller
+  actually heard → that is the engine's `Utterance.interrupted` and it is verbatim (LAW 4).
+- `tool.result` must be sent when `reply.done` is the latest event received — not earlier,
+  not later. Tools carry `execution_mode: interactive | hold` and `timeout_seconds` 1–300.
+- `input.keyterms` up to 100 strings; `input.turn_detection.{min_silence,max_silence}` 50–10,000 ms
+  (the numeric-answer cut-off tuning from engineering law (f)); `interrupt_response` on by default.
+- Barge-in client duty, verbatim: "stop and clear your queued audio so the user doesn't keep
+  hearing stale speech" on `input.speech.started` and on `reply.done` status `interrupted`.
+- LLM selectable via `session.llm[]` (gateway, e.g. Claude); 11 English TTS voices, immutable
+  once the session starts (the character's voice pick is a session-start decision).
+- UNKNOWN still: idle timeout on their side; CORS on the token endpoint (irrelevant — minted
+  server-side); whether the server stops `reply.audio` on interrupt (client flushes regardless).
