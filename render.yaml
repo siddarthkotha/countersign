@@ -1,14 +1,16 @@
 # Render Blueprint — one always-on web service serving the API, the WebSocket call path,
 # and the built React SPA out of the same process/port (Task D1; BRIEF Amendment 1 + §14b(5)).
 #
-# plan: free for the build weeks (controller ruling 2026-09-02) -- Render's free tier
-# suspends the service after 15 minutes of inactivity and takes about a minute to wake back
-# up on the next request (verified docs/hosting-render-check-2026-09-02.md). That is fine
-# while only the founder and this session hit the URL during the build, but a cold start on
-# a judge's first click during judging week is a dead submission -- flip `plan: free` below
-# to `plan: starter` in the Render dashboard (or edit this file and redeploy) BEFORE judging
-# week (~Sep 20). See docs/DEPLOY.md for the exact one-line switch and the free-tier
-# keep-alive fallback if the plan bump is missed.
+# plan: starter for the WHOLE hackathon, from the very first deploy (founder ruling
+# 2026-09-02 -- paid from day one, no mid-hackathon plan switch). Render's Starter instance
+# is always-on / no spin-down, at a flat ~$7/month (ESTIMATE-by-search -- see
+# docs/DEPLOY.md's cost section for the label and how to confirm it). The founder chose this
+# over starting on Render's free tier because a free instance suspends after 15 minutes of
+# inactivity and takes about a minute to wake back up on the next request (verified,
+# docs/hosting-render-check-2026-09-02.md) -- a sleeping instance on a judge's first click is
+# a dead submission, and that risk isn't worth the few dollars saved by starting cheap. The
+# free tier remains a documented fallback (docs/DEPLOY.md, "Fallback: free tier") only for a
+# deliberate temporary lapse, not the plan this project runs on.
 #
 # region: oregon is a FIRST GUESS (UNKNOWN which Render region sits closest to AssemblyAI's
 # realtime WebSocket servers) -- measure connect->session.ready latency from the deployed
@@ -18,7 +20,7 @@ services:
   - type: web
     name: countersign
     runtime: node
-    plan: free
+    plan: starter
     region: oregon
     buildCommand: npm ci && npm run build
     startCommand: npm run start:server

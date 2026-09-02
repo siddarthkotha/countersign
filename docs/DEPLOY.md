@@ -4,14 +4,38 @@ Plain-English steps to get Countersign running on a real URL. Everything here is
 **hosting container** (one server that answers the API, the WebSocket call, and the web
 page). It does not touch AssemblyAI itself — see `docs/SETUP-API-KEY.md` for that.
 
+**Hosting is paid from day one (founder ruling, 2026-09-02) — no mid-hackathon plan switch.**
+`render.yaml` sets `plan: starter` ($7/month, always-on, no spin-down) from the very first
+deploy. The founder chose this over starting on the free tier because a sleeping free
+instance waking up on a judge's first click is a dead submission — see
+`docs/hosting-render-check-2026-09-02.md` for the free-tier facts that made the call. The
+free tier still exists as a documented fallback (bottom of this file) in case the paid plan
+ever needs to lapse temporarily, but it is not the plan this project deploys on.
+
 ## 1. Create the Render service from the blueprint
 
 1. Push this repo to GitHub (already done if you're reading this from the repo).
 2. In the Render dashboard: **New +** → **Blueprint**.
 3. Point it at this GitHub repo. Render reads `render.yaml` at the repo root and proposes one
    web service named `countersign` — Node 24, builds `npm ci && npm run build` (the web app
-   and the server), starts with `npm run start:server`, health-checked at `/health`.
-4. Click **Apply**. Render builds and deploys automatically from here.
+   and the server), starts with `npm run start:server`, health-checked at `/health`, on the
+   **Starter** instance type (`plan: starter` in the blueprint — not a separate manual
+   choice, it comes straight from the file).
+4. **The card moment:** because Starter is a paid plan, if the Render account doesn't already
+   have a payment method on file, Render pauses the blueprint-creation flow right here and
+   asks for one (a standard card-entry screen) before it will actually provision the service
+   — expect this step; it's Render protecting itself, not something this repo controls. (Not
+   yet observed live on this specific account as of this writing — the actual first deploy is
+   the founder's step, done with him present; if the real flow differs from this description,
+   update this paragraph after that run.)
+5. Click **Apply**. Render builds and deploys automatically from here.
+
+**Why Render, not Railway or Vercel:** Railway's free tier is $1/month of usage credit plus a
+one-time $5 trial credit for 30 days — not a sustainable always-on plan for a multi-week build
+(`docs/railway-check-2026-09-02.md`). Vercel's serverless functions cap out at a 5-minute
+execution duration on every plan checked and offer no always-on persistent server at all,
+which the WebSocket call path needs (`docs/vercel-ws-check-2026-09-02.md`). Render's Starter
+plan is a genuinely always-on box at a flat, predictable price.
 
 **How it runs, and why:** `build:server` compiles `packages/server/src` to plain JavaScript
 (`packages/server/dist`), but `start:server` still runs that compiled output through `tsx`,
@@ -51,7 +75,8 @@ Once the deploy finishes, Render shows the service's URL (something like
 
 Then open the root URL in a browser — it should load the split-screen app, not a 404 or a
 blank page. If it 404s, the build likely didn't produce `packages/web/dist` — check the
-Render build logs for `build:web` output.
+Render build logs for `build:web` output. On the Starter plan this should respond
+immediately, first click, every time — no cold-start wait to account for.
 
 **Important — match the CORS allowlist to the real URL.** `render.yaml` sets
 `COUNTERSIGN_ALLOWED_ORIGINS` to `https://countersign.onrender.com` as a guess. If Render
@@ -109,38 +134,48 @@ automatically at UTC midnight — no manual action needed. To raise or lower it,
 
 ## 7. Cost expectation
 
-**PROVEN — $7/month** for Render's Starter web-service instance (512 MB RAM, 0.5 CPU,
-always-on/continuous run — no spin-down). Source: render.com/pricing, checked 2026-09-02.
-The Free plan (what `render.yaml` uses during the build weeks) costs $0/month but suspends
-after inactivity — see step 8. Confirm the current figure in the Render dashboard's own plan
-picker before switching (step 8) in case pricing has changed since this was checked.
+**$7/month** for Render's Starter web-service instance (512 MB RAM, 0.5 CPU, always-on/
+continuous run — no spin-down). Label: **ESTIMATE-by-search** — this figure came from a
+routed web search against render.com/pricing (2026-09-02), not a direct read of the live
+pricing page in a browser (the page renders its plan table client-side and returned nothing
+useful to a plain fetch). Treat it as a strong estimate, not a proven number, until someone
+actually opens render.com/pricing in a browser and confirms the Starter line item — do that
+before relying on it for a budget line, and update this paragraph (with the date checked and
+"PROVEN") once done. The Render dashboard's own plan picker will also show the live price at
+the moment of the actual first deploy (step 1.4 above) — that's a second, even more direct
+confirmation opportunity.
 
-## 8. Switching from Free to Starter before judging week
+---
 
-`render.yaml` currently sets `plan: free` for the build weeks — free web services suspend
-after **15 minutes** of inactivity and take about **one minute** to spin back up on the next
-request or WebSocket connection (verified,
-`docs/hosting-render-check-2026-09-02.md`, quoting Render's own docs: *"Free web services
-automatically suspend after 15 minutes of inactivity. A Free web service spins back up
-whenever it next receives an HTTP request or new WebSocket connection. This process takes
+## Fallback: free tier
+
+This project deploys on Starter from day one (see the top of this file) — the free tier is
+**not** the default and nothing here needs to be done for a normal deploy. This section
+exists only in case the paid plan ever needs to lapse temporarily (a billing hiccup, a
+deliberate short pause between build sessions) and the service has to run on Render's free
+instance type for a stretch.
+
+**What changes on free:** free web services suspend after **15 minutes** of inactivity and
+take about **one minute** to spin back up on the next request or WebSocket connection
+(verified, `docs/hosting-render-check-2026-09-02.md`, quoting Render's own docs: *"Free web
+services automatically suspend after 15 minutes of inactivity. A Free web service spins back
+up whenever it next receives an HTTP request or new WebSocket connection. This process takes
 about one minute."*). A judge whose first click eats a ~1-minute cold start is a bad first
-impression at best.
+impression at best — this is exactly why the project doesn't run on free tier during judging.
 
-**The one-line switch, before ~Sep 20:**
+**To switch to free temporarily:** in `render.yaml`, change `plan: starter` to `plan: free`,
+commit, and push — **or** change the plan directly in the Render dashboard (service →
+Settings → Instance Type), which takes effect immediately without a git change. Switch back
+to `starter` the same way before any real usage (rehearsals, judging).
 
-- In `render.yaml`, change `plan: free` to `plan: starter`, commit, and push (Render
-  redeploys with the new plan on the next blueprint sync) — **or** just change the plan
-  directly in the Render dashboard (service → Settings → Instance Type), which takes effect
-  immediately without a git change.
-- Starter (and every paid plan) stays always-on: no 15-minute suspend, no cold start.
-
-**Free-tier fallback, if the plan switch is missed or delayed:** `.github/workflows/keepalive.yml`
-is a GitHub Actions workflow that pings `/health` on a schedule to keep the free instance
-awake — it ships **disabled by default** (only a manual `workflow_dispatch` trigger; the
-`schedule:` block is commented out) so it costs nothing and does nothing until turned on.
-To enable it: uncomment the `schedule:` cron line in that file, set the
-`COUNTERSIGN_HEALTH_URL` repository variable (Settings → Secrets and variables → Actions →
-Variables) to the deployed `/health` URL, and commit. This is a stopgap, not a substitute for
-the Starter switch — it only prevents the 15-minute suspend as long as GitHub Actions keeps
-running the schedule, and does nothing about a wake-up that's already mid-flight if traffic
-arrives right as the free instance is spinning back up.
+**Keep-alive workaround while on free tier:** `.github/workflows/keepalive.yml` is a GitHub
+Actions workflow that pings `/health` on a schedule to keep a free instance awake — it ships
+**disabled by default** (only a manual `workflow_dispatch` trigger; the `schedule:` block is
+commented out) so it costs nothing and does nothing until turned on. To enable it: uncomment
+the `schedule:` cron line in that file, set the `COUNTERSIGN_HEALTH_URL` repository variable
+(Settings → Secrets and variables → Actions → Variables) to the deployed `/health` URL, and
+commit. This is a stopgap, not a substitute for the Starter plan — it only prevents the
+15-minute suspend as long as GitHub Actions keeps running the schedule, and does nothing
+about a wake-up that's already mid-flight if traffic arrives right as the free instance is
+spinning back up. Remember to disable it again (re-comment the `schedule:` line) once back on
+Starter, so it isn't pinging a service that no longer needs it.
