@@ -173,7 +173,11 @@ function selectRelational(claims: Claim[], issued: ChallengeSpec[], seed: SeedCo
 
 /** Deterministic: same (claims, issued, results, seed, session_id, conversation) → the
  *  same spec every time. Order of preference: LIVE_COMMITMENT, then TRAP_FACT (once per
- *  call), then SEED_FACT, then RELATIONAL (once per call). Null once
+ *  call), then RELATIONAL (once per call), then SEED_FACT. (Ruled reorder, 2026-09-01
+ *  11:24 PM CDT: RELATIONAL is conversation-derived -- it asks for the account of the bank
+ *  the CALLER named -- and so ranks above the seeded, non-conversational SEED_FACT
+ *  question; otherwise RELATIONAL was dead code against the shipping seed, since SEED_FACT
+ *  would always exhaust the challenge budget first.) Null once
  *  `seed.thresholds.max_challenges` have been issued, or nothing applies. `results` is
  *  accepted for interface symmetry with the grading side; nothing here currently changes
  *  selection based on past results (a FAILED/PASSED challenge is still "issued" and thus
@@ -198,13 +202,13 @@ export function selectChallenge(
     if (trap) return trap;
   }
 
-  const seedFact = selectSeedFact(issued, seed, session_id, challengeId);
-  if (seedFact) return seedFact;
-
   if (!issued.some((s) => s.kind === 'RELATIONAL')) {
     const relational = selectRelational(claims, issued, seed, challengeId);
     if (relational) return relational;
   }
+
+  const seedFact = selectSeedFact(issued, seed, session_id, challengeId);
+  if (seedFact) return seedFact;
 
   return null;
 }

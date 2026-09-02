@@ -46,6 +46,13 @@ export interface AgentAction {
   kind: AgentActionKind;
   t_ms: number;
   challenge_id?: string; // challenge_issued
+  // Founder-morning item 4: the exact ChallengeSpec the server recorded issuing, when
+  // available. `reconstructIssued` (compose.ts) uses this verbatim after validating it was
+  // a LEGAL choice at that point in the call, instead of recomputing `selectChallenge` and
+  // hoping the recomputation agrees -- this is what lets the knowledge card name the
+  // question actually asked (e.g. counsel-of-record) rather than whatever the hash-order
+  // recomputation would have picked. Absent ⇒ falls back to the existing recomputation.
+  spec?: ChallengeSpec; // challenge_issued
   field?: ClaimField; // readback_issued: what the agent read back
   value?: string; // readback_issued: what the agent read back
   detail?: string; // session_config_updated: e.g. "keyterms+=First Meridian Trust"

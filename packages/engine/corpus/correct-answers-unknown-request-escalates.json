@@ -1,6 +1,6 @@
 {
-  "title": "Passing the quiz is not the same as authorization",
-  "description": "Dana (real identity, clean SSO, clean out-of-band) asks to pay a vendor that has never been paid before -- no scheduled payment matches, so the context check fails and the beneficiary reads as new, which doubles the challenge requirement to 2 PASSes. The caller answers every challenge the engine asks correctly. It does not matter: rule 10 escalates ANY first-time beneficiary for a human callback regardless of amount or how well the knowledge checks went, ahead of rule 11's all-green STAGE gate. Proves the amendment's own framing verbatim: knowing the right facts is necessary, never sufficient, to move money to someone new.",
+  "title": "Consistent restatement is not authorization",
+  "description": "Dana (real identity, clean SSO, clean out-of-band) asks to pay a vendor that has never been paid before -- no scheduled payment matches, so the context check fails and the beneficiary reads as new, which doubles the challenge requirement to 2 PASSes. Both challenges issued this call are LIVE_COMMITMENT restatements (amount, then beneficiary) -- no seeded knowledge question ever fires in this call, so this proves consistent restatement, not proof-of-knowledge. The caller restates every fact consistently and both PASS. It does not matter: rule 10 escalates ANY first-time beneficiary for a human callback regardless of amount or how consistently the caller restates it, ahead of rule 11's all-green STAGE gate. Proves the amendment's own framing verbatim: knowing -- or merely repeating -- the right facts is necessary, never sufficient, to move money to someone new.",
   "call": {
     "session_id": "sess-9",
     "origin_kind": "registered_device",

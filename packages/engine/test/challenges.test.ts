@@ -62,7 +62,11 @@ describe('selectChallenge — selection order', () => {
     expect(spec2?.expect).toEqual({ trap_value: 'Calder & Finch', true_claim_id: 'c-counsel' });
   });
 
-  it('then picks SEED_FACT, then returns null once max_challenges (3) are issued', () => {
+  it('then picks SEED_FACT (RELATIONAL is inapplicable here -- no beneficiary/escrow claim), then returns null once max_challenges (3) are issued', () => {
+    // Ruled reorder (2026-09-01, 11:24 PM CDT): RELATIONAL now ranks ABOVE SEED_FACT, but
+    // this fixture's claims are only amount_usd and counsel -- no beneficiary or
+    // escrow_institution claim exists, so `selectRelational` still finds nothing and the
+    // third pick falls through to SEED_FACT exactly as before the reorder.
     const spec1 = selectChallenge(claims, [], {}, SEED, 'sess1', conversation)!;
     const spec2 = selectChallenge(claims, [spec1], {}, SEED, 'sess1', conversation)!;
     const spec3 = selectChallenge(claims, [spec1, spec2], {}, SEED, 'sess1', conversation);
@@ -95,6 +99,27 @@ describe('selectChallenge — selection order', () => {
     expect(spec?.field).toBe('account_last4');
     // No escrow_account_last4 knowledge entry in this seed ⇒ accept_tokens falls back to [].
     expect(spec?.expect).toEqual({ accept_tokens: [] });
+  });
+
+  it('ruled reorder: picks RELATIONAL over SEED_FACT when BOTH are available (real seed, unused knowledge entries)', () => {
+    // Unlike the previous test, this uses the real MERIDIAN seed (knowledge entries
+    // present and unused, including escrow_account_last4) with a plain high max_challenges
+    // -- so before the reorder this would have picked a SEED_FACT entry. Proves RELATIONAL
+    // now wins whenever both are simultaneously eligible.
+    const withBeneficiary: Claim[] = [claim('c-ben2', 'beneficiary', 'STATED', 'meridian supply', 1000, 'Meridian Supply')];
+    const trapAlready: ChallengeSpec = {
+      challenge_id: 'sessR2-1',
+      kind: 'TRAP_FACT',
+      field: 'beneficiary',
+      ask: 'x',
+      expect: { trap_value: 'Northgate Partners', true_claim_id: 'c-ben2' },
+    };
+    const bigMaxSeed = { ...SEED, thresholds: { ...SEED.thresholds, max_challenges: 100 } };
+    const spec = selectChallenge(withBeneficiary, [trapAlready], {}, bigMaxSeed, 'sessR2', undefined);
+    expect(spec?.kind).toBe('RELATIONAL');
+    expect(spec?.field).toBe('account_last4');
+    const escrowLast4 = SEED.knowledge.find((k) => k.id === 'escrow_account_last4')!;
+    expect(spec?.expect).toEqual({ accept_tokens: escrowLast4.accept_tokens });
   });
 });
 

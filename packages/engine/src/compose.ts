@@ -38,15 +38,59 @@ function isDrift(spec: ChallengeSpec): boolean {
   return spec.ask === '';
 }
 
-/** Rebuilds the sequence of `ChallengeSpec`s that were actually issued, purely from the
- *  `challenge_issued` actions and the ledger -- never trusting a stored spec, since none is
- *  stored (the server only logs the action). Deterministic: re-runs `selectChallenge` as of
- *  each action's t_ms (claims with t_ms <= action.t_ms only). If the rebuilt spec's
- *  challenge_id doesn't match the action's (log drift -- e.g. a replayed/edited corpus
- *  file, or a server/engine version mismatch), a placeholder spec is kept instead of
- *  dropping the action: there is no reliable spec to grade the caller's answer against, so
- *  it is treated as UNANSWERED (amendment §D step 3) by `buildKnowledgeEvidence`, never
- *  silently vanished from the evidence record. */
+/** Placeholder spec for log drift (`ask: ''`, the drift sentinel -- never graded normally,
+ *  since its deliberately empty expect.accept_tokens would otherwise vacuously PASS) so the
+ *  drift itself is visible as a FLAG card rather than disappearing. */
+function driftSpec(challenge_id: string | undefined, fallbackId: string): ChallengeSpec {
+  return {
+    challenge_id: challenge_id ?? `drift-${fallbackId}`,
+    kind: 'SEED_FACT',
+    field: 'purpose',
+    ask: '',
+    expect: { accept_tokens: [] },
+  };
+}
+
+/** Founder-morning item 4: is `spec` (an action's recorded `AgentAction.spec`) a LEGAL
+ *  choice at the point it was issued -- i.e. one `selectChallenge` could actually have
+ *  produced, given what had happened in the call by `action.t_ms`? Checked structurally
+ *  rather than by re-running selection (the whole point is to trust the recorded spec
+ *  instead of the hash-order recomputation), so a legal spec can carry a DIFFERENT
+ *  challenge than recomputation would have picked (e.g. the server asked counsel_of_record
+ *  while hash order would have picked a different seed fact) and still be used verbatim. */
+function isLegalSpec(spec: ChallengeSpec, issued: ChallengeSpec[], claimsAsOf: Claim[], seed: SeedConfig, session_id: string): boolean {
+  if (spec.challenge_id !== `${session_id}-${issued.length + 1}`) return false;
+  if (spec.kind === 'SEED_FACT') {
+    if (!spec.fact_id) return false;
+    if (!seed.knowledge.some((k) => k.id === spec.fact_id)) return false;
+    return !issued.some((s) => s.kind === 'SEED_FACT' && s.fact_id === spec.fact_id);
+  }
+  if (spec.kind === 'LIVE_COMMITMENT') {
+    const expect = spec.expect;
+    return 'commitment_claim_id' in expect && claimsAsOf.some((c) => c.id === expect.commitment_claim_id);
+  }
+  if (spec.kind === 'TRAP_FACT') {
+    const expect = spec.expect;
+    return 'true_claim_id' in expect && claimsAsOf.some((c) => c.id === expect.true_claim_id);
+  }
+  // RELATIONAL: expect is accept_tokens-shaped (no claim id of its own) -- the field it
+  // depends on (escrow_institution, or beneficiary as the fallback) must have been claimed
+  // by this point, the same precondition `selectRelational` itself requires.
+  return claimsAsOf.some((c) => c.field === 'escrow_institution' || c.field === 'beneficiary');
+}
+
+/** Rebuilds the sequence of `ChallengeSpec`s that were actually issued, from the
+ *  `challenge_issued` actions and the ledger. When an action carries a `spec` (the server's
+ *  own record of what it asked) that is a LEGAL choice at that point (see `isLegalSpec`),
+ *  it is used verbatim -- this is what lets the knowledge card name the exact question
+ *  asked instead of whatever a hash-order recomputation would have picked. When an action
+ *  carries no `spec` (or an illegal one), falls back to the prior behavior: re-runs
+ *  `selectChallenge` as of each action's t_ms (claims with t_ms <= action.t_ms only). If
+ *  neither the recorded spec nor the rebuilt spec's challenge_id matches the action's (log
+ *  drift -- e.g. a replayed/edited corpus file, or a server/engine version mismatch), a
+ *  placeholder spec is kept instead of dropping the action: there is no reliable spec to
+ *  grade the caller's answer against, so it is treated as UNANSWERED (amendment §D step 3)
+ *  by `buildKnowledgeEvidence`, never silently vanished from the evidence record. */
 export function reconstructIssued(
   claims: Claim[],
   actions: AgentAction[],
@@ -59,22 +103,22 @@ export function reconstructIssued(
   for (const action of issuedActions) {
     const claimsAsOf = claims.filter((c) => c.t_ms <= action.t_ms);
     const conversationAsOf = conversation.filter((u) => u.t_ms <= action.t_ms);
+
+    if (action.spec) {
+      if (isLegalSpec(action.spec, issued, claimsAsOf, seed, session_id)) {
+        issued.push(action.spec);
+      } else {
+        issued.push(driftSpec(action.challenge_id, action.id));
+      }
+      continue;
+    }
+
     const rebuilt = selectChallenge(claimsAsOf, issued, {}, seed, session_id, conversationAsOf);
     if (rebuilt && rebuilt.challenge_id === action.challenge_id) {
       issued.push(rebuilt);
       continue;
     }
-    // Log drift: the action names a challenge_id no reconstruction produces. Keep a
-    // placeholder spec (`ask: ''`, the drift sentinel -- never graded normally, since its
-    // deliberately empty expect.accept_tokens would otherwise vacuously PASS) so the drift
-    // itself is visible as a FLAG card rather than disappearing.
-    issued.push({
-      challenge_id: action.challenge_id ?? `drift-${action.id}`,
-      kind: 'SEED_FACT',
-      field: 'purpose',
-      ask: '',
-      expect: { accept_tokens: [] },
-    });
+    issued.push(driftSpec(action.challenge_id, action.id));
   }
   return issued;
 }
