@@ -4,7 +4,7 @@
 // through the real `deriveScreenState` mapper (packages/server/src/screen/state.ts) -- so
 // this test exercises the actual contract, not a hand-typed guess at its shape. CallView
 // must render ScreenState verbatim: it computes nothing about verdicts.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { evaluate, MERIDIAN } from '@countersign/engine';
@@ -164,5 +164,45 @@ describe('CallView', () => {
     expect(within(forensic).getByText(/abc123def456/)).toBeInTheDocument();
     expect(within(forensic).getByText('server verdict FREEZE, recomputed: yes')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Hide why' })).toBeInTheDocument();
+  });
+
+  // Fix round 1, Critical 1: LAW 1 vocabulary -- "sealed" is banned outright, including in
+  // the negative ("not yet sealed"). Before any verdict, `export_hash` is null and this is
+  // the string a judge sees on the default (defaultForensicOpen) Replay path.
+  it('never says "sealed" for an unset export hash, and says the hash-chained export is not yet available', async () => {
+    const state = scenarioBFinalState();
+    const pendingState: ScreenState = {
+      ...state,
+      forensic: { ...state.forensic, export_hash: null },
+    };
+
+    const user = userEvent.setup();
+    const { container } = render(<CallView screen={pendingState} />);
+    await user.click(screen.getByRole('button', { name: 'Why?' }));
+
+    const forensic = screen.getByLabelText('forensic');
+    expect(within(forensic).getByText('Export hash: hash-chained evidence export not yet available')).toBeInTheDocument();
+    expect(container.textContent ?? '').not.toMatch(/seal/i);
+  });
+
+  // Fix round 1, Important: brief requirement C asks for an auto-scrolling transcript
+  // ("newest at the bottom"). `.transcript` (styles.css) is a fixed-height `overflow-y: auto`
+  // box, so a newly-appended line needs something to bring it into view. `scrollIntoView` is
+  // stubbed as a no-op for every test in test/setup.ts (jsdom has no layout, so it doesn't
+  // implement it); spy over that stub here to assert CallView actually calls it, on the
+  // newest line, both on first render and again when a line is appended.
+  it('scrolls the newest transcript line into view on render and again when a line is appended', () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+
+    const full = scenarioBFinalState();
+    const withoutLastLine: ScreenState = { ...full, transcript: full.transcript.slice(0, -1) };
+
+    const { rerender } = render(<CallView screen={withoutLastLine} />);
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+    rerender(<CallView screen={full} />);
+    expect(scrollIntoView).toHaveBeenCalledTimes(2);
+
+    scrollIntoView.mockRestore();
   });
 });

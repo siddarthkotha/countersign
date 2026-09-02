@@ -61,10 +61,15 @@ const css = readFileSync(CSS_PATH, 'utf-8');
 const root = parseRootCustomProperties(css);
 
 // Every text colour token, over every background token it is actually painted on in
-// styles.css: --cs-fg, --cs-muted and --cs-accent all appear as text on both --cs-bg (the
-// call/replay/landing surface) and --cs-panel (the board and verdict-banner surface).
+// styles.css: --cs-fg, --cs-muted and --cs-accent all appear as text on --cs-bg (the
+// call/replay/landing surface), --cs-panel (the board and verdict-banner surface), AND
+// --cs-elevated (Fix round 1, Critical 2 -- button, select/input, .role-card, .banner
+// (SimulatedBanner / mic-blocked / replay-unavailable), .transcript's highlighted-row
+// background, and the whole .forensic section all paint --cs-fg/--cs-muted/--cs-accent text
+// on a --cs-elevated background; omitting it left those pairings free to drift below
+// threshold without this test ever failing).
 const TEXT_TOKENS = ['--cs-fg', '--cs-muted', '--cs-accent'] as const;
-const BACKGROUND_TOKENS = ['--cs-bg', '--cs-panel'] as const;
+const BACKGROUND_TOKENS = ['--cs-bg', '--cs-panel', '--cs-elevated'] as const;
 
 describe('contrast (styles.css :root palette)', () => {
   it('parses a non-empty :root block with every token this test needs', () => {

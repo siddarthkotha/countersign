@@ -6,7 +6,7 @@
 // unconditionally, rendered via the shared `SimulatedBanner` component (Task R1: the banner
 // text has one source -- Call.tsx renders the same component for every moment CallView isn't
 // on screen instead of this file keeping its own copy).
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AssuranceChecklist, Claim, ChallengeResult, Evidence, ScreenState, Speaker } from '@countersign/engine';
 import SimulatedBanner from './SimulatedBanner';
 
@@ -89,6 +89,18 @@ function LedgerRow({ claim }: { claim: Claim }) {
 
 export default function CallView({ screen, defaultForensicOpen }: CallViewProps) {
   const [showWhy, setShowWhy] = useState(defaultForensicOpen ?? false);
+  // Fix round 1, Important: brief requirement C asks for an auto-scrolling transcript with
+  // newest at the bottom. `.transcript` (styles.css) is a fixed-height `overflow-y: auto`
+  // box, so without this a new line can land below the visible viewport. `lastLineId` (not
+  // just `.length`) is the effect's dependency so a replay that restarts with a shorter
+  // transcript (same length, different last line) still re-triggers the scroll -- instant,
+  // no `behavior: 'smooth'`, so there is nothing here for `prefers-reduced-motion` to guard
+  // and it never delays the verdict line reaching the screen.
+  const lastLineRef = useRef<HTMLParagraphElement | null>(null);
+  const lastLineId = screen.transcript.length > 0 ? screen.transcript[screen.transcript.length - 1]!.id : null;
+  useEffect(() => {
+    lastLineRef.current?.scrollIntoView({ block: 'end' });
+  }, [lastLineId]);
 
   return (
     <div className="call-view">
@@ -131,9 +143,10 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
           channel is marked by both a class (`turn-caller` / `turn-agent`, colour) and the
           label text itself, so the two channels read apart without relying on colour alone. */}
       <section className="transcript" aria-label="transcript">
-        {screen.transcript.map((line) => (
+        {screen.transcript.map((line, i) => (
           <p
             key={line.id}
+            ref={i === screen.transcript.length - 1 ? lastLineRef : undefined}
             className={`turn turn-${line.speaker}${line.highlighted ? ' highlighted' : ''}`}
             data-highlighted={line.highlighted ? 'true' : 'false'}
             data-speaker={line.speaker}
@@ -196,7 +209,7 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
               ))}
             </ul>
 
-            <p>Export hash: {screen.forensic.export_hash ?? 'not yet sealed (hash-chained evidence export pending)'}</p>
+            <p>Export hash: {screen.forensic.export_hash ?? 'hash-chained evidence export not yet available'}</p>
             <p className="countersign">
               server verdict {screen.forensic.countersign.server_verdict}, recomputed: {screen.forensic.countersign.recomputed ? 'yes' : 'no'}
             </p>
