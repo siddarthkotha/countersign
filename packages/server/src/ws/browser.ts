@@ -35,8 +35,7 @@ import { endSession, touch, type CapsState } from '../caps.js';
 import type { AaiSocket } from '../aai/types.js';
 import { CallSession } from '../call/session.js';
 import { defaultCorpusDir, loadCorpusFile, runReplay } from '../replay.js';
-
-const STATE_THROTTLE_MS = 66;
+import { makeThrottle, THROTTLE_WINDOW_MS } from './throttle.js';
 
 /** Matches config.ts's own `COUNTERSIGN_BROWSER_GRACE_MS` default -- kept as a local literal
  *  rather than importing ServerConfig here so `BrowserWsDeps.browser_grace_ms` stays a plain
@@ -112,40 +111,21 @@ function safeSend(ws: WebSocket, msg: object): void {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 }
 
-/** Coalesces `state` ServerEvents to at most one send per STATE_THROTTLE_MS: a burst of
- *  rapid state changes results in one send carrying the latest state, not one send per
- *  change. Every other ServerEvent type (audio, flush, ended) is timing-sensitive and
- *  always sent immediately. */
+/** Coalesces `state` ServerEvents to at most one send per THROTTLE_WINDOW_MS (the exact
+ *  leading-edge/trailing-flush/latest-wins timing lives in and is unit-tested by
+ *  `./throttle.ts` with fake timers -- this wrapper just decides WHICH events go through the
+ *  throttle): a burst of rapid state changes results in one send carrying the latest state,
+ *  not one send per change. Every other ServerEvent type (audio, flush, ended) is
+ *  timing-sensitive and always sent immediately. */
 function makeThrottledSender(ws: WebSocket): (e: ServerEvent) => void {
-  let lastStateSentAt = -Infinity;
-  let pendingState: ServerEvent | null = null;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-
-  function flushPending(): void {
-    timer = null;
-    if (pendingState) {
-      lastStateSentAt = Date.now();
-      safeSend(ws, pendingState);
-      pendingState = null;
-    }
-  }
+  const sendState = makeThrottle<ServerEvent>((e) => safeSend(ws, e), THROTTLE_WINDOW_MS);
 
   return (e: ServerEvent) => {
     if (e.type !== 'state') {
       safeSend(ws, e);
       return;
     }
-    const now = Date.now();
-    if (now - lastStateSentAt >= STATE_THROTTLE_MS) {
-      lastStateSentAt = now;
-      pendingState = null;
-      safeSend(ws, e);
-      return;
-    }
-    pendingState = e;
-    if (!timer) {
-      timer = setTimeout(flushPending, STATE_THROTTLE_MS - (now - lastStateSentAt));
-    }
+    sendState(e);
   };
 }
 

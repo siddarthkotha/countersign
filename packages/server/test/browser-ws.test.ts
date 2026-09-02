@@ -156,41 +156,45 @@ describe('ws/browser — /ws/call/:id', () => {
     ws.close();
   });
 
-  it('throttles rapid state updates to at most one send per ~66ms window', async () => {
+  it('throttles rapid state updates to fewer sends than updates (exact per-window timing is unit-tested in throttle.test.ts with fake timers)', async () => {
+    // The EXACT throttle timing (leading-edge send, one trailing coalesced flush at the
+    // window boundary, latest-state-wins) is proven deterministically in
+    // packages/server/test/throttle.test.ts against the pure `makeThrottle` function using
+    // vitest fake timers -- no real clock involved, so no flakiness under load. This test
+    // stays a real socket/timer integration test, but only asserts the timing-INSENSITIVE
+    // fact that end-to-end wiring (browser.ts's `makeThrottledSender` actually calls into the
+    // throttle for `state` events): a burst of state-changing updates produces strictly fewer
+    // `state` sends than updates, never one send per update. That is true for ANY throttle
+    // window that fires more slowly than the burst, so it can't flake on timing the way an
+    // exact upper/lower bound over a fixed real wait could.
     const { base, wsBase, aaiInstances } = await start();
     const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
     const { session_id, ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
 
-    const ws = await connect(`${wsBase}${ws_path}`);
-    const messages: ServerEvent[] = [];
-    const timestamps: number[] = [];
-    ws.on('message', (data) => {
-      messages.push(JSON.parse(data.toString()) as ServerEvent);
-      timestamps.push(Date.now());
-    });
+    const { ws, messages } = await connectAndCollect(`${wsBase}${ws_path}`);
     ws.send(JSON.stringify({ type: 'start' }));
     await pollUntil(() => messages.some((m) => m.type === 'state'));
 
     const aai = aaiInstances.get(session_id)!;
+    const stateCountBeforeBurst = messages.filter((m) => m.type === 'state').length;
+    const burstSize = 10;
     // Fire a burst of user transcripts well within one 66ms throttle window -- each one
     // changes the conversation log and would otherwise trigger its own `state` send.
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < burstSize; i++) {
       aai.emit({ type: 'transcript.user', item_id: `burst-${i}`, text: `hello ${i}` });
     }
 
     try {
-      // Finding 5 (final review): this asserts an UPPER bound (no more than one trailing
-      // coalesced flush), which a poll-until-true can't express -- proving an absence needs
-      // waiting out the real window, not racing to the first true. 300ms is a real wait
-      // (comfortably longer than the 66ms window it's proving nothing extra fires inside),
-      // not a shorter-than-necessary guess.
+      // Give the throttle's trailing flush (and the socket) time to deliver whatever it's
+      // going to send -- generous on purpose (this is a "let it settle" wait, not a
+      // boundary-proving one, so being longer than strictly necessary costs nothing).
       await new Promise((resolve) => setTimeout(resolve, 300));
 
-      const stateEvents = messages.filter((m) => m.type === 'state');
-      // Everything fired inside one throttle window: at most 2 sends (one immediate leading
-      // send, one trailing coalesced flush) -- never one per burst event.
-      expect(stateEvents.length).toBeLessThanOrEqual(2);
-      expect(stateEvents.length).toBeGreaterThanOrEqual(1);
+      const stateEventsAfterBurst = messages.filter((m) => m.type === 'state').length - stateCountBeforeBurst;
+      // Never one send per burst event -- strictly fewer sends than updates. (The exact
+      // bound of "at most 2" lives in throttle.test.ts, proven with fake timers.)
+      expect(stateEventsAfterBurst).toBeLessThan(burstSize);
+      expect(stateEventsAfterBurst).toBeGreaterThanOrEqual(1);
     } finally {
       // Finding 5 (final review): cleanup runs even if the assertion above throws -- an
       // uncleaned socket left open after a failed assertion is what turned one flaky
