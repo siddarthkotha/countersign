@@ -60,9 +60,24 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForHealth(base: string, deadline: number): Promise<Record<string, unknown>> {
+/** D1 fix round 1 #5: used to only check `exitedEarly` *after* this loop returned -- a
+ *  server that crashes immediately on startup still made the script wait out the full
+ *  `HEALTH_TIMEOUT_MS` before reporting the (correct) failure. `getExitInfo` is polled
+ *  on every iteration instead, so a crash is reported within one `HEALTH_POLL_MS` tick. */
+async function waitForHealth(
+  base: string,
+  deadline: number,
+  getExitInfo: () => { code: number | null; lastOutput: string } | null
+): Promise<Record<string, unknown>> {
   let lastError: unknown;
   while (Date.now() < deadline) {
+    const exitInfo = getExitInfo();
+    if (exitInfo !== null) {
+      throw new Error(
+        `server process exited early (code ${String(exitInfo.code)}) before /health was reachable.\n` +
+          `last output:\n${exitInfo.lastOutput}`
+      );
+    }
     try {
       const res = await fetch(`${base}/health`);
       if (res.ok) {
@@ -104,17 +119,18 @@ async function main(): Promise<void> {
     serverOutput += chunk.toString();
   });
 
-  let exitedEarly: number | null = null;
+  let exitCode: number | null = null;
+  let hasExited = false;
   child.once('exit', (code) => {
-    exitedEarly = code;
+    hasExited = true;
+    exitCode = code;
   });
 
   try {
     const deadline = Date.now() + HEALTH_TIMEOUT_MS;
-    const health = await waitForHealth(base, deadline);
-    if (exitedEarly !== null) {
-      throw new Error(`server process exited early (code ${String(exitedEarly)}) before /health was reachable`);
-    }
+    const health = await waitForHealth(base, deadline, () =>
+      hasExited ? { code: exitCode, lastOutput: serverOutput.trim().slice(-2000) } : null
+    );
     if (health.ok !== true) {
       throw new Error(`/health responded but ok !== true: ${JSON.stringify(health)}`);
     }

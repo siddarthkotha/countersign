@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createStaticServer } from '../src/static.js';
@@ -42,6 +42,7 @@ function startServerFor(distDir: string): Promise<{ server: Server; base: string
 
 describe('static.ts -- SPA static server', () => {
   let fixtureDir: string;
+  let outsideDir: string;
 
   beforeAll(() => {
     fixtureDir = mkdtempSync(join(tmpdir(), 'countersign-static-'));
@@ -50,10 +51,18 @@ describe('static.ts -- SPA static server', () => {
     writeFileSync(join(fixtureDir, 'assets', 'index-ABC123.js'), 'console.log("hi")');
     writeFileSync(join(fixtureDir, 'assets', 'index-ABC123.css'), 'body{color:red}');
     writeFileSync(join(fixtureDir, 'favicon.svg'), '<svg></svg>');
+
+    // D1 fix round 1 #3 fixture: a file entirely OUTSIDE dist, and a symlink planted INSIDE
+    // dist that points at it -- a compromised build step's-eye view of the traversal that
+    // `resolveSafe`'s lexical containment check alone can't see through.
+    outsideDir = mkdtempSync(join(tmpdir(), 'countersign-static-outside-'));
+    writeFileSync(join(outsideDir, 'secret.txt'), 'not part of the dist build');
+    symlinkSync(join(outsideDir, 'secret.txt'), join(fixtureDir, 'escape-link.txt'));
   });
 
   afterAll(() => {
     rmSync(fixtureDir, { recursive: true, force: true });
+    rmSync(outsideDir, { recursive: true, force: true });
   });
 
   async function withServer<T>(distDir: string, fn: (base: string) => Promise<T>): Promise<T> {
@@ -95,6 +104,35 @@ describe('static.ts -- SPA static server', () => {
       expect(rCss.status).toBe(200);
       expect(rCss.headers.get('content-type')).toContain('text/css');
       expect(rCss.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    });
+  });
+
+  it('HEAD / returns the same headers as GET but no body (D1 fix round 1 #1)', async () => {
+    await withServer(fixtureDir, async (base) => {
+      const rGet = await fetch(`${base}/`);
+      const getBody = await rGet.text();
+      expect(getBody).toContain('shell');
+
+      const rHead = await fetch(`${base}/`, { method: 'HEAD' });
+      expect(rHead.status).toBe(200);
+      expect(rHead.headers.get('content-type')).toContain('text/html');
+      expect(rHead.headers.get('cache-control')).toBe('no-cache');
+      expect(rHead.headers.get('content-length')).toBe(String(getBody.length));
+      expect(await rHead.text()).toBe('');
+    });
+  });
+
+  it('HEAD on a hashed asset returns the same headers as GET but no body', async () => {
+    await withServer(fixtureDir, async (base) => {
+      const rGet = await fetch(`${base}/assets/index-ABC123.js`);
+      const getBody = await rGet.text();
+
+      const rHead = await fetch(`${base}/assets/index-ABC123.js`, { method: 'HEAD' });
+      expect(rHead.status).toBe(200);
+      expect(rHead.headers.get('content-type')).toContain('text/javascript');
+      expect(rHead.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      expect(rHead.headers.get('content-length')).toBe(String(getBody.length));
+      expect(await rHead.text()).toBe('');
     });
   });
 
@@ -163,6 +201,15 @@ describe('static.ts -- SPA static server', () => {
     const handled = staticServer.handle(fakeReq, fakeRes);
     expect(handled).toBe(true);
     expect(capturedStatus).toBe(404);
+  });
+
+  it('rejects a symlink inside dist that points outside it (realpath check, D1 fix round 1 #3)', async () => {
+    await withServer(fixtureDir, async (base) => {
+      const r = await fetch(`${base}/escape-link.txt`);
+      expect(r.status).toBe(404);
+      const body = await r.text();
+      expect(body).not.toContain('not part of the dist build');
+    });
   });
 
   it('declines /api and /ws paths so an unmatched API route still gets the JSON 404', async () => {

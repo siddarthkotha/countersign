@@ -1,7 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createHttpServer } from '../src/http.js';
+import { createStaticServer } from '../src/static.js';
 import type { CapsState } from '../src/caps.js';
 import type { ServerConfig } from '../src/config.js';
 
@@ -195,5 +199,74 @@ describe('http server', () => {
     expect(rEnd.status).toBe(204);
     const r2 = await fetch(`${base}/api/session/start`, { method: 'POST' });
     expect(r2.status).toBe(200);
+  });
+});
+
+// D1 fix round 1 #1: the static-server mount (http.ts) used to gate on `req.method ===
+// 'GET'` only, so a HEAD request fell through to the generic JSON 404 even though
+// static.ts's `handle` always supported HEAD -- invisible to every other test in this file
+// (none of them ever configure a `staticServer`) and to static.test.ts (it exercises
+// `staticServer.handle` directly, bypassing http.ts's mount entirely). This suite builds the
+// REAL `createHttpServer` with a real `staticServer`, which is the only way to catch a
+// regression in the mount's own method gate rather than in static.ts's internal one.
+describe('http server -- static mount (D1 fix round 1 #1)', () => {
+  let close: (() => Promise<void>) | undefined;
+  let fixtureDir: string;
+
+  afterEach(async () => {
+    if (close) {
+      await close();
+      close = undefined;
+    }
+    if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
+  });
+
+  async function startWithStatic(): Promise<{ base: string }> {
+    fixtureDir = mkdtempSync(join(tmpdir(), 'countersign-http-static-'));
+    writeFileSync(join(fixtureDir, 'index.html'), '<!doctype html><html><body>shell</body></html>');
+
+    const { server } = createHttpServer(cfg(), {
+      fetchImpl: globalThis.fetch,
+      now: () => 1000,
+      randomId: () => '11111111-1111-1111-1111-111111111111',
+      endCall: () => false,
+      staticServer: createStaticServer(fixtureDir),
+    });
+    return new Promise((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address() as AddressInfo;
+        close = () =>
+          new Promise((res) => {
+            server.closeAllConnections();
+            server.close(() => res());
+          });
+        resolve({ base: `http://127.0.0.1:${addr.port}` });
+      });
+    });
+  }
+
+  it('GET / reaches the static server and serves index.html', async () => {
+    const { base } = await startWithStatic();
+    const r = await fetch(`${base}/`);
+    expect(r.status).toBe(200);
+    expect(await r.text()).toContain('shell');
+  });
+
+  it('HEAD / reaches the static server too -- not the JSON 404 (the actual bug found)', async () => {
+    const { base } = await startWithStatic();
+    const r = await fetch(`${base}/`, { method: 'HEAD' });
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-type')).toContain('text/html');
+    expect(await r.text()).toBe('');
+  });
+
+  it('unmatched /api path still gets the JSON 404, HEAD included', async () => {
+    const { base } = await startWithStatic();
+    const rGet = await fetch(`${base}/api/nonexistent`);
+    expect(rGet.status).toBe(404);
+    expect(await rGet.json()).toEqual({ error: 'not found' });
+
+    const rHead = await fetch(`${base}/api/nonexistent`, { method: 'HEAD' });
+    expect(rHead.status).toBe(404);
   });
 });

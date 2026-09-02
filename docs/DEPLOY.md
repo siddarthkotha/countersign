@@ -13,6 +13,16 @@ page). It does not touch AssemblyAI itself — see `docs/SETUP-API-KEY.md` for t
    and the server), starts with `npm run start:server`, health-checked at `/health`.
 4. Click **Apply**. Render builds and deploys automatically from here.
 
+**How it runs, and why:** `build:server` compiles `packages/server/src` to plain JavaScript
+(`packages/server/dist`), but `start:server` still runs that compiled output through `tsx`,
+not plain `node`. That's required, not a leftover: `@countersign/engine`'s own package.json
+points at a TypeScript source file whose internal imports omit file extensions (fine for the
+"bundler" resolution this repo's tooling uses, but Node's own module loader can't follow it —
+confirmed live, plain `node` throws `ERR_MODULE_NOT_FOUND`). `tsx` resolves it correctly, so
+it stays a small production dependency for now. **Week-2 cleanup item:** compile
+`packages/engine` the same way and point its `exports` at the compiled output — then
+`start:server` can drop back to plain `node` and `tsx` moves back to a dev-only dependency.
+
 ## 2. Paste the API key
 
 `render.yaml` deliberately does **not** contain the AssemblyAI key (`sync: false` — secrets

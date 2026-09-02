@@ -19,6 +19,19 @@ import { allToolSchemas } from './aai/schemas.js';
 // packages/server/, so '../../web/dist' resolves the same from either location.
 const webDistDir = join(dirname(fileURLToPath(import.meta.url)), '../../web/dist');
 
+// D1 fix round 1 #6: `npm run start:server` runs this compiled file through `tsx`
+// (root package.json), not plain `node`, even though `build:server` already compiled it --
+// that's not a leftover, it's required. `@countersign/engine`'s package.json exports a
+// TypeScript source file (`./src/index.ts`) whose own internal relative imports omit file
+// extensions (valid under this repo's "bundler" module resolution, but Node's native ESM
+// loader has no bundler-style extension inference and throws ERR_MODULE_NOT_FOUND on it).
+// `tsx` resolves that correctly, plain `node` does not -- verified live, both ways. Fixing
+// packages/engine's imports is out of D1's scope (server-only task). The real fix, a week-2
+// item: compile packages/engine too (its own tsconfig.build.json -> dist/, explicit .js
+// extensions on the emitted relative imports) and point its package.json `exports` at the
+// compiled output -- then `start:server` can run under plain `node` and `tsx` moves back to
+// devDependencies. See docs/DEPLOY.md's "how it runs" note and task-D1-review.md finding #6.
+
 const useFakeAai = process.env.COUNTERSIGN_FAKE_AAI === '1';
 
 const loadedCfg = loadConfig(process.env);

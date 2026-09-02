@@ -118,8 +118,11 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
 
     // Task D1: static SPA fallback -- only reached once every API/WS route above has
     // declined this request. `staticServer.handle` itself refuses /api and /ws paths, so an
-    // unmatched API route still gets the JSON 404 below, never an HTML page.
-    if (req.method === 'GET' && deps.staticServer?.handle(req, res)) {
+    // unmatched API route still gets the JSON 404 below, never an HTML page. HEAD is allowed
+    // through alongside GET (D1 fix round 1 #1) -- static.ts already supports HEAD
+    // (headers only, no body), but this gate used to only let GET through, so a HEAD request
+    // silently fell through to the generic JSON 404 instead of ever reaching static.ts.
+    if ((req.method === 'GET' || req.method === 'HEAD') && deps.staticServer?.handle(req, res)) {
       return;
     }
 
