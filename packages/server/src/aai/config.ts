@@ -14,7 +14,10 @@
 // the gateway (`https://llm-gateway.assemblyai.com/v1`) accepts the AssemblyAI API key or a
 // separate provider key; per the task ruling this passes the AssemblyAI key and documents
 // the gap below rather than guessing at a different shape.
-export const DEFAULT_VOICE = 'alba';
+// AMENDMENT (controller, 2026-09-02 11:35 AM CDT, from AssemblyAI's own coding-agent
+// instructions, docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md "Voices" section): the documented
+// default voice is `anna`. COUNTERSIGN_VOICE overrides it below.
+export const DEFAULT_VOICE = 'anna';
 export const LLM_GATEWAY_BASE_URL = 'https://llm-gateway.assemblyai.com/v1';
 const AUDIO_ENCODING = 'audio/pcm';
 

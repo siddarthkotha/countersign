@@ -100,8 +100,14 @@ describe('buildInitialSessionUpdate', () => {
   });
 });
 
+describe('DEFAULT_VOICE', () => {
+  it('is "anna" -- AssemblyAI\'s documented default (docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md Voices)', () => {
+    expect(DEFAULT_VOICE).toBe('anna');
+  });
+});
+
 describe('loadAaiEnvDefaults', () => {
-  it('defaults voice to alba and leaves llm_model unset when no env vars are present', () => {
+  it('defaults voice to anna and leaves llm_model unset when no env vars are present', () => {
     expect(loadAaiEnvDefaults({})).toEqual({ voice: DEFAULT_VOICE });
   });
 

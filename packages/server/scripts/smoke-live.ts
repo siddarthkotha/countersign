@@ -14,7 +14,7 @@
 //   connect -> session.ready
 //   session.ready -> first reply.audio
 import { WebSocket } from 'ws';
-import { connectAai, type WsLike } from '../src/aai/session.js';
+import { connectAai, fetchVoices, type WsLike } from '../src/aai/session.js';
 import { loadAaiEnvDefaults, type AaiSessionConfig } from '../src/aai/config.js';
 import { allToolSchemas } from '../src/aai/schemas.js';
 
@@ -47,6 +47,18 @@ async function main(): Promise<void> {
     // exactOptionalPropertyTypes: only set the key when a model is actually configured.
     ...(envDefaults.llm_model ? { llm_model: envDefaults.llm_model } : {}),
   };
+
+  // AMENDMENT (controller, 2026-09-02, docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md "Voices"
+  // section): voice ids are exact strings and "invented or remembered values silently
+  // fail" -- print the live list length and the voice this run will request before
+  // spending a real connection on it. `connectAai` itself still validates/falls back
+  // internally; this is just visibility for the person running the script.
+  try {
+    const voices = await fetchVoices(cfg, fetch);
+    console.log(`voices list: ${voices.length} available; requesting voice "${cfg.voice}"`);
+  } catch (err) {
+    console.warn(`smoke-live: could not fetch the voices list (${String(err)}) -- requesting voice "${cfg.voice}" unvalidated.`);
+  }
 
   const connectStartMs = Date.now();
   let readyAtMs: number | null = null;

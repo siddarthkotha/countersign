@@ -6,10 +6,12 @@
 // path (a fresh token, a new socket, session.resume with the prior session_id, and the
 // `link` lost/restored events the screen uses for "voice link lost, security state
 // preserved").
-import { describe, it, expect, vi } from 'vitest';
-import { connectAai, type AaiConnectDeps, type WsLike } from '../src/aai/session.js';
-import type { AaiSessionConfig } from '../src/aai/config.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { connectAai, fetchVoices, _resetVoicesCache, type AaiConnectDeps, type WsLike } from '../src/aai/session.js';
+import { DEFAULT_VOICE, type AaiSessionConfig } from '../src/aai/config.js';
 import type { AaiEvent } from '../src/aai/types.js';
+
+const ALL_VOICES = ['alba', 'eve', 'george', 'jane', 'jean', 'mary', 'michael', 'anna', 'charles', 'paul', 'vera'];
 
 type Listener = (...args: unknown[]) => void;
 
@@ -49,10 +51,15 @@ class FakeWs implements WsLike {
   }
 }
 
-function makeDeps(tokens: string[] = ['tok-1', 'tok-2', 'tok-3', 'tok-4', 'tok-5']) {
+function makeDeps(tokens: string[] = ['tok-1', 'tok-2', 'tok-3', 'tok-4', 'tok-5'], voices: string[] = ALL_VOICES) {
   const sockets: FakeWs[] = [];
   let tokenIdx = 0;
-  const fetchImpl = vi.fn(async () => {
+  const fetchImpl = vi.fn(async (url: unknown) => {
+    if (String(url).includes('/v1/voices')) {
+      // The documented shape ({voices:[{id}]}) -- other shapes are covered by the
+      // `fetchVoices` unit tests below with their own bespoke fetch mocks.
+      return new Response(JSON.stringify({ voices: voices.map((id) => ({ id })) }), { status: 200 });
+    }
     const token = tokens[Math.min(tokenIdx, tokens.length - 1)]!;
     tokenIdx += 1;
     return new Response(JSON.stringify({ token, expires_in_seconds: 60 }), { status: 200 });
@@ -101,6 +108,12 @@ async function connectAndReady(deps: AaiConnectDeps, sockets: FakeWs[], sessionI
   sockets[0]!.triggerMessage({ type: 'session.ready', session_id: sessionId });
   return connectPromise;
 }
+
+// The live voice-list validation cache (src/aai/session.ts) is per-process by design --
+// reset it before every test so one test's fetch/warning does not leak into the next.
+beforeEach(() => {
+  _resetVoicesCache();
+});
 
 describe('connectAai', () => {
   it('opens the socket with the minted token in the URL and sends session.update as the first message', async () => {
@@ -306,5 +319,119 @@ describe('connectAai', () => {
     await waitFor(() => expect(received).toContainEqual({ type: 'session.ended' }));
     expect(fetchImpl.mock.calls.length).toBe(mintCallsBeforeDrop); // no resume mint was ever attempted
     expect(sockets.length).toBe(1); // no second socket was ever opened
+  });
+});
+
+// AMENDMENT (controller, 2026-09-02 11:35 AM CDT, docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md
+// Voices section): voice ids are exact strings and "invented or remembered values silently
+// fail" -- fetchVoices() is the live authoritative list, and connectAai validates the
+// configured voice against it once per process before the first session.update goes out.
+describe('fetchVoices', () => {
+  function fakeFetch(body: unknown, status = 200) {
+    return vi.fn(async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
+  }
+
+  it('parses the documented {voices:[{id}]} shape', async () => {
+    const voices = await fetchVoices(
+      { assemblyai_api_key: 'k' },
+      fakeFetch({ voices: [{ id: 'anna' }, { id: 'alba' }] })
+    );
+    expect(voices).toEqual(['anna', 'alba']);
+  });
+
+  it('tolerates [{voice_id}]', async () => {
+    const voices = await fetchVoices({ assemblyai_api_key: 'k' }, fakeFetch([{ voice_id: 'anna' }, { voice_id: 'alba' }]));
+    expect(voices).toEqual(['anna', 'alba']);
+  });
+
+  it('tolerates [{id}]', async () => {
+    const voices = await fetchVoices({ assemblyai_api_key: 'k' }, fakeFetch([{ id: 'anna' }]));
+    expect(voices).toEqual(['anna']);
+  });
+
+  it('tolerates a plain string[]', async () => {
+    const voices = await fetchVoices({ assemblyai_api_key: 'k' }, fakeFetch(['anna', 'alba']));
+    expect(voices).toEqual(['anna', 'alba']);
+  });
+
+  it('sends the API key as a Bearer token', async () => {
+    const fetchImpl = vi.fn(async (_url: unknown, init?: { headers?: Record<string, string> }) => {
+      expect(init?.headers?.Authorization).toBe('Bearer secret-key');
+      return new Response(JSON.stringify({ voices: [] }), { status: 200 });
+    });
+    await fetchVoices({ assemblyai_api_key: 'secret-key' }, fetchImpl as unknown as typeof fetch);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws on a non-OK response', async () => {
+    await expect(fetchVoices({ assemblyai_api_key: 'k' }, fakeFetch({ error: 'nope' }, 500))).rejects.toThrow();
+  });
+});
+
+describe('connectAai live voice-list validation (once per process, cached)', () => {
+  it('uses the configured voice as-is when it is present in the live list, without warning', async () => {
+    const { deps, sockets } = makeDeps(undefined, ALL_VOICES);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await connectAndReady(deps, sockets); // cfg() defaults voice to 'alba', which IS in ALL_VOICES
+
+    const sent = JSON.parse(sockets[0]!.sent[0]!) as { session: { output: { voice: string } } };
+    expect(sent.session.output.voice).toBe('alba');
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('falls back to DEFAULT_VOICE with a single warning when the configured voice is absent from the live list', async () => {
+    const { deps, sockets } = makeDeps(undefined, ['george', 'jane']); // cfg() default 'alba' not present
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await connectAndReady(deps, sockets);
+
+    const sent = JSON.parse(sockets[0]!.sent[0]!) as { session: { output: { voice: string } } };
+    expect(sent.session.output.voice).toBe(DEFAULT_VOICE);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it('proceeds with the configured voice and warns once when the voices endpoint errors', async () => {
+    const sockets: FakeWs[] = [];
+    let tokenIdx = 0;
+    const tokens = ['tok-1'];
+    const fetchImpl = vi.fn(async (url: unknown) => {
+      if (String(url).includes('/v1/voices')) return new Response('boom', { status: 500 });
+      const token = tokens[Math.min(tokenIdx, tokens.length - 1)]!;
+      tokenIdx += 1;
+      return new Response(JSON.stringify({ token, expires_in_seconds: 60 }), { status: 200 });
+    });
+    const WebSocketImpl = vi.fn((url: string) => {
+      const sock = new FakeWs(url);
+      sockets.push(sock);
+      return sock;
+    }) as unknown as new (url: string) => WsLike;
+    const deps: AaiConnectDeps = {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      WebSocketImpl,
+      now: () => 0,
+      sleep: async () => {},
+    };
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await connectAndReady(deps, sockets); // cfg() default voice 'alba' -- unvalidated, but kept
+    const sent = JSON.parse(sockets[0]!.sent[0]!) as { session: { output: { voice: string } } };
+    expect(sent.session.output.voice).toBe('alba');
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it('fetches the voices list only once per process -- a second connect (fresh deps) reuses the cache', async () => {
+    const first = makeDeps(['tok-1'], ALL_VOICES);
+    await connectAndReady(first.deps, first.sockets, 'sess-1');
+    const firstVoicesCalls = first.fetchImpl.mock.calls.filter((c) => String(c[0]).includes('/v1/voices')).length;
+    expect(firstVoicesCalls).toBe(1);
+
+    // A second connect, with its OWN deps/fetchImpl (not the same mock instance) -- if the
+    // cache is truly per-process (not per-deps), this fetchImpl must never see /v1/voices.
+    const second = makeDeps(['tok-2'], ALL_VOICES);
+    await connectAndReady(second.deps, second.sockets, 'sess-2');
+    const secondVoicesCalls = second.fetchImpl.mock.calls.filter((c) => String(c[0]).includes('/v1/voices')).length;
+    expect(secondVoicesCalls).toBe(0);
   });
 });
