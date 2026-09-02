@@ -11,6 +11,7 @@ Build-affecting facts extracted for Countersign (2026-09-02):
 - `input.audio` carries base64 in `audio`; `reply.audio` carries it in `data` (field-name asymmetry).
 - `tool.result` goes out after `reply.done`; if `reply.done.status == "interrupted"`, DISCARD pending tool results.
 - Voice ids are exact strings; fetch `GET https://agents.assemblyai.com/v1/voices` for the live list; default voice is `anna`.
+- CORRECTION (verified live 2026-09-02 11:49 AM CDT + docs check): `GET https://agents.assemblyai.com/v1/voices` does NOT exist (HTTP 426); the documented voice ids are a static table (docs/aai-voices-endpoint-2026-09-02.md). Countersign validates the configured voice against that table instead of calling an endpoint.
 - Resume within 30 s of a disconnect with a NEW token and `session.resume` carrying the previous `session_id`.
 - Docs MCP: `claude mcp add assemblyai-docs --transport http https://mcp.assemblyai.com/docs`; index at https://www.assemblyai.com/docs/llms.txt.
 
