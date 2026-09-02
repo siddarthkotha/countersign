@@ -238,6 +238,13 @@ describe('ws/browser — /ws/call/:id', () => {
 
     const ws = await connect(`${wsBase}${ws_path}`);
     ws.close();
+    // No externally observable condition distinguishes "the server has processed this
+    // socket's close (and entered the grace window)" from "still attached" -- `state.active`
+    // reads true in both, and this is a real TCP socket close (not a synthetic/fake one), so
+    // there is no synchronous or microtask-level signal to poll on either. A short real wait
+    // for the close to propagate is the only option here (same tradeoff as the reattach test
+    // below); 50ms is comfortably within the 500ms grace window while still giving the close
+    // time to land.
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     // Well within the 500ms grace window: the slot is still taken -- a browser drop does not

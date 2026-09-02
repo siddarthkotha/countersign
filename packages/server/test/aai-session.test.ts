@@ -135,7 +135,12 @@ describe('connectAai', () => {
     await waitFor(() => expect(sockets.length).toBe(1));
     sockets[0]!.triggerOpen();
     await waitFor(() => expect(sockets[0]!.sent.length).toBe(1));
-    await new Promise((r) => setTimeout(r, 20));
+    // Deterministic, not a timed guess: `sent.length` becomes 1 in the SAME synchronous
+    // continuation (right after `await openSocket` resolves in session.ts) that then
+    // registers the `message` listener connectAai's returned promise resolves from -- so by
+    // this point that listener is already registered, and `resolved` can only flip to true
+    // via an explicit `triggerMessage` call, which we have not made yet. No real wait is
+    // needed to prove it's still false.
     expect(resolved).toBe(false);
 
     sockets[0]!.triggerMessage({ type: 'session.ready', session_id: 'sess-1' });
@@ -229,7 +234,12 @@ describe('connectAai', () => {
     aai.close();
     sockets[0]!.triggerClose(1000, 'normal');
 
-    await new Promise((r) => setTimeout(r, 20));
+    // Deterministic, not a timed guess: `aai.close()` sets `expectClose` synchronously before
+    // `triggerClose` runs, and `FakeWs.triggerClose` invokes the wired close handler
+    // synchronously (no microtask in between, unlike a real socket) -- the `expectClose` guard
+    // in session.ts's `wire()` returns immediately without ever starting
+    // `handleUnexpectedClose`, so by the time `triggerClose` returns, no resume attempt could
+    // have been made or started. No real wait is needed to prove it.
     expect(sockets.length).toBe(1);
     expect(received).not.toContainEqual({ type: 'link', state: 'lost', attempt: 1 });
   });
