@@ -21,7 +21,7 @@ import type {
   SeedConfig,
   Utterance,
 } from './types';
-import { normalizeText } from './normalize';
+import { hasLexiconHit, normalizeText } from './normalize';
 import { currentClaim } from './ledger';
 import { extractAmounts } from './extract/amounts';
 import { extractAccountLast4, extractCuedNames, extractDeadline } from './extract/claims';
@@ -147,7 +147,7 @@ function selectSeedFact(
   };
 }
 
-function selectRelational(claims: Claim[], seed: SeedConfig, challengeId: string): ChallengeSpec | null {
+function selectRelational(claims: Claim[], issued: ChallengeSpec[], seed: SeedConfig, challengeId: string): ChallengeSpec | null {
   const escrow = currentClaim(claims, 'escrow_institution');
   const beneficiary = currentClaim(claims, 'beneficiary');
   let humanField: string | null = null;
@@ -155,12 +155,18 @@ function selectRelational(claims: Claim[], seed: SeedConfig, challengeId: string
   else if (beneficiary) humanField = 'beneficiary';
   if (!humanField) return null;
   const entry = seed.knowledge.find((k) => k.id === 'escrow_account_last4');
+  const acceptTokens = entry ? entry.accept_tokens : [];
+  // Same fact must never be asked twice under two kinds (e.g. already surfaced as a
+  // SEED_FACT challenge) — dedup the same way selectSeedFact does.
+  if (issued.some((s) => 'accept_tokens' in s.expect && arraysEqual(s.expect.accept_tokens, acceptTokens))) {
+    return null;
+  }
   return {
     challenge_id: challengeId,
     kind: 'RELATIONAL',
     field: 'account_last4',
     ask: `Ask for the last four digits of the account attached to the ${humanField} they named.`,
-    expect: { accept_tokens: entry ? entry.accept_tokens : [] },
+    expect: { accept_tokens: acceptTokens },
   };
 }
 
@@ -195,7 +201,7 @@ export function selectChallenge(
   if (seedFact) return seedFact;
 
   if (!issued.some((s) => s.kind === 'RELATIONAL')) {
-    const relational = selectRelational(claims, seed, challengeId);
+    const relational = selectRelational(claims, issued, seed, challengeId);
     if (relational) return relational;
   }
 
@@ -226,10 +232,6 @@ function eligibleUtterances(conversation: Utterance[], actions: AgentAction[], i
     )
     .sort((a, b) => a.t_ms - b.t_ms)
     .slice(0, 2);
-}
-
-function lexiconHit(normText: string, lexicon: string[]): boolean {
-  return lexicon.some((phrase) => normText.includes(normalizeText(phrase)));
 }
 
 function gradeLiveCommitment(field: ClaimField, claim: Claim | undefined, rawText: string, normText: string): ChallengeResult {
@@ -266,12 +268,16 @@ function gradeLiveCommitment(field: ClaimField, claim: Claim | undefined, rawTex
   return normText.includes(committedNorm) ? 'PASS' : 'AMBIGUOUS';
 }
 
-function gradeTrapFact(trueClaim: Claim | undefined, normText: string, seed: SeedConfig): ChallengeResult {
-  const negate = lexiconHit(normText, seed.negate_lexicon);
+function gradeTrapFact(trueClaim: Claim | undefined, rawText: string, seed: SeedConfig): ChallengeResult {
+  // Word-boundary lexicon matching (shared with ledger.ts, src/normalize.ts) — a naive
+  // substring test let "no" fire inside "know" and "right" fire inside "alright"/
+  // "copyright"; hasLexiconHit normalizes both sides and matches whole words/phrases only.
+  const negate = hasLexiconHit(rawText, seed.negate_lexicon);
+  const normText = normalizeText(rawText);
   const trueVal = trueClaim ? normalizeText(String(trueClaim.value)) : null;
   const containsTrue = trueVal !== null && trueVal.length > 0 && normText.includes(trueVal);
   if (negate || containsTrue) return 'PASS';
-  if (lexiconHit(normText, seed.affirm_lexicon)) return 'FAIL';
+  if (hasLexiconHit(rawText, seed.affirm_lexicon)) return 'FAIL';
   return 'AMBIGUOUS';
 }
 
@@ -326,7 +332,7 @@ export function gradeChallenges(
     } else {
       const trueClaimId = expect.true_claim_id;
       const trueClaim = claims.find((c) => c.id === trueClaimId);
-      result = gradeTrapFact(trueClaim, normText, seed);
+      result = gradeTrapFact(trueClaim, rawText, seed);
     }
 
     out[spec.challenge_id] = { result, quote, eligible_utterance_ids: eligibleIds };

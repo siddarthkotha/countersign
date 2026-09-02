@@ -77,8 +77,11 @@ describe('selectChallenge — selection order', () => {
   it('picks RELATIONAL once a beneficiary/escrow claim exists and both prior kinds are exhausted', () => {
     const withBeneficiary: Claim[] = [claim('c-ben', 'beneficiary', 'STATED', 'meridian supply', 1000, 'to Meridian Supply')];
     // Force straight to RELATIONAL: no LIVE_COMMITMENT-eligible claim (turns < 2, absent
-    // conversation makes every claim "old enough" — so mark TRAP_FACT and SEED_FACT as
-    // already issued/exhausted instead).
+    // conversation makes every claim "old enough" — so mark TRAP_FACT as already issued),
+    // and use a seed with NO knowledge entries so SEED_FACT is naturally unavailable
+    // (rather than exhausted by issuing escrow_account_last4 itself — fix round 1's
+    // RELATIONAL dedup would then correctly block RELATIONAL too, since it would be the
+    // same fact asked twice; that scenario has its own "RELATIONAL dedup" test below).
     const trap: ChallengeSpec = {
       challenge_id: 'sessR-1',
       kind: 'TRAP_FACT',
@@ -86,18 +89,12 @@ describe('selectChallenge — selection order', () => {
       ask: 'x',
       expect: { trap_value: 'Northgate Partners', true_claim_id: 'c-ben' },
     };
-    const seedFacts: ChallengeSpec[] = SEED.knowledge.map((k, i) => ({
-      challenge_id: `sessR-${i + 2}`,
-      kind: 'SEED_FACT',
-      field: 'purpose',
-      ask: k.ask,
-      expect: { accept_tokens: k.accept_tokens },
-    }));
-    const bigSeed = { ...SEED, thresholds: { ...SEED.thresholds, max_challenges: 100 } };
-    const spec = selectChallenge(withBeneficiary, [trap, ...seedFacts], {}, bigSeed, 'sessR', undefined);
+    const noKnowledgeSeed = { ...SEED, knowledge: [], thresholds: { ...SEED.thresholds, max_challenges: 100 } };
+    const spec = selectChallenge(withBeneficiary, [trap], {}, noKnowledgeSeed, 'sessR', undefined);
     expect(spec?.kind).toBe('RELATIONAL');
     expect(spec?.field).toBe('account_last4');
-    expect(spec?.expect).toEqual({ accept_tokens: ['8830'] });
+    // No escrow_account_last4 knowledge entry in this seed ⇒ accept_tokens falls back to [].
+    expect(spec?.expect).toEqual({ accept_tokens: [] });
   });
 });
 
@@ -237,6 +234,74 @@ describe('gradeChallenges — TRAP_FACT', () => {
     const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
     expect(result['g3-1']?.result).toBe('AMBIGUOUS');
   });
+
+  // Fix round 1 (reviewer finding, Important): the old `lexiconHit` was a raw substring
+  // test, so negate_lexicon's "no" fired inside "know" and affirm_lexicon's "right" fired
+  // inside "alright"/"copyright". Now backed by the shared word-boundary
+  // `hasLexiconHit`/`lexiconHit` in src/normalize.ts (commit a695632).
+  it('PASS via the restated-original path, not a false negate from "know" containing "no"', () => {
+    const conversation = [utt('u1', 3000, "I know it's Whitmore & Bass")];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
+    expect(result['g3-1']?.result).toBe('PASS');
+  });
+
+  it('AMBIGUOUS for "Alright, that\'s fine" — no genuine affirm word (not "right" inside "alright")', () => {
+    const conversation = [utt('u1', 3000, "Alright, that's fine")];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
+    expect(result['g3-1']?.result).toBe('AMBIGUOUS');
+  });
+
+  it('FAIL for "yes, right" — a genuine whole-word affirm', () => {
+    const conversation = [utt('u1', 3000, 'yes, right')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
+    expect(result['g3-1']?.result).toBe('FAIL');
+  });
+});
+
+describe('selectChallenge — RELATIONAL dedup', () => {
+  it('does not re-ask escrow_account_last4 as RELATIONAL if already issued as SEED_FACT', () => {
+    const last4Fact = SEED.knowledge.find((k) => k.id === 'escrow_account_last4')!;
+    const withEscrow: Claim[] = [claim('c-esc', 'escrow_institution', 'STATED', 'first meridian trust', 1000, 'First Meridian Trust')];
+    const alreadyIssued: ChallengeSpec[] = [
+      {
+        challenge_id: 'dedup-1',
+        kind: 'SEED_FACT',
+        field: 'purpose',
+        ask: last4Fact.ask,
+        expect: { accept_tokens: last4Fact.accept_tokens },
+      },
+    ];
+    // Block LIVE_COMMITMENT (claim looks old enough with conversation undefined) and
+    // TRAP_FACT so selection actually reaches RELATIONAL's dedup check.
+    const blockLive: ChallengeSpec = {
+      challenge_id: 'dedup-block-live',
+      kind: 'TRAP_FACT',
+      field: 'escrow_institution',
+      ask: 'x',
+      expect: { trap_value: 'Northgate Partners', true_claim_id: 'c-esc' },
+    };
+    // Exhaust the remaining SEED_FACT entries too, so selectChallenge would otherwise fall
+    // through past SEED_FACT into RELATIONAL.
+    const otherSeedFacts: ChallengeSpec[] = SEED.knowledge
+      .filter((k) => k.id !== 'escrow_account_last4')
+      .map((k, i) => ({
+        challenge_id: `dedup-seed-${i}`,
+        kind: 'SEED_FACT' as const,
+        field: 'purpose' as const,
+        ask: k.ask,
+        expect: { accept_tokens: k.accept_tokens },
+      }));
+    const bigSeed = { ...SEED, thresholds: { ...SEED.thresholds, max_challenges: 100 } };
+    const spec = selectChallenge(
+      withEscrow,
+      [blockLive, ...alreadyIssued, ...otherSeedFacts],
+      {},
+      bigSeed,
+      'dedup-sess',
+      undefined,
+    );
+    expect(spec).toBeNull();
+  });
 });
 
 describe('selectChallenge — ask never leaks the expected answer', () => {
@@ -288,7 +353,10 @@ describe('selectChallenge — ask never leaks the expected answer', () => {
     // Also check a RELATIONAL spec explicitly (not reached in the sequence above because
     // max_challenges caps out first).
     const withBeneficiary: Claim[] = [claim('c-ben', 'beneficiary', 'STATED', 'meridian supply', 1000, 'Meridian Supply')];
-    const bigSeed = { ...SEED, thresholds: { ...SEED.thresholds, max_challenges: 100 } };
+    // A seed with no knowledge entries at all: SEED_FACT is naturally unavailable, so
+    // selection reaches RELATIONAL without also exhausting escrow_account_last4 itself
+    // (which would legitimately trigger RELATIONAL's own dedup — see "RELATIONAL dedup").
+    const noKnowledgeSeed = { ...SEED, knowledge: [], thresholds: { ...SEED.thresholds, max_challenges: 100 } };
     const blockLiveCommitment: ChallengeSpec = {
       challenge_id: 'rel-block',
       kind: 'TRAP_FACT',
@@ -296,23 +364,7 @@ describe('selectChallenge — ask never leaks the expected answer', () => {
       ask: 'x',
       expect: { trap_value: 'Northgate Partners', true_claim_id: 'c-ben' },
     };
-    const relSpec = selectChallenge(
-      withBeneficiary,
-      [
-        blockLiveCommitment,
-        ...SEED.knowledge.map((k, i) => ({
-          challenge_id: `rel-${i}`,
-          kind: 'SEED_FACT' as const,
-          field: 'purpose' as const,
-          ask: k.ask,
-          expect: { accept_tokens: k.accept_tokens },
-        })),
-      ],
-      {},
-      bigSeed,
-      'leak-check-2',
-      undefined,
-    );
+    const relSpec = selectChallenge(withBeneficiary, [blockLiveCommitment], {}, noKnowledgeSeed, 'leak-check-2', undefined);
     expect(relSpec?.kind).toBe('RELATIONAL');
     const relAccept = (relSpec!.expect as { accept_tokens: string[] }).accept_tokens;
     for (const token of relAccept) {
