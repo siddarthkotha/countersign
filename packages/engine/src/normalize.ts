@@ -27,3 +27,30 @@ export function normalizeValue(field: ClaimField, v: string | number): string | 
   }
   return typeof v === 'number' ? v : normalizeText(v);
 }
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** v2 (shared by ledger.ts and challenges.ts): does any lexicon phrase occur in `text` as a
+ *  whole word/phrase — never as a bare substring? Both `text` and each phrase are run
+ *  through `normalizeText` first (so "Calder & Finch" matches the lexicon phrase "calder
+ *  and finch", and an apostrophe inside a phrase like "that's not" still matches even
+ *  though normalization strips it from both sides identically), then a phrase matches only
+ *  when bounded by non-word characters or the string edges on both sides — so "no" never
+ *  fires on "know", and "right" never fires on "copyright". Returns the first matching
+ *  lexicon entry (in lexicon order) verbatim, or null. */
+export function lexiconHit(text: string, lexicon: string[]): string | null {
+  const normalizedText = normalizeText(text);
+  for (const phrase of lexicon) {
+    const normalizedPhrase = normalizeText(phrase);
+    if (normalizedPhrase.length === 0) continue;
+    const pattern = `\\b${escapeRegExp(normalizedPhrase).replace(/\s+/g, '\\s+')}\\b`;
+    if (new RegExp(pattern, 'i').test(normalizedText)) return phrase;
+  }
+  return null;
+}
+
+export function hasLexiconHit(text: string, lexicon: string[]): boolean {
+  return lexiconHit(text, lexicon) !== null;
+}
