@@ -27,3 +27,5 @@ BEFORE the submission form is filed. Every box below gets checked, with evidence
       irreversible actions." It matters for the Team's Choice vote window (final 24h).
 - [ ] **Submission form:** repo URL + demo URL + video + deck + cover, per BRIEF §7
       checklist. Target Sep 27–28 (deadline Sep 30, 10:00 AM Central — a MORNING deadline).
+
+- [ ] Commit 8afaf2a (D1 build) carries a polluted message (backtick expansion pasted ~4.6 KB of npm output; no secrets, scanned 2026-09-02). Reword it before the public flip — history rewrite is a founder-run step (`git rebase -i cc40f79`, reword 8afaf2a; clean message text kept in .superpowers/sdd/2026-09-02-plan2-voice-path/d1-clean-message.txt). The controller was denied the rewrite on 2026-09-02, by design.
