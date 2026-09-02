@@ -1,0 +1,70 @@
+/*
+  Structure-only styling (Task W1). No visual identity decisions here — the
+  founder picks the look in W5. This is the neutral, legible default only:
+  - System font stack, no custom typeface.
+  - One accent colour, #0B5FFF, on a white (#FFFFFF) background. Contrast
+    ratio computed via the WCAG 2.x relative-luminance formula: 5.13:1
+    (>= the 4.5:1 minimum for normal text). See the computation this ratio
+    came from: srgbToLin per channel, luminance = 0.2126R + 0.7152G + 0.0722B,
+    contrast = (lighter + 0.05) / (darker + 0.05).
+  - Status (ready / blocked / unavailable) is carried by text and layout,
+    never by a red-vs-green colour pair.
+  - No animation or transition anywhere in this file.
+*/
+
+:root {
+  --accent: #0b5fff;
+  --bg: #ffffff;
+  --text: #111111;
+  --muted: #555555;
+  --border: #cccccc;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+button {
+  font: inherit;
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  color: var(--muted);
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
+.role-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.role-card {
+  border: 1px solid var(--border);
+  padding: 1rem;
+}
+
+.banner {
+  border: 1px solid var(--border);
+  padding: 0.75rem;
+}
