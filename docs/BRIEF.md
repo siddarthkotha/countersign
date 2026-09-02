@@ -690,3 +690,38 @@ disclose the overrun after; he only ever sees the LAST step of a plan (finished 
 reference material or designer vocabulary); one decision at a time with a recommendation; nothing
 published or linked without his word (local HTML in his browser); agents move rejected files, never
 delete.
+
+## 16. DAY-1 PANEL AMENDMENTS (2026-09-01, four founder-run seats; synthesis in docs/consults/2026-09-01-panel-synthesis.md)
+
+Kickoff-night consult on the full plan (ChatGPT, Perplexity, Grok, Gemini; identical prompt;
+citations fetch-verified same night). Four-of-four convergence on: the seeded-verdict objection
+(fatal as planned; cured by evidence the caller creates during the call), the story ledger and
+adaptive challenges as upgrades #1 and #2, "the LLM may ask, never grade," the browser as an
+untrusted terminal, the screen's over-design, and under-use of AssemblyAI's mid-session
+`session.update` and session resume. Two seats proposed pivots (consumer scam screener; healthcare
+eligibility); both fail the panel's own tests and the protocol is not re-run for them.
+
+**PENDING FOUNDER RATIFICATION (D1-D5 in the synthesis):** D1 keep concept, adopt "a call can
+request, it can never authorize," cut the consumer coda from the video · D2 server-authoritative
+relay, engine on the server only (supersedes Amendment 1b) · D3 one visual metaphor, keynote-then-
+forensic layout, character demoted to a small element, dashed caller portrait dropped, voice
+professional and unyielding (amends §15 character laws) · D4 replay as the default judge path, role
+prompts without answers, hidden per-session facts · D5 GO on engine plan v2.
+
+**Engine changes adopted regardless of D1-D4 (they are pure-engine):** story ledger with typed
+deltas (CONFIRMED / APPROXIMATE / CORRECTED / CONTRADICTED / UNKNOWN); engine-issued challenges
+with ids and eligible-turn windows, graded deterministically (no LLM-recorded answers); affirmative
+assurance requirements for STAGE (never "zero failures"); invariants independent of scoring
+(VOICE_CAN_NEVER_RELEASE; material claim change invalidates dependent evidence; infrastructure
+failure → NO_ACTION or ESCALATE); request versioning; aggregate exposure across a session (anti-
+structuring); pressure changes the path (no disclosure, supervisor notice) but never blocks staging
+alone; "no response" = UNVERIFIED, never IMPOSTOR; provenance tag on every card; readback
+confirmation before any amount or account digits are evaluated; a counterfactual panel ("what single
+change would flip this"); a live-evidence-overrides-green corpus case; the trap-fact probe as a
+labeled challenge type; mutation tests. Timing signals demoted to operational-risk evidence only.
+
+**Risk register additions (§12):** 8. Seeded-verdict perception → live commitments + counterfactual
+panel + overrides-green case. 9. False positives on honest correction/stress → CORRECTED delta type +
+the honest-Dana-under-stress corpus case (ESCALATE, never FREEZE). 10. In-event competitor in the
+scam-screening lane (seat-asserted "VoiceFirewall," lablab page 403 to fetchers; verify from the
+founder's browser) → positioning stays on the assembly and on "request, never authorize."
