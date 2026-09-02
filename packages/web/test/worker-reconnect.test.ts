@@ -76,22 +76,49 @@ describe('createConnection', () => {
 
     // Initial attempt fails.
     await advance(0);
-    expect(posted).toEqual([{ type: 'link', state: 'lost' }]);
+    expect(posted).toEqual([{ type: 'link', state: 'lost', dropped_frames: 0 }]);
     expect(sockets).toHaveLength(1);
 
     // First retry, after RECONNECT_BACKOFF_MS[0] -- also fails.
     await advance(RECONNECT_BACKOFF_MS[0]!);
     expect(sockets).toHaveLength(2);
     // Still just the one 'lost' -- a already-known-down link doesn't re-announce itself.
-    expect(posted).toEqual([{ type: 'link', state: 'lost' }]);
+    expect(posted).toEqual([{ type: 'link', state: 'lost', dropped_frames: 0 }]);
 
     // Second retry, after RECONNECT_BACKOFF_MS[1] -- succeeds.
     await advance(RECONNECT_BACKOFF_MS[1]!);
     expect(sockets).toHaveLength(3);
     expect(posted).toEqual([
-      { type: 'link', state: 'lost' },
-      { type: 'link', state: 'restored' },
+      { type: 'link', state: 'lost', dropped_frames: 0 },
+      { type: 'link', state: 'restored', dropped_frames: 0 },
     ]);
+  });
+
+  it('counts audio frames dropped while the link is down and carries the count on link:restored, then resets', async () => {
+    const { factory, sockets } = makeScriptedFactory(['fail', 'open']);
+    const posted: ServerEvent[] = [];
+    const conn = createConnection('/ws/call/x', (e) => posted.push(e), factory);
+
+    // Initial attempt fails -- link is down now.
+    await advance(0);
+    expect(posted).toEqual([{ type: 'link', state: 'lost', dropped_frames: 0 }]);
+
+    // Capture keeps running: two audio frames posted while there is nowhere for them to go.
+    conn.send({ type: 'audio', data: 'frame-1' });
+    conn.send({ type: 'audio', data: 'frame-2' });
+    expect(sockets[0]!.send).not.toHaveBeenCalled();
+
+    // The retry succeeds -- link:restored carries exactly how many frames were lost.
+    await advance(RECONNECT_BACKOFF_MS[0]!);
+    expect(posted).toEqual([
+      { type: 'link', state: 'lost', dropped_frames: 0 },
+      { type: 'link', state: 'restored', dropped_frames: 2 },
+    ]);
+
+    // The counter reset with the restore: a frame sent now (link is up) is delivered, not
+    // counted as dropped.
+    conn.send({ type: 'audio', data: 'frame-3' });
+    expect(sockets[1]!.send).toHaveBeenCalledWith(JSON.stringify({ type: 'audio', data: 'frame-3' }));
   });
 
   it('exhausting every retry attempt emits ended with reason link_lost, never looping forever', async () => {
@@ -108,7 +135,7 @@ describe('createConnection', () => {
     // Initial attempt + 4 retries = 5 sockets total, matching "max 4 attempts".
     expect(sockets).toHaveLength(1 + RECONNECT_BACKOFF_MS.length);
     expect(posted).toEqual([
-      { type: 'link', state: 'lost' },
+      { type: 'link', state: 'lost', dropped_frames: 0 },
       { type: 'ended', reason: 'link_lost' },
     ]);
     // ~7.5s total, comfortably inside the server's default 20s browser grace window.

@@ -84,6 +84,13 @@ export type WebSocketFactory = (url: string) => MinimalWebSocket;
  *  grace window (COUNTERSIGN_BROWSER_GRACE_MS, packages/server/src/config.ts). */
 export const RECONNECT_BACKOFF_MS = [500, 1000, 2000, 4000];
 
+/** Fix round 1: the `link` message posted from worker to main thread carries how many audio
+ *  frames were dropped (capture kept running, nowhere to send them) during this down cycle
+ *  -- a worker->main-thread-only detail, not part of the wire protocol between browser and
+ *  server, so it's additive here rather than on the shared `ServerEvent` type. `dropped_frames`
+ *  resets to 0 the moment a `restored` carries the count for its cycle. */
+export type LinkPost = { type: 'link'; state: 'lost' | 'restored'; dropped_frames: number };
+
 export interface ConnectionHandle {
   /** Forwards a BrowserEvent to the live socket; silently dropped while the link is down --
    *  there is nowhere for it to go (capture itself never stops running). */
@@ -106,6 +113,7 @@ export function createConnection(
   let socket: MinimalWebSocket | null = null;
   let intentionalClose = false;
   let attempt = 0;
+  let droppedFrames = 0;
   const throttledPost = createStateThrottle(post);
 
   function open(): void {
@@ -120,13 +128,20 @@ export function createConnection(
       throttledPost(parsed);
     };
     s.onopen = () => {
-      if (attempt > 0) post({ type: 'link', state: 'restored' });
+      if (attempt > 0) {
+        const restored: LinkPost = { type: 'link', state: 'restored', dropped_frames: droppedFrames };
+        post(restored);
+        droppedFrames = 0;
+      }
       attempt = 0;
     };
     s.onclose = () => {
       socket = null;
       if (intentionalClose) return;
-      if (attempt === 0) post({ type: 'link', state: 'lost' });
+      if (attempt === 0) {
+        const lost: LinkPost = { type: 'link', state: 'lost', dropped_frames: droppedFrames };
+        post(lost);
+      }
       retry();
     };
   }
@@ -147,7 +162,11 @@ export function createConnection(
     send(msg: object) {
       if (socket && socket.readyState === 1 /* OPEN -- avoids depending on a global WebSocket in this otherwise-portable function */) {
         socket.send(JSON.stringify(msg));
+        return;
       }
+      // Capture keeps running while the link is down (this task never tells it to stop) --
+      // an audio frame posted here has nowhere to go and is counted, not silently vanished.
+      if ((msg as { type?: unknown }).type === 'audio') droppedFrames += 1;
     },
     markIntentionalClose() {
       intentionalClose = true;
