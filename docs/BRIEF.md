@@ -401,6 +401,13 @@ the repo goes public IF any auth/token handling exists.
    AssemblyAI) → the API use must be visibly right, not merely working: session.update per goal,
    session resume on drops, keyterms, tool.result timing after reply.done, barge-in flush. The
    Sep 12 judge-sim preload gets an AssemblyAI-engineer persona; README names each API feature used.
+13. Name collision, FOUNDER-VISIBLE 2026-09-02: an unrelated product named "Countersign" ("the
+   security firewall for LLM applications", Python/uvicorn) holds https://countersign.onrender.com;
+   our deploy is https://countersign-bf8q.onrender.com. Judges who search the name may find them
+   first. Mitigation options for the founder (decision, not now): keep the name and make every
+   link explicit; or a short qualifier in the submission title (e.g. "Countersign — voice
+   checkpoint"); §13 uniqueness verdict was "OPEN as an integrated product", unchanged.
+
 
 
 ## 13. NAME + COMPETITIVE-LANDSCAPE ADDENDUM (2026-08-26 scoping day)
