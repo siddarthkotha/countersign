@@ -67,8 +67,9 @@ describe('MicCheck', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    const line = await screen.findByRole('alert');
-    expect(line).toHaveTextContent(/^FAILED — Microphone blocked\./);
+    const line = await screen.findByText(/^FAILED — Microphone blocked\./);
+    expect(line).toHaveAttribute('role', 'status');
+    expect(line).toHaveAttribute('aria-live', 'polite');
     expect(onResult).toHaveBeenCalledWith({ ok: false, reason: 'not-allowed', deviceLabel: null });
   });
 
@@ -80,8 +81,9 @@ describe('MicCheck', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    const line = await screen.findByRole('alert');
-    expect(line).toHaveTextContent(/^FAILED — No microphone found\./);
+    const line = await screen.findByText(/^FAILED — No microphone found\./);
+    expect(line).toHaveAttribute('role', 'status');
+    expect(line).toHaveAttribute('aria-live', 'polite');
     expect(onResult).toHaveBeenCalledWith({ ok: false, reason: 'not-found', deviceLabel: null });
   });
 
@@ -93,8 +95,9 @@ describe('MicCheck', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    const line = await screen.findByRole('alert');
-    expect(line).toHaveTextContent(/^FAILED — Microphone is in use by another app\./);
+    const line = await screen.findByText(/^FAILED — Microphone is in use by another app\./);
+    expect(line).toHaveAttribute('role', 'status');
+    expect(line).toHaveAttribute('aria-live', 'polite');
     expect(onResult).toHaveBeenCalledWith({ ok: false, reason: 'not-readable', deviceLabel: null });
   });
 
@@ -106,8 +109,9 @@ describe('MicCheck', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    const line = await screen.findByRole('alert');
-    expect(line).toHaveTextContent(/^FAILED — Could not access the microphone\./);
+    const line = await screen.findByText(/^FAILED — Could not access the microphone\./);
+    expect(line).toHaveAttribute('role', 'status');
+    expect(line).toHaveAttribute('aria-live', 'polite');
     expect(onResult).toHaveBeenCalledWith({ ok: false, reason: 'error', deviceLabel: null });
   });
 
@@ -121,17 +125,43 @@ describe('MicCheck', () => {
   });
 
   it('times out with its own sentence when getUserMedia never resolves', async () => {
+    const testTimeoutMs = 30;
     mockGetUserMedia(() => new Promise<MediaStream>(() => {})); // never settles
     const onResult = vi.fn();
     const user = userEvent.setup();
-    render(<MicCheck onResult={onResult} timeoutMs={20} />);
+    render(<MicCheck onResult={onResult} timeoutMs={testTimeoutMs} />);
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    const line = await screen.findByRole('alert');
-    expect(line).toHaveTextContent(/^FAILED — The browser did not respond within 8 seconds\./);
+    const expectedSeconds = Math.round(testTimeoutMs / 1000);
+    const line = await screen.findByText(
+      new RegExp(`^FAILED — The browser did not respond within ${expectedSeconds} seconds\\.`)
+    );
+    expect(line).toHaveAttribute('role', 'status');
+    expect(line).toHaveAttribute('aria-live', 'polite');
     expect(onResult).toHaveBeenCalledWith({ ok: false, reason: 'timeout', deviceLabel: null });
   });
+
+  // Task W6, fix round 1: the "N seconds" wording is derived from the actual timeout in
+  // effect (Math.round(timeoutMs / 1000)), not a second, hand-typed "8 seconds" -- so it
+  // cannot drift from MIC_CHECK_TIMEOUT_MS. Asserted directly against a value that isn't 8,
+  // to prove it's a real derivation and not a coincidence of the default.
+  it('derives the timeout sentence\'s second count from the actual timeoutMs in effect', async () => {
+    mockGetUserMedia(() => new Promise<MediaStream>(() => {})); // never settles
+    const onResult = vi.fn();
+    const user = userEvent.setup();
+    render(<MicCheck onResult={onResult} timeoutMs={1500} />);
+
+    await user.click(screen.getByRole('button', { name: 'Check microphone' }));
+
+    const line = await screen.findByText(
+      /^FAILED — The browser did not respond within 2 seconds\./,
+      {},
+      { timeout: 3000 }
+    );
+    expect(line).toHaveAttribute('role', 'status');
+    expect(onResult).toHaveBeenCalledWith({ ok: false, reason: 'timeout', deviceLabel: null });
+  }, 6000);
 
   it('shows CHECKING immediately on click, before the result arrives', async () => {
     let resolveStream!: (s: MediaStream) => void;
@@ -140,10 +170,17 @@ describe('MicCheck', () => {
     render(<MicCheck onResult={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-    expect(screen.getByText('CHECKING — asking your browser for the microphone.')).toBeInTheDocument();
+    const checkingLine = screen.getByText('CHECKING — asking your browser for the microphone.');
+    expect(checkingLine).toBeInTheDocument();
+    // Task W6, fix round 1: role="status"/aria-live="polite" on every state, not only FAILED.
+    expect(checkingLine).toHaveAttribute('role', 'status');
+    expect(checkingLine).toHaveAttribute('aria-live', 'polite');
 
     resolveStream(fakeStream().stream);
-    expect(await screen.findByText(/^PASSED —/)).toBeInTheDocument();
+    const passedLine = await screen.findByText(/^PASSED —/);
+    expect(passedLine).toBeInTheDocument();
+    expect(passedLine).toHaveAttribute('role', 'status');
+    expect(passedLine).toHaveAttribute('aria-live', 'polite');
   });
 
   // QA finding 2, root cause: the live site's own `navigator.permissions.query('microphone')`

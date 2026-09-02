@@ -33,13 +33,20 @@ type Line = { kind: 'checking' | 'passed' | 'failed'; text: string };
  *  must not leave the button silent forever -- 8 seconds, then a specific timeout sentence. */
 export const MIC_CHECK_TIMEOUT_MS = 8000;
 
-const FAILURE_SENTENCES: Record<Exclude<MicCheckReason, 'passed'>, string> = {
+const FAILURE_SENTENCES: Record<Exclude<MicCheckReason, 'passed' | 'timeout'>, string> = {
   'not-allowed': "FAILED — Microphone blocked. Allow it in the browser's address bar, then check again.",
   'not-found': 'FAILED — No microphone found. The recorded attack works without one.',
   'not-readable': 'FAILED — Microphone is in use by another app. Close it, then check again.',
-  timeout: 'FAILED — The browser did not respond within 8 seconds. Check again, or use "Watch a recorded attack".',
   error: 'FAILED — Could not access the microphone. Use "Watch a recorded attack" instead.',
 };
+
+/** Task W6, fix round 1: the wording is derived from the actual timeout duration in effect
+ *  (`MIC_CHECK_TIMEOUT_MS` in production, `timeoutMs` in a test) instead of a second,
+ *  hand-typed "8 seconds" -- the two can never drift apart. */
+function timeoutSentence(effectiveTimeoutMs: number): string {
+  const seconds = Math.round(effectiveTimeoutMs / 1000);
+  return `FAILED — The browser did not respond within ${seconds} seconds. Check again, or use "Watch a recorded attack".`;
+}
 
 class MicCheckTimeoutError extends Error {
   constructor() {
@@ -93,6 +100,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 export default function MicCheck({ onResult, timeoutMs }: MicCheckProps) {
   const [line, setLine] = useState<Line | null>(null);
+  const effectiveTimeoutMs = timeoutMs ?? MIC_CHECK_TIMEOUT_MS;
 
   async function check() {
     setLine({ kind: 'checking', text: 'CHECKING — asking your browser for the microphone.' });
@@ -104,7 +112,7 @@ export default function MicCheck({ onResult, timeoutMs }: MicCheckProps) {
         navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
         }),
-        timeoutMs ?? MIC_CHECK_TIMEOUT_MS
+        effectiveTimeoutMs
       );
       const tracks = stream.getTracks();
       const audioTrack = typeof stream.getAudioTracks === 'function' ? stream.getAudioTracks()[0] : tracks[0];
@@ -117,7 +125,8 @@ export default function MicCheck({ onResult, timeoutMs }: MicCheckProps) {
       onResult({ ok: true, reason: 'passed', deviceLabel });
     } catch (err) {
       const reason = err instanceof MicCheckTimeoutError ? 'timeout' : classifyGetUserMediaError(err);
-      setLine({ kind: 'failed', text: FAILURE_SENTENCES[reason] });
+      const text = reason === 'timeout' ? timeoutSentence(effectiveTimeoutMs) : FAILURE_SENTENCES[reason];
+      setLine({ kind: 'failed', text });
       onResult({ ok: false, reason, deviceLabel: null });
     }
   }
@@ -127,12 +136,14 @@ export default function MicCheck({ onResult, timeoutMs }: MicCheckProps) {
       <button type="button" onClick={check}>
         Check microphone
       </button>
-      {line && line.kind === 'failed' && (
-        <p className="banner" role="alert">
+      {/* Task W6, fix round 1: role="status"/aria-live="polite" on the result line for every
+          state (CHECKING/PASSED/FAILED alike) -- a screen-reader user used to hear only a
+          failure announced; a pass or an in-progress check is announced the same way now. */}
+      {line && (
+        <p className={line.kind === 'failed' ? 'banner' : undefined} role="status" aria-live="polite">
           {line.text}
         </p>
       )}
-      {line && line.kind !== 'failed' && <p>{line.text}</p>}
     </div>
   );
 }

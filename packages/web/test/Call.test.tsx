@@ -194,18 +194,22 @@ describe('Call', () => {
 
   // Task W5, fix round 2, requirement 3: the footer's export hash, amber monospace, shows
   // once `forensic.export_hash` exists -- absent before any state has arrived.
+  // Task W6, fix round 1: label matches the forensic section's vocabulary ("hash-chained
+  // evidence export"), joined to the full hash, with a `title` carrying the same hash.
   it('shows the footer export hash once present, absent before any state', async () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
     render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
 
-    expect(screen.queryByText(/Export hash:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/hash-chained evidence export/)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
     fake.emitState(scenarioBFinalState());
 
-    expect(await screen.findByText('Export hash: abc123def456')).toBeInTheDocument();
+    const footerHash = await screen.findByText('hash-chained evidence export · abc123def456');
+    expect(footerHash).toBeInTheDocument();
+    expect(footerHash).toHaveAttribute('title', 'abc123def456');
   });
 
   it('a flush event calls playback flush via the mocked client', async () => {

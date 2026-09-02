@@ -152,9 +152,13 @@ describe('Replay', () => {
 
   // Task W5, fix round 2, requirement 3: Replay had no footer at all before this round --
   // same wording as Call.tsx's, and the export hash shows once present. Replay also defaults
-  // the forensic section open (BRIEF D4, fix round 1), which renders its own "Export hash:"
-  // line -- `{ selector: '.footer-hash' }` scopes this assertion to the FOOTER's copy
-  // specifically, not just "some element somewhere says this".
+  // the forensic section open (BRIEF D4, fix round 1), which renders its own "Hash-chained
+  // evidence export:" line -- `{ selector: '.footer-hash' }` scopes this assertion to the
+  // FOOTER's copy specifically, not just "some element somewhere says this".
+  //
+  // Task W6, fix round 1: the footer's label now matches the forensic section's vocabulary
+  // ("hash-chained evidence export"), joined to the full hash by " · ", with a `title`
+  // carrying the same hash (same hover pattern as the verdict banner's short form).
   it('shows the footer with the bottom line and the export hash once present', async () => {
     const fake = makeFakeClient();
     vi.mocked(connectSocketOnly).mockReturnValue(fake.client as never);
@@ -162,11 +166,15 @@ describe('Replay', () => {
     render(<Replay />);
 
     expect(screen.getByText('No funds can move by voice alone. Second approval required.')).toBeInTheDocument();
-    expect(screen.queryByText(/Export hash:/, { selector: '.footer-hash' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/hash-chained evidence export/, { selector: '.footer-hash' })).not.toBeInTheDocument();
 
     await user.selectOptions(await screen.findByLabelText('Recording'), RECORDING);
     fake.emitState(scenarioBFinalState());
 
-    expect(await screen.findByText('Export hash: abc123def456', { selector: '.footer-hash' })).toBeInTheDocument();
+    const footerHash = await screen.findByText('hash-chained evidence export · abc123def456', {
+      selector: '.footer-hash'
+    });
+    expect(footerHash).toBeInTheDocument();
+    expect(footerHash).toHaveAttribute('title', 'abc123def456');
   });
 });
