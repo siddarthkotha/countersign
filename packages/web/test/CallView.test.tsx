@@ -119,4 +119,50 @@ describe('CallView', () => {
       expect(text).not.toContain(fact);
     }
   });
+
+  // Task W5, requirement C: the two-channel live trace. Distinct WITHOUT relying on colour
+  // alone -- every caller line carries the "Caller" label and a `turn-caller` class, every
+  // agent line carries the "Countersign" label (never a human name, requirement E) and a
+  // `turn-agent` class; the underlying `line.text` is untouched (LAW 4, never reworded).
+  it('renders the caller and Countersign channels distinctly, by label and class, not colour alone', () => {
+    render(<CallView screen={scenarioBFinalState()} />);
+    const transcript = screen.getByLabelText('transcript');
+
+    const callerLine = within(transcript).getByText(/This is Robert Miller/).closest('p');
+    expect(callerLine).not.toBeNull();
+    expect(callerLine).toHaveClass('turn-caller');
+    expect(callerLine).toHaveAttribute('data-speaker', 'caller');
+    expect(within(callerLine as HTMLElement).getByText('Caller:')).toBeInTheDocument();
+
+    const agentLine = within(transcript).getByText(/Before anything can stage/).closest('p');
+    expect(agentLine).not.toBeNull();
+    expect(agentLine).toHaveClass('turn-agent');
+    expect(agentLine).toHaveAttribute('data-speaker', 'agent');
+    expect(within(agentLine as HTMLElement).getByText('Countersign:')).toBeInTheDocument();
+
+    // The agent is never given a human name anywhere on screen.
+    expect(within(transcript).queryByText(/Robert Miller:/)).not.toBeInTheDocument();
+  });
+
+  // Task W5, requirement B: the verdict line lands inside the keynote board, above the fold,
+  // alongside who is calling / what they ask / the amount / the status word.
+  it('lands the verdict line inside the board region', () => {
+    render(<CallView screen={scenarioBFinalState()} />);
+    const board = screen.getByLabelText('board');
+    expect(within(board).getByRole('heading', { name: 'WIRE FROZEN' })).toBeInTheDocument();
+    expect(within(board).getByText(/Claimed identity:/)).toBeInTheDocument();
+    expect(within(board).getByLabelText('gates')).toBeInTheDocument();
+  });
+
+  // Task W5, requirement B: Replay.tsx passes `defaultForensicOpen` so the forensic section
+  // -- evidence, ledger, challenges, counterfactuals, the export hash and the countersign
+  // line -- is open by default there, without a click, instead of hidden behind "Why?".
+  it('opens the forensic section by default when defaultForensicOpen is set, with the export hash and countersign line present', () => {
+    render(<CallView screen={scenarioBFinalState()} defaultForensicOpen />);
+
+    const forensic = screen.getByLabelText('forensic');
+    expect(within(forensic).getByText(/abc123def456/)).toBeInTheDocument();
+    expect(within(forensic).getByText('server verdict FREEZE, recomputed: yes')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide why' })).toBeInTheDocument();
+  });
 });

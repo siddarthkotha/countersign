@@ -7,11 +7,26 @@
 // text has one source -- Call.tsx renders the same component for every moment CallView isn't
 // on screen instead of this file keeping its own copy).
 import { useState } from 'react';
-import type { AssuranceChecklist, Claim, ChallengeResult, Evidence, ScreenState } from '@countersign/engine';
+import type { AssuranceChecklist, Claim, ChallengeResult, Evidence, ScreenState, Speaker } from '@countersign/engine';
 import SimulatedBanner from './SimulatedBanner';
 
 export type CallViewProps = {
   screen: ScreenState;
+  /** Task W5, requirement B: the forensic section sits behind one "Evidence" toggle
+   *  ("Why?" / "Hide why", unchanged text), default CLOSED on the live call screen and
+   *  default OPEN in Replay (Replay.tsx passes `true`). Purely which way `showWhy` starts --
+   *  no other behaviour changes. */
+  defaultForensicOpen?: boolean;
+};
+
+// Task W5, requirement E: anywhere the UI names the agent, it says "Countersign" -- never a
+// human name (controller ruling, 2026-09-02). `line.speaker` off the wire is the plain
+// 'caller' | 'agent' tag (packages/engine/src/types.ts); this is a display-only relabel of
+// that tag, never a change to `line.text` itself (LAW 4 / requirement C: the transcript text
+// stays verbatim, never reworded).
+const SPEAKER_LABELS: Record<Speaker, string> = {
+  caller: 'Caller',
+  agent: 'Countersign',
 };
 
 const ASSURANCE_LABELS: Record<keyof AssuranceChecklist, string> = {
@@ -72,105 +87,122 @@ function LedgerRow({ claim }: { claim: Claim }) {
   );
 }
 
-export default function CallView({ screen }: CallViewProps) {
-  const [showWhy, setShowWhy] = useState(false);
+export default function CallView({ screen, defaultForensicOpen }: CallViewProps) {
+  const [showWhy, setShowWhy] = useState(defaultForensicOpen ?? false);
 
   return (
     <div className="call-view">
       {screen.simulated === true && <SimulatedBanner />}
 
-      <header className="request-header">
-        <p>Claimed identity: {screen.request.claimed_identity ?? 'unknown'}</p>
-        <p>Amount: {screen.request.amount_usd !== null ? `$${screen.request.amount_usd.toLocaleString()}` : 'unknown'}</p>
-        <p>Beneficiary: {screen.request.beneficiary ?? 'unknown'}</p>
-        <p>Request version: {screen.request.request_version}</p>
-        <p>Agent status: {screen.agent_status}</p>
-      </header>
+      {/* Task W5, requirement B: the departure board -- who is calling, what they ask, the
+          amount, the status word, and the verdict line landing as a board update. Same
+          fields as before, grouped as one keynote board instead of a loose paragraph stack;
+          nothing added or removed. */}
+      <div className="board" aria-label="board">
+        <header className="request-header">
+          <p>Claimed identity: {screen.request.claimed_identity ?? 'unknown'}</p>
+          <p>Amount: {screen.request.amount_usd !== null ? `$${screen.request.amount_usd.toLocaleString()}` : 'unknown'}</p>
+          <p>Beneficiary: {screen.request.beneficiary ?? 'unknown'}</p>
+          <p>Request version: {screen.request.request_version}</p>
+          <p>Agent status: {screen.agent_status}</p>
+        </header>
 
-      <section className="gates" aria-label="gates">
-        <p>Context: {screen.gates.context}</p>
-        <p>Device: {screen.gates.device}</p>
-        <p>Consistency: {screen.gates.consistency}</p>
-      </section>
-
-      {screen.banner && (
-        <section className="banner-terminal" role="alert">
-          <h2>{screen.banner.headline}</h2>
-          <ul>
-            {screen.banner.reasons.map((r) => (
-              <li key={r}>{r}</li>
-            ))}
-          </ul>
-          <p>{screen.banner.subline}</p>
+        <section className="gates" aria-label="gates">
+          <p>Context: {screen.gates.context}</p>
+          <p>Device: {screen.gates.device}</p>
+          <p>Consistency: {screen.gates.consistency}</p>
         </section>
-      )}
 
+        {screen.banner && (
+          <section className="banner-terminal" role="alert">
+            <h2>{screen.banner.headline}</h2>
+            <ul>
+              {screen.banner.reasons.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+            <p>{screen.banner.subline}</p>
+          </section>
+        )}
+      </div>
+
+      {/* Task W5, requirement C: two-channel live trace. Each line still renders `line.text`
+          verbatim -- only the speaker LABEL is relabelled (SPEAKER_LABELS, above), and the
+          channel is marked by both a class (`turn-caller` / `turn-agent`, colour) and the
+          label text itself, so the two channels read apart without relying on colour alone. */}
       <section className="transcript" aria-label="transcript">
         {screen.transcript.map((line) => (
-          <p key={line.id} className={line.highlighted ? 'highlighted' : undefined} data-highlighted={line.highlighted ? 'true' : 'false'}>
-            <strong>{line.speaker}:</strong> {line.text}
+          <p
+            key={line.id}
+            className={`turn turn-${line.speaker}${line.highlighted ? ' highlighted' : ''}`}
+            data-highlighted={line.highlighted ? 'true' : 'false'}
+            data-speaker={line.speaker}
+          >
+            <strong>{SPEAKER_LABELS[line.speaker]}:</strong> {line.text}
             {line.highlighted ? ' [flagged]' : ''}
             {line.interrupted ? ' [interrupted]' : ''}
           </p>
         ))}
       </section>
 
-      <button type="button" onClick={() => setShowWhy((v) => !v)}>
-        {showWhy ? 'Hide why' : 'Why?'}
-      </button>
+      <div className="forensic-zone">
+        <button type="button" onClick={() => setShowWhy((v) => !v)}>
+          {showWhy ? 'Hide why' : 'Why?'}
+        </button>
 
-      {showWhy && (
-        <section className="forensic" aria-label="forensic">
-          <h3>Evidence</h3>
-          {screen.forensic.evidence.map((e) => (
-            <EvidenceCard key={e.id} evidence={e} />
-          ))}
+        {showWhy && (
+          <section className="forensic" aria-label="forensic">
+            <h3>Evidence</h3>
+            {screen.forensic.evidence.map((e) => (
+              <EvidenceCard key={e.id} evidence={e} />
+            ))}
 
-          <h3>Story ledger</h3>
-          <table>
-            <tbody>
-              {screen.forensic.ledger.map((c) => (
-                <LedgerRow key={c.id} claim={c} />
-              ))}
-            </tbody>
-          </table>
+            <h3>Story ledger</h3>
+            <table>
+              <tbody>
+                {screen.forensic.ledger.map((c) => (
+                  <LedgerRow key={c.id} claim={c} />
+                ))}
+              </tbody>
+            </table>
 
-          <h3>Challenges</h3>
-          <ul>
-            {screen.forensic.challenges.issued.map((c) => {
-              const { text, ungraded } = labelForChallenge(screen.forensic.challenges.results[c.challenge_id]);
-              return (
-                <li key={c.challenge_id}>
-                  {c.field}: <span className={ungraded ? 'ungraded' : 'status-word'}>{text}</span>
+            <h3>Challenges</h3>
+            <ul>
+              {screen.forensic.challenges.issued.map((c) => {
+                const { text, ungraded } = labelForChallenge(screen.forensic.challenges.results[c.challenge_id]);
+                return (
+                  <li key={c.challenge_id}>
+                    {c.field}: <span className={ungraded ? 'ungraded' : 'status-word'}>{text}</span>
+                  </li>
+                );
+              })}
+            </ul>
+
+            <h3>Assurance</h3>
+            <ul>
+              {ASSURANCE_KEYS.map((key) => (
+                <li key={key}>
+                  {screen.forensic.assurance[key] ? '✓' : '✗'} {ASSURANCE_LABELS[key]}
                 </li>
-              );
-            })}
-          </ul>
+              ))}
+            </ul>
 
-          <h3>Assurance</h3>
-          <ul>
-            {ASSURANCE_KEYS.map((key) => (
-              <li key={key}>
-                {screen.forensic.assurance[key] ? '✓' : '✗'} {ASSURANCE_LABELS[key]}
-              </li>
-            ))}
-          </ul>
+            <h3>Counterfactuals</h3>
+            <ul>
+              {screen.forensic.counterfactuals.map((c, i) => (
+                <li key={`cf-${i}`}>
+                  {c.flip} → {c.verdict} ({c.state})
+                </li>
+              ))}
+            </ul>
 
-          <h3>Counterfactuals</h3>
-          <ul>
-            {screen.forensic.counterfactuals.map((c, i) => (
-              <li key={`cf-${i}`}>
-                {c.flip} → {c.verdict} ({c.state})
-              </li>
-            ))}
-          </ul>
-
-          <p>Export hash: {screen.forensic.export_hash ?? 'not yet sealed (hash-chained evidence export pending)'}</p>
-          <p className="countersign">
-            server verdict {screen.forensic.countersign.server_verdict}, recomputed: {screen.forensic.countersign.recomputed ? 'yes' : 'no'}
-          </p>
-        </section>
-      )}
+            <p>Export hash: {screen.forensic.export_hash ?? 'not yet sealed (hash-chained evidence export pending)'}</p>
+            <p className="countersign">
+              server verdict {screen.forensic.countersign.server_verdict}, recomputed: {screen.forensic.countersign.recomputed ? 'yes' : 'no'}
+            </p>
+          </section>
+        )}
+      </div>
     </div>
   );
 }

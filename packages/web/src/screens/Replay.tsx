@@ -105,7 +105,14 @@ export default function Replay() {
 
       {ended && <p role="status">Replay ended: {ended}</p>}
 
-      {screenState ? <CallView screen={screenState} /> : <p>Choose a recording to begin.</p>}
+      {screenState ? (
+        // Task W5, requirement B: the forensic section defaults OPEN in Replay (the judge's
+        // default path, BRIEF D4) -- everywhere else (the live call screen) it stays behind
+        // the "Why?" click, unchanged.
+        <CallView screen={screenState} defaultForensicOpen />
+      ) : (
+        <p>Choose a recording to begin.</p>
+      )}
     </div>
   );
 }

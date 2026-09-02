@@ -1,70 +1,482 @@
 /*
-  Structure-only styling (Task W1). No visual identity decisions here — the
-  founder picks the look in W5. This is the neutral, legible default only:
-  - System font stack, no custom typeface.
-  - One accent colour, #0B5FFF, on a white (#FFFFFF) background. Contrast
-    ratio computed via the WCAG 2.x relative-luminance formula: 5.13:1
-    (>= the 4.5:1 minimum for normal text). See the computation this ratio
-    came from: srgbToLin per channel, luminance = 0.2126R + 0.7152G + 0.0722B,
-    contrast = (lighter + 0.05) / (darker + 0.05).
-  - Status (ready / blocked / unavailable) is carried by text and layout,
-    never by a red-vs-green colour pair.
-  - No animation or transition anywhere in this file.
+  Task W5 -- look 6, "Swiss departure board" (docs/design/six-looks-2026-08-30/
+  6-swiss-departure-board.html is the visual source of truth: palette, type, spacing, board
+  rhythm). This file changes ONLY presentation -- no component was restructured to get here;
+  every class name below already exists in the component source or was added purely to hang
+  a style on (see the W5 report for the short list). CallView.tsx keeps rendering the
+  server's ScreenState verbatim; nothing here computes a verdict, a status word, or a colour
+  standing in for one.
+
+  Palette (CSS custom properties, one :root block -- Task W5 requirement D): dark instrument
+  surfaces (--cs-bg, --cs-panel) with one accent (--cs-accent, amber) and two text tones
+  (--cs-fg, --cs-muted) on top -- "one visual metaphor" (BRIEF D3). Every text/background
+  pairing actually used for text is listed and measured in test/contrast.test.ts (relative
+  luminance + contrast computed in that test, no library) and must clear WCAG 2.1 4.5:1.
+  Status words (PASS/FAIL/FLAG/etc, LIVE/RECONNECTING/ENDED, gate words) are ALWAYS carried
+  by text, never colour alone -- this file adds no red/green semantic colour anywhere.
+
+  Fonts: system stack only (condensed system-ui with tight tracking approximates the look's
+  Fira Sans Condensed; ui-monospace approximates Fira Mono) -- no Google Fonts link, no CDN,
+  so replay mode still renders identically offline. No new runtime dependency.
+
+  Motion: the board's "flip/settle" landing is a short (<=220ms) CSS animation, OFF entirely
+  under prefers-reduced-motion, and it never gates when React actually paints the verdict --
+  it only animates the element already on screen.
 */
 
 :root {
-  --accent: #0b5fff;
-  --bg: #ffffff;
-  --text: #111111;
-  --muted: #555555;
-  --border: #cccccc;
+  /* Backgrounds -- the two instrument surfaces. */
+  --cs-bg: #12151c;
+  --cs-panel: #1c1608;
+  --cs-elevated: #171a22;
+
+  /* Text -- primary, secondary, and the one accent, each measured against every background
+     above in test/contrast.test.ts. */
+  --cs-fg: #e8ebef;
+  --cs-muted: #9aa3b2;
+  --cs-accent: #ffc72c;
+
+  /* Structure only -- never used as a text colour, so not part of the contrast test. */
+  --cs-border: #262b36;
+  --cs-row-border: #1c2029;
+
+  --cs-font-sans: system-ui, -apple-system, "Segoe UI", "Arial Narrow", Helvetica, Arial, sans-serif;
+  --cs-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  color: var(--text);
-  background: var(--bg);
+  font-family: var(--cs-font-sans);
+  color: var(--cs-fg);
+  background: var(--cs-bg);
 }
 
 main {
-  max-width: 40rem;
+  max-width: 42rem;
   margin: 0 auto;
-  padding: 2rem 1rem;
+  padding: 2rem 1.25rem 3rem;
+  border-top: 3px solid var(--cs-accent);
+}
+
+h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  margin: 0.25rem 0 0.75rem;
+}
+
+h1, h2, h3, h4 {
+  color: var(--cs-fg);
+}
+
+p {
+  line-height: 1.45;
 }
 
 button {
   font: inherit;
-  padding: 0.6rem 1rem;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text);
+  font-family: var(--cs-font-sans);
+  padding: 0.6rem 1.1rem;
+  border: 1px solid var(--cs-border);
+  background: var(--cs-elevated);
+  color: var(--cs-fg);
   cursor: pointer;
+  letter-spacing: 0.02em;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--cs-accent);
 }
 
 button:disabled {
   cursor: not-allowed;
-  color: var(--muted);
+  color: var(--cs-muted);
 }
 
 button.primary {
-  background: var(--accent);
-  color: var(--bg);
-  border-color: var(--accent);
+  background: var(--cs-accent);
+  color: #000000;
+  border-color: var(--cs-accent);
+  font-weight: 700;
 }
 
+select,
+input {
+  font: inherit;
+  background: var(--cs-elevated);
+  color: var(--cs-fg);
+  border: 1px solid var(--cs-border);
+}
+
+/* Landing: role cards without answers. */
 .role-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.role-card {
+  border: 1px solid var(--cs-border);
+  background: var(--cs-elevated);
+  padding: 1rem;
+  border-left: 3px solid var(--cs-accent);
+}
+
+.role-card h2 {
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 0 0 0.4rem;
+}
+
+/* Shared alert/status strip -- "simulated" banner, mic-blocked banner, replay-unavailable
+   banner. Text-only signal; the accent left-rule is decoration, never the only cue. */
+.banner {
+  border: 1px solid var(--cs-border);
+  border-left: 3px solid var(--cs-accent);
+  background: var(--cs-elevated);
+  color: var(--cs-fg);
+  padding: 0.75rem 1rem;
+  font-family: var(--cs-font-mono);
+  font-size: 0.9rem;
+}
+
+/* Call / Replay screens -- the instrument frame. */
+.call-screen,
+.replay-screen {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 3rem;
+  border-top: 3px solid var(--cs-accent);
+}
+
+.replay-screen h1 {
+  font-size: 1.5rem;
+}
+
+.call-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0 1rem;
+  border-bottom: 1px solid var(--cs-border);
+  margin-bottom: 1rem;
+}
+
+.link-chip {
+  font-family: var(--cs-font-mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  color: var(--cs-accent);
+  border: 1px solid var(--cs-border);
+  padding: 0.2rem 0.5rem;
+}
+
+.cap-countdown {
+  font-family: var(--cs-font-mono);
+  color: var(--cs-muted);
+}
+
+.replay-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--cs-border);
+  margin-bottom: 1rem;
+}
+
+.replay-controls fieldset {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.bottom-line {
+  margin-top: 1.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--cs-border);
+  color: var(--cs-muted);
+  font-size: 0.9rem;
+}
+
+/* --- Keynote: the departure board ------------------------------------------------------ */
+/* Above the fold on Call/Replay: who is calling, what they ask, the amount, the status
+   word, and the verdict line landing as a board update. Nothing here is new content -- the
+   same fields CallView.tsx already reads off ScreenState, just grouped and laid out as one
+   board instead of a stack of paragraphs. */
+.call-view {
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
 
-.role-card {
-  border: 1px solid var(--border);
-  padding: 1rem;
+.board {
+  border: 1px solid var(--cs-border);
+  background: var(--cs-panel);
+  padding: 0.75rem 1rem 1rem;
 }
 
-.banner {
-  border: 1px solid var(--border);
-  padding: 0.75rem;
+.request-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin: 0;
+  border-bottom: 2px solid var(--cs-accent);
+  padding-bottom: 0.5rem;
+}
+
+.request-header p {
+  margin: 0;
+  padding: 0.3rem 1rem 0.3rem 0;
+  border-right: 1px solid var(--cs-row-border);
+  font-family: var(--cs-font-mono);
+  font-size: 0.95rem;
+  color: var(--cs-fg);
+}
+
+.request-header p:last-child {
+  border-right: none;
+}
+
+.gates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin: 0;
+  border: 1px solid var(--cs-border);
+}
+
+.gates p {
+  flex: 1 1 0;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.85rem;
+  color: var(--cs-muted);
+  border-right: 1px solid var(--cs-border);
+}
+
+.gates p:last-child {
+  border-right: none;
+}
+
+/* The verdict line, landing as a board update. Text-only headline + reasons + subline --
+   colour is decoration (the amber rule), never the carrier of the verdict itself. */
+.banner-terminal {
+  background: var(--cs-panel);
+  border-top: 4px solid var(--cs-accent);
+  border-bottom: 4px solid var(--cs-accent);
+  padding: 0.75rem 1rem;
+  margin-top: 0.75rem;
+  animation: cs-settle 0.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .banner-terminal {
+    animation: none;
+  }
+}
+
+@keyframes cs-settle {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.banner-terminal h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--cs-accent);
+  margin: 0 0 0.4rem;
+}
+
+.banner-terminal ul {
+  list-style: none;
+  margin: 0 0 0.4rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  font-family: var(--cs-font-mono);
+  font-size: 0.85rem;
+  color: var(--cs-muted);
+}
+
+.banner-terminal p {
+  margin: 0;
+  font-family: var(--cs-font-mono);
+  font-size: 0.85rem;
+  color: var(--cs-muted);
+}
+
+/* --- Two-channel live trace: caller vs Countersign ------------------------------------- */
+/* Each line carries a text label ("Caller" / "Countersign") AND a channel class -- the
+   distinction is never colour-only (BRIEF D3 / Task W5 requirement C). Newest sits at the
+   bottom of source order already (server appends); this just makes the two speakers read
+   apart at a glance. */
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 22rem;
+  overflow-y: auto;
+  border: 1px solid var(--cs-border);
+  padding: 0.25rem 0.75rem;
+}
+
+.transcript p {
+  margin: 0;
+  padding: 0.4rem 0 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--cs-row-border);
+  border-left: 3px solid transparent;
+  font-size: 0.95rem;
+}
+
+.transcript p:last-child {
+  border-bottom: none;
+}
+
+.turn-caller {
+  border-left-color: var(--cs-muted);
+}
+
+.turn-caller strong {
+  color: var(--cs-muted);
+}
+
+.turn-agent {
+  border-left-color: var(--cs-accent);
+}
+
+.turn-agent strong {
+  color: var(--cs-accent);
+}
+
+.transcript strong {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.8rem;
+  display: inline-block;
+  margin-right: 0.4rem;
+}
+
+.transcript p[data-highlighted='true'] {
+  background: var(--cs-elevated);
+}
+
+/* --- Forensic: below the fold ----------------------------------------------------------- */
+.forensic-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.forensic-zone > button {
+  align-self: flex-start;
+}
+
+.forensic {
+  border: 1px solid var(--cs-border);
+  background: var(--cs-elevated);
+  padding: 0.75rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.forensic h3 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cs-accent);
+  border-bottom: 1px solid var(--cs-border);
+  padding-bottom: 0.25rem;
+  margin: 0.5rem 0 0.25rem;
+}
+
+.forensic table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+.forensic td {
+  padding: 0.25rem 0.5rem 0.25rem 0;
+  border-bottom: 1px solid var(--cs-row-border);
+  color: var(--cs-muted);
+}
+
+.forensic ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.9rem;
+}
+
+.evidence-card {
+  border-bottom: 1px solid var(--cs-row-border);
+  padding: 0.4rem 0;
+}
+
+.evidence-card h4 {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+  color: var(--cs-fg);
+}
+
+.evidence-card p {
+  margin: 0.15rem 0;
+  font-size: 0.85rem;
+  color: var(--cs-muted);
+}
+
+.evidence-card .provenance {
+  font-family: var(--cs-font-mono);
+  font-size: 0.78rem;
+}
+
+.quotes {
+  list-style: none;
+  padding: 0;
+  margin: 0.25rem 0 0;
+  font-style: italic;
+  color: var(--cs-muted);
+}
+
+.status-word {
+  color: var(--cs-accent);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.ungraded {
+  color: var(--cs-muted);
+  font-style: italic;
+}
+
+.countersign {
+  font-family: var(--cs-font-mono);
+  font-size: 0.85rem;
+  color: var(--cs-accent);
+  border-top: 1px solid var(--cs-border);
+  padding-top: 0.5rem;
 }
