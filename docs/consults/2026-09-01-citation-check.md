@@ -123,3 +123,7 @@
 - **6 VERIFIED** (all AssemblyAI docs and hackathon results match claims)
 - **1 CONTRADICTED** (voice-agent-features page contradicts ~300ms turn detection claim; actual spec is 700ms end-to-end)
 
+
+## Founder-verified from his own browser, 2026-09-01 10:47 PM CDT (screenshots)
+- Event page (lablab.ai/ai-hackathons/assemblyai-voice-agent-hackathon): **Approved 1477** participants (green up-arrow), Sep 1–30 2026, submission deadline Sep 30 10:00 AM CDT, $10,000 pool ($5k cash + $5k AAI credits), a "Live Results" button is already visible. VERIFIED. Seats had said 1,197 / 1,390 / ~1,466 — all were low or stale; the brief's Aug 26 figure (485) is three times too small.
+- Team TLE page (…/team-tle): TEAM IDEA verbatim: "We are building VoiceFirewall, a real time AI safety layer for live voice conversations. It uses AssemblyAI to analyze speech as it happens and detect risky patterns such as scam…" (truncated on the page). Two members; "Team Leader hasn't made a submission yet." VERIFIED. Classification: a DETECTOR (analyze + detect risky patterns) — adjacent lane; not an interrogation, not a policy engine, not stage-only. Positioning line stands: they alarm; we interrogate, collect evidence, and gate the action.

@@ -723,8 +723,11 @@ labeled challenge type; mutation tests. Timing signals demoted to operational-ri
 **Risk register additions (§12):** 8. Seeded-verdict perception → live commitments + counterfactual
 panel + overrides-green case. 9. False positives on honest correction/stress → CORRECTED delta type +
 the honest-Dana-under-stress corpus case (ESCALATE, never FREEZE). 10. In-event competitor in the
-scam-screening lane (seat-asserted "VoiceFirewall," lablab page 403 to fetchers; verify from the
-founder's browser) → positioning stays on the assembly and on "request, never authorize."
+scam-screening lane: VoiceFirewall (Team TLE), FOUNDER-VERIFIED 2026-09-01 10:47 PM CDT from his browser,
+a real-time DETECTOR of risky patterns ("analyze speech as it happens and detect risky patterns such as
+scam…"), two members, no submission yet → adjacent, not the same: they alarm, we interrogate and gate.
+Positioning stays on the assembly and on "request, never authorize." Field size FOUNDER-VERIFIED same
+moment: 1,477 approved participants (the brief's Aug 26 figure of 485 is superseded).
 
 **RATIFIED by the founder 2026-09-01, 10:27 PM CDT: "yes to all five, go."** D1-D5 are now law. Amendment 1b
 is superseded (engine on the server only; browser is an untrusted terminal). §15 character laws amended per D3.
