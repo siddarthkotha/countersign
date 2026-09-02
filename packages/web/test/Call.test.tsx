@@ -360,4 +360,24 @@ describe('Call', () => {
 
     expect(onStartOver).toHaveBeenCalled();
   });
+
+  // Task W7, item 6: the "simulated" banner is owned exclusively by the screen component
+  // (Call.tsx renders it once, unconditionally; CallView.tsx never renders its own copy --
+  // see CallView.test.tsx's "never renders its own copy" test). This is Call's own
+  // integration check that the fix holds end to end: exactly one copy on screen, both before
+  // Start Call and once a state event has landed and CallView is on screen too.
+  it('shows exactly one "Every system here is simulated." banner, before and after a call starts', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+
+    expect(screen.getAllByText('Every system here is simulated.')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+    fake.emitState(scenarioBFinalState());
+    await screen.findByText(/Claimed identity:/);
+
+    expect(screen.getAllByText('Every system here is simulated.')).toHaveLength(1);
+  });
 });

@@ -425,6 +425,25 @@ input {
   font-weight: 700;
 }
 
+/* Task W7, item 3: at phone width (<=420px) five pills (LISTENING / SPEAKING / VERIFYING /
+   AWAITING OUT-OF-BAND / VERDICT) sharing one `flex: 1 1 0` row overflow the right edge of
+   `.agent-states` by ~10px -- each pill's text can't shrink past its own content width.
+   `flex-wrap: wrap` lets the strip break onto a second line inside its own container instead
+   of overflowing; `.state-pill`'s own `flex: 1 1 auto` (replacing the equal-share `1 1 0`
+   only at this breakpoint) lets each pill size to roughly a third of the row so the wrap
+   lands predictably. test/agent-states-layout.test.ts (styles.css parsed directly, same
+   read-the-real-file pattern as test/checks-row-layout.test.ts) asserts the mechanism. */
+@media (max-width: 420px) {
+  .agent-states {
+    flex-wrap: wrap;
+  }
+
+  .state-pill {
+    flex: 1 1 auto;
+    min-width: 33%;
+  }
+}
+
 /* --- Two-channel live trace: caller vs Countersign (fix round 2: two-line row form) ----- */
 /* Each row is a numbered board row ("01.", "02.", monospace) with the role label in amber
    small caps on its own line and the verbatim utterance beneath it -- distinct WITHOUT

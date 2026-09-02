@@ -188,8 +188,14 @@ function ChecksRow({
           : 'No verbatim quote on the transcript to jump to for this check'
       }
     >
+      {/* Task W7, item 2: `aria-pressed` already carries the "this row is the active one"
+          signal for assistive tech; sighted users who don't rely on colour get their own
+          non-colour cue too -- a leading "▸" glyph prepended to the existing decorative
+          square, the same glyph already used elsewhere on screen (the transcript's "▸ quoted"
+          flag) for the identical purpose, so this isn't a new visual vocabulary. Decorative
+          only (`aria-hidden`), never a substitute for `aria-pressed` itself. */}
       <span className="checks-mark" aria-hidden="true">
-        ■
+        {isActive ? '▸ ■' : '■'}
       </span>
       <span className="checks-label">{evidence.label}</span>
       <span className="checks-status">{evidence.status}</span>
@@ -221,6 +227,30 @@ type ActiveQuote = {
   text: string;
   fading: boolean;
 };
+
+/** Task W7, item 4: the banner subline's export-hash short form (10 characters, the server's
+ *  own `shortHash`, packages/server/src/screen/state.ts) now gets a visible "…" truncation
+ *  marker right after it, so it reads as an intentionally-cut string rather than the whole
+ *  hash. This is a display-time insertion only -- `screen.banner.subline` itself (the server-
+ *  composed string) is never rewritten, matching this file's rule that verbatim server/
+ *  transcript text is wrapped for display, never edited (see `withQuoteMark` above). The full
+ *  hash stays reachable exactly the same way as before: the paragraph's own `title`. Falls
+ *  back to the subline exactly as sent if there's no export hash yet, or the short form
+ *  doesn't turn up in it (defensive; should not happen). */
+function withHashEllipsis(subline: string, exportHash: string | null) {
+  if (!exportHash) return subline;
+  const marker = `export ${exportHash.slice(0, 10)}`;
+  const idx = subline.indexOf(marker);
+  if (idx === -1) return subline;
+  const cut = idx + marker.length;
+  return (
+    <>
+      {subline.slice(0, cut)}
+      <span aria-hidden="true">&hellip;</span>
+      {subline.slice(cut)}
+    </>
+  );
+}
 
 export default function CallView({ screen, defaultForensicOpen }: CallViewProps) {
   const [showWhy, setShowWhy] = useState(defaultForensicOpen ?? false);
@@ -400,7 +430,11 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
               {/* Task W5, fix round 3, item 6: list semantics restored -- a real <ul>, the
                   " · " separator is CSS-only (styles.css, ::after on non-last <li>), never
                   string-joined into one text node. */}
-              <ul className="verdict-reasons">
+              {/* Task W7, item 7: explicit `role="list"` -- Safari/VoiceOver drops the
+                  implicit list role off a `<ul>` once `list-style: none` is set
+                  (styles.css, `.verdict-reasons`), so without this the reasons read to
+                  VoiceOver as plain unstructured text, not a list of N items. */}
+              <ul className="verdict-reasons" role="list">
                 {screen.banner.reasons.map((r) => (
                   <li key={r}>{r}</li>
                 ))}
@@ -409,8 +443,12 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
                   export hash short-form (first 10 characters, `state.ts`'s own `shortHash`)
                   -- the only change here is a `title` so hovering it reveals the full hash
                   this short form stands for. The full hash itself is never repeated on
-                  screen a second time outside the forensic section below. */}
-              <p title={screen.forensic.export_hash ?? undefined}>{screen.banner.subline}</p>
+                  screen a second time outside the forensic section below.
+                  Task W7, item 4: `withHashEllipsis` appends a visible "…" right after that
+                  short form -- see its own comment above. */}
+              <p title={screen.forensic.export_hash ?? undefined}>
+                {withHashEllipsis(screen.banner.subline, screen.forensic.export_hash)}
+              </p>
             </section>
           )}
 

@@ -10,7 +10,7 @@
 // covers Call; this file is Replay's half of that same coverage (Replay had no dedicated
 // test file before this round).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { evaluate, MERIDIAN } from '@countersign/engine';
 import type { CorpusFile, EngineInput, ScreenState } from '@countersign/engine';
@@ -176,5 +176,49 @@ describe('Replay', () => {
     });
     expect(footerHash).toBeInTheDocument();
     expect(footerHash).toHaveAttribute('title', 'abc123def456');
+  });
+
+  // Task W7, item 5: the select is bound via `onChange` (Replay.tsx), not a click handler on
+  // its options -- so a programmatic `change` event (the shape a form-fill/automation tool,
+  // or `<select>.value = x; el.dispatchEvent(new Event('change'))`, produces) must start the
+  // replay exactly the same way a real user's click-driven selection does.
+  // `userEvent.selectOptions` (used by the tests above) already fires a real pointer sequence
+  // ending in a native `change` event -- this test skips straight to `fireEvent.change` to
+  // prove the binding itself is on `onChange`, not layered on top of a click handler that
+  // `userEvent` happens to also trigger.
+  it('starts the replay from a programmatic change event on the select, the same as a click-driven selection', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connectSocketOnly).mockReturnValue(fake.client as never);
+    render(<Replay />);
+
+    const select = await screen.findByLabelText('Recording');
+    fireEvent.change(select, { target: { value: RECORDING } });
+
+    expect(connectSocketOnly).toHaveBeenCalledWith(
+      expect.stringContaining(`/ws/replay/${encodeURIComponent(RECORDING)}?speed=1`),
+    );
+
+    fake.emitState(scenarioBFinalState());
+    expect(await screen.findByText(/Claimed identity:/)).toBeInTheDocument();
+  });
+
+  // Task W7, item 6: the "simulated" banner is owned exclusively by the screen component
+  // (Replay.tsx renders it once, unconditionally; CallView.tsx never renders its own copy --
+  // see CallView.test.tsx's "never renders its own copy" test). This is Replay's own
+  // integration check that the fix holds end to end: exactly one copy on screen, both before
+  // a recording is chosen and once a state event has landed and CallView is on screen too.
+  it('shows exactly one "Every system here is simulated." banner, before and after a recording is chosen', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connectSocketOnly).mockReturnValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Replay />);
+
+    expect(screen.getAllByText('Every system here is simulated.')).toHaveLength(1);
+
+    await user.selectOptions(await screen.findByLabelText('Recording'), RECORDING);
+    fake.emitState(scenarioBFinalState());
+    await screen.findByText(/Claimed identity:/);
+
+    expect(screen.getAllByText('Every system here is simulated.')).toHaveLength(1);
   });
 });

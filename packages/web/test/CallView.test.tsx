@@ -206,6 +206,10 @@ describe('CallView', () => {
     const checksBoard = screen.getByLabelText('checks-board');
     const list = checksBoard.querySelector('ul.verdict-reasons');
     expect(list).not.toBeNull();
+    // Task W7, item 7: explicit `role="list"` -- `.verdict-reasons` sets `list-style: none`
+    // (styles.css), which Safari/VoiceOver treats as "not really a list" and drops the
+    // implicit list role for, unless one is restored explicitly.
+    expect(list).toHaveAttribute('role', 'list');
 
     const items = within(list as HTMLElement).getAllByRole('listitem');
     expect(items.map((li) => li.textContent)).toEqual(state.banner!.reasons);
@@ -280,7 +284,12 @@ describe('CallView', () => {
   // the banner ever shows only the 10-character short form (already `state.ts`'s own
   // `shortHash`) -- the full hash is reachable there only via a `title` hover, and stays a
   // visible full string exactly once, in the forensic section's labelled export line.
-  it('shows only the 10-character export hash in the banner (full hash in its title), and the full hash in the forensic section', async () => {
+  //
+  // Task W7, item 4: that short form now also carries a visible "…" truncation marker right
+  // after it, so it reads as a deliberately-cut string, not the whole hash -- the `title`
+  // hover (full hash) is unchanged, and the marker itself is `aria-hidden` (decorative, the
+  // `title` already carries the accessible full value).
+  it('shows only the 10-character export hash in the banner, followed by a visible "…" marker (full hash in its title), and the full hash in the forensic section', async () => {
     const state = scenarioBFinalState();
     const fullHash = state.forensic.export_hash;
     expect(fullHash).not.toBeNull();
@@ -293,9 +302,16 @@ describe('CallView', () => {
     const checksBoard = screen.getByLabelText('checks-board');
     const banner = within(checksBoard).getByRole('alert');
 
-    const sublineEl = within(banner).getByText(new RegExp(`export ${shortHash}\\b`));
-    expect(sublineEl).toBeInTheDocument();
+    // Not `getByText` here: the "…" marker sits in its own nested `<span>` (see
+    // `withHashEllipsis`, CallView.tsx), so the short hash and the marker are no longer one
+    // single text node -- `getNodeText`'s default (direct child text nodes only) wouldn't
+    // find either the `<p>` or the `<span>` matching the full pattern. Select the paragraph
+    // directly and read its full (all-descendants) `textContent` instead.
+    const sublineEl = banner.querySelector('p[title]') as HTMLElement;
+    expect(sublineEl).not.toBeNull();
+    expect(sublineEl.textContent ?? '').toMatch(new RegExp(`export ${shortHash}…`));
     expect(sublineEl).toHaveAttribute('title', exportHash);
+    expect(sublineEl.querySelector('span[aria-hidden="true"]')?.textContent).toBe('…');
     expect(container.textContent ?? '').not.toContain(exportHash);
 
     await user.click(screen.getByRole('button', { name: 'Why?' }));
@@ -383,6 +399,30 @@ describe('evidence-to-quote linking (Task P3)', () => {
     expect(scrollIntoView.mock.instances).toContain(targetLine);
 
     scrollIntoView.mockRestore();
+  });
+
+  // Task W7, item 2: `aria-pressed` alone is the row's semantic "this is the active one"
+  // signal, but a sighted user who doesn't rely on colour to read `--cs-elevated` needs a cue
+  // too -- a leading "▸" glyph prepended to the row's existing decorative square, in addition
+  // to (not instead of) `aria-pressed`.
+  it('shows a leading "▸" glyph on the pressed row, in addition to aria-pressed', async () => {
+    const user = userEvent.setup();
+    render(<CallView screen={scenarioBFinalState()} />);
+
+    const row = getRow(CONSISTENCY_LABEL);
+    const mark = row.querySelector('.checks-mark') as HTMLElement;
+    expect(mark).not.toBeNull();
+    expect(mark.textContent ?? '').not.toContain('▸');
+
+    await user.click(row);
+
+    expect(row).toHaveAttribute('aria-pressed', 'true');
+    expect(mark.textContent ?? '').toContain('▸');
+
+    await user.click(row);
+
+    expect(row).toHaveAttribute('aria-pressed', 'false');
+    expect(mark.textContent ?? '').not.toContain('▸');
   });
 
   it('a checks-row with no quotes is inert: no button semantics, click does nothing, and its title says why', async () => {
@@ -478,6 +518,46 @@ describe('evidence-to-quote linking (Task P3)', () => {
       });
       expect(row).toHaveAttribute('aria-pressed', 'false');
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Task W7, item 1: `handleChecksRowActivate` arms two `setTimeout`s (the fade timer, then
+  // the clear timer, ~2s out -- see the constants above CallView). Unmounting while both are
+  // still pending used to leave them free to fire later and call `setActiveQuote` on a
+  // component that's gone, which is exactly the "act" warning / "state update on an
+  // unmounted component" pattern this test locks out. The real fix already lives in
+  // CallView.tsx (the unmount-only `useEffect(() => clearQuoteTimers, [])` above
+  // `handleChecksRowActivate`) -- this test proves it actually clears both timers on unmount,
+  // not just that a cleanup function exists, and that advancing past when they WOULD have
+  // fired produces no console.error (React's act/state-update warnings both land there).
+  it('clears the pending quote-highlight timers on unmount -- no act warning, no state update after unmount', () => {
+    vi.useFakeTimers();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    try {
+      const { unmount } = render(<CallView screen={scenarioBFinalState()} />);
+      const row = getRow(CONSISTENCY_LABEL);
+
+      fireEvent.click(row);
+      expect(row).toHaveAttribute('aria-pressed', 'true');
+      // Both timers are armed and still pending (well under the 2s window) at this point.
+      clearTimeoutSpy.mockClear();
+
+      unmount();
+
+      // Both the fade timer and the clear timer got cleared on unmount -- not just one of
+      // the two.
+      expect(clearTimeoutSpy).toHaveBeenCalledTimes(2);
+
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      clearTimeoutSpy.mockRestore();
+      consoleError.mockRestore();
       vi.useRealTimers();
     }
   });
