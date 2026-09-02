@@ -26,8 +26,10 @@ import {
 import { evaluate } from '@countersign/engine';
 import type { AaiEvent, AaiSocket } from '../aai/types.js';
 import { isToolName, toolLogEntryFromCall, utteranceFromTranscript } from './events.js';
-import { renderPrompt } from './prompt.js';
+import { renderPrompt, type PromptCtx } from './prompt.js';
+import { toolSchemasFor } from './allowlist.js';
 import { deriveScreenState } from '../screen/state.js';
+import { validateToolArgs, type FlatToolSchema } from './validate.js';
 
 export interface CallSessionOpts {
   session_id: string;
@@ -37,6 +39,9 @@ export interface CallSessionOpts {
   now: () => number;
   onServerEvent: (e: ServerEvent) => void;
   mock: typeof mockToolResult;
+  /** The agent's spoken persona name (BRIEF: not yet chosen by the founder). Defaults to
+   *  `COUNTERSIGN_AGENT_NAME` env, then "Countersign" -- never hard-coded past that. */
+  agent_name?: string;
 }
 
 interface PendingToolResult {
@@ -45,9 +50,19 @@ interface PendingToolResult {
   is_error: boolean;
 }
 
-const TOOL_TIMEOUT_SECONDS = 30;
+function resolveAgentName(explicit: string | undefined): string {
+  if (explicit && explicit.trim().length > 0) return explicit.trim();
+  const fromEnv = process.env.COUNTERSIGN_AGENT_NAME;
+  return fromEnv && fromEnv.trim().length > 0 ? fromEnv.trim() : 'Countersign';
+}
 
-const TOOL_SCHEMAS: Record<ToolName, { description: string; parameters: object }> = {
+/** Tools whose schema carries `identity_id`. Review finding (fix round 1): the LLM never
+ *  overrides the claimed identity -- whatever it sends for `identity_id` on one of these is
+ *  replaced with the engine's own `claimed_identity_id` before validation ever sees it, so
+ *  a spoofed or altered value can never reach the mock backend. */
+const IDENTITY_ARG_TOOLS = new Set<ToolName>(['get_request_history', 'check_sso_context', 'verify_out_of_band', 'alert_principal']);
+
+const TOOL_SCHEMAS: Record<ToolName, { description: string; parameters: FlatToolSchema }> = {
   get_request_history: {
     description: 'Look up prior scheduled payments on file for the claimed identity, to check this request against history.',
     parameters: { type: 'object', properties: { identity_id: { type: 'string' } }, required: ['identity_id'] },
@@ -82,17 +97,6 @@ const TOOL_SCHEMAS: Record<ToolName, { description: string; parameters: object }
   },
 };
 
-function allowlistSchemas(allowed: ToolName[]): object[] {
-  return allowed.map((name) => ({
-    type: 'function',
-    name,
-    description: TOOL_SCHEMAS[name].description,
-    parameters: TOOL_SCHEMAS[name].parameters,
-    execution_mode: 'hold',
-    timeout_seconds: TOOL_TIMEOUT_SECONDS,
-  }));
-}
-
 export class CallSession {
   readonly logs: { conversation: Utterance[]; tools: ToolLogEntry[]; actions: AgentAction[] } = {
     conversation: [],
@@ -114,10 +118,12 @@ export class CallSession {
   private terminalActionsRun = false;
   private exportHash: string | null = null;
   private countersignRecomputed = false;
+  private readonly agentName: string;
 
   constructor(opts: CallSessionOpts) {
     this.opts = opts;
     this.startMs = opts.now();
+    this.agentName = resolveAgentName(opts.agent_name);
     opts.aai.on((evt) => this.handleAaiEvent(evt));
   }
 
@@ -267,10 +273,33 @@ export class CallSession {
     }
 
     const name = evt.name;
-    const args = { ...evt.arguments, request_version: this.last!.request_version };
+
+    // The LLM never overrides the claimed identity (see IDENTITY_ARG_TOOLS above): whatever
+    // it sent for identity_id is replaced before it ever reaches the validator.
+    const candidateArgs: Record<string, unknown> = { ...evt.arguments };
+    if (IDENTITY_ARG_TOOLS.has(name) && this.last!.claimed_identity_id) {
+      candidateArgs.identity_id = this.last!.claimed_identity_id;
+    }
+
+    // CLAUDE.md law: "typed tool payloads validated/repaired in code." A tool.call's
+    // `arguments` is LLM-generated (untrusted shape, even though it's not evidence) --
+    // validate/repair it against the schema we advertised before it can reach the mock.
+    const validation = validateToolArgs(name, candidateArgs, TOOL_SCHEMAS[name].parameters);
+    const loggedArgs: Record<string, unknown> =
+      validation.repaired.length > 0 ? { ...validation.args, _repaired: validation.repaired } : validation.args;
+
+    if (!validation.ok) {
+      const result = { error: 'invalid_arguments', rejected: validation.rejected };
+      this.logs.tools.push(toolLogEntryFromCall(evt, this.nowT(), loggedArgs, result));
+      this.pendingToolResults.push({ call_id: evt.call_id, result, is_error: true });
+      return;
+    }
+
+    const args = { ...validation.args, request_version: this.last!.request_version };
+    const finalLoggedArgs = validation.repaired.length > 0 ? { ...args, _repaired: validation.repaired } : args;
     const result = this.opts.mock(name, args, this.opts.seed, this.mockCtx);
     if (name === 'open_incident') this.mockCtx.incident_index += 1;
-    this.logs.tools.push(toolLogEntryFromCall(evt, this.nowT(), args, result));
+    this.logs.tools.push(toolLogEntryFromCall(evt, this.nowT(), finalLoggedArgs, result));
     this.pendingToolResults.push({ call_id: evt.call_id, result, is_error: Boolean(result.error) });
   }
 
@@ -293,6 +322,18 @@ export class CallSession {
     this.emitState();
   }
 
+  private promptCtx(output: EngineOutput): PromptCtx {
+    const claimed_identity_name = output.claimed_identity_id
+      ? (this.opts.seed.identities.find((i) => i.id === output.claimed_identity_id)?.name ?? null)
+      : null;
+    return {
+      company: this.opts.seed.company,
+      agent_name: this.agentName,
+      claimed_identity_name,
+      state: output.state,
+    };
+  }
+
   private applyEvaluate(): void {
     const output = evaluate(this.buildEngineInput());
     const goalKey = JSON.stringify(output.goal);
@@ -301,8 +342,8 @@ export class CallSession {
       this.opts.aai.send({
         type: 'session.update',
         session: {
-          system_prompt: renderPrompt(output.goal),
-          tools: allowlistSchemas(output.allowed_tools),
+          system_prompt: renderPrompt(output.goal, this.promptCtx(output)),
+          tools: toolSchemasFor(output.allowed_tools),
           input: {
             keyterms: output.goal.keyterms.slice(0, 100),
             turn_detection: { min_silence: output.goal.turn_detection_hint === 'patient' ? 1200 : 600 },
@@ -359,6 +400,10 @@ export class CallSession {
     if (after) {
       buildEvidenceExport(this.opts.session_id, after, new Date(this.opts.now()).toISOString())
         .then((exp) => {
+          // End-guard (fix round 1 minor): the session may have ended (browser closed,
+          // aai error/ended) while this hash was still computing -- don't resurrect a
+          // closed session with a late state push.
+          if (this.ended) return;
           this.exportHash = exp.root_hash;
           this.emitState();
         })

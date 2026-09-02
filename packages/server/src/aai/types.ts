@@ -27,4 +27,9 @@ export type AaiEvent =
   | { type: 'input.speech.stopped' }
   | { type: 'tool.call'; call_id: string; name: string; arguments: Record<string, unknown> }
   | { type: 'session.error'; code: string; message: string }
-  | { type: 'session.ended' };
+  | { type: 'session.ended' }
+  // S3 extension: not an AssemblyAI wire event -- the real adapter (`src/aai/session.ts`)
+  // synthesizes this around its own resume-on-drop handling so the screen can show "voice
+  // link lost, security state preserved" without the call layer re-deriving anything (the
+  // engine's verdict is untouched; only the transport dropped). FakeAaiSocket never emits it.
+  | { type: 'link'; state: 'lost' | 'restored' };

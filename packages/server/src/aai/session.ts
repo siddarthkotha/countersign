@@ -1,0 +1,256 @@
+// packages/server/src/aai/session.ts
+// The real AssemblyAI Voice Agent adapter: mints a token, opens
+// wss://agents.assemblyai.com/v1/ws, sends the initial session.update, waits for
+// session.ready, then maps every server event onto the same `AaiSocket` interface
+// `call/session.ts` already knows from `FakeAaiSocket` (S2) -- CallSession never knows
+// which one it is holding. Also owns resume-on-drop: an unexpected close within 30s
+// re-mints a token, opens a new socket, and sends session.resume -- surfaced to the call
+// layer as a `link` AaiEvent so the screen can show "voice link lost, security state
+// preserved" (nothing here re-derives a verdict; that stays the engine's job, replayed from
+// the logs call/session.ts already owns).
+//
+// VERIFY-AT-BUILD facts this file codes to (docs/aai-verify-2026-09-02.md, quoted there):
+//  Q1 tools/system_prompt/keyterms/turn_detection are mutable mid-call; voice, output
+//     encoding and greeting are NOT (immutable_field if resent) -- config.ts sets those
+//     three only in the FIRST session.update, never again.
+//  Q3 input.audio carries base64 in `audio`; chunk size doesn't matter (~50ms preferred) --
+//     send() forwards whatever call/session.ts already framed, verbatim.
+//  Q4 session.resume is `{type:'session.resume', session_id}` on a NEW socket with a NEW
+//     token, within 30s of the drop.
+//  Q5 llm selection (when configured) is `llm: [{base_url, model, api_key}]` -- built in
+//     config.ts, not here.
+import type { AaiEvent, AaiSocket } from './types.js';
+import { buildInitialSessionUpdate, type AaiSessionConfig } from './config.js';
+
+const TOKEN_URL = 'https://agents.assemblyai.com/v1/token';
+const WS_URL = 'wss://agents.assemblyai.com/v1/ws';
+const RESUME_WINDOW_MS = 30_000;
+const READY_TIMEOUT_MS = 15_000;
+
+/** The slice of `ws`'s WebSocket (and the browser WebSocket API's EventEmitter-style `.on`)
+ *  this adapter needs -- kept minimal and dependency-shaped so tests can supply a scripted
+ *  fake with no real socket, no real network (LAW: tests never call the live API). */
+export interface WsLike {
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+  on(event: 'open' | 'message' | 'close' | 'error', listener: (...args: unknown[]) => void): void;
+}
+
+export interface AaiConnectDeps {
+  fetchImpl: typeof fetch;
+  WebSocketImpl: new (url: string) => WsLike;
+  now: () => number;
+}
+
+async function mintForConnect(cfg: AaiSessionConfig, fetchImpl: typeof fetch): Promise<{ token: string }> {
+  const url = new URL(TOKEN_URL);
+  url.searchParams.set('expires_in_seconds', '60');
+  url.searchParams.set('max_session_duration_seconds', String(cfg.session_cap_seconds));
+
+  const res = await fetchImpl(url, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${cfg.assemblyai_api_key}` },
+  });
+  if (!res.ok) throw new Error(`aai token mint failed: ${res.status}`);
+
+  const body = (await res.json()) as { token: string };
+  return { token: body.token };
+}
+
+function openSocket(WebSocketImpl: new (url: string) => WsLike, token: string): Promise<WsLike> {
+  const ws = new WebSocketImpl(`${WS_URL}?token=${token}`);
+  return new Promise<WsLike>((resolve, reject) => {
+    ws.on('open', () => resolve(ws));
+    ws.on('error', (err) => reject(err instanceof Error ? err : new Error(String(err))));
+  });
+}
+
+function parseMessage(data: unknown): Record<string, unknown> | null {
+  try {
+    const text = typeof data === 'string' ? data : String(data);
+    const parsed: unknown = JSON.parse(text);
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Maps one already-parsed server message to an AaiEvent, or null for anything this adapter
+ *  does not model (session.updated, the transcript.*.delta streaming events, and any future
+ *  event type AssemblyAI adds) -- unknown types are ignored, never thrown on. */
+function mapServerEvent(msg: Record<string, unknown>): AaiEvent | null {
+  switch (msg.type) {
+    case 'session.ready':
+      return { type: 'session.ready', session_id: String(msg.session_id) };
+    case 'transcript.user':
+      return { type: 'transcript.user', item_id: String(msg.item_id), text: String(msg.text) };
+    case 'transcript.agent':
+      return {
+        type: 'transcript.agent',
+        item_id: String(msg.item_id),
+        text: String(msg.text),
+        reply_id: String(msg.reply_id),
+        interrupted: Boolean(msg.interrupted),
+      };
+    case 'reply.started':
+      return { type: 'reply.started', reply_id: String(msg.reply_id) };
+    case 'reply.audio':
+      return { type: 'reply.audio', data: String(msg.data) };
+    case 'reply.done':
+      return { type: 'reply.done', reply_id: String(msg.reply_id), status: String(msg.status) };
+    case 'input.speech.started':
+      return { type: 'input.speech.started' };
+    case 'input.speech.stopped':
+      return { type: 'input.speech.stopped' };
+    case 'tool.call':
+      return {
+        type: 'tool.call',
+        call_id: String(msg.call_id),
+        name: String(msg.name),
+        arguments: (msg.arguments as Record<string, unknown>) ?? {},
+      };
+    case 'session.error':
+      return { type: 'session.error', code: String(msg.code), message: String(msg.message) };
+    case 'session.ended':
+      return { type: 'session.ended' };
+    default:
+      return null;
+  }
+}
+
+class RealAaiSocket implements AaiSocket {
+  private handlers: ((evt: AaiEvent) => void)[] = [];
+  private ws: WsLike;
+  private sessionId: string | null;
+  private closed = false;
+  /** Set true only by our own close() -- distinguishes "we hung up" from "the transport
+   *  dropped", so ending a call normally never triggers a resume attempt. */
+  private expectClose = false;
+  /** Server messages whose type this adapter does not model -- never used for control
+   *  flow, kept only so a caller (e.g. the live smoke script) can report it if useful. */
+  unknownEventCount = 0;
+
+  constructor(
+    ws: WsLike,
+    sessionId: string,
+    private readonly cfg: AaiSessionConfig,
+    private readonly deps: AaiConnectDeps
+  ) {
+    this.ws = ws;
+    this.sessionId = sessionId;
+    this.wire(ws);
+  }
+
+  private wire(ws: WsLike): void {
+    ws.on('message', (data) => {
+      const msg = parseMessage(data);
+      if (!msg) return;
+      if (msg.type === 'session.ready' && typeof msg.session_id === 'string') {
+        this.sessionId = msg.session_id;
+      }
+      const evt = mapServerEvent(msg);
+      if (!evt) {
+        this.unknownEventCount += 1;
+        return;
+      }
+      this.emit(evt);
+    });
+    ws.on('close', () => {
+      if (this.closed || this.expectClose) return;
+      void this.attemptResume();
+    });
+    ws.on('error', () => {
+      // A transport error surfaces as a close on real sockets; resume is driven from
+      // there, not duplicated here.
+    });
+  }
+
+  private emit(evt: AaiEvent): void {
+    for (const h of this.handlers) h(evt);
+  }
+
+  private async attemptResume(): Promise<void> {
+    const droppedAt = this.deps.now();
+    this.emit({ type: 'link', state: 'lost' });
+
+    const sessionId = this.sessionId;
+    if (!sessionId) return; // never got a session_id from this connection -- nothing to resume
+
+    try {
+      const { token } = await mintForConnect(this.cfg, this.deps.fetchImpl);
+      if (this.closed) return;
+      if (this.deps.now() - droppedAt > RESUME_WINDOW_MS) return; // past the resumable window
+
+      const ws = await openSocket(this.deps.WebSocketImpl, token);
+      if (this.closed) {
+        ws.close();
+        return;
+      }
+      ws.send(JSON.stringify({ type: 'session.resume', session_id: sessionId }));
+      this.ws = ws;
+      this.wire(ws);
+      this.emit({ type: 'link', state: 'restored' });
+    } catch {
+      // Resume failed -- the call layer already has 'lost' and nothing here re-derives a
+      // verdict, so the security state itself is unaffected either way.
+    }
+  }
+
+  send(msg: object): void {
+    if (this.closed) return;
+    this.ws.send(JSON.stringify(msg));
+  }
+
+  on(handler: (evt: AaiEvent) => void): void {
+    this.handlers.push(handler);
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.expectClose = true;
+    try {
+      this.ws.send(JSON.stringify({ type: 'session.end' }));
+    } catch {
+      // socket already gone -- nothing to tell it
+    }
+    try {
+      this.ws.close();
+    } catch {
+      // already closed
+    }
+  }
+}
+
+/** Mints a token, connects, sends the initial session.update, and resolves once
+ *  session.ready arrives (or rejects on session.error / a connect failure / timeout). The
+ *  returned AaiSocket owns resume-on-drop for the rest of the call's life. */
+export async function connectAai(cfg: AaiSessionConfig, deps: AaiConnectDeps): Promise<AaiSocket> {
+  const { token } = await mintForConnect(cfg, deps.fetchImpl);
+  const ws = await openSocket(deps.WebSocketImpl, token);
+
+  ws.send(JSON.stringify(buildInitialSessionUpdate(cfg)));
+
+  return new Promise<AaiSocket>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('connectAai: timed out waiting for session.ready'));
+    }, READY_TIMEOUT_MS);
+    (timeout as unknown as { unref?: () => void }).unref?.();
+
+    let settled = false;
+    ws.on('message', function onFirstMessage(data) {
+      if (settled) return;
+      const msg = parseMessage(data);
+      if (!msg) return;
+      if (msg.type === 'session.ready' && typeof msg.session_id === 'string') {
+        settled = true;
+        clearTimeout(timeout);
+        resolve(new RealAaiSocket(ws, msg.session_id, cfg, deps));
+      } else if (msg.type === 'session.error') {
+        settled = true;
+        clearTimeout(timeout);
+        reject(new Error(`aai session.error before ready: ${String(msg.code)} ${String(msg.message)}`));
+      }
+    });
+  });
+}

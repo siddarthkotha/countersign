@@ -72,24 +72,32 @@ fi
 # Parallel lanes share one working tree: another agent's half-written file must not block this commit.
 # Snapshot = the index exported to a temp dir, plus (when the command itself runs `git add`) the paths it names
 # copied from the working tree. `git add -A|.|--all` = the whole working tree.
-staged=$(git -C "$PROJ" diff --cached --name-only 2>/dev/null | grep -E '^(packages/|\.github/)')
-add_paths=""
+add_paths=""; add_all=0
 if [ "$will_add" = 1 ]; then
   add_paths=$(printf '%s' "$cmd" | tr '\n' ' ' | sed -E 's/.*git[[:space:]]+add[[:space:]]+//; s/[[:space:]]*(&&|;|\|).*$//')
-  if printf '%s' "$add_paths" | grep -qE '(^|[[:space:]])(-A|--all|\.)([[:space:]]|$)'; then
-    staged=$(printf '%s\n%s' "$staged" "$(git -C "$PROJ" status --porcelain 2>/dev/null | awk '{print $NF}')" | grep -E '^(packages/|\.github/)')
-  else
-    staged=$(printf '%s\n%s' "$staged" "$(printf '%s' "$add_paths" | tr ' ' '\n')" | grep -E '^(packages/|\.github/)')
-  fi
+  printf '%s' "$add_paths" | grep -qE '(^|[[:space:]])(-A|--all|\.)([[:space:]]|$)' && add_all=1
+fi
+if [ "$will_add" = 1 ] && [ "$add_all" = 0 ]; then
+  # named paths: ONLY those paths are this commit's business (the shared index belongs to every lane)
+  staged=$(printf '%s' "$add_paths" | tr ' ' '\n' | grep -E '^(packages/|\.github/)')
+elif [ "$will_add" = 1 ]; then
+  staged=$(git -C "$PROJ" status --porcelain 2>/dev/null | awk '{print $NF}' | grep -E '^(packages/|\.github/)')
+else
+  staged=$(git -C "$PROJ" diff --cached --name-only 2>/dev/null | grep -E '^(packages/|\.github/)')
 fi
 [ -z "$staged" ] && exit 0
 [ -n "${PRECOMMIT_GATE_TEST_DIFF:-}" ] && exit 0   # test harness stops before running the suite
 SNAP=$(mktemp -d "${TMPDIR:-/tmp}/csgate.XXXXXX") || exit 0
 cleanup() { rm -rf "$SNAP" 2>/dev/null; }
 trap cleanup EXIT
-git -C "$PROJ" checkout-index -a --prefix="$SNAP/" 2>/dev/null || { echo "pre-commit-gate: could not snapshot the index; allowing (fail-open on infrastructure, logged)" >&2; exit 0; }
+if [ "$will_add" = 1 ] && [ "$add_all" = 0 ]; then
+  # named paths: snapshot = HEAD (what git will actually build the commit on) + the named paths from the working tree
+  git -C "$PROJ" archive HEAD 2>/dev/null | tar -x -C "$SNAP" 2>/dev/null || { echo "pre-commit-gate: could not snapshot HEAD; allowing (fail-open on infrastructure, logged)" >&2; exit 0; }
+else
+  git -C "$PROJ" checkout-index -a --prefix="$SNAP/" 2>/dev/null || { echo "pre-commit-gate: could not snapshot the index; allowing (fail-open on infrastructure, logged)" >&2; exit 0; }
+fi
 if [ "$will_add" = 1 ]; then
-  if printf '%s' "$add_paths" | grep -qE '(^|[[:space:]])(-A|--all|\.)([[:space:]]|$)'; then
+  if [ "$add_all" = 1 ]; then
     (cd "$PROJ" && git ls-files -m -o --exclude-standard -z 2>/dev/null | while IFS= read -r -d '' f; do mkdir -p "$SNAP/$(dirname "$f")"; [ -f "$f" ] && cp "$f" "$SNAP/$f"; done)
   else
     for f in $add_paths; do case "$f" in -*) continue;; esac; if [ -d "$PROJ/$f" ]; then (cd "$PROJ" && find "$f" -type f -not -path '*/node_modules/*' | while read -r g; do mkdir -p "$SNAP/$(dirname "$g")"; cp "$g" "$SNAP/$g"; done); elif [ -f "$PROJ/$f" ]; then mkdir -p "$SNAP/$(dirname "$f")"; cp "$PROJ/$f" "$SNAP/$f"; fi; done

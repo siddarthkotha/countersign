@@ -1,0 +1,120 @@
+// packages/server/test/aai-config.test.ts
+// Verifies the initial session.update payload `src/aai/config.ts` builds is exactly what
+// the verified docs (docs/aai-verify-2026-09-02.md) say AssemblyAI expects: flat tool
+// schemas, audio/pcm on both directions, keyterms capped at 100, turn_detection present,
+// the `llm` block only when a model is configured (Q5: omit to keep the managed default),
+// and voice/greeting set once at connect time (Q1/Q2: both immutable after session.ready).
+import { describe, it, expect } from 'vitest';
+import {
+  buildInitialSessionUpdate,
+  loadAaiEnvDefaults,
+  DEFAULT_VOICE,
+  LLM_GATEWAY_BASE_URL,
+  type AaiSessionConfig,
+} from '../src/aai/config.js';
+import { allToolSchemas } from '../src/aai/schemas.js';
+
+function cfg(overrides: Partial<AaiSessionConfig> = {}): AaiSessionConfig {
+  return {
+    assemblyai_api_key: 'secret-key',
+    session_cap_seconds: 300,
+    voice: 'alba',
+    system_prompt: 'You are Countersign.',
+    tools: allToolSchemas(),
+    keyterms: ['Meridian Dynamics', 'Robert Miller'],
+    ...overrides,
+  };
+}
+
+describe('buildInitialSessionUpdate', () => {
+  it('wraps the payload as a session.update message', () => {
+    const msg = buildInitialSessionUpdate(cfg());
+    expect(msg.type).toBe('session.update');
+    expect(msg.session).toBeTruthy();
+  });
+
+  it('sets audio/pcm encoding on both input and output, and the configured voice', () => {
+    const msg = buildInitialSessionUpdate(cfg({ voice: 'eve' }));
+    expect(msg.session.input).toMatchObject({ format: { encoding: 'audio/pcm' } });
+    expect(msg.session.output).toMatchObject({ voice: 'eve', format: { encoding: 'audio/pcm' } });
+  });
+
+  it('caps keyterms at 100 even when more are supplied', () => {
+    const many = Array.from({ length: 150 }, (_, i) => `term-${i}`);
+    const msg = buildInitialSessionUpdate(cfg({ keyterms: many }));
+    const keyterms = (msg.session.input as { keyterms: string[] }).keyterms;
+    expect(keyterms).toHaveLength(100);
+    expect(keyterms[0]).toBe('term-0');
+  });
+
+  it('includes turn_detection fields with sane defaults', () => {
+    const msg = buildInitialSessionUpdate(cfg());
+    expect(msg.session.input).toMatchObject({
+      turn_detection: {
+        vad_threshold: expect.any(Number),
+        min_silence: expect.any(Number),
+        max_silence: expect.any(Number),
+        interrupt_response: expect.any(Boolean),
+      },
+    });
+  });
+
+  it('lets a caller override turn_detection fields', () => {
+    const msg = buildInitialSessionUpdate(cfg({ turn_detection: { min_silence: 1200 } }));
+    expect((msg.session.input as { turn_detection: { min_silence: number } }).turn_detection.min_silence).toBe(1200);
+  });
+
+  it('sends flat tool schemas -- {type, name, description, parameters, execution_mode, timeout_seconds}, never a nested "function" key', () => {
+    const msg = buildInitialSessionUpdate(cfg());
+    const tools = msg.session.tools as Record<string, unknown>[];
+    expect(tools.length).toBeGreaterThan(0);
+    for (const t of tools) {
+      expect(t.type).toBe('function');
+      expect(typeof t.name).toBe('string');
+      expect(typeof t.description).toBe('string');
+      expect(typeof t.parameters).toBe('object');
+      expect(['interactive', 'hold']).toContain(t.execution_mode);
+      expect(typeof t.timeout_seconds).toBe('number');
+      expect(t).not.toHaveProperty('function');
+    }
+  });
+
+  it('includes the greeting only when configured', () => {
+    const withGreeting = buildInitialSessionUpdate(cfg({ greeting: 'Countersign smoke test' }));
+    expect(withGreeting.session.greeting).toBe('Countersign smoke test');
+
+    const withoutGreeting = buildInitialSessionUpdate(cfg());
+    expect(withoutGreeting.session).not.toHaveProperty('greeting');
+  });
+
+  it('omits the llm block by default so the session uses AssemblyAI\'s managed model', () => {
+    const msg = buildInitialSessionUpdate(cfg());
+    expect(msg.session).not.toHaveProperty('llm');
+  });
+
+  it('emits the llm block through the gateway when a model is configured', () => {
+    const msg = buildInitialSessionUpdate(cfg({ llm_model: 'claude-sonnet-4-6' }));
+    expect(msg.session.llm).toEqual([
+      { base_url: LLM_GATEWAY_BASE_URL, model: 'claude-sonnet-4-6', api_key: 'secret-key' },
+    ]);
+  });
+});
+
+describe('loadAaiEnvDefaults', () => {
+  it('defaults voice to alba and leaves llm_model unset when no env vars are present', () => {
+    expect(loadAaiEnvDefaults({})).toEqual({ voice: DEFAULT_VOICE });
+  });
+
+  it('reads COUNTERSIGN_VOICE and COUNTERSIGN_LLM_MODEL from env', () => {
+    expect(loadAaiEnvDefaults({ COUNTERSIGN_VOICE: 'eve', COUNTERSIGN_LLM_MODEL: 'claude-x' })).toEqual({
+      voice: 'eve',
+      llm_model: 'claude-x',
+    });
+  });
+
+  it('treats an empty-string env var as unset', () => {
+    expect(loadAaiEnvDefaults({ COUNTERSIGN_VOICE: '', COUNTERSIGN_LLM_MODEL: '' })).toEqual({
+      voice: DEFAULT_VOICE,
+    });
+  });
+});

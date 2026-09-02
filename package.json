@@ -16,7 +16,8 @@
     "replay": "npm run replay --workspace @countersign/engine --",
     "dev:web": "vite --config packages/web/vite.config.ts packages/web",
     "build:web": "vite build --config packages/web/vite.config.ts packages/web",
-    "dev:server": "tsx packages/server/src/index.ts"
+    "dev:server": "tsx packages/server/src/index.ts",
+    "smoke:live": "tsx packages/server/scripts/smoke-live.ts --live"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

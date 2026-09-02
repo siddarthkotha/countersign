@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import { WebSocket } from 'ws';
 import { loadConfig } from './config.js';
 import { createHttpServer } from './http.js';
 import { reapIdle } from './caps.js';
 import { attachWebSocketServer } from './ws/browser.js';
 import { FakeAaiSocket } from './aai/fake.js';
-import type { AaiSocket } from './aai/types.js';
+import type { AaiEvent, AaiSocket } from './aai/types.js';
+import { connectAai, type WsLike } from './aai/session.js';
+import { loadAaiEnvDefaults, type AaiSessionConfig } from './aai/config.js';
+import { allToolSchemas } from './aai/schemas.js';
 
 const useFakeAai = process.env.COUNTERSIGN_FAKE_AAI === '1';
 
@@ -34,12 +38,100 @@ setInterval(() => {
 // whole stack (session start, caps, the WebSocket protocol, the engine on every event) with
 // no ASSEMBLYAI_API_KEY set. It plays no script by itself -- it only answers what
 // call/session.ts sends it (an initial session.update) -- driving one with real audio/tool
-// events is a manual dev step (or S3's real adapter) until a task actually needs it
-// automated. The real adapter (src/aai/session.ts) lands in S3 and plugs into this same
-// `createAai` factory.
+// events is a manual dev step.
+//
+// The real adapter (src/aai/session.ts, Task S3) plugs into this same `createAai` factory.
+// `attachWebSocketServer` calls `createAai` synchronously and expects an `AaiSocket` back
+// immediately (S2's design -- FakeAaiSocket is synchronous), but a real connection needs an
+// async round trip (mint a token, open the socket, wait for session.ready). `PendingAaiSocket`
+// below bridges that gap: it returns a real AaiSocket synchronously, queues anything sent to
+// it before the real connection is ready, and forwards events once it is -- `call/session.ts`
+// never has to know a real connect was still in flight underneath it.
+let fakeFallbackWarned = false;
+
+const DEFAULT_INITIAL_PROMPT =
+  'You are Countersign, a calm verification voice for the Meridian Dynamics treasury desk. ' +
+  'Wait for the caller to state their request.';
+
+class PendingAaiSocket implements AaiSocket {
+  private handlers: ((evt: AaiEvent) => void)[] = [];
+  private queued: object[] = [];
+  private real: AaiSocket | null = null;
+  private closedBeforeReady = false;
+
+  constructor(connecting: Promise<AaiSocket>) {
+    connecting
+      .then((real) => {
+        if (this.closedBeforeReady) {
+          real.close();
+          return;
+        }
+        this.real = real;
+        real.on((evt) => this.emit(evt));
+        for (const msg of this.queued) real.send(msg);
+        this.queued = [];
+      })
+      .catch((err: unknown) => {
+        console.error('countersign: AssemblyAI connect failed:', err);
+        this.emit({ type: 'session.error', code: 'connect_failed', message: String(err) });
+      });
+  }
+
+  private emit(evt: AaiEvent): void {
+    for (const h of this.handlers) h(evt);
+  }
+
+  send(msg: object): void {
+    if (this.real) this.real.send(msg);
+    else this.queued.push(msg);
+  }
+
+  on(handler: (evt: AaiEvent) => void): void {
+    this.handlers.push(handler);
+  }
+
+  close(): void {
+    if (this.real) this.real.close();
+    else this.closedBeforeReady = true;
+  }
+}
+
 function createAai(_session_id: string): AaiSocket {
   if (useFakeAai) return new FakeAaiSocket();
-  throw new Error('real AssemblyAI adapter not wired yet (Task S3) -- set COUNTERSIGN_FAKE_AAI=1 for dev mode');
+
+  if (!cfg.assemblyai_api_key) {
+    if (!fakeFallbackWarned) {
+      fakeFallbackWarned = true;
+      console.warn(
+        'countersign: no ASSEMBLYAI_API_KEY configured -- falling back to the fake AssemblyAI socket for this ' +
+          'session. Set ASSEMBLYAI_API_KEY (or COUNTERSIGN_FAKE_AAI=1) for a real call.'
+      );
+    }
+    return new FakeAaiSocket();
+  }
+
+  const envDefaults = loadAaiEnvDefaults(process.env);
+  const aaiCfg: AaiSessionConfig = {
+    assemblyai_api_key: cfg.assemblyai_api_key,
+    session_cap_seconds: cfg.session_cap_seconds,
+    voice: envDefaults.voice,
+    system_prompt: DEFAULT_INITIAL_PROMPT,
+    tools: allToolSchemas(),
+    keyterms: [],
+    // exactOptionalPropertyTypes: only set the key at all when a model was actually
+    // configured -- envDefaults.llm_model is `string | undefined`, and assigning
+    // `undefined` explicitly to an optional prop is a different (rejected) thing from
+    // omitting it.
+    ...(envDefaults.llm_model ? { llm_model: envDefaults.llm_model } : {}),
+  };
+
+  const connecting = connectAai(aaiCfg, {
+    fetchImpl: fetch,
+    WebSocketImpl: WebSocket as unknown as new (url: string) => WsLike,
+    now: () => Date.now(),
+  });
+
+  return new PendingAaiSocket(connecting);
 }
 
 attachWebSocketServer(server, {
