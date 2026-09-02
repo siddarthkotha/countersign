@@ -5,7 +5,7 @@
 // words are always rendered as text, never colour-only. The "simulated" banner is present
 // unconditionally.
 import { useState } from 'react';
-import type { AssuranceChecklist, Claim, Evidence, ScreenState } from '@countersign/engine';
+import type { AssuranceChecklist, Claim, ChallengeResult, Evidence, ScreenState } from '@countersign/engine';
 
 export type CallViewProps = {
   screen: ScreenState;
@@ -25,6 +25,17 @@ const ASSURANCE_LABELS: Record<keyof AssuranceChecklist, string> = {
 };
 
 const ASSURANCE_KEYS = Object.keys(ASSURANCE_LABELS) as (keyof AssuranceChecklist)[];
+
+/** `results[challenge_id]` can be absent for a challenge that has been issued but not yet
+ *  graded (the engine has not graded it yet -- there is no eligible caller reply on the
+ *  transcript for it). "awaiting answer" is NOT a member of `ChallengeResult` (PASS | FAIL |
+ *  AMBIGUOUS | REFUSED | UNANSWERED) and must never be confused with one -- it is plain
+ *  words for "no verdict exists here", rendered in a visibly non-status style, never an
+ *  invented status word. */
+function labelForChallenge(result: ChallengeResult | undefined): { text: string; ungraded: boolean } {
+  if (result === undefined) return { text: 'awaiting answer', ungraded: true };
+  return { text: result, ungraded: false };
+}
 
 function EvidenceCard({ evidence }: { evidence: Evidence }) {
   return (
@@ -63,7 +74,7 @@ export default function CallView({ screen }: CallViewProps) {
 
   return (
     <div className="call-view">
-      <p className="banner">Every system here is simulated.</p>
+      {screen.simulated === true && <p className="banner">Every system here is simulated.</p>}
 
       <header className="request-header">
         <p>Claimed identity: {screen.request.claimed_identity ?? 'unknown'}</p>
@@ -123,11 +134,14 @@ export default function CallView({ screen }: CallViewProps) {
 
           <h3>Challenges</h3>
           <ul>
-            {screen.forensic.challenges.issued.map((c) => (
-              <li key={c.challenge_id}>
-                {c.field}: {screen.forensic.challenges.results[c.challenge_id] ?? 'PENDING'}
-              </li>
-            ))}
+            {screen.forensic.challenges.issued.map((c) => {
+              const { text, ungraded } = labelForChallenge(screen.forensic.challenges.results[c.challenge_id]);
+              return (
+                <li key={c.challenge_id}>
+                  {c.field}: <span className={ungraded ? 'ungraded' : 'status-word'}>{text}</span>
+                </li>
+              );
+            })}
           </ul>
 
           <h3>Assurance</h3>

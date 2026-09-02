@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { evaluate, MERIDIAN } from '@countersign/engine';
-import type { CorpusFile, EngineInput } from '@countersign/engine';
+import type { CorpusFile, EngineInput, ScreenState } from '@countersign/engine';
 import { deriveScreenState } from '@countersign/server/src/screen/state.js';
 import CallView from '../src/components/CallView';
 import scenarioBJson from '../../engine/corpus/scenario-b-miller-fraud.json' with { type: 'json' };
@@ -83,6 +83,30 @@ describe('CallView', () => {
     expect(within(forensic).getAllByText(/Whitmore & Bass/).length).toBeGreaterThan(0);
     expect(within(forensic).getByText('server verdict FREEZE, recomputed: yes')).toBeInTheDocument();
     expect(within(forensic).getByText(/abc123def456/)).toBeInTheDocument();
+  });
+
+  it('renders "awaiting answer" -- never an invented status word -- for an issued-but-ungraded challenge', async () => {
+    const state = scenarioBFinalState();
+    // The real engine always grades every issued challenge (at worst UNANSWERED), so this
+    // shape never occurs from a live evaluate() call -- it is hand-built here specifically
+    // to exercise CallView's defensive branch for a challenge_id absent from `results`
+    // (TypeScript's noUncheckedIndexedAccess types that lookup as possibly undefined, and
+    // CallView must never paper over it with an invented ChallengeResult like "PENDING").
+    const ungradedState: ScreenState = {
+      ...state,
+      forensic: {
+        ...state.forensic,
+        challenges: { issued: state.forensic.challenges.issued, results: {} },
+      },
+    };
+
+    const user = userEvent.setup();
+    render(<CallView screen={ungradedState} />);
+    await user.click(screen.getByRole('button', { name: 'Why?' }));
+
+    const forensic = screen.getByLabelText('forensic');
+    expect(within(forensic).getByText('awaiting answer')).toBeInTheDocument();
+    expect(within(forensic).queryByText('PENDING')).not.toBeInTheDocument();
   });
 
   it('never leaks a hidden seed fact anywhere on screen, including inside the Why panel', async () => {

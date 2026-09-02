@@ -92,6 +92,10 @@ if (isDedicatedWorkerScope()) {
       return;
     }
 
+    // A BrowserEvent posted before the socket finishes opening is silently dropped here
+    // (no queue) -- W3 (live call screen) is responsible for not starting capture until
+    // `connect()`'s socket is open, or for buffering frames itself if that ordering can't
+    // be guaranteed.
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(msg));
     }
