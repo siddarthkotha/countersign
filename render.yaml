@@ -1,16 +1,15 @@
 # Render Blueprint — one always-on web service serving the API, the WebSocket call path,
 # and the built React SPA out of the same process/port (Task D1; BRIEF Amendment 1 + §14b(5)).
 #
-# plan: starter for the WHOLE hackathon, from the very first deploy (founder ruling
-# 2026-09-02 -- paid from day one, no mid-hackathon plan switch). Render's Starter instance
-# is always-on / no spin-down, at a flat ~$7/month (ESTIMATE-by-search -- see
-# docs/DEPLOY.md's cost section for the label and how to confirm it). The founder chose this
-# over starting on Render's free tier because a free instance suspends after 15 minutes of
-# inactivity and takes about a minute to wake back up on the next request (verified,
-# docs/hosting-render-check-2026-09-02.md) -- a sleeping instance on a judge's first click is
-# a dead submission, and that risk isn't worth the few dollars saved by starting cheap. The
-# free tier remains a documented fallback (docs/DEPLOY.md, "Fallback: free tier") only for a
-# deliberate temporary lapse, not the plan this project runs on.
+# plan: free for the WHOLE hackathon (founder ruling 2026-09-02, countermanding an earlier
+# same-day "starter from day one" ruling) -- judges confirmed in the event's support chat
+# that a cold start is "totally ok," and to host on the free tier. Free web services suspend
+# after 15 minutes of inactivity and take about a minute to wake back up on the next request
+# (verified, docs/hosting-render-check-2026-09-02.md); that's the accepted trade-off here,
+# not a risk being managed around. `plan: starter` ($7/mo, always-on, no spin-down) remains
+# a documented, one-line optional upgrade in docs/DEPLOY.md ("Optional: always-on for
+# $7/month") -- not the default, and not needed unless the founder later decides the cold
+# start actually is a problem in practice.
 #
 # region: oregon is a FIRST GUESS (UNKNOWN which Render region sits closest to AssemblyAI's
 # realtime WebSocket servers) -- measure connect->session.ready latency from the deployed
@@ -20,7 +19,7 @@ services:
   - type: web
     name: countersign
     runtime: node
-    plan: starter
+    plan: free
     region: oregon
     buildCommand: npm ci && npm run build
     startCommand: npm run start:server
