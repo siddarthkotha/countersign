@@ -309,7 +309,7 @@ describe('evaluate -- goal.turn_detection_hint', () => {
 
   // Amount close to (not exactly) the scheduled payment: context PASSes but amendment_only
   // is false, so the challenge requirement is need=1 -- with no challenge yet asked, this
-  // lands in CHALLENGE (row 8).
+  // lands in CHALLENGE (row 4).
   const closeAmountConversation: Utterance[] = [
     {
       id: 'c1',
@@ -342,15 +342,29 @@ describe('evaluate -- goal.turn_detection_hint', () => {
     expect(out.goal.turn_detection_hint).toBe('patient');
   });
 
-  it('CONSISTENCY_CHECK / READBACK goal (no readback actions issued yet) -> patient', () => {
+  it('challenge-first (ruling 2026-09-02): with no readback AND no challenge yet, CHALLENGE (row 4) comes before CONSISTENCY_CHECK (row 5) -> patient', () => {
+    // Same fixture the old "CONSISTENCY_CHECK / READBACK, no actions" case used -- under the
+    // pre-ruling row order this landed in CONSISTENCY_CHECK/READBACK; a required challenge
+    // (need=1, amendment_only false, zero passed) now runs first instead.
     const out = evaluate({ conversation: closeAmountConversation, tools: closeAmountTools, actions: [], call: readbackCall, seed: MERIDIAN });
-    expect(out.state).toBe('CONSISTENCY_CHECK');
-    expect(out.goal.code).toBe('READBACK');
+    expect(out.state).toBe('CHALLENGE');
+    expect(out.goal.code).toBe('ASK_CHALLENGE');
     expect(out.goal.turn_detection_hint).toBe('patient');
   });
 
-  it('EVIDENCE state (checks not yet run) -> default', () => {
-    const out = evaluate({ conversation: closeAmountConversation, tools: [], actions: readbackActions, call: evidenceCall, seed: MERIDIAN });
+  it('EVIDENCE state (checks not yet run, challenge requirement already exhausted) -> default', () => {
+    // Row 4 only intercepts while a challenge is still owed AND one can still be asked; once
+    // challenges_issued reaches max_challenges (3, via three log-drift challenge_issued
+    // actions -- see "evaluate -- challenge log drift" below for the single-action case),
+    // challengesRemaining is false, row 4 no longer fires, and (with the critical fields
+    // already confirmed) row 7's live-check-pending gate is reached instead.
+    const exhaustedChallengeActions: AgentAction[] = [
+      ...readbackActions,
+      { id: 'ch1', kind: 'challenge_issued', t_ms: 4600, challenge_id: 'drift-1' },
+      { id: 'ch2', kind: 'challenge_issued', t_ms: 4700, challenge_id: 'drift-2' },
+      { id: 'ch3', kind: 'challenge_issued', t_ms: 4800, challenge_id: 'drift-3' },
+    ];
+    const out = evaluate({ conversation: closeAmountConversation, tools: [], actions: exhaustedChallengeActions, call: evidenceCall, seed: MERIDIAN });
     expect(out.state).toBe('EVIDENCE');
     expect(out.goal.turn_detection_hint).toBe('default');
   });
@@ -370,6 +384,60 @@ describe('evaluate -- goal.turn_detection_hint', () => {
     const out = evaluate({ conversation, tools: [], actions: [], call: judgeCall, seed: MERIDIAN });
     expect(out.state).toBe('OUT_OF_SCOPE');
     expect(out.goal.turn_detection_hint).toBe('default');
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Ruling 2026-09-02 (challenge-before-readback): when a challenge is still required (row 4's
+// "need > passed results", challenges remain) AND there is no in-progress identity switch,
+// the PENDING goal is ASK_CHALLENGE before READBACK; readback (row 5) still gates STAGE via
+// I2 and still fires once challenges are satisfied; a mid-call identity switch (row 6) always
+// wins over both, since a fresh challenge or a readback would otherwise address "whoever is
+// on the line now" rather than re-establishing who that is.
+// ---------------------------------------------------------------------------------------
+describe('evaluate -- challenge-first ordering (ruling 2026-09-02)', () => {
+  it("Scenario B's first PENDING goal, right after the caller's opening claim, is ASK_CHALLENGE (not READBACK)", () => {
+    const out = evaluate({
+      conversation: [scenarioBConversation[0]!],
+      tools: [],
+      actions: [],
+      call: scenarioBCall,
+      seed: MERIDIAN,
+    });
+    expect(out.state).toBe('CHALLENGE');
+    expect(out.goal.code).toBe('ASK_CHALLENGE');
+  });
+
+  it("Dana's first goal, once the challenge requirement already reads need 0 (context PASS, amendment-only), is READBACK", () => {
+    // The live checks have already run and context PASSes as an exact vendor+amount match
+    // (amendment_only -> need 0), but nothing has been read back yet -- row 4 is trivially
+    // satisfied (0 needed), so row 5 (readback) is the very next thing the engine asks for.
+    const call: CallContext = { session_id: 'sess-dana-need0', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const out = evaluate({
+      conversation: [danaConversation[0]!],
+      tools: danaTools,
+      actions: [],
+      call,
+      seed: MERIDIAN,
+    });
+    expect(out.state).toBe('CONSISTENCY_CHECK');
+    expect(out.goal.code).toBe('READBACK');
+  });
+
+  it('a mid-call identity switch still yields RE_ELICIT_AFTER_SWITCH, never a challenge addressed to the abandoned claim', () => {
+    // Mirrors corpus/identity-switch.json: fully confirmed as Dana (readbacks affirmed, all
+    // three live checks PASS under version 1), then the caller claims to be Robert Miller.
+    // Without the row-6 guard on row 4, the engine would ask a fresh knowledge challenge of
+    // "whoever is on the line now" instead of re-establishing identity from scratch.
+    const conversation: Utterance[] = [
+      ...danaConversation,
+      { id: 'c5', speaker: 'caller', text: "Actually -- hold on -- this is Robert Miller speaking, I'll take it from here.", t_ms: 5000 },
+    ];
+    const call: CallContext = { session_id: 'sess-switch', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const out = evaluate({ conversation, tools: danaTools, actions: danaActions, call, seed: MERIDIAN });
+    expect(out.verdict).toBe('PENDING');
+    expect(out.state).toBe('CLAIM');
+    expect(out.goal.code).toBe('RE_ELICIT_AFTER_SWITCH');
   });
 });
 

@@ -73,14 +73,14 @@ export function deriveState(decideResult: DecideResult, evidence: Evidence[], to
   if (!hasIdentity || !hasRequest) return 'CLAIM';
 
   switch (decideResult.rule_hit) {
-    case 4:
-      return 'CONSISTENCY_CHECK'; // reading back an unconfirmed critical field
     case 5:
+      return 'CONSISTENCY_CHECK'; // reading back an unconfirmed critical field
+    case 6:
       return 'CLAIM'; // re-establishing identity/claims after a switch
-    case 8:
+    case 4:
     case 12:
       return 'CHALLENGE';
-    case 6:
+    case 7:
     default:
       return 'EVIDENCE';
   }
@@ -146,7 +146,7 @@ function goal(code: GoalCode, hint: string, keyterms: string[], patient: boolean
 export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
   const { state, decideResult, evidence, ledger, seed, tools, nextChallenge } = input;
   const keyterms = buildKeyterms(seed, ledger, evidence);
-  const patient = state === 'CHALLENGE' || (state === 'CONSISTENCY_CHECK' && decideResult.rule_hit === 4);
+  const patient = state === 'CHALLENGE' || (state === 'CONSISTENCY_CHECK' && decideResult.rule_hit === 5);
 
   if (state === 'OUT_OF_SCOPE') {
     const hasRequest = evidence.some((e) => e.kind === 'request_params');
@@ -175,7 +175,7 @@ export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
   }
 
   if (state === 'CLAIM') {
-    if (decideResult.rule_hit === 5) {
+    if (decideResult.rule_hit === 6) {
       return goal(
         'RE_ELICIT_AFTER_SWITCH',
         'The caller switched who they claim to be mid-call. Re-establish identity and re-elicit the request from scratch; treat everything gathered before the switch as stale.',

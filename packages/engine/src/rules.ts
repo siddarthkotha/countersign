@@ -191,31 +191,40 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
     verdict = 'PENDING';
     rule_hit = 3;
   }
-  // Row 4: a critical field is claimed but not yet confirmed (unless freeze is already
-  // warranted on the raw evidence -- see the fail-safe note above).
-  else if (!freezeEligible && !mutant?.skip_readback_gate && !ctx.critical_confirmed) {
+  // Row 4 (ruling 2026-09-02): a challenge is still required for the risk level and one can
+  // still be asked -> ask it before reading back an unconfirmed critical field, so the
+  // agent's first question on a risky call is the interrogation, not a readback. Guarded by
+  // !freezeEligible (freeze keeps strict priority over both this row and row 5 -- see the
+  // fail-safe note above) and by !ctx.identity_switch_stale: a mid-call identity switch must
+  // be re-established from scratch (row 6) before any challenge is put to "whoever is on the
+  // line now" -- asking a knowledge question here would trust the abandoned claim's context,
+  // exactly what row 6 exists to prevent.
+  else if (!freezeEligible && !ctx.identity_switch_stale && passedChallenges < need && challengesRemaining) {
     verdict = 'PENDING';
     rule_hit = 4;
   }
-  // Row 5: identity switched this version, evidence now stale.
-  else if (ctx.identity_switch_stale) {
+  // Row 5: a critical field is claimed but not yet confirmed (unless freeze is already
+  // warranted on the raw evidence -- see the fail-safe note above). Reached once any
+  // required challenge for this risk level has already been asked (row 4), or none is
+  // required (need 0).
+  else if (!freezeEligible && !mutant?.skip_readback_gate && !ctx.critical_confirmed) {
     verdict = 'PENDING';
     rule_hit = 5;
   }
-  // Row 6: any live check still pending/absent/stale.
-  else if (!ssoEv || ssoEv.status === 'PENDING' || !oobEv || oobEv.status === 'PENDING' || !contextEv || contextEv.status === 'PENDING') {
+  // Row 6: identity switched this version, evidence now stale.
+  else if (ctx.identity_switch_stale) {
     verdict = 'PENDING';
     rule_hit = 6;
   }
-  // Row 7: freeze conditions.
+  // Row 7: any live check still pending/absent/stale.
+  else if (!ssoEv || ssoEv.status === 'PENDING' || !oobEv || oobEv.status === 'PENDING' || !contextEv || contextEv.status === 'PENDING') {
+    verdict = 'PENDING';
+    rule_hit = 7;
+  }
+  // Row 8: freeze conditions.
   else if (freezeEligible) {
     verdict = 'FREEZE';
     reasons = orderedFreezeReasons(ssoFail, oobFail, contextFail, hasContradiction, anyKnowledgeFail, pressureFlag, exposureFail, ctx.new_beneficiary);
-    rule_hit = 7;
-  }
-  // Row 8: not enough passed challenges yet, and more can be asked.
-  else if (passedChallenges < need && challengesRemaining) {
-    verdict = 'PENDING';
     rule_hit = 8;
   }
   // Row 9: structuring -- exposure across versions over the high-value line.
@@ -290,22 +299,22 @@ Rule table (evidence-first, first match wins):
 1. An out-of-scope marker with no open request -> NO_ACTION; explain this is a demo checkpoint, nothing moves.
 2. An out-of-scope marker with an open request -> NO_ACTION; the request stays open and unstaged, for a human to route.
 3. No identity claim, or no request -> hold; ask for whichever is missing.
-4. Any critical field (amount, account, beneficiary) that has been claimed but not yet confirmed -> hold; read it back and ask the caller to confirm.
-5. An identity switch this version, with now-stale evidence -> hold; re-establish who is calling from scratch.
-6. Any identity, out-of-band, or context check still pending, absent, or stale -> hold; keep the floor with one short neutral line.
-7. Freeze the transfer rail when any of:
-   7a. the out-of-band check and the identity/SSO check both failed;
-   7b. a contradicted claim exists alongside any failed check;
-   7c. three or more independent checks have failed;
-   7d. the account-relation challenge failed alongside a failed out-of-band check;
-   7e. the deliberate-misstatement challenge failed alongside any failed check.
-   Reasons are always ordered: identity, out-of-band, context, story consistency, knowledge check, urgency pressure, exposure limit, new beneficiary.
-8. Not enough passed challenges yet for the risk level, and challenges remain to ask -> hold; ask the next challenge.
+4. A required challenge is asked before the amount is read back: not enough passed challenges yet for the risk level, challenges remain to ask, and there is no in-progress identity switch to resolve first -> hold; ask the next challenge.
+5. A readback is still required before anything can be staged: any critical field (amount, account, beneficiary) that has been claimed but not yet confirmed -> hold; read it back and ask the caller to confirm. Reached once any challenge required by row 4 has already been asked (or none is required for this risk level).
+6. An identity switch this version, with now-stale evidence -> hold; re-establish who is calling from scratch (this always takes priority over asking a fresh challenge or a readback, since both would otherwise address someone whose claimed identity has already been abandoned).
+7. Any identity, out-of-band, or context check still pending, absent, or stale -> hold; keep the floor with one short neutral line.
+8. Freeze the transfer rail when any of:
+   8a. the out-of-band check and the identity/SSO check both failed;
+   8b. a contradicted claim exists alongside any failed check;
+   8c. three or more independent checks have failed;
+   8d. the account-relation challenge failed alongside a failed out-of-band check;
+   8e. the deliberate-misstatement challenge failed alongside any failed check.
+   Reasons are always ordered: identity, out-of-band, context, story consistency, knowledge check, urgency pressure, exposure limit, new beneficiary. Freeze keeps strict priority over rows 4 and 5: it can fire on raw, unconfirmed evidence rather than waiting on a challenge or a readback that may never come.
 9. Distinct amounts stated across the call add up past the high-value threshold while the current amount alone reads under it -> escalate for a human callback (this guards against splitting one large request into smaller-looking pieces).
 10. A first-time beneficiary not on record -> escalate for a human callback, regardless of amount.
 11. Every AssuranceChecklist item reads true -> STAGE for second approval. A pressure flag never blocks this step, but it keeps the details off the call and adds the principal alert to the required actions.
 12. Some checks have failed, fewer than three, and challenges remain -> hold; ask another challenge.
 13. Otherwise -> escalate for a human callback; nothing moves by voice alone.
 
-Tally (independent failed checks; used by rows 7c and 12): SSO/identity fail 1, out-of-band fail 1, context fail 1, each contradicted claim 1 (capped at 2), each failed challenge 1, each ambiguous/refused challenge 0.5 (evasion is not free, but not fatal either). Pressure, an injection-lexicon hit, and an identity switch each count 0 toward the tally -- they are behavior, never proof, and an identity switch resets the evaluation instead of accruing against it.
+Tally (independent failed checks; used by rows 8c and 12): SSO/identity fail 1, out-of-band fail 1, context fail 1, each contradicted claim 1 (capped at 2), each failed challenge 1, each ambiguous/refused challenge 0.5 (evasion is not free, but not fatal either). Pressure, an injection-lexicon hit, and an identity switch each count 0 toward the tally -- they are behavior, never proof, and an identity switch resets the evaluation instead of accruing against it.
 `;

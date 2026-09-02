@@ -85,43 +85,61 @@ describe('decide -- rule table (first match wins)', () => {
     expect(decide([REQUEST], SEED, ctx())).toMatchObject({ verdict: 'PENDING', rule_hit: 3 });
   });
 
-  it('row 4: a critical field is claimed but not confirmed -> PENDING, rule_hit 4', () => {
-    const r = decide([IDENTITY, REQUEST], SEED, ctx({ critical_confirmed: false }));
+  it('row 4: a challenge is still required for the risk level, and one can still be asked -> PENDING, rule_hit 4', () => {
+    const r = decide(stageEvidence(), SEED, ctx({ amendment_only: false })); // need = 1, zero passed
     expect(r.verdict).toBe('PENDING');
     expect(r.rule_hit).toBe(4);
   });
 
-  it('row 5: identity switch this version, stale evidence -> PENDING, rule_hit 5', () => {
-    const r = decide([IDENTITY, REQUEST], SEED, ctx({ identity_switch_stale: true }));
+  it('row 4 is skipped when an identity switch is in progress (row 6 wins instead -- ruling 2026-09-02)', () => {
+    // Same "challenge still owed" shape as the row-4 test above, but with a stale identity
+    // switch layered on: the switch must be re-established from scratch before any challenge
+    // is put to "whoever is on the line now" (row 6), not row 4.
+    const r = decide(stageEvidence(), SEED, ctx({ amendment_only: false, identity_switch_stale: true }));
+    expect(r.verdict).toBe('PENDING');
+    expect(r.rule_hit).toBe(6);
+  });
+
+  it('row 5: a critical field is claimed but not confirmed (challenge requirement already met) -> PENDING, rule_hit 5', () => {
+    // challenges_issued: 3 exhausts row 4's "challenges remain" condition so this isolates
+    // row 5's own gate rather than being pre-empted by row 4.
+    const r = decide([IDENTITY, REQUEST], SEED, ctx({ critical_confirmed: false, challenges_issued: 3 }));
     expect(r.verdict).toBe('PENDING');
     expect(r.rule_hit).toBe(5);
   });
 
-  it('row 6: a live check is pending or absent -> PENDING, rule_hit 6', () => {
-    const pending = decide([IDENTITY, REQUEST, ev('ev-sso', 'sso_context_result', 'PENDING')], SEED, ctx());
-    expect(pending).toMatchObject({ verdict: 'PENDING', rule_hit: 6 });
-    const absent = decide([IDENTITY, REQUEST], SEED, ctx());
-    expect(absent).toMatchObject({ verdict: 'PENDING', rule_hit: 6 });
+  it('row 6: identity switch this version, stale evidence -> PENDING, rule_hit 6', () => {
+    const r = decide([IDENTITY, REQUEST], SEED, ctx({ identity_switch_stale: true }));
+    expect(r.verdict).toBe('PENDING');
+    expect(r.rule_hit).toBe(6);
   });
 
-  it('row 7a: out-of-band FAIL AND sso FAIL -> FREEZE, reasons lead with IDENTITY_UNVERIFIED', () => {
+  it('row 7: a live check is pending or absent -> PENDING, rule_hit 7', () => {
+    // challenges_issued: 3 keeps row 4 from intercepting these before row 7 gets a chance.
+    const pending = decide([IDENTITY, REQUEST, ev('ev-sso', 'sso_context_result', 'PENDING')], SEED, ctx({ challenges_issued: 3 }));
+    expect(pending).toMatchObject({ verdict: 'PENDING', rule_hit: 7 });
+    const absent = decide([IDENTITY, REQUEST], SEED, ctx({ challenges_issued: 3 }));
+    expect(absent).toMatchObject({ verdict: 'PENDING', rule_hit: 7 });
+  });
+
+  it('row 8a: out-of-band FAIL AND sso FAIL -> FREEZE, reasons lead with IDENTITY_UNVERIFIED', () => {
     const r = decide(stageEvidence({ sso: 'FAIL', oob: 'FAIL' }), SEED, STAGE_CTX);
     expect(r.verdict).toBe('FREEZE');
-    expect(r.rule_hit).toBe(7);
+    expect(r.rule_hit).toBe(8);
     expect(r.reasons[0]).toBe('IDENTITY_UNVERIFIED');
     expect(r.reasons).toContain('OUT_OF_BAND_NO_RESPONSE');
   });
 
-  it('row 7b: a contradicted claim AND any check FAIL -> FREEZE', () => {
+  it('row 8b: a contradicted claim AND any check FAIL -> FREEZE', () => {
     const evidence = [...stageEvidence({ context: 'FAIL' }), ev('ev-consistency-amount_usd', 'consistency_flag', 'FAIL')];
     const r = decide(evidence, SEED, STAGE_CTX);
     expect(r.verdict).toBe('FREEZE');
-    expect(r.rule_hit).toBe(7);
+    expect(r.rule_hit).toBe(8);
     expect(r.reasons).toContain('STORY_INCONSISTENCY');
     expect(r.reasons).toContain('CONTEXT_FAILURE');
   });
 
-  it('row 7c: failure_tally >= 3 -> FREEZE (three independent failures, no contradiction)', () => {
+  it('row 8c: failure_tally >= 3 -> FREEZE (three independent failures, no contradiction)', () => {
     const evidence = [
       ...stageEvidence({ context: 'FAIL' }),
       ev('ev-knowledge-a', 'knowledge_check_result', 'FAIL', { facts: { kind: 'SEED_FACT', result: 'FAIL' } }),
@@ -130,32 +148,26 @@ describe('decide -- rule table (first match wins)', () => {
     const r = decide(evidence, SEED, STAGE_CTX);
     expect(r.failure_tally).toBeGreaterThanOrEqual(3);
     expect(r.verdict).toBe('FREEZE');
-    expect(r.rule_hit).toBe(7);
+    expect(r.rule_hit).toBe(8);
   });
 
-  it('row 7d: RELATIONAL challenge FAIL AND oob FAIL -> FREEZE', () => {
+  it('row 8d: RELATIONAL challenge FAIL AND oob FAIL -> FREEZE', () => {
     const evidence = [
       ...stageEvidence({ oob: 'FAIL' }),
       ev('ev-knowledge-rel', 'knowledge_check_result', 'FAIL', { facts: { kind: 'RELATIONAL', result: 'FAIL' } }),
     ];
     const r = decide(evidence, SEED, STAGE_CTX);
     expect(r.verdict).toBe('FREEZE');
-    expect(r.rule_hit).toBe(7);
+    expect(r.rule_hit).toBe(8);
   });
 
-  it('row 7e: TRAP_FACT challenge FAIL AND any check FAIL -> FREEZE', () => {
+  it('row 8e: TRAP_FACT challenge FAIL AND any check FAIL -> FREEZE', () => {
     const evidence = [
       ...stageEvidence({ sso: 'FAIL' }),
       ev('ev-knowledge-trap', 'knowledge_check_result', 'FAIL', { facts: { kind: 'TRAP_FACT', result: 'FAIL' } }),
     ];
     const r = decide(evidence, SEED, STAGE_CTX);
     expect(r.verdict).toBe('FREEZE');
-    expect(r.rule_hit).toBe(7);
-  });
-
-  it('row 8: not enough passed challenges yet, and challenges remain -> PENDING, rule_hit 8', () => {
-    const r = decide(stageEvidence(), SEED, ctx({ amendment_only: false })); // need = 1, zero passed
-    expect(r.verdict).toBe('PENDING');
     expect(r.rule_hit).toBe(8);
   });
 
@@ -168,7 +180,7 @@ describe('decide -- rule table (first match wins)', () => {
   });
 
   it('row 10: a first-time beneficiary -> ESCALATE regardless of amount, reasons contain NEW_BENEFICIARY', () => {
-    // challenges exhausted so row 8's "need=2, 0 passed" doesn't intercept it first.
+    // challenges exhausted so row 4's "need=2, 0 passed" doesn't intercept it first.
     const r = decide(stageEvidence(), SEED, ctx({ amendment_only: true, new_beneficiary: true, challenges_issued: 3 }));
     expect(r.verdict).toBe('ESCALATE');
     expect(r.rule_hit).toBe(10);
@@ -188,7 +200,7 @@ describe('decide -- rule table (first match wins)', () => {
       ...stageEvidence({ context: 'FAIL' }),
       ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
     ];
-    const r = decide(evidence, SEED, ctx({ amendment_only: false })); // need=1, 1 passed -> row 8 satisfied
+    const r = decide(evidence, SEED, ctx({ amendment_only: false })); // need=1, 1 passed -> row 4 satisfied
     expect(r.verdict).toBe('PENDING');
     expect(r.rule_hit).toBe(12);
     expect(r.failure_tally).toBeGreaterThan(0);
@@ -265,7 +277,7 @@ describe('decide -- mutants (each proves a rule is load-bearing)', () => {
     const evidence = stageEvidence();
     const straight = decide(evidence, SEED, ctx({ amendment_only: true, critical_confirmed: false }));
     expect(straight.verdict).toBe('PENDING');
-    expect(straight.rule_hit).toBe(4);
+    expect(straight.rule_hit).toBe(5);
     const mutated = withMutant(evidence, ctx({ amendment_only: true, critical_confirmed: false }), { skip_readback_gate: true });
     expect(mutated.verdict).toBe('STAGE');
   });
