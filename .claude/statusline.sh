@@ -57,6 +57,8 @@ if [ -n "$PCT" ]; then
 fi
 
 OUT="$BASE"
+# Autopilot badge: the ONE truth source is the flag file the toggle writes; absent flag = no badge.
+[ -f "${DIRPATH:-.}/.claude/autopilot.on" ] && OUT="🚀AUTO · $OUT"
 [ -n "$BRANCH" ] && OUT="$OUT · $BRANCH"
 [ -n "$MODEL" ] && { OUT="$OUT · $MODEL"; [ -n "$EFFORT" ] && OUT="$OUT $EFFORT"; [ -n "$OUTTOK" ] && OUT="$OUT $(k "$OUTTOK")"; }
 [ -n "$DELEG" ] && OUT="$OUT │ deleg $DELEG"

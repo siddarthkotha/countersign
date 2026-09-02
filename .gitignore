@@ -22,3 +22,4 @@ Thumbs.db
 
 # SDD scratch (ledgers, briefs, review packages)
 .superpowers/
+.claude/autopilot.on
