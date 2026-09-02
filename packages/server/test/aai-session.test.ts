@@ -2,16 +2,18 @@
 // Drives `connectAai` against a scripted fake `WebSocketImpl` (never a real socket, never
 // the network -- LAW: tests never call the live API). Covers: the connect URL carries the
 // minted token, session.update is the first message sent, session.ready resolves the
-// connect promise, every mapped event shape, input.audio framing, and the resume-on-drop
-// path (a fresh token, a new socket, session.resume with the prior session_id, and the
-// `link` lost/restored events the screen uses for "voice link lost, security state
-// preserved").
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { connectAai, fetchVoices, _resetVoicesCache, type AaiConnectDeps, type WsLike } from '../src/aai/session.js';
-import { DEFAULT_VOICE, type AaiSessionConfig } from '../src/aai/config.js';
+// connect promise, every mapped event shape, input.audio framing, the resume-on-drop path
+// (a fresh token, a new socket, session.resume with the prior session_id, and the `link`
+// lost/restored events the screen uses for "voice link lost, security state preserved"),
+// the bounded give-up path (`session.ended` reason `link_lost`), and `stats()`.
+//
+// Live voice-id validation (KNOWN_VOICES / resolveVoice) is a pure, synchronous table
+// lookup in src/aai/config.ts as of round 3 (docs/aai-voices-endpoint-2026-09-02.md: GET
+// /v1/voices returns HTTP 426, does not exist) -- tested there, not here.
+import { describe, it, expect, vi } from 'vitest';
+import { connectAai, type AaiConnectDeps, type WsLike } from '../src/aai/session.js';
+import type { AaiSessionConfig } from '../src/aai/config.js';
 import type { AaiEvent } from '../src/aai/types.js';
-
-const ALL_VOICES = ['alba', 'eve', 'george', 'jane', 'jean', 'mary', 'michael', 'anna', 'charles', 'paul', 'vera'];
 
 type Listener = (...args: unknown[]) => void;
 
@@ -51,15 +53,10 @@ class FakeWs implements WsLike {
   }
 }
 
-function makeDeps(tokens: string[] = ['tok-1', 'tok-2', 'tok-3', 'tok-4', 'tok-5'], voices: string[] = ALL_VOICES) {
+function makeDeps(tokens: string[] = ['tok-1', 'tok-2', 'tok-3', 'tok-4', 'tok-5']) {
   const sockets: FakeWs[] = [];
   let tokenIdx = 0;
-  const fetchImpl = vi.fn(async (url: unknown) => {
-    if (String(url).includes('/v1/voices')) {
-      // The documented shape ({voices:[{id}]}) -- other shapes are covered by the
-      // `fetchVoices` unit tests below with their own bespoke fetch mocks.
-      return new Response(JSON.stringify({ voices: voices.map((id) => ({ id })) }), { status: 200 });
-    }
+  const fetchImpl = vi.fn(async () => {
     const token = tokens[Math.min(tokenIdx, tokens.length - 1)]!;
     tokenIdx += 1;
     return new Response(JSON.stringify({ token, expires_in_seconds: 60 }), { status: 200 });
@@ -108,12 +105,6 @@ async function connectAndReady(deps: AaiConnectDeps, sockets: FakeWs[], sessionI
   sockets[0]!.triggerMessage({ type: 'session.ready', session_id: sessionId });
   return connectPromise;
 }
-
-// The live voice-list validation cache (src/aai/session.ts) is per-process by design --
-// reset it before every test so one test's fetch/warning does not leak into the next.
-beforeEach(() => {
-  _resetVoicesCache();
-});
 
 describe('connectAai', () => {
   it('opens the socket with the minted token in the URL and sends session.update as the first message', async () => {
@@ -243,7 +234,7 @@ describe('connectAai', () => {
     expect(received).not.toContainEqual({ type: 'link', state: 'lost', attempt: 1 });
   });
 
-  it('maps session.ended and sends session.end verbatim on close()', async () => {
+  it('maps a real AssemblyAI-originated session.ended (no reason) and sends session.end verbatim on close()', async () => {
     const { deps, sockets } = makeDeps();
     const aai = await connectAndReady(deps, sockets, 'sess-1');
 
@@ -266,7 +257,7 @@ describe('connectAai', () => {
     await waitFor(() => expect(sockets.length).toBe(1)); // it did try to open one socket
   });
 
-  it('caps resume attempts at 3 for the life of the call, then gives up with session.ended and mints no further tokens', async () => {
+  it('caps resume attempts at 3 for the life of the call, then gives up with session.ended reason link_lost and mints no further tokens', async () => {
     const { deps, sockets, fetchImpl } = makeDeps();
     const aai = await connectAndReady(deps, sockets, 'sess-1');
 
@@ -298,12 +289,12 @@ describe('connectAai', () => {
 
     // attempt 4: the cap is exhausted -- must give up without minting again or opening a 5th socket
     sockets[3]!.triggerClose(1006);
-    await waitFor(() => expect(received).toContainEqual({ type: 'session.ended' }));
+    await waitFor(() => expect(received).toContainEqual({ type: 'session.ended', reason: 'link_lost' }));
     expect(fetchImpl.mock.calls.length).toBe(mintCallsSoFar);
     expect(sockets.length).toBe(4);
   });
 
-  it('gives up without minting a new token once the 30s resumable window has passed', async () => {
+  it('gives up with session.ended reason link_lost, minting no new token, once the 30s resumable window has passed', async () => {
     const { deps, sockets, fetchImpl } = makeDeps();
     let t = 0;
     const controlledDeps: AaiConnectDeps = { ...deps, now: () => t };
@@ -316,122 +307,20 @@ describe('connectAai', () => {
     sockets[0]!.triggerClose(1006); // t is 0 at the moment of the drop
     t = 31_000; // advance the clock past the 30s window while the (no-op) backoff is "pending"
 
-    await waitFor(() => expect(received).toContainEqual({ type: 'session.ended' }));
+    await waitFor(() => expect(received).toContainEqual({ type: 'session.ended', reason: 'link_lost' }));
     expect(fetchImpl.mock.calls.length).toBe(mintCallsBeforeDrop); // no resume mint was ever attempted
     expect(sockets.length).toBe(1); // no second socket was ever opened
   });
-});
 
-// AMENDMENT (controller, 2026-09-02 11:35 AM CDT, docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md
-// Voices section): voice ids are exact strings and "invented or remembered values silently
-// fail" -- fetchVoices() is the live authoritative list, and connectAai validates the
-// configured voice against it once per process before the first session.update goes out.
-describe('fetchVoices', () => {
-  function fakeFetch(body: unknown, status = 200) {
-    return vi.fn(async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
-  }
+  it('stats() reports server messages this adapter does not model', async () => {
+    const { deps, sockets } = makeDeps();
+    const aai = await connectAndReady(deps, sockets, 'sess-1');
 
-  it('parses the documented {voices:[{id}]} shape', async () => {
-    const voices = await fetchVoices(
-      { assemblyai_api_key: 'k' },
-      fakeFetch({ voices: [{ id: 'anna' }, { id: 'alba' }] })
-    );
-    expect(voices).toEqual(['anna', 'alba']);
-  });
+    expect(aai.stats?.()).toEqual({ unknown_events: 0 });
 
-  it('tolerates [{voice_id}]', async () => {
-    const voices = await fetchVoices({ assemblyai_api_key: 'k' }, fakeFetch([{ voice_id: 'anna' }, { voice_id: 'alba' }]));
-    expect(voices).toEqual(['anna', 'alba']);
-  });
+    sockets[0]!.triggerMessage({ type: 'transcript.agent.delta', reply_id: 'r1', delta: 'hi' });
+    sockets[0]!.triggerMessage({ type: 'session.updated' });
 
-  it('tolerates [{id}]', async () => {
-    const voices = await fetchVoices({ assemblyai_api_key: 'k' }, fakeFetch([{ id: 'anna' }]));
-    expect(voices).toEqual(['anna']);
-  });
-
-  it('tolerates a plain string[]', async () => {
-    const voices = await fetchVoices({ assemblyai_api_key: 'k' }, fakeFetch(['anna', 'alba']));
-    expect(voices).toEqual(['anna', 'alba']);
-  });
-
-  it('sends the API key as a Bearer token', async () => {
-    const fetchImpl = vi.fn(async (_url: unknown, init?: { headers?: Record<string, string> }) => {
-      expect(init?.headers?.Authorization).toBe('Bearer secret-key');
-      return new Response(JSON.stringify({ voices: [] }), { status: 200 });
-    });
-    await fetchVoices({ assemblyai_api_key: 'secret-key' }, fetchImpl as unknown as typeof fetch);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-  });
-
-  it('throws on a non-OK response', async () => {
-    await expect(fetchVoices({ assemblyai_api_key: 'k' }, fakeFetch({ error: 'nope' }, 500))).rejects.toThrow();
-  });
-});
-
-describe('connectAai live voice-list validation (once per process, cached)', () => {
-  it('uses the configured voice as-is when it is present in the live list, without warning', async () => {
-    const { deps, sockets } = makeDeps(undefined, ALL_VOICES);
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await connectAndReady(deps, sockets); // cfg() defaults voice to 'alba', which IS in ALL_VOICES
-
-    const sent = JSON.parse(sockets[0]!.sent[0]!) as { session: { output: { voice: string } } };
-    expect(sent.session.output.voice).toBe('alba');
-    expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
-  });
-
-  it('falls back to DEFAULT_VOICE with a single warning when the configured voice is absent from the live list', async () => {
-    const { deps, sockets } = makeDeps(undefined, ['george', 'jane']); // cfg() default 'alba' not present
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await connectAndReady(deps, sockets);
-
-    const sent = JSON.parse(sockets[0]!.sent[0]!) as { session: { output: { voice: string } } };
-    expect(sent.session.output.voice).toBe(DEFAULT_VOICE);
-    expect(warn).toHaveBeenCalledTimes(1);
-    warn.mockRestore();
-  });
-
-  it('proceeds with the configured voice and warns once when the voices endpoint errors', async () => {
-    const sockets: FakeWs[] = [];
-    let tokenIdx = 0;
-    const tokens = ['tok-1'];
-    const fetchImpl = vi.fn(async (url: unknown) => {
-      if (String(url).includes('/v1/voices')) return new Response('boom', { status: 500 });
-      const token = tokens[Math.min(tokenIdx, tokens.length - 1)]!;
-      tokenIdx += 1;
-      return new Response(JSON.stringify({ token, expires_in_seconds: 60 }), { status: 200 });
-    });
-    const WebSocketImpl = vi.fn((url: string) => {
-      const sock = new FakeWs(url);
-      sockets.push(sock);
-      return sock;
-    }) as unknown as new (url: string) => WsLike;
-    const deps: AaiConnectDeps = {
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-      WebSocketImpl,
-      now: () => 0,
-      sleep: async () => {},
-    };
-
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await connectAndReady(deps, sockets); // cfg() default voice 'alba' -- unvalidated, but kept
-    const sent = JSON.parse(sockets[0]!.sent[0]!) as { session: { output: { voice: string } } };
-    expect(sent.session.output.voice).toBe('alba');
-    expect(warn).toHaveBeenCalledTimes(1);
-    warn.mockRestore();
-  });
-
-  it('fetches the voices list only once per process -- a second connect (fresh deps) reuses the cache', async () => {
-    const first = makeDeps(['tok-1'], ALL_VOICES);
-    await connectAndReady(first.deps, first.sockets, 'sess-1');
-    const firstVoicesCalls = first.fetchImpl.mock.calls.filter((c) => String(c[0]).includes('/v1/voices')).length;
-    expect(firstVoicesCalls).toBe(1);
-
-    // A second connect, with its OWN deps/fetchImpl (not the same mock instance) -- if the
-    // cache is truly per-process (not per-deps), this fetchImpl must never see /v1/voices.
-    const second = makeDeps(['tok-2'], ALL_VOICES);
-    await connectAndReady(second.deps, second.sockets, 'sess-2');
-    const secondVoicesCalls = second.fetchImpl.mock.calls.filter((c) => String(c[0]).includes('/v1/voices')).length;
-    expect(secondVoicesCalls).toBe(0);
+    expect(aai.stats?.()).toEqual({ unknown_events: 2 });
   });
 });

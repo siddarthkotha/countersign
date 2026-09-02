@@ -364,6 +364,37 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'aai_error:boom' });
     expect(aai.isClosed).toBe(true);
   });
+
+  // Round 3 (S3 re-review): the real adapter (src/aai/session.ts) sets
+  // `reason: 'link_lost'` on its own AaiEvent when its bounded resume-on-drop gives up; a
+  // genuine AssemblyAI-originated session.ended never carries one. `FakeAaiSocket.emit`
+  // lets a test send either shape directly, so both branches are covered without needing a
+  // real resume-on-drop scenario here (that's covered end-to-end in aai-session.test.ts).
+  it('maps a plain (reason-less) AAI session.ended to the existing aai_ended reason', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-plain-end', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+
+    aai.emit({ type: 'session.ended' });
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'aai_ended' });
+    expect(aai.isClosed).toBe(true);
+  });
+
+  it('maps an AAI session.ended carrying reason "link_lost" (adapter give-up) to that same reason', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-link-lost', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+
+    aai.emit({ type: 'session.ended', reason: 'link_lost' });
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'link_lost' });
+    expect(aai.isClosed).toBe(true);
+  });
 });
 
 describe('CallSession — STALL line anti-repeat is call-scoped (fix round 1, finding 1)', () => {

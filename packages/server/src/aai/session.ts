@@ -25,10 +25,9 @@
 //     config.ts, not here.
 import { mintToken } from '../token.js';
 import type { AaiEvent, AaiSocket } from './types.js';
-import { buildInitialSessionUpdate, DEFAULT_VOICE, type AaiSessionConfig } from './config.js';
+import { buildInitialSessionUpdate, resolveVoice, type AaiSessionConfig } from './config.js';
 
 const WS_URL = 'wss://agents.assemblyai.com/v1/ws';
-const VOICES_URL = 'https://agents.assemblyai.com/v1/voices';
 const RESUME_WINDOW_MS = 30_000;
 const READY_TIMEOUT_MS = 15_000;
 const OPEN_TIMEOUT_MS = 8_000;
@@ -77,101 +76,6 @@ function openSocket(WebSocketImpl: new (url: string) => WsLike, token: string, t
       reject(err instanceof Error ? err : new Error(String(err)));
     });
   });
-}
-
-// --- Live voice-list validation ------------------------------------------------------
-// AMENDMENT (controller, 2026-09-02 11:35 AM CDT, docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md
-// "Voices" section): voice ids are exact strings and "invented or remembered values
-// silently fail" -- a wrong id would fail at session.update against a paid endpoint with
-// nothing catching it. `connectAai` fetches the live list once per process (cached below)
-// and validates `cfg.voice` against it before the first session.update goes out.
-let cachedVoicesPromise: Promise<string[]> | null = null;
-let warnedInvalidVoice = false;
-let warnedVoicesEndpointError = false;
-
-/** Test-only: clears the per-process voices cache and the one-shot warning flags. */
-export function _resetVoicesCache(): void {
-  cachedVoicesPromise = null;
-  warnedInvalidVoice = false;
-  warnedVoicesEndpointError = false;
-}
-
-function extractVoiceId(entry: unknown): string | undefined {
-  if (typeof entry === 'string') return entry;
-  if (typeof entry === 'object' && entry !== null) {
-    const rec = entry as Record<string, unknown>;
-    if (typeof rec.voice_id === 'string') return rec.voice_id;
-    if (typeof rec.id === 'string') return rec.id;
-  }
-  return undefined;
-}
-
-/** Parses the /v1/voices response, tolerating every shape seen in the docs/live checks:
- *  the documented `{voices:[{id}]}`, plus `[{voice_id}]`, `[{id}]`, and a plain
- *  `string[]`. An unrecognised shape parses to an empty list rather than throwing -- the
- *  caller already treats "no voices reported" the same as "configured voice not found"
- *  (fallback + warn), so there is nothing extra to special-case here. */
-function parseVoicesResponse(body: unknown): string[] {
-  const list = Array.isArray(body)
-    ? body
-    : typeof body === 'object' && body !== null && Array.isArray((body as Record<string, unknown>).voices)
-      ? ((body as Record<string, unknown>).voices as unknown[])
-      : [];
-  return list.map(extractVoiceId).filter((id): id is string => typeof id === 'string');
-}
-
-/** `GET /v1/voices` -- the authoritative live voice-id list (docs/ASSEMBLYAI_AGENT_
- *  INSTRUCTIONS.md: "Call GET /v1/voices for the authoritative live list rather than
- *  guessing"). Throws on a non-OK response; does not cache by itself -- `resolveVoice`
- *  below is what gives `connectAai` the "once per process" behavior. */
-export async function fetchVoices(
-  cfg: Pick<AaiSessionConfig, 'assemblyai_api_key'>,
-  fetchImpl: typeof fetch
-): Promise<string[]> {
-  const res = await fetchImpl(VOICES_URL, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${cfg.assemblyai_api_key}` },
-  });
-  if (!res.ok) {
-    throw new Error(`fetchVoices failed: ${res.status}`);
-  }
-  const body: unknown = await res.json();
-  return parseVoicesResponse(body);
-}
-
-function getCachedVoices(cfg: Pick<AaiSessionConfig, 'assemblyai_api_key'>, fetchImpl: typeof fetch): Promise<string[]> {
-  cachedVoicesPromise ??= fetchVoices(cfg, fetchImpl);
-  return cachedVoicesPromise;
-}
-
-/** Validates `cfg.voice` against the live list (cached once per process). Absent from a
- *  successfully-fetched list -> falls back to `DEFAULT_VOICE` ('anna') with ONE console
- *  warning for the life of the process. Endpoint error -> proceeds with the configured
- *  voice unvalidated, with ONE console warning. Never throws -- a voice-list problem must
- *  never block a call from connecting. */
-async function resolveVoice(cfg: AaiSessionConfig, fetchImpl: typeof fetch): Promise<string> {
-  let voices: string[];
-  try {
-    voices = await getCachedVoices(cfg, fetchImpl);
-  } catch (err) {
-    if (!warnedVoicesEndpointError) {
-      warnedVoicesEndpointError = true;
-      console.warn(
-        `countersign: GET /v1/voices failed (${String(err)}) -- proceeding with configured voice "${cfg.voice}" unvalidated.`
-      );
-    }
-    return cfg.voice;
-  }
-
-  if (voices.includes(cfg.voice)) return cfg.voice;
-
-  if (!warnedInvalidVoice) {
-    warnedInvalidVoice = true;
-    console.warn(
-      `countersign: configured voice "${cfg.voice}" is not in the live AssemblyAI voice list -- falling back to "${DEFAULT_VOICE}".`
-    );
-  }
-  return DEFAULT_VOICE;
 }
 
 function parseMessage(data: unknown): Record<string, unknown> | null {
@@ -331,7 +235,11 @@ class RealAaiSocket implements AaiSocket {
     // happened; nothing here re-derives a verdict -- that stays call/session.ts + the engine.
     if (!this.closed) {
       this.closed = true;
-      this.emit({ type: 'session.ended' });
+      // Round 3 (S3 re-review): `reason: 'link_lost'` distinguishes a give-up here from a
+      // real AssemblyAI-originated session.ended (mapServerEvent never sets a reason) --
+      // call/session.ts maps this into its own `end(reason)` so the browser's `ended`
+      // event carries `link_lost` instead of the generic `aai_ended`.
+      this.emit({ type: 'session.ended', reason: 'link_lost' });
     }
   }
 
@@ -342,6 +250,13 @@ class RealAaiSocket implements AaiSocket {
 
   on(handler: (evt: AaiEvent) => void): void {
     this.handlers.push(handler);
+  }
+
+  /** Round 3 (S3 re-review): visibility into unmodeled server messages (see the `default`
+   *  branch of `mapServerEvent`) -- never used for control flow, so exposing it costs
+   *  nothing and lets the live smoke script (or any future ops surface) report it. */
+  stats(): { unknown_events: number } {
+    return { unknown_events: this.unknownEventCount };
   }
 
   close(): void {
@@ -366,7 +281,7 @@ class RealAaiSocket implements AaiSocket {
  *  returned AaiSocket owns resume-on-drop for the rest of the call's life. */
 export async function connectAai(cfg: AaiSessionConfig, deps: AaiConnectDeps): Promise<AaiSocket> {
   const { token } = await mintToken(cfg, deps.fetchImpl);
-  const voice = await resolveVoice(cfg, deps.fetchImpl);
+  const voice = resolveVoice(cfg.voice);
   const effectiveCfg: AaiSessionConfig = voice === cfg.voice ? cfg : { ...cfg, voice };
   const ws = await openSocket(deps.WebSocketImpl, token, deps.openTimeoutMs ?? OPEN_TIMEOUT_MS);
 

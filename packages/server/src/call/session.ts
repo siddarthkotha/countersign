@@ -216,7 +216,10 @@ export class CallSession {
         return;
 
       case 'session.ended':
-        this.end('aai_ended');
+        // Round 3 (S3 re-review): the real adapter sets `reason: 'link_lost'` when its own
+        // bounded resume-on-drop gives up; a genuine AssemblyAI-originated session.ended
+        // never carries one, so this still falls back to the existing 'aai_ended' reason.
+        this.end(evt.reason ?? 'aai_ended');
         return;
 
       case 'link':

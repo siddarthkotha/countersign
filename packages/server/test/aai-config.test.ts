@@ -4,12 +4,15 @@
 // schemas, audio/pcm on both directions, keyterms capped at 100, turn_detection present,
 // the `llm` block only when a model is configured (Q5: omit to keep the managed default),
 // and voice/greeting set once at connect time (Q1/Q2: both immutable after session.ready).
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   buildInitialSessionUpdate,
   loadAaiEnvDefaults,
   DEFAULT_VOICE,
   LLM_GATEWAY_BASE_URL,
+  KNOWN_VOICES,
+  resolveVoice,
+  _resetVoiceWarning,
   type AaiSessionConfig,
 } from '../src/aai/config.js';
 import { allToolSchemas } from '../src/aai/schemas.js';
@@ -103,6 +106,55 @@ describe('buildInitialSessionUpdate', () => {
 describe('DEFAULT_VOICE', () => {
   it('is "anna" -- AssemblyAI\'s documented default (docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md Voices)', () => {
     expect(DEFAULT_VOICE).toBe('anna');
+  });
+});
+
+// AMENDMENT round 3 (controller, verified live 2026-09-02 11:49 AM CDT + docs check --
+// docs/aai-voices-endpoint-2026-09-02.md): GET /v1/voices does NOT exist (HTTP 426) --
+// AssemblyAI publishes voice ids as a static reference table. This replaces the round-2
+// network fetchVoices()/connectAai-cache tests with a plain synchronous table lookup.
+describe('KNOWN_VOICES / resolveVoice (static table -- no live endpoint)', () => {
+  beforeEach(() => {
+    _resetVoiceWarning();
+  });
+
+  it('KNOWN_VOICES is exactly the documented table (docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md Voices)', () => {
+    expect(KNOWN_VOICES).toEqual([
+      'alba',
+      'eve',
+      'george',
+      'jane',
+      'jean',
+      'mary',
+      'michael',
+      'anna',
+      'charles',
+      'paul',
+      'vera',
+      'giovanni',
+      'lola',
+      'juergen',
+      'rafael',
+      'estelle',
+    ]);
+  });
+
+  it('returns a voice that is in the table as-is, without warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(resolveVoice('alba')).toBe('alba');
+    expect(resolveVoice('estelle')).toBe('estelle');
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('falls back to DEFAULT_VOICE with a single warning when the voice is not in the table', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(resolveVoice('not-a-real-voice')).toBe(DEFAULT_VOICE);
+    // A second (different) invalid voice must not warn again -- one warning for the life
+    // of the process, same as round 2's live-list validation.
+    expect(resolveVoice('also-not-a-real-voice')).toBe(DEFAULT_VOICE);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });
 

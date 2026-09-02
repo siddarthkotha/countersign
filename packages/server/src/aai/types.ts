@@ -11,6 +11,11 @@ export interface AaiSocket {
   send(msg: object): void;
   on(handler: (evt: AaiEvent) => void): void;
   close(): void;
+  /** Round 3 (S3 re-review): counts server messages this adapter never modeled (see the
+   *  `default` branch of `mapServerEvent` in `session.ts`) -- optional so `FakeAaiSocket`
+   *  (which never has unmodeled events, since tests only ever emit shapes it knows) need
+   *  not implement it. */
+  stats?(): { unknown_events: number };
 }
 
 /** Server <- AssemblyAI events actually used by S2 (a strict subset of the full events
@@ -27,7 +32,12 @@ export type AaiEvent =
   | { type: 'input.speech.stopped' }
   | { type: 'tool.call'; call_id: string; name: string; arguments: Record<string, unknown> }
   | { type: 'session.error'; code: string; message: string }
-  | { type: 'session.ended' }
+  // `reason` is a round-3 (S3 re-review) addition, additive/optional: the real adapter
+  // (`session.ts`) sets it to 'link_lost' when its own bounded resume-on-drop gives up
+  // (attempts exhausted, the 30s window passed, or nothing to resume against). A real
+  // AssemblyAI-originated `session.ended` (mapped in `mapServerEvent`) never sets it --
+  // `call/session.ts` falls back to its existing 'aai_ended' reason in that case.
+  | { type: 'session.ended'; reason?: string }
   // S3 extension: not an AssemblyAI wire event -- the real adapter (`src/aai/session.ts`)
   // synthesizes this around its own resume-on-drop handling so the screen can show "voice
   // link lost, security state preserved" without the call layer re-deriving anything (the

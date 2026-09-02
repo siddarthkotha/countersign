@@ -18,6 +18,55 @@
 // instructions, docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md "Voices" section): the documented
 // default voice is `anna`. COUNTERSIGN_VOICE overrides it below.
 export const DEFAULT_VOICE = 'anna';
+
+// AMENDMENT round 3 (controller, verified live 2026-09-02 11:49 AM CDT + docs check --
+// see docs/aai-voices-endpoint-2026-09-02.md, and the CORRECTION line in
+// docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md): `GET https://agents.assemblyai.com/v1/voices`
+// does NOT exist -- it returns HTTP 426. AssemblyAI publishes voice ids as a static
+// reference table (the Voices doc page), not a live endpoint. This replaces round 2's
+// network `fetchVoices()` call: exactly the documented ids, validated with the same
+// one-warning fallback to DEFAULT_VOICE, but as a plain synchronous table lookup -- no
+// fetch, no cache, no endpoint-error path, and no extra round trip before connecting.
+export const KNOWN_VOICES = [
+  'alba',
+  'eve',
+  'george',
+  'jane',
+  'jean',
+  'mary',
+  'michael',
+  'anna',
+  'charles',
+  'paul',
+  'vera',
+  'giovanni',
+  'lola',
+  'juergen',
+  'rafael',
+  'estelle',
+] as const;
+
+let warnedInvalidVoice = false;
+
+/** Test-only: clears the one-shot invalid-voice warning flag. */
+export function _resetVoiceWarning(): void {
+  warnedInvalidVoice = false;
+}
+
+/** Validates a configured voice id against `KNOWN_VOICES`. Absent -> falls back to
+ *  `DEFAULT_VOICE` ('anna') with ONE console warning for the life of the process. Pure and
+ *  synchronous (no network, no I/O) -- never throws, so a voice-id typo can never block a
+ *  call from connecting. */
+export function resolveVoice(voice: string): string {
+  if ((KNOWN_VOICES as readonly string[]).includes(voice)) return voice;
+  if (!warnedInvalidVoice) {
+    warnedInvalidVoice = true;
+    console.warn(
+      `countersign: configured voice "${voice}" is not in the documented AssemblyAI voice table -- falling back to "${DEFAULT_VOICE}".`
+    );
+  }
+  return DEFAULT_VOICE;
+}
 export const LLM_GATEWAY_BASE_URL = 'https://llm-gateway.assemblyai.com/v1';
 const AUDIO_ENCODING = 'audio/pcm';
 
