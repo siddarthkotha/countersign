@@ -1,0 +1,61 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Bash",
+      "Edit(docs/**)",
+      "Edit(packages/**)",
+      "Edit(README.md)",
+      "Edit(package.json)",
+      "Edit(tsconfig*.json)",
+      "Edit(vitest.workspace.ts)",
+      "Edit(.github/**)",
+      "Edit(.gitignore)"
+    ],
+    "deny": [
+      "Bash(git reset:*)",
+      "Bash(git checkout:*)",
+      "Bash(git rebase:*)",
+      "Bash(git push --force:*)",
+      "Bash(rmdir:*)",
+      "Bash(sed -i:*)",
+      "Bash(tee:*)",
+      "Bash(dd:*)",
+      "Bash(chmod:*)",
+      "Bash(chown:*)"
+    ],
+    "ask": [
+      "Bash(rm:*)",
+      "Edit(CLAUDE.md)",
+      "Edit(.claude/**)",
+      "Edit(.env*)"
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/statusline.sh\""
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Agent|Task|Workflow|Bash|Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/usage-ledger.sh\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/local-time-gate.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
