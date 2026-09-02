@@ -1,0 +1,250 @@
+// packages/web/test/Call.test.tsx
+// TDD for src/screens/Call.tsx. `connect` (src/ws/client.ts) is mocked -- the socket must
+// never open before an explicit "Start Call" click (BRIEF engineering law: explicit
+// Start-Call click). The fake client mirrors the real `connect()` contract documented in
+// src/ws/client.ts (onFlush wired to playback.flush()) so this test exercises Call.tsx's own
+// wiring, not a copy of the engine or the real worker. `deriveScreenState` (the same mapper
+// the server uses) turns a real corpus file into a real ScreenState fixture, same pattern as
+// test/CallView.test.tsx.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { evaluate, MERIDIAN } from '@countersign/engine';
+import type { BrowserEvent, CorpusFile, EngineInput, ScreenState } from '@countersign/engine';
+import { deriveScreenState } from '@countersign/server/src/screen/state.js';
+import Call from '../src/screens/Call';
+import { connect } from '../src/ws/client';
+import scenarioBJson from '../../engine/corpus/scenario-b-miller-fraud.json' with { type: 'json' };
+
+vi.mock('../src/ws/client', () => ({
+  connect: vi.fn(),
+  connectSocketOnly: vi.fn(),
+}));
+
+const scenarioB = scenarioBJson as unknown as CorpusFile;
+
+const SESSION = { session_id: 'sess-123', ws_path: '/ws/call/sess-123', cap_seconds: 180 };
+
+// Same list W1 (Landing.test.tsx) checks -- facts true in the seed world that must never
+// leak onto any screen, except where they legitimately appear in the call's own transcript
+// (Scenario B's caller answers "Whitmore & Bass", the wrong law firm -- that string belongs
+// on screen; the real counsel of record, Calder & Finch, never should).
+const HIDDEN_FACTS = ['Calder', 'Finch', 'First Meridian Trust', '8830', 'Zurich', 'Lena Voss', 'August 19', 'Whitmore'];
+
+const BOTTOM_LINE = 'No funds can move by voice alone. Second approval required.';
+
+function scenarioBFinalState(): ScreenState {
+  const engineInput: EngineInput = {
+    conversation: scenarioB.conversation,
+    tools: scenarioB.tools,
+    actions: scenarioB.actions,
+    call: scenarioB.call,
+    seed: MERIDIAN,
+  };
+  const output = evaluate(engineInput);
+  return deriveScreenState({
+    session_id: SESSION.session_id,
+    t_ms: 52000,
+    engineInput,
+    output,
+    speaking: false,
+    export_hash: 'abc123def456',
+    recomputed: true,
+    link: 'live',
+  });
+}
+
+function makeFakeClient() {
+  let stateCb: ((state: ScreenState) => void) | null = null;
+  let endedCb: ((reason: string) => void) | null = null;
+  let flushCb: (() => void) | null = null;
+  const playbackFlush = vi.fn();
+  const send = vi.fn<(e: BrowserEvent) => void>();
+  const close = vi.fn();
+
+  const client = {
+    send,
+    onState(cb: (state: ScreenState) => void) {
+      stateCb = cb;
+    },
+    onAudio() {
+      // Not exercised here -- playback wiring for actual audio chunks belongs to client.ts.
+    },
+    onFlush(cb: () => void) {
+      flushCb = cb;
+    },
+    onEnded(cb: (reason: string) => void) {
+      endedCb = cb;
+    },
+    close,
+    capture: { stop: vi.fn() },
+    playback: { flush: playbackFlush, push: vi.fn(), level: vi.fn(), close: vi.fn() },
+  };
+
+  // Mirrors the real connect()'s documented wiring (src/ws/client.ts): a `flush` ServerEvent
+  // always calls playback.flush() -- this fake reproduces that contract instead of asserting
+  // against Call.tsx internals that don't exist (Call.tsx never touches playback directly).
+  client.onFlush(() => client.playback.flush());
+
+  return {
+    client,
+    emitState: (state: ScreenState) => stateCb?.(state),
+    emitEnded: (reason: string) => endedCb?.(reason),
+    emitFlush: () => flushCb?.(),
+    playbackFlush,
+    send,
+    close,
+  };
+}
+
+beforeEach(() => {
+  vi.mocked(connect).mockReset();
+  vi.stubGlobal('AudioContext', class {} as unknown as typeof AudioContext);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('Call', () => {
+  it('does not open the socket before Start Call is clicked', () => {
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it('shows the bottom line before any call starts', () => {
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    expect(screen.getByText(BOTTOM_LINE)).toBeInTheDocument();
+  });
+
+  it('Start Call calls connect with the ws_path and sends start', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+
+    expect(connect).toHaveBeenCalledWith(SESSION.ws_path, expect.anything());
+    expect(fake.send).toHaveBeenCalledWith({ type: 'start' });
+  });
+
+  it('renders the request header, gates and transcript on a state event', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+
+    fake.emitState(scenarioBFinalState());
+
+    expect(await screen.findByText(/Claimed identity:/)).toBeInTheDocument();
+    expect(screen.getByLabelText('gates')).toBeInTheDocument();
+    expect(screen.getByLabelText('transcript')).toBeInTheDocument();
+  });
+
+  it('a flush event calls playback flush via the mocked client', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+
+    fake.emitFlush();
+
+    expect(fake.playbackFlush).toHaveBeenCalled();
+  });
+
+  it('shows the plain-words reason and keeps the last state when the server ends the call', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+
+    fake.emitState(scenarioBFinalState());
+    fake.emitEnded('idle_timeout');
+
+    expect(await screen.findByText('The call ended: no speech for 30 seconds')).toBeInTheDocument();
+    expect(screen.getByText(/Claimed identity:/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Why?' })).toBeInTheDocument();
+  });
+
+  it('End Call sends end and POSTs the session end endpoint', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+
+    await user.click(screen.getByRole('button', { name: 'End Call' }));
+
+    expect(fake.send).toHaveBeenCalledWith({ type: 'end' });
+    expect(fetchMock).toHaveBeenCalledWith(`/api/session/${SESSION.session_id}/end`, expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('keeps the bottom line present through start, live and ended states', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    expect(screen.getByText(BOTTOM_LINE)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+    fake.emitState(scenarioBFinalState());
+    expect(screen.getByText(BOTTOM_LINE)).toBeInTheDocument();
+
+    fake.emitEnded('cap_reached');
+    expect(await screen.findByText('The call ended: the session cap was reached')).toBeInTheDocument();
+    expect(screen.getByText(BOTTOM_LINE)).toBeInTheDocument();
+  });
+
+  it('never leaks a hidden seed fact anywhere on screen, except facts present in the transcript itself', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    const { container } = render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+
+    const state = scenarioBFinalState();
+    fake.emitState(state);
+    await screen.findByText(/Claimed identity:/);
+
+    const transcriptText = state.transcript.map((line) => line.text).join(' ');
+    const text = container.textContent ?? '';
+    for (const fact of HIDDEN_FACTS) {
+      if (transcriptText.includes(fact)) continue;
+      expect(text).not.toContain(fact);
+    }
+  });
+
+  it('shows a mic-failure banner and a Watch offer when connect rejects', async () => {
+    vi.mocked(connect).mockRejectedValue(new Error('denied'));
+    const onWatch = vi.fn();
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={onWatch} />);
+
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Watch a recorded attack' }));
+    expect(onWatch).toHaveBeenCalled();
+  });
+
+  it('Start over calls onStartOver', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const onStartOver = vi.fn();
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={onStartOver} onWatch={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+
+    fake.emitEnded('caller_ended');
+    await user.click(await screen.findByRole('button', { name: 'Start over' }));
+
+    expect(onStartOver).toHaveBeenCalled();
+  });
+});

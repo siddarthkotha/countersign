@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import MicCheck from '../components/MicCheck';
 import RoleCards from '../components/RoleCards';
-import { startSession } from '../api';
+import { startSession, type StartResult } from '../api';
+
+type StartedSession = Extract<StartResult, { session_id: string }>;
 
 export type LandingProps = {
   onWatch: () => void;
-  onCall: () => void;
+  onCall: (result: StartedSession) => void;
 };
 
 const REPLAY_ONLY_REASONS: Record<string, string> = {
@@ -30,11 +32,11 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
     setUnavailableReason(null);
     const result = await startSession();
     setStarting(false);
-    if ('replay_only' in result && result.replay_only) {
+    if ('replay_only' in result) {
       setUnavailableReason(reasonToPlainWords(result.reason));
       return;
     }
-    onCall();
+    onCall(result);
   }
 
   return (
