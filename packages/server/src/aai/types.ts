@@ -32,4 +32,7 @@ export type AaiEvent =
   // synthesizes this around its own resume-on-drop handling so the screen can show "voice
   // link lost, security state preserved" without the call layer re-deriving anything (the
   // engine's verdict is untouched; only the transport dropped). FakeAaiSocket never emits it.
-  | { type: 'link'; state: 'lost' | 'restored' };
+  // `attempt` is the 1-indexed resume attempt this event belongs to -- resume is bounded
+  // (MAX_RESUME_ATTEMPTS in session.ts), so this also tells a viewer how close to giving up
+  // the call is.
+  | { type: 'link'; state: 'lost' | 'restored'; attempt: number };

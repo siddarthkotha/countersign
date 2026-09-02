@@ -49,7 +49,7 @@ class FakeWs implements WsLike {
   }
 }
 
-function makeDeps(tokens: string[] = ['tok-1', 'tok-2', 'tok-3']) {
+function makeDeps(tokens: string[] = ['tok-1', 'tok-2', 'tok-3', 'tok-4', 'tok-5']) {
   const sockets: FakeWs[] = [];
   let tokenIdx = 0;
   const fetchImpl = vi.fn(async () => {
@@ -66,6 +66,11 @@ function makeDeps(tokens: string[] = ['tok-1', 'tok-2', 'tok-3']) {
     fetchImpl: fetchImpl as unknown as typeof fetch,
     WebSocketImpl,
     now: () => 0,
+    // The bounded-resume backoff (500ms/1500ms/3000ms) is real-timer based in production;
+    // tests inject a no-op so waiting on it doesn't make the suite slow. Tests that care
+    // about backoff/window timing override `now` (and keep this no-op) rather than waiting
+    // on real delays.
+    sleep: async () => {},
   };
   return { deps, sockets, fetchImpl };
 }
@@ -198,7 +203,7 @@ describe('connectAai', () => {
     aai.on((evt) => received.push(evt));
 
     sockets[0]!.triggerClose(1006, 'abnormal');
-    expect(received).toContainEqual({ type: 'link', state: 'lost' });
+    expect(received).toContainEqual({ type: 'link', state: 'lost', attempt: 1 });
 
     await waitFor(() => expect(sockets.length).toBe(2));
     expect(sockets[1]!.url).toBe('wss://agents.assemblyai.com/v1/ws?token=tok-2');
@@ -207,7 +212,7 @@ describe('connectAai', () => {
     await waitFor(() => expect(sockets[1]!.sent.length).toBe(1));
     expect(JSON.parse(sockets[1]!.sent[0]!)).toEqual({ type: 'session.resume', session_id: 'sess-1' });
 
-    await waitFor(() => expect(received).toContainEqual({ type: 'link', state: 'restored' }));
+    await waitFor(() => expect(received).toContainEqual({ type: 'link', state: 'restored', attempt: 1 }));
   });
 
   it('does not attempt a resume on a close the caller itself requested', async () => {
@@ -222,6 +227,84 @@ describe('connectAai', () => {
 
     await new Promise((r) => setTimeout(r, 20));
     expect(sockets.length).toBe(1);
-    expect(received).not.toContainEqual({ type: 'link', state: 'lost' });
+    expect(received).not.toContainEqual({ type: 'link', state: 'lost', attempt: 1 });
+  });
+
+  it('maps session.ended and sends session.end verbatim on close()', async () => {
+    const { deps, sockets } = makeDeps();
+    const aai = await connectAndReady(deps, sockets, 'sess-1');
+
+    const received: AaiEvent[] = [];
+    aai.on((evt) => received.push(evt));
+
+    sockets[0]!.triggerMessage({ type: 'session.ended' });
+    expect(received).toContainEqual({ type: 'session.ended' });
+
+    const before = sockets[0]!.sent.length;
+    aai.close();
+    expect(JSON.parse(sockets[0]!.sent[before]!)).toEqual({ type: 'session.end' });
+  });
+
+  it('rejects if the socket never opens within the open timeout', async () => {
+    const { deps, sockets } = makeDeps();
+    const fastDeps: AaiConnectDeps = { ...deps, openTimeoutMs: 20 };
+
+    await expect(connectAai(cfg(), fastDeps)).rejects.toThrow(/timed out waiting for open/);
+    await waitFor(() => expect(sockets.length).toBe(1)); // it did try to open one socket
+  });
+
+  it('caps resume attempts at 3 for the life of the call, then gives up with session.ended and mints no further tokens', async () => {
+    const { deps, sockets, fetchImpl } = makeDeps();
+    const aai = await connectAndReady(deps, sockets, 'sess-1');
+
+    const received: AaiEvent[] = [];
+    aai.on((evt) => received.push(evt));
+
+    // attempt 1: succeeds
+    sockets[0]!.triggerClose(1006);
+    await waitFor(() => expect(sockets.length).toBe(2));
+    sockets[1]!.triggerOpen();
+    await waitFor(() => expect(sockets[1]!.sent.length).toBe(1));
+    await waitFor(() => expect(received).toContainEqual({ type: 'link', state: 'restored', attempt: 1 }));
+
+    // attempt 2: succeeds
+    sockets[1]!.triggerClose(1006);
+    await waitFor(() => expect(sockets.length).toBe(3));
+    sockets[2]!.triggerOpen();
+    await waitFor(() => expect(sockets[2]!.sent.length).toBe(1));
+    await waitFor(() => expect(received).toContainEqual({ type: 'link', state: 'restored', attempt: 2 }));
+
+    // attempt 3: succeeds -- this is the last one the cap allows
+    sockets[2]!.triggerClose(1006);
+    await waitFor(() => expect(sockets.length).toBe(4));
+    sockets[3]!.triggerOpen();
+    await waitFor(() => expect(sockets[3]!.sent.length).toBe(1));
+    await waitFor(() => expect(received).toContainEqual({ type: 'link', state: 'restored', attempt: 3 }));
+
+    const mintCallsSoFar = fetchImpl.mock.calls.length;
+
+    // attempt 4: the cap is exhausted -- must give up without minting again or opening a 5th socket
+    sockets[3]!.triggerClose(1006);
+    await waitFor(() => expect(received).toContainEqual({ type: 'session.ended' }));
+    expect(fetchImpl.mock.calls.length).toBe(mintCallsSoFar);
+    expect(sockets.length).toBe(4);
+  });
+
+  it('gives up without minting a new token once the 30s resumable window has passed', async () => {
+    const { deps, sockets, fetchImpl } = makeDeps();
+    let t = 0;
+    const controlledDeps: AaiConnectDeps = { ...deps, now: () => t };
+    const aai = await connectAndReady(controlledDeps, sockets, 'sess-1');
+
+    const received: AaiEvent[] = [];
+    aai.on((evt) => received.push(evt));
+    const mintCallsBeforeDrop = fetchImpl.mock.calls.length;
+
+    sockets[0]!.triggerClose(1006); // t is 0 at the moment of the drop
+    t = 31_000; // advance the clock past the 30s window while the (no-op) backoff is "pending"
+
+    await waitFor(() => expect(received).toContainEqual({ type: 'session.ended' }));
+    expect(fetchImpl.mock.calls.length).toBe(mintCallsBeforeDrop); // no resume mint was ever attempted
+    expect(sockets.length).toBe(1); // no second socket was ever opened
   });
 });

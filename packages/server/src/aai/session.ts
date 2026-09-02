@@ -3,11 +3,15 @@
 // wss://agents.assemblyai.com/v1/ws, sends the initial session.update, waits for
 // session.ready, then maps every server event onto the same `AaiSocket` interface
 // `call/session.ts` already knows from `FakeAaiSocket` (S2) -- CallSession never knows
-// which one it is holding. Also owns resume-on-drop: an unexpected close within 30s
-// re-mints a token, opens a new socket, and sends session.resume -- surfaced to the call
-// layer as a `link` AaiEvent so the screen can show "voice link lost, security state
-// preserved" (nothing here re-derives a verdict; that stays the engine's job, replayed from
-// the logs call/session.ts already owns).
+// which one it is holding. Also owns resume-on-drop, BOUNDED: an unexpected close re-mints
+// a token, opens a new socket, and sends session.resume -- up to MAX_RESUME_ATTEMPTS times
+// total for the life of the call (not reset between drops), each attempt backed off and
+// each still constrained to AssemblyAI's 30s resumable window measured from that drop.
+// Exhausting attempts, missing the window, or having no session_id to resume against all
+// give up rather than retry forever, surfaced to the call layer as `link` AaiEvents
+// (lost/restored, each carrying which attempt) so the screen can show "voice link lost,
+// security state preserved" (nothing here re-derives a verdict; that stays the engine's
+// job, replayed from the logs call/session.ts already owns).
 //
 // VERIFY-AT-BUILD facts this file codes to (docs/aai-verify-2026-09-02.md, quoted there):
 //  Q1 tools/system_prompt/keyterms/turn_detection are mutable mid-call; voice, output
@@ -19,13 +23,16 @@
 //     token, within 30s of the drop.
 //  Q5 llm selection (when configured) is `llm: [{base_url, model, api_key}]` -- built in
 //     config.ts, not here.
+import { mintToken } from '../token.js';
 import type { AaiEvent, AaiSocket } from './types.js';
 import { buildInitialSessionUpdate, type AaiSessionConfig } from './config.js';
 
-const TOKEN_URL = 'https://agents.assemblyai.com/v1/token';
 const WS_URL = 'wss://agents.assemblyai.com/v1/ws';
 const RESUME_WINDOW_MS = 30_000;
 const READY_TIMEOUT_MS = 15_000;
+const OPEN_TIMEOUT_MS = 8_000;
+const MAX_RESUME_ATTEMPTS = 3;
+const RESUME_BACKOFF_MS = [500, 1_500, 3_000];
 
 /** The slice of `ws`'s WebSocket (and the browser WebSocket API's EventEmitter-style `.on`)
  *  this adapter needs -- kept minimal and dependency-shaped so tests can supply a scripted
@@ -40,28 +47,34 @@ export interface AaiConnectDeps {
   fetchImpl: typeof fetch;
   WebSocketImpl: new (url: string) => WsLike;
   now: () => number;
+  /** Defaults to a real setTimeout-based delay. Tests inject a fast/no-op version so the
+   *  bounded resume backoff (500ms/1500ms/3000ms) doesn't slow the suite down. */
+  sleep?: (ms: number) => Promise<void>;
+  /** Defaults to OPEN_TIMEOUT_MS. Tests shrink this to exercise a never-opening socket
+   *  without a slow real wait. */
+  openTimeoutMs?: number;
 }
 
-async function mintForConnect(cfg: AaiSessionConfig, fetchImpl: typeof fetch): Promise<{ token: string }> {
-  const url = new URL(TOKEN_URL);
-  url.searchParams.set('expires_in_seconds', '60');
-  url.searchParams.set('max_session_duration_seconds', String(cfg.session_cap_seconds));
-
-  const res = await fetchImpl(url, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${cfg.assemblyai_api_key}` },
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    (t as unknown as { unref?: () => void }).unref?.();
   });
-  if (!res.ok) throw new Error(`aai token mint failed: ${res.status}`);
-
-  const body = (await res.json()) as { token: string };
-  return { token: body.token };
 }
 
-function openSocket(WebSocketImpl: new (url: string) => WsLike, token: string): Promise<WsLike> {
+function openSocket(WebSocketImpl: new (url: string) => WsLike, token: string, timeoutMs: number): Promise<WsLike> {
   const ws = new WebSocketImpl(`${WS_URL}?token=${token}`);
   return new Promise<WsLike>((resolve, reject) => {
-    ws.on('open', () => resolve(ws));
-    ws.on('error', (err) => reject(err instanceof Error ? err : new Error(String(err))));
+    const timer = setTimeout(() => reject(new Error('openSocket: timed out waiting for open')), timeoutMs);
+    (timer as unknown as { unref?: () => void }).unref?.();
+    ws.on('open', () => {
+      clearTimeout(timer);
+      resolve(ws);
+    });
+    ws.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err instanceof Error ? err : new Error(String(err)));
+    });
   });
 }
 
@@ -126,6 +139,9 @@ class RealAaiSocket implements AaiSocket {
   /** Set true only by our own close() -- distinguishes "we hung up" from "the transport
    *  dropped", so ending a call normally never triggers a resume attempt. */
   private expectClose = false;
+  /** Total resume attempts made over the LIFE of this call (not reset between drops) --
+   *  the bound that stops a flaky connection from retrying forever. */
+  private resumeAttempts = 0;
   /** Server messages whose type this adapter does not model -- never used for control
    *  flow, kept only so a caller (e.g. the live smoke script) can report it if useful. */
   unknownEventCount = 0;
@@ -157,7 +173,7 @@ class RealAaiSocket implements AaiSocket {
     });
     ws.on('close', () => {
       if (this.closed || this.expectClose) return;
-      void this.attemptResume();
+      void this.handleUnexpectedClose();
     });
     ws.on('error', () => {
       // A transport error surfaces as a close on real sockets; resume is driven from
@@ -169,30 +185,57 @@ class RealAaiSocket implements AaiSocket {
     for (const h of this.handlers) h(evt);
   }
 
-  private async attemptResume(): Promise<void> {
+  /** Bounded resume: up to MAX_RESUME_ATTEMPTS total for the call's life (not per drop --
+   *  a flapping connection cannot retry forever), each attempt backed off, each still
+   *  constrained to AssemblyAI's 30s resumable window measured from THIS drop. Gives up
+   *  (emits `session.ended`) once attempts are exhausted, the window has passed, or there
+   *  is no session_id to resume against -- never loops indefinitely. */
+  private async handleUnexpectedClose(): Promise<void> {
     const droppedAt = this.deps.now();
-    this.emit({ type: 'link', state: 'lost' });
+    const sleep = this.deps.sleep ?? defaultSleep;
+    const openTimeoutMs = this.deps.openTimeoutMs ?? OPEN_TIMEOUT_MS;
 
-    const sessionId = this.sessionId;
-    if (!sessionId) return; // never got a session_id from this connection -- nothing to resume
-
-    try {
-      const { token } = await mintForConnect(this.cfg, this.deps.fetchImpl);
+    while (this.resumeAttempts < MAX_RESUME_ATTEMPTS) {
+      this.resumeAttempts += 1;
+      const attempt = this.resumeAttempts;
+      this.emit({ type: 'link', state: 'lost', attempt });
       if (this.closed) return;
-      if (this.deps.now() - droppedAt > RESUME_WINDOW_MS) return; // past the resumable window
 
-      const ws = await openSocket(this.deps.WebSocketImpl, token);
-      if (this.closed) {
-        ws.close();
-        return;
+      const sessionId = this.sessionId;
+      if (!sessionId) break; // never got a session_id from this connection -- nothing to resume against
+      if (this.deps.now() - droppedAt > RESUME_WINDOW_MS) break; // past the resumable window already
+
+      await sleep(RESUME_BACKOFF_MS[attempt - 1] ?? RESUME_BACKOFF_MS[RESUME_BACKOFF_MS.length - 1]!);
+      if (this.closed) return;
+      if (this.deps.now() - droppedAt > RESUME_WINDOW_MS) break; // window passed during backoff
+
+      try {
+        const { token } = await mintToken(this.cfg, this.deps.fetchImpl);
+        if (this.closed) return;
+        if (this.deps.now() - droppedAt > RESUME_WINDOW_MS) break; // window passed during mint
+
+        const ws = await openSocket(this.deps.WebSocketImpl, token, openTimeoutMs);
+        if (this.closed) {
+          ws.close();
+          return;
+        }
+        ws.send(JSON.stringify({ type: 'session.resume', session_id: sessionId }));
+        this.ws = ws;
+        this.wire(ws);
+        this.emit({ type: 'link', state: 'restored', attempt });
+        return; // success -- stop retrying
+      } catch {
+        // this attempt failed -- the loop continues, still bounded by resumeAttempts/MAX
       }
-      ws.send(JSON.stringify({ type: 'session.resume', session_id: sessionId }));
-      this.ws = ws;
-      this.wire(ws);
-      this.emit({ type: 'link', state: 'restored' });
-    } catch {
-      // Resume failed -- the call layer already has 'lost' and nothing here re-derives a
-      // verdict, so the security state itself is unaffected either way.
+    }
+
+    // Attempts exhausted, the window passed, or nothing to resume against: give up rather
+    // than retry forever. The last `link:'lost'` event already emitted (or the absence of
+    // one, on a 4th+ drop past the cap) plus this session.ended are the record of what
+    // happened; nothing here re-derives a verdict -- that stays call/session.ts + the engine.
+    if (!this.closed) {
+      this.closed = true;
+      this.emit({ type: 'session.ended' });
     }
   }
 
@@ -226,8 +269,8 @@ class RealAaiSocket implements AaiSocket {
  *  session.ready arrives (or rejects on session.error / a connect failure / timeout). The
  *  returned AaiSocket owns resume-on-drop for the rest of the call's life. */
 export async function connectAai(cfg: AaiSessionConfig, deps: AaiConnectDeps): Promise<AaiSocket> {
-  const { token } = await mintForConnect(cfg, deps.fetchImpl);
-  const ws = await openSocket(deps.WebSocketImpl, token);
+  const { token } = await mintToken(cfg, deps.fetchImpl);
+  const ws = await openSocket(deps.WebSocketImpl, token, deps.openTimeoutMs ?? OPEN_TIMEOUT_MS);
 
   ws.send(JSON.stringify(buildInitialSessionUpdate(cfg)));
 
