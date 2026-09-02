@@ -45,6 +45,15 @@
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/usage-ledger.sh\""
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/commit-orphan-guard.sh\""
+          }
+        ]
       }
     ],
     "Stop": [
@@ -69,11 +78,69 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-gate.sh\"",
+            "timeout": 300
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/merge-ci-guard.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Agent|Task|Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/review-model-guard.sh\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/agent-model-guard.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Artifact|mcp__claude_ai_Gmail__send_message|mcp__claude_ai_Gmail__reply|mcp__claude_ai_Gmail__forward|mcp__claude_ai_Gmail__create_draft|mcp__claude_ai_Gmail__update_draft|mcp__claude_ai_Buffer__create_post|mcp__claude_ai_Buffer__edit_post|mcp__claude_ai_Buffer__create_idea|mcp__claude_ai_Buffer__execute_mutation|mcp__claude_ai_Google_Drive__share_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/external-comms-guard.sh\""
+          }
+        ]
+      },
+      {
         "matcher": "*",
         "hooks": [
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/autopilot-guard.sh\""
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-compact-checkpoint.sh\"",
+            "statusMessage": "Recording pre-compaction checkpoint..."
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-compact-context.sh\"",
+            "statusMessage": "Injecting post-compaction re-grounding..."
           }
         ]
       }
