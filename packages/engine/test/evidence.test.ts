@@ -154,7 +154,7 @@ describe('evidenceFromTools', () => {
     const sso = ev.find((e) => e.id === 'ev-sso')!;
     expect(sso.status).toBe('PENDING');
     expect(sso.facts.stale).toBe(true);
-    expect(sso.detail).toContain('stale');
+    expect(sso.detail).toContain('Stale');
     expect(sso.request_version).toBe(2); // the card carries the CURRENT version being evaluated
   });
 
@@ -186,7 +186,7 @@ describe('evidenceFromTools', () => {
     });
     const ctx = ev.find((e) => e.id === 'ev-context')!;
     expect(ctx.status).toBe('FAIL');
-    expect(ctx.detail).toContain('no scheduled payment matches');
+    expect(ctx.detail).toContain('No scheduled payment matches');
     expect(ctx.facts.amendment_only).toBeUndefined();
   });
 
@@ -356,7 +356,7 @@ describe('evidenceFromTools edge cases (fix round 1)', () => {
     expect(sso.detail).not.toContain('undefined');
   });
 
-  it('a missing/malformed oob response is labeled "no usable response" and still FAILs (not "declined")', () => {
+  it('a missing/malformed oob response is labeled "No usable response." and still FAILs (not "Declined.")', () => {
     const tools: ToolLogEntry[] = [
       { id: 't1', name: 'verify_out_of_band', t_ms: 1000, args: { identity_id: 'robert-miller' }, result: { devices: 2, request_version: 1 } },
     ];
@@ -368,7 +368,7 @@ describe('evidenceFromTools edge cases (fix round 1)', () => {
     });
     const oob = ev.find((e) => e.id === 'ev-oob')!;
     expect(oob.status).toBe('FAIL');
-    expect(oob.detail).toBe('no usable response');
+    expect(oob.detail).toBe('No usable response.');
     expect(oob.facts.response).toBeNull();
   });
 });

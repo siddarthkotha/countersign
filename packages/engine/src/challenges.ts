@@ -144,6 +144,7 @@ function selectSeedFact(
     field: seedFieldForEntry(entry.id),
     ask: entry.ask,
     expect: { accept_tokens: entry.accept_tokens },
+    fact_id: entry.id,
   };
 }
 
@@ -268,15 +269,97 @@ function gradeLiveCommitment(field: ClaimField, claim: Claim | undefined, rawTex
   return normText.includes(committedNorm) ? 'PASS' : 'AMBIGUOUS';
 }
 
-function gradeTrapFact(trueClaim: Claim | undefined, rawText: string, seed: SeedConfig): ChallengeResult {
-  // Word-boundary lexicon matching (shared with ledger.ts, src/normalize.ts) — a naive
-  // substring test let "no" fire inside "know" and "right" fire inside "alright"/
-  // "copyright"; hasLexiconHit normalizes both sides and matches whole words/phrases only.
-  const negate = hasLexiconHit(rawText, seed.negate_lexicon);
+function escapeRegExpLocal(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Removes every whole-word/phrase occurrence of any `lexicon` entry from `normText` (both
+ *  already run through `normalizeText`), longest phrases first so a multi-word match like
+ *  "that's not" is consumed whole rather than leaving its words to be stripped twice.
+ *  Returns the remaining text (collapsed whitespace) and whether anything was removed. */
+function stripLexicon(normText: string, lexicon: string[]): { remainder: string; hit: boolean } {
+  let working = normText;
+  let hit = false;
+  const phrases = [...new Set(lexicon.map((p) => normalizeText(p)).filter((p) => p.length > 0))].sort(
+    (a, b) => b.split(' ').length - a.split(' ').length,
+  );
+  for (const phrase of phrases) {
+    const pattern = new RegExp(`\\b${escapeRegExpLocal(phrase).replace(/\s+/g, '\\s+')}\\b`, 'g');
+    if (pattern.test(working)) {
+      hit = true;
+      working = working.replace(pattern, ' ');
+    }
+  }
+  return { remainder: working.replace(/\s+/g, ' ').trim(), hit };
+}
+
+const NEGATION_FILLER_TOKENS = new Set(['thats', 'its', 'wrong', 'incorrect']);
+
+/** Rule (c): the reply is ONLY a negation. After stripping every negate-lexicon phrase,
+ *  nothing meaningful is left — either nothing at all ("no"), or a single leftover token
+ *  that reads as the grammatical object of the negation rather than an independent
+ *  affirmation (e.g. "that's not right" strips "that's not", leaving "right" — the thing
+ *  being negated, not a confirmation). Two or more leftover words (e.g. "not sure but
+ *  sure, go ahead") means there is unrelated content beyond the bare negation, so this
+ *  rule does not fire. */
+function isPureNegation(normText: string, seed: SeedConfig): boolean {
+  const { remainder, hit } = stripLexicon(normText, seed.negate_lexicon);
+  if (!hit) return false;
+  if (remainder.length === 0) return true;
+  const remainderTokens = remainder.split(' ').filter(Boolean);
+  if (remainderTokens.length > 1) return false;
+  const leftover = remainderTokens[0]!;
+  if (NEGATION_FILLER_TOKENS.has(leftover)) return true;
+  return seed.affirm_lexicon.some((phrase) => normalizeText(phrase) === leftover);
+}
+
+/** Rule (b): a negate-lexicon phrase occurs within 4 words (before or after) of the trap
+ *  value's normalized form — the caller rejected the planted value directly, without
+ *  necessarily restating the true one (e.g. "no, not Calder & Finch, ask counsel"). */
+function negateNearTrapValue(normText: string, trapValueNorm: string, seed: SeedConfig): boolean {
+  if (trapValueNorm.length === 0) return false;
+  const tokens = normText.split(' ').filter(Boolean);
+  const trapTokens = trapValueNorm.split(' ').filter(Boolean);
+  if (trapTokens.length === 0) return false;
+  const trapStarts: number[] = [];
+  for (let i = 0; i + trapTokens.length <= tokens.length; i++) {
+    if (trapTokens.every((t, j) => tokens[i + j] === t)) trapStarts.push(i);
+  }
+  if (trapStarts.length === 0) return false;
+
+  const negatePhrases = [...new Set(seed.negate_lexicon.map((p) => normalizeText(p)).filter((p) => p.length > 0))];
+  for (const phrase of negatePhrases) {
+    const pTokens = phrase.split(' ').filter(Boolean);
+    for (let i = 0; i + pTokens.length <= tokens.length; i++) {
+      if (!pTokens.every((t, j) => tokens[i + j] === t)) continue;
+      const negStart = i;
+      const negEnd = i + pTokens.length - 1;
+      for (const trapStart of trapStarts) {
+        const trapEnd = trapStart + trapTokens.length - 1;
+        const gap = negStart > trapEnd ? negStart - trapEnd - 1 : trapStart > negEnd ? trapStart - negEnd - 1 : 0;
+        if (gap <= 4) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function gradeTrapFact(trueClaim: Claim | undefined, rawText: string, seed: SeedConfig, trapValue: string): ChallengeResult {
   const normText = normalizeText(rawText);
   const trueVal = trueClaim ? normalizeText(String(trueClaim.value)) : null;
   const containsTrue = trueVal !== null && trueVal.length > 0 && normText.includes(trueVal);
-  if (negate || containsTrue) return 'PASS';
+  const trapValueNorm = normalizeText(trapValue);
+
+  // (a) the reply contains the TRUE claim's normalized value.
+  if (containsTrue) return 'PASS';
+  // (b) a negate hit occurs within 4 words of the trap value's normalized form.
+  if (negateNearTrapValue(normText, trapValueNorm, seed)) return 'PASS';
+  // (c) the reply is only a negation (word-boundary lexicon matching, not a naive
+  // substring test — a naive test let "no" fire inside "know" and "right" fire inside
+  // "alright"/"copyright"; stripLexicon/hasLexiconHit normalize both sides and match whole
+  // words/phrases only).
+  if (isPureNegation(normText, seed)) return 'PASS';
+
   if (hasLexiconHit(rawText, seed.affirm_lexicon)) return 'FAIL';
   return 'AMBIGUOUS';
 }
@@ -332,7 +415,7 @@ export function gradeChallenges(
     } else {
       const trueClaimId = expect.true_claim_id;
       const trueClaim = claims.find((c) => c.id === trueClaimId);
-      result = gradeTrapFact(trueClaim, rawText, seed);
+      result = gradeTrapFact(trueClaim, rawText, seed, expect.trap_value);
     }
 
     out[spec.challenge_id] = { result, quote, eligible_utterance_ids: eligibleIds };

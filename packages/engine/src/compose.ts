@@ -13,6 +13,7 @@ import type {
   ChallengeSpec,
   Evidence,
   EvidenceStatus,
+  KnowledgeFact,
   SeedConfig,
   ToolLogEntry,
   Utterance,
@@ -22,10 +23,6 @@ export const CRITICAL_FIELDS: ClaimField[] = ['amount_usd', 'account_last4', 'be
 
 function money(n: number): string {
   return `$${n.toLocaleString('en-US')}`;
-}
-
-function displayValue(field: ClaimField, value: string | number): string {
-  return field === 'amount_usd' ? money(Number(value)) : String(value);
 }
 
 // ---------- issued-challenge reconstruction (composition step 3) ----------
@@ -97,11 +94,92 @@ function statusForResult(result: ChallengeResult): EvidenceStatus {
   return 'FLAG'; // AMBIGUOUS, REFUSED, UNANSWERED
 }
 
+// ---------- judge-legible knowledge-card detail (review finding, final wave) ----------
+
+/** Strips a leading "Ask " (any case) off a seed KnowledgeFact's `ask` phrasing goal, e.g.
+ *  "Ask which law firm is our counsel of record on the Hartwell deal." becomes "which law
+ *  firm is our counsel of record on the Hartwell deal." -- used to describe what was asked
+ *  without echoing the LLM-facing imperative verb. */
+function stripAskPrefix(ask: string): string {
+  return ask.replace(/^ask\s+/i, '').trim();
+}
+
+function trimQuote(text: string, max = 80): string {
+  return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text;
+}
+
+/** Resolves the specific seed.knowledge entry a SEED_FACT spec was drawn from: prefers the
+ *  spec's own `fact_id` (set by `selectSeedFact`); falls back to matching `accept_tokens`
+ *  back against every seed.knowledge entry (for specs reconstructed before `fact_id`
+ *  existed, or any other path that only carries `expect`). */
+function resolveSeedFact(spec: ChallengeSpec, seed: SeedConfig): KnowledgeFact | undefined {
+  if (spec.fact_id) {
+    const byId = seed.knowledge.find((k) => k.id === spec.fact_id);
+    if (byId) return byId;
+  }
+  if ('accept_tokens' in spec.expect) {
+    const tokens = spec.expect.accept_tokens;
+    return seed.knowledge.find((k) => k.accept_tokens.length === tokens.length && k.accept_tokens.every((t, i) => t === tokens[i]));
+  }
+  return undefined;
+}
+
+const AMBIGUOUS_ANSWER_LABEL: Record<ChallengeResult, string> = {
+  PASS: 'PASS',
+  FAIL: 'FAIL',
+  AMBIGUOUS: 'no usable answer',
+  REFUSED: 'refused',
+  UNANSWERED: 'unanswered',
+};
+
+function seedFactDetail(spec: ChallengeSpec, result: ChallengeResult, quoteText: string | undefined, seed: SeedConfig): string {
+  const entry = resolveSeedFact(spec, seed);
+  // The seed KnowledgeFact's own `ask` (stripped of its leading "Ask ") is the most specific
+  // source; a bare `spec.ask` covers the case where the entry itself couldn't be resolved;
+  // `entry.topic` is the last-resort fallback if even that is empty (e.g. a hand-built spec).
+  const rawAsk = entry?.ask || spec.ask;
+  const askedText = rawAsk.length > 0 ? stripAskPrefix(rawAsk) : (entry?.topic ?? spec.field.replace('_', ' '));
+  const answered = quoteText ? `caller answered "${trimQuote(quoteText)}"` : 'caller gave no answer';
+  return `Asked: ${askedText}; ${answered}: ${AMBIGUOUS_ANSWER_LABEL[result]}.`;
+}
+
+function outcomeWord(result: ChallengeResult, matchWord: string, mismatchWord: string): string {
+  if (result === 'PASS') return matchWord;
+  if (result === 'FAIL') return mismatchWord;
+  if (result === 'REFUSED') return 'was refused';
+  if (result === 'UNANSWERED') return 'was never given';
+  return 'was ambiguous';
+}
+
+function liveCommitmentDetail(spec: ChallengeSpec, result: ChallengeResult): string {
+  const fieldLabel = spec.field.replace('_', ' ');
+  return `Asked the caller to restate their ${fieldLabel}; answer ${outcomeWord(result, 'matched', 'did not match')}.`;
+}
+
+function trapFactDetail(spec: ChallengeSpec, result: ChallengeResult): string {
+  const fieldLabel = spec.field.replace('_', ' ');
+  const outcome = result === 'PASS' ? 'corrected it' : result === 'FAIL' ? 'accepted the wrong value' : 'gave no clear answer';
+  return `Consistency probe (deliberate misstatement of ${fieldLabel}): caller ${outcome}.`;
+}
+
+function relationalDetail(spec: ChallengeSpec, result: ChallengeResult): string {
+  const fieldLabel = spec.field.replace('_', ' ');
+  return `Relational check (${fieldLabel}): answer ${outcomeWord(result, 'matched', 'did not match')}.`;
+}
+
+function knowledgeCardDetail(spec: ChallengeSpec, result: ChallengeResult, quoteText: string | undefined, seed: SeedConfig): string {
+  if (spec.kind === 'SEED_FACT') return seedFactDetail(spec, result, quoteText, seed);
+  if (spec.kind === 'LIVE_COMMITMENT') return liveCommitmentDetail(spec, result);
+  if (spec.kind === 'TRAP_FACT') return trapFactDetail(spec, result);
+  return relationalDetail(spec, result);
+}
+
 export function buildKnowledgeEvidence(
   issued: ChallengeSpec[],
   results: Record<string, { result: ChallengeResult; quote?: { utterance_id: string; text: string }; eligible_utterance_ids: string[] }>,
   actions: AgentAction[],
   request_version: number,
+  seed: SeedConfig,
 ): Evidence[] {
   const out: Evidence[] = [];
   for (const spec of issued) {
@@ -111,6 +189,7 @@ export function buildKnowledgeEvidence(
     const graded = drifted ? { result: 'UNANSWERED' as ChallengeResult, eligible_utterance_ids: [] as string[] } : results[spec.challenge_id];
     if (!graded) continue;
     const issuedAction = actions.find((a) => a.kind === 'challenge_issued' && a.challenge_id === spec.challenge_id);
+    const seedFactEntry = spec.kind === 'SEED_FACT' && !drifted ? resolveSeedFact(spec, seed) : undefined;
     out.push({
       id: `ev-knowledge-${spec.challenge_id}`,
       kind: 'knowledge_check_result',
@@ -119,8 +198,12 @@ export function buildKnowledgeEvidence(
       status: statusForResult(graded.result),
       detail: drifted
         ? 'The issued challenge could not be reconstructed from the ledger (log drift); treated as unanswered.'
-        : `${spec.kind} check on ${spec.field}: ${graded.result.toLowerCase()}.`,
-      facts: { kind: drifted ? 'DRIFT' : spec.kind, result: graded.result, field: spec.field },
+        : knowledgeCardDetail(spec, graded.result, graded.quote?.text, seed),
+      facts: {
+        kind: drifted ? 'DRIFT' : spec.kind,
+        result: graded.result,
+        field: seedFactEntry ? seedFactEntry.id : spec.field,
+      },
       quotes: graded.quote ? [graded.quote] : [],
       source: 'transcript',
       provenance: 'POLICY_DERIVED',
@@ -148,8 +231,8 @@ export function buildConsistencyEvidence(claims: Claim[], request_version: numbe
       label: `Consistency: ${claim.field.replace('_', ' ')}`,
       status: 'FAIL',
       detail: superseded
-        ? `Caller said ${displayValue(claim.field, superseded.value)}, then said ${displayValue(claim.field, claim.value)}, with no correction offered.`
-        : `Caller contradicted an earlier ${claim.field.replace('_', ' ')} claim with no correction offered.`,
+        ? `Caller said "${superseded.quote.text}", then said "${claim.quote.text}", with no correction offered.`
+        : `Caller contradicted an earlier ${claim.field.replace('_', ' ')} claim with no correction offered: "${claim.quote.text}".`,
       facts: { field: claim.field, first: superseded ? superseded.value : null, later: claim.value },
       quotes: superseded ? [superseded.quote, claim.quote] : [claim.quote],
       source: 'transcript',
@@ -195,17 +278,26 @@ export function buildExposureEvidence(claims: Claim[], seed: SeedConfig, request
   const exposure_usd = distinct.reduce((a, b) => a + b, 0);
   const current = currentClaim(claims, 'amount_usd');
   const current_usd = current ? Number(current.value) : 0;
-  const over = exposure_usd > seed.thresholds.high_value_usd && current_usd < seed.thresholds.high_value_usd;
+  const threshold = seed.thresholds.high_value_usd;
+  const over = exposure_usd > threshold && current_usd < threshold;
+  const currentAloneOverThreshold = current_usd >= threshold;
   const last = amountClaims[amountClaims.length - 1]!;
+  // PASS covers two distinct shapes, and conflating them into one "within the threshold"
+  // sentence was misleading (review finding, final wave): when the CURRENT request is
+  // itself at/above the high-value threshold, second approval is required regardless of
+  // the anti-structuring check -- the card must say so, not imply everything's fine.
+  const detail = over
+    ? `Distinct amounts stated this call total ${money(exposure_usd)}, above the ${money(threshold)} threshold, while the current request alone reads under it.`
+    : currentAloneOverThreshold
+      ? `Current request ${money(current_usd)} is itself above the ${money(threshold)} high-value threshold; second approval required regardless.`
+      : `Distinct amounts stated total ${money(exposure_usd)}, within the ${money(threshold)} threshold.`;
   return {
     id: 'ev-exposure',
     kind: 'exposure_check_result',
     t_ms: last.t_ms,
     label: 'Cumulative exposure',
     status: over ? 'FAIL' : 'PASS',
-    detail: over
-      ? `Distinct amounts stated this call total ${money(exposure_usd)}, above the ${money(seed.thresholds.high_value_usd)} threshold, while the current request alone reads under it.`
-      : `Distinct amounts stated this call total ${money(exposure_usd)}, within the ${money(seed.thresholds.high_value_usd)} threshold.`,
+    detail,
     facts: { exposure_usd, current_usd },
     quotes: amountClaims.map((c) => c.quote),
     source: 'transcript',

@@ -101,6 +101,7 @@ export interface ChallengeSpec {
     | { accept_tokens: string[] }
     | { commitment_claim_id: string }
     | { trap_value: string; true_claim_id: string };
+  fact_id?: string; // SEED_FACT only: the seed.knowledge entry id (e.g. "counsel_of_record"), for judge-legible evidence detail
 }
 
 export type ChallengeResult = 'PASS' | 'FAIL' | 'AMBIGUOUS' | 'REFUSED' | 'UNANSWERED';

@@ -4,7 +4,7 @@
 // card's status flipped via the override map; nothing here mutates the input or reads
 // external state.
 import { evaluate } from './evaluate';
-import type { EngineInput, EvidenceStatus, Verdict } from './types';
+import type { EngineInput, EngineState, EvidenceStatus, Verdict } from './types';
 
 function flipped(status: EvidenceStatus): EvidenceStatus | null {
   if (status === 'FAIL') return 'PASS';
@@ -13,16 +13,16 @@ function flipped(status: EvidenceStatus): EvidenceStatus | null {
   return null; // PENDING/INFO cards aren't meaningful single-card flips
 }
 
-export function counterfactuals(input: EngineInput): { flip: string; verdict: Verdict }[] {
+export function counterfactuals(input: EngineInput): { flip: string; verdict: Verdict; state: EngineState }[] {
   const base = evaluate(input);
-  const out: { flip: string; verdict: Verdict }[] = [];
+  const out: { flip: string; verdict: Verdict; state: EngineState }[] = [];
 
   for (const e of base.evidence) {
     const to = flipped(e.status);
     if (to === null) continue;
     const result = evaluate(input, { [e.id]: to });
     if (result.verdict !== base.verdict) {
-      out.push({ flip: `${e.label}: ${e.status} -> ${to}`, verdict: result.verdict });
+      out.push({ flip: `${e.label}: ${e.status} -> ${to}`, verdict: result.verdict, state: result.state });
     }
   }
 

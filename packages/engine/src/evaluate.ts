@@ -44,7 +44,7 @@ export function evaluate(input: EngineInput, overrides?: Record<string, Evidence
   // 3. Challenges: reconstruct what was issued, grade it, build knowledge_check_result cards.
   const issued = reconstructIssued(claims, actions, seed, call.session_id, conversation);
   const results = gradeChallenges(conversation, actions, issued, seed, claims);
-  const knowledgeEv = buildKnowledgeEvidence(issued, results, actions, request_version);
+  const knowledgeEv = buildKnowledgeEvidence(issued, results, actions, request_version, seed);
 
   // 4. Tool evidence.
   const toolEv = evidenceFromTools(tools, call, seed, {

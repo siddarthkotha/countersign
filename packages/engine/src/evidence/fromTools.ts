@@ -79,7 +79,7 @@ function pendingCard(
       label,
       entry.t_ms,
       'PENDING',
-      `stale: obtained for request version ${resultVersion}`,
+      `Stale: obtained for request version ${resultVersion}.`,
       { stale: true },
       ctx,
     );
@@ -131,12 +131,12 @@ function oobEvidence(entry: ToolLogEntry, ctx: ToolEvidenceCtx): Evidence {
   const pass = response === 'confirmed';
   const detail =
     response === null
-      ? 'no usable response'
+      ? 'No usable response.'
       : pass
         ? `Out-of-band confirmed on ${devices} registered device(s).`
         : response === 'no_response'
-          ? `no response from ${devices} registered devices`
-          : 'declined';
+          ? `No response from ${devices} registered devices.`
+          : 'Declined.';
 
   return card(
     'ev-oob',
@@ -196,7 +196,7 @@ function contextEvidence(entry: ToolLogEntry, ctx: ToolEvidenceCtx): Evidence {
     'Payment context check',
     entry.t_ms,
     'FAIL',
-    `no scheduled payment matches ${amountLabel} to ${beneficiaryLabel}`,
+    `No scheduled payment matches ${amountLabel} to ${beneficiaryLabel}.`,
     facts,
     ctx,
   );

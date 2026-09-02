@@ -256,6 +256,36 @@ describe('gradeChallenges — TRAP_FACT', () => {
     const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
     expect(result['g3-1']?.result).toBe('FAIL');
   });
+
+  // Review finding (final wave): a naive "any negate hit anywhere" rule let a reply like
+  // "I'm not sure but sure, go ahead" PASS off the bare word "not" even though the rest of
+  // the sentence reads as going along with the trap value. Tightened to three explicit
+  // PASS rules (true value present; negate hit within 4 words of the trap value; or the
+  // reply is nothing but a negation) — anything else with an affirm hit is FAIL, anything
+  // else at all is AMBIGUOUS.
+  it('AMBIGUOUS (not PASS) for "I\'m not sure but sure, go ahead" — a bare negate word buried in an otherwise non-committal reply', () => {
+    const conversation = [utt('u1', 3000, "I'm not sure but sure, go ahead")];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
+    expect(result['g3-1']?.result).toBe('AMBIGUOUS');
+  });
+
+  it('PASS for "no" alone — rule (c): the reply is nothing but a negation', () => {
+    const conversation = [utt('u1', 3000, 'no')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
+    expect(result['g3-1']?.result).toBe('PASS');
+  });
+
+  it('PASS for "not Calder, it\'s Whitmore & Bass" — rule (a): contains the true value', () => {
+    const conversation = [utt('u1', 3000, "not Calder, it's Whitmore & Bass")];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
+    expect(result['g3-1']?.result).toBe('PASS');
+  });
+
+  it('PASS for "that\'s not right" — rule (c): negation consumes the leftover affirm-shaped word', () => {
+    const conversation = [utt('u1', 3000, "that's not right")];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
+    expect(result['g3-1']?.result).toBe('PASS');
+  });
 });
 
 describe('selectChallenge — RELATIONAL dedup', () => {

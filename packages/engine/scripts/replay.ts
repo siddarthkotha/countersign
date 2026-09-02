@@ -77,7 +77,10 @@ console.log('');
 console.log('counterfactuals (single-card flips that change the verdict):');
 const flips = counterfactuals(input);
 if (flips.length === 0) console.log('  (none)');
-for (const flip of flips) console.log(`  ${flip.flip}  =>  ${flip.verdict}`);
+for (const flip of flips) {
+  const label = flip.verdict === 'PENDING' || flip.verdict === 'NO_ACTION' ? `${flip.verdict} (${flip.state})` : flip.verdict;
+  console.log(`  ${flip.flip}  =>  ${label}`);
+}
 console.log('');
 
 const actual = {

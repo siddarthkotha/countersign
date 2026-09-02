@@ -49,9 +49,14 @@ const scenarioBConversation: Utterance[] = [
     speaker: 'caller',
     text: "I don't care about your process. Release the wire or you're fired!",
     t_ms: 48000,
+  },
+  {
+    id: 'a4',
+    speaker: 'agent',
+    text: "I can't accept authority as verification. One last check.",
+    t_ms: 50000,
     interrupted: true,
   },
-  { id: 'a4', speaker: 'agent', text: "I can't accept authority as verification. One last check.", t_ms: 50000 },
 ];
 
 // Reconstructed deterministically: at t=4000, the ledger holds only the identity + amount
@@ -151,6 +156,11 @@ describe('evaluate -- Scenario B (Miller fraud) end to end', () => {
     expect(out.invariants_ok).toBe(true);
   });
 
+  it('pressure card counts exactly one talk-over (the barge-in over a4)', () => {
+    const pressure = out.evidence.find((e) => e.id === 'ev-pressure')!;
+    expect(pressure.facts.talk_overs).toBe(1);
+  });
+
   it('determinism: the same input evaluated twice is deep-equal', () => {
     const again = evaluate({
       conversation: scenarioBConversation,
@@ -238,6 +248,14 @@ describe('evaluate -- counterfactuals', () => {
     const flips = counterfactuals(input);
     expect(flips.length).toBeGreaterThan(0);
     expect(flips.every((f) => f.verdict !== 'STAGE')).toBe(true);
+  });
+
+  it('every flip carries the resulting engine state alongside the verdict', () => {
+    const flips = counterfactuals(input);
+    const validStates = ['INTAKE', 'CLAIM', 'CHALLENGE', 'EVIDENCE', 'CONSISTENCY_CHECK', 'DECISION', 'ACTION', 'SEALED', 'OUT_OF_SCOPE'];
+    for (const flip of flips) {
+      expect(validStates).toContain(flip.state);
+    }
   });
 
   it('is pure: calling it twice on the same input gives the same flips', () => {
