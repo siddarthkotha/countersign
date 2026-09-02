@@ -15,19 +15,19 @@
     "typecheck": "tsc -p packages/engine --noEmit && tsc -p packages/web --noEmit && tsc -p packages/server --noEmit",
     "replay": "npm run replay --workspace @countersign/engine --",
     "dev:web": "vite --config packages/web/vite.config.ts packages/web",
+    "build:engine": "tsc -p packages/engine/tsconfig.build.json",
     "build:web": "vite build --config packages/web/vite.config.ts packages/web",
     "build:server": "tsc -p packages/server/tsconfig.build.json",
-    "build": "npm run build:web && npm run build:server",
+    "build": "npm run build:engine && npm run build:web && npm run build:server",
     "dev:server": "tsx packages/server/src/index.ts",
-    "start:server": "tsx packages/server/dist/index.js",
+    "start:server": "node packages/server/dist/index.js",
     "smoke:live": "tsx packages/server/scripts/smoke-live.ts --live",
     "preflight:deploy": "tsx scripts/preflight-deploy.ts"
   },
-  "dependencies": {
-    "tsx": "^4.19.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^22.20.1",
+    "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0"
   }

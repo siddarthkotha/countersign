@@ -36,15 +36,21 @@ execution duration on every plan checked and offer no always-on persistent serve
 which the WebSocket call path needs (`docs/vercel-ws-check-2026-09-02.md`). Render is the one
 of the three that can actually hold a persistent WebSocket-serving box, free or paid.
 
-**How it runs, and why:** `build:server` compiles `packages/server/src` to plain JavaScript
-(`packages/server/dist`), but `start:server` still runs that compiled output through `tsx`,
-not plain `node`. That's required, not a leftover: `@countersign/engine`'s own package.json
-points at a TypeScript source file whose internal imports omit file extensions (fine for the
-"bundler" resolution this repo's tooling uses, but Node's own module loader can't follow it —
-confirmed live, plain `node` throws `ERR_MODULE_NOT_FOUND`). `tsx` resolves it correctly, so
-it stays a small production dependency for now. **Week-2 cleanup item:** compile
-`packages/engine` the same way and point its `exports` at the compiled output — then
-`start:server` can drop back to plain `node` and `tsx` moves back to a dev-only dependency.
+**How it runs, and why:** `npm run build` is `build:engine && build:web && build:server`.
+`build:engine` compiles `packages/engine/src` to plain JavaScript with declaration files
+(`packages/engine/dist`, via `packages/engine/tsconfig.build.json`); `build:server` compiles
+`packages/server/src` the same way (`packages/server/dist`). `start:server` runs the compiled
+server through plain `node` — `@countersign/engine`'s package.json `exports` now points
+Node's own resolver (and any other consumer that doesn't request the `development` condition)
+at the compiled `dist/index.js`/`dist/index.d.ts`, so there's nothing left for `tsx` to
+resolve at runtime, and it moved back to a dev-only dependency (used only for `dev:server`,
+`replay`, `smoke:live`, and the preflight script below — never in the deployed process). The
+dev and test experience is unaffected: `vitest` and `vite` both apply the package's
+`development` export condition automatically, and `tsc` does too (via `customConditions:
+["development"]` added to `tsconfig.base.json`) — so tests, typecheck, and `dev:server` all
+still resolve `@countersign/engine` straight to its TypeScript source in
+`packages/engine/src`, and the corpus tests keep exercising the real engine, not a compiled
+copy.
 
 ## 2. Paste the API key
 
@@ -71,7 +77,8 @@ Once the deploy finishes, Render shows the service's URL (something like
   `{"ok":true,"active":0,"killed":false,"has_key":true}`. `has_key: false` means step 2
   above still needs doing. If the service has been idle, expect this first request to take
   up to about a minute while the free instance wakes up (see the note at the top of this
-  file) — that's expected, not a failure.
+  file) — that's expected, not a failure. (Verified against `packages/server/src/http.ts`,
+  2026-09-02: the `/health` handler emits exactly these four fields, in this shape.)
 - **Terminal:** `curl https://<your-service>.onrender.com/health`
 
 Then open the root URL in a browser — it should load the split-screen app, not a 404 or a

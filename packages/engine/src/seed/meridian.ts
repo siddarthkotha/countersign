@@ -1,6 +1,6 @@
 // packages/engine/src/seed/meridian.ts
 // ALL FICTIONAL. Meridian Dynamics does not exist; nobody here is a real person.
-import type { SeedConfig } from '../types';
+import type { SeedConfig } from '../types.js';
 
 export const MERIDIAN: SeedConfig = {
   company: 'Meridian Dynamics',

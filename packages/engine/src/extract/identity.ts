@@ -8,8 +8,8 @@
 // the name opening the utterance with no possessive/cued-name continuation ("X approved
 // it", "X's account"). Names captured by a cued-name pattern elsewhere in claims.ts
 // (approved by X, counsel is X, escrow ... X, ... to X) are excluded outright.
-import type { SeedConfig } from '../types';
-import { cuedNameSpans } from './claims';
+import type { SeedConfig } from '../types.js';
+import { cuedNameSpans } from './claims.js';
 
 export interface IdentityHit {
   identity_id: string;

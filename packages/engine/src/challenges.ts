@@ -20,14 +20,15 @@ import type {
   Quote,
   SeedConfig,
   Utterance,
-} from './types';
-import { hasLexiconHit, normalizeText } from './normalize';
-import { currentClaim } from './ledger';
-import { extractAmounts } from './extract/amounts';
-import { extractAccountLast4, extractCuedNames, extractDeadline } from './extract/claims';
-import { fnv1a } from './hash';
+} from './types.js';
+import { hasLexiconHit, normalizeText } from './normalize.js';
+import { currentClaim } from './ledger.js';
+import { extractAmounts } from './extract/amounts.js';
+import { extractAccountLast4, extractCuedNames, extractDeadline } from './extract/claims.js';
+import { fnv1a } from './hash.js';
+import { escapeRegExp } from './util.js';
 
-export { fnv1a } from './hash';
+export { fnv1a } from './hash.js';
 
 // ---------- selectChallenge ----------
 
@@ -282,10 +283,6 @@ function gradeLiveCommitment(field: ClaimField, claim: Claim | undefined, rawTex
   return normText.includes(committedNorm) ? 'PASS' : 'AMBIGUOUS';
 }
 
-function escapeRegExpLocal(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /** Removes every whole-word/phrase occurrence of any `lexicon` entry from `normText` (both
  *  already run through `normalizeText`), longest phrases first so a multi-word match like
  *  "that's not" is consumed whole rather than leaving its words to be stripped twice.
@@ -297,7 +294,7 @@ function stripLexicon(normText: string, lexicon: string[]): { remainder: string;
     (a, b) => b.split(' ').length - a.split(' ').length,
   );
   for (const phrase of phrases) {
-    const pattern = new RegExp(`\\b${escapeRegExpLocal(phrase).replace(/\s+/g, '\\s+')}\\b`, 'g');
+    const pattern = new RegExp(`\\b${escapeRegExp(phrase).replace(/\s+/g, '\\s+')}\\b`, 'g');
     if (pattern.test(working)) {
       hit = true;
       working = working.replace(pattern, ' ');

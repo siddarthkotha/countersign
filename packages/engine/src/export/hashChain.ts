@@ -10,8 +10,8 @@
 // No runtime dependencies: uses globalThis.crypto.subtle, which is available in both
 // Node 24+ and browsers, so this module can run client-side too.
 
-import type { Evidence, EngineOutput, Verdict, VerdictReason } from '../types';
-import { ENGINE_VERSION } from '../index';
+import type { Evidence, EngineOutput, Verdict, VerdictReason } from '../types.js';
+import { ENGINE_VERSION } from '../index.js';
 
 export interface ChainEntry {
   index: number;

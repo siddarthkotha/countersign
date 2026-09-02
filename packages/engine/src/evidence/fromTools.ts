@@ -3,8 +3,9 @@
 // the scheduled-payment context check. LAW 4: facts (raw) live separately from status/detail
 // (interpretation). Provenance SIMULATED_SYSTEM -- these are mocked tools (SCOPE FENCE: no
 // real banking/SSO/SIEM integration), never treated as proof of anything beyond themselves.
-import { normalizeText } from '../normalize';
-import type { CallContext, Evidence, EvidenceKind, EvidenceStatus, SeedConfig, ToolLogEntry, ToolName } from '../types';
+import { normalizeText } from '../normalize.js';
+import { money } from '../util.js';
+import type { CallContext, Evidence, EvidenceKind, EvidenceStatus, SeedConfig, ToolLogEntry, ToolName } from '../types.js';
 
 export interface ToolEvidenceCtx {
   claimed_id: string | null;
@@ -17,10 +18,6 @@ function latest(tools: ToolLogEntry[], name: ToolName): ToolLogEntry | undefined
   let found: ToolLogEntry | undefined;
   for (const t of tools) if (t.name === name) found = t; // last entry of this name wins
   return found;
-}
-
-function money(n: number): string {
-  return `$${n.toLocaleString('en-US')}`;
 }
 
 /** A missing/null field in a tool result renders as "unknown" in facts/detail, never the

@@ -4,13 +4,13 @@
 // evidence card from scratch, derives the rule context, decides a verdict, derives state,
 // and phrases a goal -- recomputed from nothing but the input every single call. LAW 3: the
 // engine is the only verdict owner; nothing here reads a clock or random source.
-import { buildLedger, currentClaim } from './ledger';
-import { gradeChallenges, selectChallenge } from './challenges';
-import { evidenceFromTranscript } from './evidence/fromTranscript';
-import { evidenceFromTools } from './evidence/fromTools';
-import { decide } from './rules';
-import type { RuleMutant } from './rules';
-import { allowedTools, deriveState, phrasingGoal, requiredActions } from './fsm';
+import { buildLedger, currentClaim } from './ledger.js';
+import { gradeChallenges, selectChallenge } from './challenges.js';
+import { evidenceFromTranscript } from './evidence/fromTranscript.js';
+import { evidenceFromTools } from './evidence/fromTools.js';
+import { decide } from './rules.js';
+import type { RuleMutant } from './rules.js';
+import { allowedTools, deriveState, phrasingGoal, requiredActions } from './fsm.js';
 import {
   applyOverrides,
   buildConsistencyEvidence,
@@ -19,8 +19,8 @@ import {
   buildReadbackEvidence,
   deriveRuleContext,
   reconstructIssued,
-} from './compose';
-import type { ChallengeResult, EngineInput, EngineOutput, Evidence, EvidenceStatus } from './types';
+} from './compose.js';
+import type { ChallengeResult, EngineInput, EngineOutput, Evidence, EvidenceStatus } from './types.js';
 
 /** `overrides` and `mutant` are TEST-ONLY (used by test/evaluate.test.ts's counterfactual
  *  checks and test/mutants.test.ts respectively). `evaluate(input)` alone stays the only

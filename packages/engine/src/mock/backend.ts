@@ -3,7 +3,7 @@
 // seed, ctx) inputs -- same inputs, same output, always. SCOPE FENCE: no real banking,
 // SSO, or SIEM integration; this is the "simulated" system the server tags as such.
 // LAW 2: there is no release verdict or tool -- nothing here ever returns one.
-import type { Identity, SeedConfig, ToolName } from '../types';
+import type { Identity, SeedConfig, ToolName } from '../types.js';
 
 export interface MockCtx {
   evidence_count: number;

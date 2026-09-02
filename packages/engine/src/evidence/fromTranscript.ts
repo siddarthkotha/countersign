@@ -6,17 +6,14 @@
 // itself. The story ledger (a later task) owns request-version bookkeeping and the
 // consistency_flag card; this module always tags its cards `request_version: 1` and lets
 // the ledger overwrite when it composes the full evidence set.
-import { extractAmounts } from '../extract/amounts';
-import { extractIdentityClaim } from '../extract/identity';
-import { extractOutOfScope } from '../extract/outOfScope';
-import { extractPressure } from '../extract/pressure';
-import type { Evidence, Quote, SeedConfig, Utterance } from '../types';
+import { extractAmounts } from '../extract/amounts.js';
+import { extractIdentityClaim } from '../extract/identity.js';
+import { extractOutOfScope } from '../extract/outOfScope.js';
+import { extractPressure } from '../extract/pressure.js';
+import { money } from '../util.js';
+import type { Evidence, Quote, SeedConfig, Utterance } from '../types.js';
 
 const TRANSCRIPT_REQUEST_VERSION = 1;
-
-function money(n: number): string {
-  return `$${n.toLocaleString('en-US')}`;
-}
 
 function identityName(seed: SeedConfig, id: string): string {
   return seed.identities.find((i) => i.id === id)?.name ?? id;

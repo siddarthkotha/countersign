@@ -2,7 +2,8 @@
 // Shared text-normalization helper: lower-case, strip punctuation, "&" -> "and", collapse
 // whitespace. Used to compare a caller-stated beneficiary/vendor name against the mock
 // backend's vendor strings without being tripped up by punctuation or case.
-import type { ClaimField } from './types';
+import { escapeRegExp } from './util.js';
+import type { ClaimField } from './types.js';
 
 export function normalizeText(s: string): string {
   return s
@@ -26,10 +27,6 @@ export function normalizeValue(field: ClaimField, v: string | number): string | 
     return String(v);
   }
   return typeof v === 'number' ? v : normalizeText(v);
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** v2 (shared by ledger.ts and challenges.ts): does any lexicon phrase occur in `text` as a

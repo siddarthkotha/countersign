@@ -7,7 +7,7 @@
 // anywhere in this file or its output. LAW 3: this is the only place a verdict is decided.
 // See amendment-v2-brief.md section D (the 13-row table + 4 invariants) -- this file is
 // that table, implemented, and RULES_DOC below is that table, published verbatim.
-import type { AssuranceChecklist, Evidence, EvidenceKind, SeedConfig, Verdict, VerdictReason } from './types';
+import type { AssuranceChecklist, Evidence, EvidenceKind, SeedConfig, Verdict, VerdictReason } from './types.js';
 
 export interface RuleContext {
   request_version: number;
@@ -15,7 +15,6 @@ export interface RuleContext {
   max_challenges: number;
   new_beneficiary: boolean;
   amendment_only: boolean;
-  exposure_usd: number;
   evaluation_incomplete: boolean;
   critical_confirmed: boolean;
   identity_switch_stale: boolean;
@@ -145,8 +144,9 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
   // The exposure_check_result card (built by compose.ts's buildExposureEvidence) already
   // encodes the FULL anti-structuring condition -- cumulative distinct amounts over the
   // high-value line WHILE the current single request reads under it -- so decide() reads
-  // its status rather than re-deriving the comparison from ctx.exposure_usd alone (a raw
-  // "cumulative > threshold" check would wrongly flag any single large, honest request).
+  // its status rather than re-deriving the comparison from a raw cumulative-exposure number
+  // (a bare "cumulative > threshold" check would wrongly flag any single large, honest
+  // request; RuleContext carried such a field once and nothing ever read it -- removed).
   const exposureFail = !mutant?.ignore_exposure && exposureEv?.status === 'FAIL';
 
   const assurance: AssuranceChecklist = {

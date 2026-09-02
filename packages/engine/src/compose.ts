@@ -2,10 +2,11 @@
 // Evidence-composition helpers used by evaluate.ts. Split out so evaluate.ts stays a short
 // orchestration script. LAW 4: facts (raw) stay separate from status/detail (interpretation)
 // on every card built here; every quote is a verbatim substring of the utterance it cites.
-import { buildLedger, currentClaim, isConfirmed } from './ledger';
-import { gradeChallenges, selectChallenge, seedFieldForEntry } from './challenges';
-import { normalizeValue } from './normalize';
-import type { RuleContext } from './rules';
+import { buildLedger, currentClaim, isConfirmed } from './ledger.js';
+import { gradeChallenges, selectChallenge, seedFieldForEntry } from './challenges.js';
+import { normalizeValue } from './normalize.js';
+import { money } from './util.js';
+import type { RuleContext } from './rules.js';
 import type {
   AgentAction,
   Claim,
@@ -18,13 +19,9 @@ import type {
   SeedConfig,
   ToolLogEntry,
   Utterance,
-} from './types';
+} from './types.js';
 
 export const CRITICAL_FIELDS: ClaimField[] = ['amount_usd', 'account_last4', 'beneficiary'];
-
-function money(n: number): string {
-  return `$${n.toLocaleString('en-US')}`;
-}
 
 // ---------- issued-challenge reconstruction (composition step 3) ----------
 
@@ -428,12 +425,6 @@ export function computeCriticalConfirmed(claims: Claim[]): boolean {
   return CRITICAL_FIELDS.every((f) => isConfirmed(claims, f));
 }
 
-export function computeExposureUsd(claims: Claim[]): number {
-  const amountClaims = claims.filter((c) => c.field === 'amount_usd');
-  const distinct = [...new Set(amountClaims.map((c) => Number(c.value)))];
-  return distinct.reduce((a, b) => a + b, 0);
-}
-
 export interface ComposedContext {
   claims: Claim[];
   request_version: number;
@@ -458,7 +449,6 @@ export function deriveRuleContext(
     max_challenges: seed.thresholds.max_challenges,
     new_beneficiary: computeNewBeneficiary(claims, contextEv),
     amendment_only: contextEv?.facts.amendment_only === true,
-    exposure_usd: computeExposureUsd(claims),
     evaluation_incomplete: computeEvaluationIncomplete(tools, conversation, actions, seed),
     critical_confirmed: computeCriticalConfirmed(claims),
     identity_switch_stale: identitySwitchEv?.status === 'FLAG',

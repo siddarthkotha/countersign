@@ -1,7 +1,8 @@
 // scripts/preflight-deploy.ts
-// Task D1: the local stand-in for "does the deploy actually work" -- builds the web SPA and
-// the compiled server exactly the way `render.yaml`'s build step will (`npm run build:web`
-// && `npm run build:server`), boots the compiled server on a spare local port with a fake
+// Task D1: the local stand-in for "does the deploy actually work" -- builds the engine, the
+// web SPA, and the compiled server exactly the way `render.yaml`'s build step will (`npm run
+// build`, which is `build:engine && build:web && build:server`), boots the compiled server
+// on a spare local port with a fake
 // AssemblyAI socket (no ASSEMBLYAI_API_KEY / network calls -- this never touches the live
 // API, see CLAUDE.md's ban on running scripts/smoke-live.ts outside a founder-present
 // session), hits /health and / the same way Render's health check and a judge's first click
@@ -93,6 +94,7 @@ async function waitForHealth(
 }
 
 async function main(): Promise<void> {
+  runBuildStep('build:engine');
   runBuildStep('build:web');
   runBuildStep('build:server');
 
@@ -100,7 +102,7 @@ async function main(): Promise<void> {
   const base = `http://127.0.0.1:${String(port)}`;
   log(`starting compiled server on ${base} (COUNTERSIGN_FAKE_AAI=1 -- no live AssemblyAI connection, no API key needed)...`);
 
-  const child = spawn('npx', ['tsx', join(repoRoot, 'packages/server/dist/index.js')], {
+  const child = spawn('node', [join(repoRoot, 'packages/server/dist/index.js')], {
     cwd: repoRoot,
     env: {
       ...process.env,

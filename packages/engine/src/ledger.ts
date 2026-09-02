@@ -13,20 +13,17 @@
 // `readback_issued` for that field that the caller NEGATED (the readback-repair path).
 // Otherwise CONTRADICTED. A plain time gap with none of the above is CONTRADICTED, full
 // stop — "it happened soon after" is not, by itself, evidence the caller was being honest.
-import { extractAccountLast4, extractCuedNames, extractDeadline } from './extract/claims';
-import { extractAmounts } from './extract/amounts';
-import { extractIdentityClaim } from './extract/identity';
-import { hasLexiconHit, normalizeValue } from './normalize';
-import type { AgentAction, Claim, ClaimField, ClaimKind, SeedConfig, Utterance } from './types';
+import { extractAccountLast4, extractCuedNames, extractDeadline } from './extract/claims.js';
+import { extractAmounts } from './extract/amounts.js';
+import { extractIdentityClaim } from './extract/identity.js';
+import { hasLexiconHit, normalizeValue } from './normalize.js';
+import { escapeRegExp } from './util.js';
+import type { AgentAction, Claim, ClaimField, ClaimKind, SeedConfig, Utterance } from './types.js';
 
 // request_version bumps only when the current value of one of these fields changes.
 const VERSIONED_FIELDS = new Set<ClaimField>(['amount_usd', 'beneficiary', 'account_last4']);
 
 const APPROX_WORDS_RE = /\b(about|around|roughly|approximately)\b/;
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 /** True when the amount at `text[idx..end)` is preceded within three words by an
  *  approximation word, or immediately followed by "ish". */

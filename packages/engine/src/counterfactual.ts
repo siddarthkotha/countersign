@@ -3,8 +3,8 @@
 // out differently? Pure -- every counterfactual re-runs the real `evaluate` with one
 // card's status flipped via the override map; nothing here mutates the input or reads
 // external state.
-import { evaluate } from './evaluate';
-import type { EngineInput, EngineState, EvidenceStatus, Verdict } from './types';
+import { evaluate } from './evaluate.js';
+import type { EngineInput, EngineState, EvidenceStatus, Verdict } from './types.js';
 
 function flipped(status: EvidenceStatus): EvidenceStatus | null {
   if (status === 'FAIL') return 'PASS';

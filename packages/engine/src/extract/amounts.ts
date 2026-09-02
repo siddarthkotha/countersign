@@ -1,7 +1,7 @@
 // packages/engine/src/extract/amounts.ts
 // Extracts dollar-amount mentions (numeric or spoken) with verbatim quotes. Plain
 // transcript parsing — no claim about voice authenticity.
-import { extractSpokenAmounts } from './spokenNumbers';
+import { extractSpokenAmounts } from './spokenNumbers.js';
 
 export interface AmountHit {
   value_usd: number;

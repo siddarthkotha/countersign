@@ -5,8 +5,9 @@
 // instruction for HOW to talk within the state the engine already decided). Per v1 Task 5
 // text (docs/superpowers/plans/2026-09-01-day1-engine-and-scaffold.md, "### Task 5"),
 // extended per amendment-v2-brief.md section A/D for the v2 goals and states.
-import type { DecideResult } from './rules';
-import { currentClaim } from './ledger';
+import type { DecideResult } from './rules.js';
+import { currentClaim } from './ledger.js';
+import { money } from './util.js';
 import type {
   AgentAction,
   Claim,
@@ -20,7 +21,7 @@ import type {
   ToolLogEntry,
   ToolName,
   Verdict,
-} from './types';
+} from './types.js';
 
 // ---------- allowedTools ----------
 
@@ -67,6 +68,14 @@ export function requiredActions(verdict: Verdict, tools: ToolLogEntry[]): ToolNa
 const CRITICAL_FIELDS: ClaimField[] = ['amount_usd', 'account_last4', 'beneficiary'];
 
 export function deriveState(decideResult: DecideResult, evidence: Evidence[], tools: ToolLogEntry[]): EngineState {
+  // NOTE (naming clarification, no state rename): OUT_OF_SCOPE is the terminal state for
+  // EVERY NO_ACTION verdict, not only the lexicon-triggered "I'm not the CEO, this is a
+  // demo" case (rules.ts rows 1/2). Invariant I4 also produces NO_ACTION for a call that
+  // simply goes dead mid-check with no open request (see corpus/hangup-mid-check.json) --
+  // there is nothing at stake and no human to route an open request to, so it lands in the
+  // same OUT_OF_SCOPE state/goal as an honest off-script judge, even though "out of scope"
+  // doesn't literally describe a dropped line. phrasingGoal's OUT_OF_SCOPE branch already
+  // handles both shapes (EXPLAIN_OUT_OF_SCOPE vs EXPLAIN_OPEN_REQUEST) via hasRequest.
   if (decideResult.verdict === 'NO_ACTION') return 'OUT_OF_SCOPE';
   if (tools.some((t) => t.name === 'seal_evidence_record' && t.result !== undefined)) return 'SEALED';
   if (decideResult.verdict === 'STAGE' || decideResult.verdict === 'FREEZE' || decideResult.verdict === 'ESCALATE') {
@@ -94,10 +103,6 @@ export function deriveState(decideResult: DecideResult, evidence: Evidence[], to
 }
 
 // ---------- phrasingGoal ----------
-
-function money(n: number): string {
-  return `$${n.toLocaleString('en-US')}`;
-}
 
 function oldestUnconfirmedCritical(claims: Claim[]): { field: ClaimField; claim: Claim } | null {
   let best: { field: ClaimField; claim: Claim } | null = null;
