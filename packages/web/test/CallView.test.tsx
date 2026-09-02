@@ -43,9 +43,14 @@ function scenarioBFinalState() {
 }
 
 describe('CallView', () => {
-  it('always shows the simulated banner', () => {
+  // Fix round 3, item 2: CallView used to render its own copy of the "simulated" banner --
+  // on Replay.tsx that produced two copies on screen at once (its own screen-level banner
+  // plus this one). The banner is now owned exclusively by the screen component (Call.tsx /
+  // Replay.tsx, both tested separately for "always on" coverage) -- this locks in the fix so
+  // it can't quietly come back.
+  it('never renders its own copy of the simulated banner (owned by the screen component)', () => {
     render(<CallView screen={scenarioBFinalState()} />);
-    expect(screen.getByText('Every system here is simulated.')).toBeInTheDocument();
+    expect(screen.queryByText('Every system here is simulated.')).not.toBeInTheDocument();
   });
 
   it('renders the WIRE FROZEN banner for Scenario B\'s terminal state', () => {
@@ -163,14 +168,47 @@ describe('CallView', () => {
     expect(within(board).queryByRole('heading', { name: 'WIRE FROZEN' })).not.toBeInTheDocument();
   });
 
-  // Task W5, fix round 2, requirement 2: the verdict banner now lands in the checks board
-  // (the right column of the two-column grid), after the evidence summary rows.
-  it('lands the verdict line inside the checks board, after the evidence summary rows', () => {
+  // Task W5, fix round 2, requirement 2: the verdict banner lands in the checks board (the
+  // right column of the two-column grid).
+  it('lands the verdict line inside the checks board', () => {
     render(<CallView screen={scenarioBFinalState()} />);
     const checksBoard = screen.getByLabelText('checks-board');
     expect(within(checksBoard).getByRole('heading', { name: 'WIRE FROZEN' })).toBeInTheDocument();
-    // The reasons line joins the same reasons array with " · ", no longer a bulleted list.
-    expect(within(checksBoard).getByText(/·/)).toBeInTheDocument();
+  });
+
+  // Fix round 3, item 1: at 1920x1080 the verdict banner used to land AFTER every evidence
+  // row -- below the fold. It now leads the checks board, with the "Checks" heading and the
+  // row list beneath it; the heading order (verdict h2 before checks h3) matches reading
+  // order. `compareDocumentPosition` proves actual DOM order, not just presence.
+  it('puts the verdict banner (and its h2) before the "Checks" heading (h3) and the row list', () => {
+    render(<CallView screen={scenarioBFinalState()} />);
+    const checksBoard = screen.getByLabelText('checks-board');
+    const verdictHeading = within(checksBoard).getByRole('heading', { name: 'WIRE FROZEN', level: 2 });
+    const checksHeading = within(checksBoard).getByRole('heading', { name: 'Checks', level: 3 });
+    const firstRow = checksBoard.querySelector('.checks-row');
+
+    expect(firstRow).not.toBeNull();
+    // Node.DOCUMENT_POSITION_FOLLOWING (4): verdictHeading comes before checksHeading, which
+    // comes before the first evidence row.
+    expect(verdictHeading.compareDocumentPosition(checksHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(checksHeading.compareDocumentPosition(firstRow as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // Fix round 3, item 6: list semantics restored -- a real <ul>/<li> per reason (fix round 2
+  // had string-joined them into one text node), the same reasons array, same words; the
+  // " · " between them is CSS-only (styles.css `::after`), never part of any reason's text.
+  it('renders the verdict reasons as a real list, one <li> per reason, with no separator baked into the text', () => {
+    const state = scenarioBFinalState();
+    render(<CallView screen={state} />);
+    const checksBoard = screen.getByLabelText('checks-board');
+    const list = checksBoard.querySelector('ul.verdict-reasons');
+    expect(list).not.toBeNull();
+
+    const items = within(list as HTMLElement).getAllByRole('listitem');
+    expect(items.map((li) => li.textContent)).toEqual(state.banner!.reasons);
+    for (const li of items) {
+      expect(li.textContent ?? '').not.toContain('·');
+    }
   });
 
   // Task W5, fix round 2, requirement 2: each evidence card CallView already renders also

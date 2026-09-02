@@ -9,6 +9,7 @@ import type { ScreenState } from '@countersign/engine';
 import CallView from '../components/CallView';
 import Masthead from '../components/Masthead';
 import Footer from '../components/Footer';
+import SimulatedBanner from '../components/SimulatedBanner';
 import { connectSocketOnly, type CallClient } from '../ws/client';
 
 const SPEEDS = [1, 4, 20] as const;
@@ -69,9 +70,15 @@ export default function Replay() {
       <Masthead sessionId={screenState?.session_id ?? selected} status={screenState?.agent_status ?? null} />
 
       <h1>Watch a recorded attack</h1>
-      <p className="banner">Every system here is simulated.</p>
-      <p>No microphone is used on this screen -- it replays a recorded call end to end.</p>
 
+      {/* Task W5, fix round 3, item 2: the single, always-on "simulated" banner for this
+          screen -- Replay used to render this literal AND CallView's own copy at once (a
+          real duplicate once a recording started); now there is exactly one source. */}
+      <SimulatedBanner />
+
+      {/* Task W5, fix round 3, item 3: recording select, speed radios and the "Replay
+          ended:" status all sit on one row under the title (`.replay-controls`, styles.css);
+          the no-mic note is a short muted line directly beneath, same words as before. */}
       <div className="replay-controls">
         <label htmlFor="replay-file">Recording</label>
         <select
@@ -110,9 +117,15 @@ export default function Replay() {
             </label>
           ))}
         </fieldset>
+
+        {ended && (
+          <p role="status" className="replay-status">
+            Replay ended: {ended}
+          </p>
+        )}
       </div>
 
-      {ended && <p role="status">Replay ended: {ended}</p>}
+      <p className="replay-note">No microphone is used on this screen -- it replays a recorded call end to end.</p>
 
       {screenState ? (
         // Task W5, requirement B: the forensic section defaults OPEN in Replay (the judge's

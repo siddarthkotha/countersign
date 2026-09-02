@@ -107,6 +107,11 @@ describe('Replay', () => {
   // thing to "the replay's id" in client state at that point. Once a state event lands, the
   // real server `session_id` on the ScreenState takes over (it's the authoritative id), and
   // the status word ("state <STATUS>") joins it -- the same already-rendered `agent_status`.
+  // Fix round 3, item 4: both ids on screen are truncated to 8 characters, full id on a
+  // `title` attribute -- `getByTitle(fullId)` finds the truncating span directly (proving
+  // the truncation actually happened, not just "some text exists somewhere"), and
+  // `toHaveTextContent` reads the full text of its `.masthead-meta` parent, since the id now
+  // sits in its own nested `<span>` rather than one single text node.
   it('shows the masthead id from the chosen recording, then the real session id and status once a state event arrives', async () => {
     const fake = makeFakeClient();
     vi.mocked(connectSocketOnly).mockReturnValue(fake.client as never);
@@ -114,12 +119,20 @@ describe('Replay', () => {
     render(<Replay />);
 
     await user.selectOptions(await screen.findByLabelText('Recording'), RECORDING);
-    expect(screen.getByText(`session ${RECORDING} · Treasury desk`)).toBeInTheDocument();
+    const shortRecordingId = RECORDING.slice(0, 8);
+    expect(screen.getByTitle(RECORDING)).toHaveTextContent(`session ${shortRecordingId}`);
+    expect(screen.getByTitle(RECORDING).closest('.masthead-meta')).toHaveTextContent(
+      `session ${shortRecordingId} · Treasury desk`,
+    );
 
     const state = scenarioBFinalState();
     fake.emitState(state);
 
-    expect(await screen.findByText(`session ${state.session_id} · Treasury desk · state VERDICT`)).toBeInTheDocument();
+    const shortSessionId = state.session_id.slice(0, 8);
+    await screen.findByTitle(state.session_id);
+    expect(screen.getByTitle(state.session_id).closest('.masthead-meta')).toHaveTextContent(
+      `session ${shortSessionId} · Treasury desk · state VERDICT`,
+    );
   });
 
   // Task W5, fix round 2, requirement 2: the two-column keynote grid renders on Replay too,

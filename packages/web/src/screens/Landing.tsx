@@ -47,8 +47,11 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
           state to build "session <id> · Treasury desk · state <STATUS>" from). */}
       <Masthead />
 
-      <h1>Countersign</h1>
-      <p>A call can request a privileged action. It can never authorize one.</p>
+      {/* Task W5, fix round 3, item 5: the masthead already says "COUNTERSIGN" -- the big h1
+          used to say it again. The tagline is now the h1 (same words as before, just a
+          bigger element); the old duplicate tagline paragraph is gone, not the tagline
+          itself -- a removed duplicate, not removed content. */}
+      <h1>A call can request a privileged action. It can never authorize one.</h1>
 
       <p>
         You will speak with a treasury desk checkpoint. It verifies the request, not the voice. Nothing you say can

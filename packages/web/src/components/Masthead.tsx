@@ -8,10 +8,17 @@
 // elapsed-time value exists client-side to show one), no protocol field invented -- when
 // `sessionId` is absent (Landing; Replay before a recording is picked) the whole meta line
 // is omitted rather than padded with a placeholder.
+//
+// Task W5, fix round 3, item 4: a real session id (a UUID) made the meta line long enough to
+// crowd the bar -- shows only the first 8 characters ("session 2e756eed") with the FULL id
+// on a `title` attribute (a native browser tooltip on hover/focus), so the complete id is
+// still available, just not printed in full on screen.
 export type MastheadProps = {
   sessionId?: string | null;
   status?: string | null;
 };
+
+const SHORT_ID_LENGTH = 8;
 
 /** Small dial glyph, inline SVG only (no external asset, no new dependency) -- optional per
  *  the brief, purely decorative next to the wordmark. */
@@ -25,10 +32,10 @@ function DialGlyph() {
 }
 
 export default function Masthead({ sessionId, status }: MastheadProps) {
-  const metaParts: string[] = [];
+  const restParts: string[] = [];
   if (sessionId) {
-    metaParts.push(`session ${sessionId}`, 'Treasury desk');
-    if (status) metaParts.push(`state ${status}`);
+    restParts.push('Treasury desk');
+    if (status) restParts.push(`state ${status}`);
   }
 
   return (
@@ -37,7 +44,12 @@ export default function Masthead({ sessionId, status }: MastheadProps) {
         <DialGlyph />
         COUNTERSIGN
       </span>
-      {metaParts.length > 0 && <span className="masthead-meta">{metaParts.join(' · ')}</span>}
+      {sessionId && (
+        <span className="masthead-meta">
+          <span title={sessionId}>session {sessionId.slice(0, SHORT_ID_LENGTH)}</span>
+          {restParts.length > 0 ? ` · ${restParts.join(' · ')}` : null}
+        </span>
+      )}
     </header>
   );
 }

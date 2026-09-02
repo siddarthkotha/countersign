@@ -152,18 +152,29 @@ describe('Call', () => {
   // Task W5, fix round 2, requirement 1: the masthead's session id comes from
   // `session.session_id` (StartResult) -- held before any call even starts, so it shows
   // immediately, with no "state <STATUS>" segment until the first ScreenState arrives.
+  // Fix round 3, item 4: the id itself is now truncated to 8 characters on screen (the full
+  // id lives on a `title` attribute) -- `SESSION.session_id` ('sess-123') happens to BE 8
+  // characters, so this still reads the same on screen; `Masthead.test.tsx` covers the
+  // truncation of a longer id directly. `getByTitle` + `toHaveTextContent` (not
+  // `getByText(exactString)`) because the id now sits in its own nested `<span>` inside
+  // `.masthead-meta`, so the full meta text is no longer one single text node.
   it('shows the masthead session id before any state, then adds the status word once a state event arrives', async () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
     render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
 
-    expect(screen.getByText(`session ${SESSION.session_id} · Treasury desk`)).toBeInTheDocument();
+    expect(screen.getByTitle(SESSION.session_id).closest('.masthead-meta')).toHaveTextContent(
+      `session ${SESSION.session_id} · Treasury desk`,
+    );
 
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
     fake.emitState(scenarioBFinalState());
 
-    expect(await screen.findByText(`session ${SESSION.session_id} · Treasury desk · state VERDICT`)).toBeInTheDocument();
+    await screen.findByText(/Claimed identity:/);
+    expect(screen.getByTitle(SESSION.session_id).closest('.masthead-meta')).toHaveTextContent(
+      `session ${SESSION.session_id} · Treasury desk · state VERDICT`,
+    );
   });
 
   // Task W5, fix round 2, requirement 2: the two-column keynote grid renders once a state

@@ -31,6 +31,13 @@
   pair was introduced by this round -- every new element still paints --cs-fg/--cs-muted/
   --cs-accent on --cs-bg, --cs-panel or --cs-elevated, all already covered by
   test/contrast.test.ts.
+
+  Fix round 3 (1920x1080 / 1440x900 self-review): the verdict banner now leads `.checks-board`
+  (was after every row, below the fold at 1920x1080); `.checks-rows` is its own `max-height:
+  48vh` scroll box so the banner and first rows are always visible. `.replay-controls` is one
+  compact row. `.checks-row` is a `minmax()` grid, not fixed-width flex columns, so it never
+  overflows under ~600px (test/checks-row-layout.test.ts asserts no bare fixed `width` on its
+  columns). `.verdict-reasons` is a real `<ul>` again with a CSS-only `::after` separator.
 */
 
 :root {
@@ -227,14 +234,17 @@ input {
   color: var(--cs-muted);
 }
 
+/* Task W5, fix round 3, item 3: recording select + speed radios + the "Replay ended:"
+   status all sit on ONE row (was ~300px of stacked rows with a lot of empty space); the
+   no-mic note (`.replay-note`) is now a short muted line directly beneath, same words as
+   before. */
 .replay-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
-  padding: 0.75rem 0;
+  gap: 0.75rem 1.25rem;
+  padding: 0.5rem 0;
   border-bottom: 1px solid var(--cs-border);
-  margin-bottom: 1rem;
 }
 
 .replay-controls fieldset {
@@ -244,6 +254,18 @@ input {
   border: none;
   margin: 0;
   padding: 0;
+}
+
+.replay-status {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--cs-muted);
+}
+
+.replay-note {
+  margin: 0.35rem 0 1rem;
+  color: var(--cs-muted);
+  font-size: 0.85rem;
 }
 
 /* --- Footer: Call/Replay (Task W5 fix round 2, requirement 3) -------------------------- */
@@ -500,29 +522,47 @@ input {
   margin: 0;
 }
 
+/* Task W5, fix round 3, item 1: its own scroll box, height tied to the viewport (not the
+   content) -- so the verdict banner above and the first few rows are always visible on a
+   1920x1080 screen no matter how many evidence cards a call has produced. */
 .checks-rows {
   display: flex;
   flex-direction: column;
+  max-height: 48vh;
+  overflow-y: auto;
 }
 
+/* Task W5, fix round 3, item 7: a grid, not a flex row of fixed-width columns -- `minmax()`
+   lets the label/status columns shrink instead of overflowing under ~600px, and the detail
+   column wraps onto multiple lines rather than forcing horizontal scroll. No column here
+   declares a bare fixed `width` (checked by test/checks-row-layout.test.ts, which parses
+   this file directly and fails if one creeps back in). */
 .checks-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(6rem, 9rem) minmax(4rem, 5rem) minmax(8rem, 1fr);
   align-items: baseline;
-  gap: 0.6rem;
+  column-gap: 0.6rem;
   padding: 0.4rem 0;
   border-bottom: 1px solid var(--cs-row-border);
   font-size: 0.9rem;
 }
 
+@media (max-width: 600px) {
+  .checks-row {
+    grid-template-columns: auto minmax(4rem, 1fr) minmax(3rem, auto);
+  }
+
+  .checks-detail {
+    grid-column: 1 / -1;
+  }
+}
+
 .checks-mark {
-  flex: none;
   color: var(--cs-accent);
   font-size: 0.7rem;
 }
 
 .checks-label {
-  flex: none;
-  width: 9rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -530,15 +570,12 @@ input {
 }
 
 .checks-status {
-  flex: none;
-  width: 5rem;
   font-weight: 700;
   text-transform: uppercase;
   color: var(--cs-accent);
 }
 
 .checks-detail {
-  flex: 1 1 auto;
   color: var(--cs-muted);
 }
 
@@ -579,13 +616,23 @@ input {
   margin: 0 0 0.4rem;
 }
 
-/* Task W5, fix round 2: reasons joined with " · " on one line (was a bulleted `<ul>`) --
-   same reasons array, same words, matching the look's own single-line verdict headline. */
+/* Task W5, fix round 3, item 6: list semantics restored -- a real `<ul>`/`<li>` per reason
+   (fix round 2 had string-joined them into one text node, which read as a single line but
+   lost the list structure). The " · " between reasons is CSS-only (`::after` on every `<li>`
+   but the last) -- it is never part of any reason's own text. */
 .verdict-reasons {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
   margin: 0 0 0.4rem;
+  padding: 0;
   font-family: var(--cs-font-mono);
   font-size: 0.85rem;
   color: var(--cs-muted);
+}
+
+.verdict-reasons li:not(:last-child)::after {
+  content: ' · ';
 }
 
 .banner-terminal p {

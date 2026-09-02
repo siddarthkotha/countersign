@@ -125,7 +125,11 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
           arrived; omitted, not padded, until then. */}
       <Masthead sessionId={session.session_id} status={screenState?.agent_status ?? null} />
 
-      {!screenState && <SimulatedBanner />}
+      {/* Task W5, fix round 3, item 2: unconditional now -- CallView no longer renders its
+          own copy once a state arrives, so this is the single, always-on source for the
+          whole screen (previously the source moved from here to CallView.tsx at the exact
+          moment a call started; same "always on" guarantee, one component now, not two). */}
+      <SimulatedBanner />
 
       <CallControls
         link={link}

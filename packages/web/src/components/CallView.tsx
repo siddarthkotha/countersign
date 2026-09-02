@@ -1,10 +1,8 @@
 // packages/web/src/components/CallView.tsx
 // Renders `ScreenState` verbatim: this component computes NOTHING about verdicts, gates, or
 // evidence -- every word on screen is a field read straight off the prop. Status words are
-// always rendered as text, never colour-only. The "simulated" banner is present
-// unconditionally, rendered via the shared `SimulatedBanner` component (Task R1: the banner
-// text has one source -- Call.tsx renders the same component for every moment CallView isn't
-// on screen instead of this file keeping its own copy).
+// always rendered as text, never colour-only. The "simulated" banner is owned by the SCREEN
+// component (Call.tsx / Replay.tsx), not by this one -- see fix round 3, item 2 below.
 //
 // Task W5, fix round 2: the look's real structure is a full-width two-column board, not a
 // single stacked column -- `.keynote-grid` below the request/gates strip holds the
@@ -16,9 +14,17 @@
 // `EngineState` (`screen.state`) is never shown raw -- one of its members is literally
 // `'SEALED'`, banned by LAW 1 -- and there is no tool-call log on `ScreenState.forensic` at
 // all, so the look's "TOOL CALLS" rows are omitted rather than faked.
+//
+// Task W5, fix round 3: (1) the verdict banner now leads the checks board (right column),
+// above the "Checks" heading and its own scrolling row list, so it clears the fold at
+// 1920x1080; (2) this component no longer renders `SimulatedBanner` itself -- Replay.tsx
+// used to end up with two copies on screen at once (its own screen-level banner plus this
+// one), a real duplicate the controller ruled out under "nothing disappears" (removing a
+// duplicate is not removing content); Call.tsx's and Replay.tsx's own screen-level banners
+// are now the SINGLE, ALWAYS-ON source per screen. (6) the verdict reasons are a real `<ul>`
+// again, not a string-joined line -- the " · " separator is CSS-only.
 import { useEffect, useRef, useState } from 'react';
 import type { AssuranceChecklist, Claim, ChallengeResult, Evidence, ScreenState, Speaker } from '@countersign/engine';
-import SimulatedBanner from './SimulatedBanner';
 
 // No standalone `AgentStatus` export exists on `@countersign/engine` (an engine change is
 // out of scope for this task) -- derived locally from `ScreenState['agent_status']` instead,
@@ -150,7 +156,11 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
 
   return (
     <div className="call-view">
-      {screen.simulated === true && <SimulatedBanner />}
+      {/* Task W5, fix round 3, item 2: CallView no longer renders its own copy of the
+          "simulated" banner -- Replay.tsx had it rendering here AND at the screen level
+          simultaneously (a real duplicate on screen), and Call.tsx's screen-level banner now
+          stays up unconditionally too, so there is exactly one always-on `SimulatedBanner`
+          per screen, owned by the screen component, not this one. */}
 
       {/* Task W5 requirement B / fix round 2: who is calling, what they ask, the amount, the
           status word -- unchanged fields, same five request-header lines and three gate
@@ -218,7 +228,29 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
         </section>
 
         <section className="checks-board" aria-label="checks-board">
+          {/* Task W5, fix round 3, item 1: the verdict banner now leads the right column --
+              at 1920x1080 it used to land after every check row, below the fold. Headline
+              (h2) before the "Checks" heading (h3), so the heading order matches reading
+              order too. */}
+          {screen.banner && (
+            <section className="banner-terminal" role="alert">
+              <h2>{screen.banner.headline}</h2>
+              {/* Task W5, fix round 3, item 6: list semantics restored -- a real <ul>, the
+                  " · " separator is CSS-only (styles.css, ::after on non-last <li>), never
+                  string-joined into one text node. */}
+              <ul className="verdict-reasons">
+                {screen.banner.reasons.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+              <p>{screen.banner.subline}</p>
+            </section>
+          )}
+
           <h3 className="checks-board-title">Checks</h3>
+          {/* Task W5, fix round 3, item 1: its own scroll box (max-height tied to the
+              viewport, styles.css) so the banner above and the first rows are always
+              visible, no matter how many evidence cards this call has produced. */}
           <div className="checks-rows">
             {screen.forensic.evidence.map((e) => (
               <ChecksRow key={`checks-${e.id}`} evidence={e} />
@@ -228,14 +260,6 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
           {/* No tool-call rows here: ScreenState.forensic carries no tool-result log, so the
               look's "TOOL CALLS" section would have to be invented data -- it is omitted
               rather than faked. */}
-
-          {screen.banner && (
-            <section className="banner-terminal" role="alert">
-              <h2>{screen.banner.headline}</h2>
-              <p className="verdict-reasons">{screen.banner.reasons.join(' · ')}</p>
-              <p>{screen.banner.subline}</p>
-            </section>
-          )}
         </section>
       </div>
 
