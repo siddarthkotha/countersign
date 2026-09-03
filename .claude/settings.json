@@ -67,6 +67,11 @@
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/lane-gate.sh\"",
             "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/agent-watchdog.sh\"",
+            "timeout": 15
           }
         ]
       }
@@ -77,6 +82,11 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/autopilot-toggle.sh\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/agent-watchdog.sh\"",
+            "timeout": 15
           }
         ]
       }

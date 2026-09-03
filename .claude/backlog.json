@@ -1,0 +1,58 @@
+{
+  "items": [
+    {
+      "id": "S5",
+      "title": "S5 flight recorder server",
+      "files": ["packages/server/**"],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-03T00:52:55Z"
+    },
+    {
+      "id": "W9",
+      "title": "W9 flight recorder browser",
+      "files": ["packages/web/**"],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-03T00:52:55Z"
+    },
+    {
+      "id": "H1",
+      "title": "H1 orchestration tooling",
+      "files": [".claude/**"],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-03T00:52:55Z"
+    },
+    {
+      "id": "judge-sim-preload",
+      "title": "judge-sim persona preload (build Sep 12, not before)",
+      "files": [],
+      "status": "held",
+      "held_because": "founder ruling: build-on-first-use Sep 12",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "latency-table",
+      "title": "latency table n=2 + rehearsals",
+      "files": [],
+      "status": "held",
+      "held_because": "needs the founder's microphone (Sep 9)",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "commit-8afaf2a-reword",
+      "title": "commit 8afaf2a message reword",
+      "files": [],
+      "status": "held",
+      "held_because": "founder-run history rewrite at the flip",
+      "agent_id": "",
+      "started_at": ""
+    }
+  ]
+}

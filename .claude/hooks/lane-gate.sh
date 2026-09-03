@@ -137,17 +137,59 @@ if m:
             r"\b(because|until|needs?|blocked on|waits? (on|for)|after)\b", line, re.I):
         ok = True
 
-if ok:
+reasons = []
+if not ok:
+    reasons.append(
+        "lane-gate (founder orchestration law, mechanical since 2026-09-02): this turn "
+        "reports background work without stating the split. Before finishing: (1) list the "
+        "open backlog; (2) LAUNCH every item that touches files no running lane touches — "
+        "'waiting' is only legal when zero dependency-free work exists; (3) end the reply "
+        "with ONE line: 'Lanes: running: <names> · held: <item> because <dependency>' "
+        "(or 'held: none')."
+    )
+
+# --- v2: backlog.json cross-check (founder ask 2026-09-02, H1) ------------------------
+# Only reached on turns that already trip the outer gate above (launched an Agent, or the
+# reply reports background work) -- same "sized against bureaucracy" scoping as v1.
+try:
+    backlog_path = os.path.join(os.environ.get("CLAUDE_PROJECT_DIR", "."), ".claude", "backlog.json")
+    with open(backlog_path, "r") as f:
+        backlog = json.load(f)
+    items = backlog.get("items")
+    if not isinstance(items, list):
+        items = []
+except Exception:
+    items = []
+
+open_items = [it.get("title", it.get("id", "(untitled)")) for it in items
+              if isinstance(it, dict) and it.get("status") == "open"]
+held_missing = [it.get("title", it.get("id", "(untitled)")) for it in items
+                if isinstance(it, dict) and it.get("status") == "held"
+                and not str(it.get("held_because", "")).strip()]
+
+# "AND the turn launched no Agent tool AND the reply reports background work": since we
+# only get here when (launched OR reports_background) is already true, "not launched"
+# alone implies reports_background is true.
+if open_items and not launched:
+    reasons.append(
+        "backlog.json has open item(s) with no lane and no hold reason: "
+        + "; ".join(open_items)
+        + " -- launch or hold-with-reason each."
+    )
+
+if held_missing:
+    reasons.append(
+        "backlog.json has held item(s) with an empty held_because: "
+        + "; ".join(held_missing)
+        + " -- record why each is held."
+    )
+
+if not reasons:
     sys.exit(0)
 
 print(json.dumps({
     "decision": "block",
-    "reason": ("lane-gate (founder orchestration law, mechanical since 2026-09-02): this turn "
-               "reports background work without stating the split. Before finishing: (1) list the "
-               "open backlog; (2) LAUNCH every item that touches files no running lane touches — "
-               "'waiting' is only legal when zero dependency-free work exists; (3) end the reply "
-               "with ONE line: 'Lanes: running: <names> · held: <item> because <dependency>' "
-               "(or 'held: none').")
+    "reason": " | ".join(reasons)
 }))
 sys.exit(0)
 PYEOF
