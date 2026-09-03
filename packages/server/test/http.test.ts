@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHttpServer } from '../src/http.js';
 import { createStaticServer } from '../src/static.js';
+import { newDiagnosticsState, type DiagnosticsState } from '../src/diagnostics.js';
 import type { CapsState } from '../src/caps.js';
 import type { ServerConfig } from '../src/config.js';
 
@@ -45,6 +46,7 @@ describe('http server', () => {
   function start(cfgOverrides: Partial<ServerConfig> = {}): Promise<{
     server: Server;
     state: CapsState;
+    diagnostics: DiagnosticsState;
     base: string;
   }> {
     let counter = 0;
@@ -61,6 +63,7 @@ describe('http server', () => {
     // `/end`/`/reset` routes actually need from it (CRITICAL 1, final review); `ws/browser.
     // test.ts` covers the real `endCall` -- ending a live call, not just a reservation.
     let stateRef: CapsState;
+    const diagnostics = newDiagnosticsState();
     const { server, state } = createHttpServer(cfg(cfgOverrides), {
       fetchImpl: globalThis.fetch,
       now: () => clock,
@@ -72,13 +75,14 @@ describe('http server', () => {
         }
         return false;
       },
+      diagnostics,
     });
     stateRef = state;
     return new Promise((resolve) => {
       server.listen(0, '127.0.0.1', () => {
         const addr = server.address() as AddressInfo;
         close = () => new Promise((res) => server.close(() => res()));
-        resolve({ server, state, base: `http://127.0.0.1:${addr.port}` });
+        resolve({ server, state, diagnostics, base: `http://127.0.0.1:${addr.port}` });
       });
     });
   }
@@ -400,6 +404,7 @@ describe('http server -- static mount (D1 fix round 1 #1)', () => {
       randomId: () => '11111111-1111-1111-1111-111111111111',
       endCall: () => false,
       staticServer: createStaticServer(fixtureDir),
+      diagnostics: newDiagnosticsState(),
     });
     return new Promise((resolve) => {
       server.listen(0, '127.0.0.1', () => {

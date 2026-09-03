@@ -5,6 +5,7 @@ import type { Server } from 'node:http';
 import WebSocket from 'ws';
 import { attachWebSocketServer } from '../src/ws/browser.js';
 import { newCapsState } from '../src/caps.js';
+import { newDiagnosticsState } from '../src/diagnostics.js';
 import { FakeAaiSocket } from '../src/aai/fake.js';
 import { defaultCorpusDir, listCorpusFiles, loadCorpusFile } from '../src/replay.js';
 import type { ServerEvent } from '@countersign/engine';
@@ -46,6 +47,7 @@ describe('ws/browser — /ws/replay/:file', () => {
       caps: newCapsState(),
       now: () => Date.now(),
       createAai: () => new FakeAaiSocket(),
+      diagnostics: newDiagnosticsState(),
       // Origin fix round 1: attachWebSocketServer's upgrade handler now gates on Origin
       // before it even looks at the path -- this replay-only test server never sets
       // COUNTERSIGN_TRUST_PROXY, and no custom allowlist matters here, only same-origin.

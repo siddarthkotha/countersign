@@ -5,6 +5,7 @@ import WebSocket from 'ws';
 import { createHttpServer } from '../src/http.js';
 import { attachWebSocketServer } from '../src/ws/browser.js';
 import { FakeAaiSocket } from '../src/aai/fake.js';
+import { newDiagnosticsState, type DiagnosticsState } from '../src/diagnostics.js';
 import type { CapsState } from '../src/caps.js';
 import type { ServerConfig } from '../src/config.js';
 import type { ServerEvent } from '@countersign/engine';
@@ -39,12 +40,14 @@ describe('ws/browser — /ws/call/:id', () => {
     base: string;
     wsBase: string;
     state: CapsState;
+    diagnostics: DiagnosticsState;
     aaiInstances: Map<string, FakeAaiSocket>;
     endCall: (session_id: string, reason: string) => boolean;
   }> {
     const ids = ['id-1', 'id-2', 'id-3'];
     let counter = 0;
     const aaiInstances = new Map<string, FakeAaiSocket>();
+    const diagnostics = newDiagnosticsState();
 
     // Origin fix round 1: one shared ServerConfig for both createHttpServer (CORS) and
     // attachWebSocketServer (the WS upgrade's own origin gate) -- same object http.ts and
@@ -63,6 +66,7 @@ describe('ws/browser — /ws/call/:id', () => {
       // captured into `wsApi` after both are constructed) rather than through http.ts's
       // routes -- http.test.ts already covers the http.ts side of the CRITICAL 1 wiring.
       endCall: (id, reason) => wsApi.endCall(id, reason),
+      diagnostics,
     });
 
     const wsApi = attachWebSocketServer(server, {
@@ -74,6 +78,7 @@ describe('ws/browser — /ws/call/:id', () => {
         return aai;
       },
       cfg: serverCfg,
+      diagnostics,
       ...(opts.browser_grace_ms !== undefined ? { browser_grace_ms: opts.browser_grace_ms } : {}),
       ...(opts.session_cap_seconds !== undefined ? { session_cap_seconds: opts.session_cap_seconds } : {}),
     });
@@ -86,6 +91,7 @@ describe('ws/browser — /ws/call/:id', () => {
       base: `http://127.0.0.1:${addr.port}`,
       wsBase: `ws://127.0.0.1:${addr.port}`,
       state,
+      diagnostics,
       aaiInstances,
       endCall: wsApi.endCall,
     };

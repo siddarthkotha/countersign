@@ -4,6 +4,7 @@ import { newCapsState, canStartSession, startSession, type CapsState } from './c
 import { defaultCorpusDir, listCorpusFiles } from './replay.js';
 import type { StaticServer } from './static.js';
 import { isAllowedOrigin } from './origin.js';
+import { addClientEvents, getBundle, MAX_CLIENT_BODY_BYTES, type DiagnosticsState } from './diagnostics.js';
 
 export interface HttpDeps {
   fetchImpl: typeof fetch;
@@ -21,6 +22,10 @@ export interface HttpDeps {
    *  surface, and `available: false` (no build present) makes `handle` always decline, so
    *  omitting it changes nothing about existing behaviour. */
   staticServer?: StaticServer;
+  /** Flight recorder (founder's ask, 2026-09-02): the SAME in-memory DiagnosticsState
+   *  ws/browser.ts writes into (shared the way `state`/CapsState already is between the two
+   *  files) -- this is what GET/POST .../diagnostics below actually read and write. */
+  diagnostics: DiagnosticsState;
 }
 
 // Origin fix round 1 (task-origin-review.md): `selfOrigin`/`isAllowedOrigin` used to live
@@ -44,6 +49,30 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
+/** Reads a request body up to `maxBytes`. Once the stream would exceed it, stops buffering
+ *  further chunks (bounding memory to roughly `maxBytes`) but keeps DRAINING the stream to
+ *  its actual end rather than destroying it -- destroying `req` mid-body tears down the
+ *  underlying socket this response would otherwise be written back on (`req`/`res` share one
+ *  connection in `node:http`), which turns an intended 413 into a raw connection reset on
+ *  the client. Resolves `{ ok: false }` once the real end of the oversize body is reached. */
+function readBodyLimited(req: IncomingMessage, maxBytes: number): Promise<{ ok: true; body: string } | { ok: false }> {
+  return new Promise((resolve) => {
+    let size = 0;
+    let oversize = false;
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        oversize = true;
+        return; // keep draining -- just stop retaining bytes past the limit
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(oversize ? { ok: false } : { ok: true, body: Buffer.concat(chunks).toString('utf-8') }));
+    req.on('error', () => resolve({ ok: false }));
+  });
+}
+
 function statusForDecisionReason(reason: 'kill_switch' | 'session_in_use' | 'daily_cap' | 'mint_rate' | 'no_api_key'): number {
   return reason === 'kill_switch' || reason === 'no_api_key' ? 503 : 429;
 }
@@ -54,6 +83,10 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
   const state = newCapsState();
 
   const server = createServer((req, res) => {
+    void handleRequest(req, res);
+  });
+
+  async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     applyCors(req, res, cfg);
 
     if (req.method === 'OPTIONS') {
@@ -122,6 +155,47 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
       return;
     }
 
+    // Flight recorder (founder's ask, 2026-09-02): the diagnostics bundle for one call
+    // session. The id is a UUID minted the same way `/api/session/start` mints one (unguess-
+    // able) -- same 404-for-bad-shape check as `/reset`/`/end` above, no separate auth in v1
+    // (documented: the data is synthetic by law, and unguessable-UUID is the only gate).
+    const diagMatch = /^\/api\/session\/([^/]+)\/diagnostics$/.exec(path);
+    if (diagMatch && (req.method === 'GET' || req.method === 'POST')) {
+      const id = diagMatch[1] as string;
+      if (!UUID_RE.test(id)) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+
+      if (req.method === 'GET') {
+        const bundle = getBundle(deps.diagnostics, id);
+        if (!bundle) {
+          sendJson(res, 404, { error: 'not_found' });
+          return;
+        }
+        sendJson(res, 200, bundle);
+        return;
+      }
+
+      // POST: the browser's own client_events (its audio/worker-side leg of the same call --
+      // the server can't see that leg directly). Body-size cap (413) is enforced by
+      // `readBodyLimited` BEFORE any JSON parsing; shape/count validation (400) is
+      // `addClientEvents`'s job (diagnostics.ts) -- same division as everywhere else in this
+      // file (transport-level checks here, payload validation in the owning module).
+      const bodyResult = await readBodyLimited(req, MAX_CLIENT_BODY_BYTES);
+      if (!bodyResult.ok) {
+        sendJson(res, 413, { error: 'payload_too_large' });
+        return;
+      }
+      const result = addClientEvents(deps.diagnostics, id, bodyResult.body);
+      if (!result.ok) {
+        sendJson(res, result.reason === 'not_found' ? 404 : 400, { error: result.reason });
+        return;
+      }
+      sendJson(res, 200, { ok: true, accepted: result.accepted });
+      return;
+    }
+
     // Task D1: static SPA fallback -- only reached once every API/WS route above has
     // declined this request. `staticServer.handle` itself refuses /api and /ws paths, so an
     // unmatched API route still gets the JSON 404 below, never an HTML page. HEAD is allowed
@@ -133,7 +207,7 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
     }
 
     sendJson(res, 404, { error: 'not found' });
-  });
+  }
 
   return { server, state };
 }

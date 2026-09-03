@@ -32,6 +32,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { MERIDIAN, mockToolResult } from '@countersign/engine';
 import type { BrowserEvent, CallContext, SeedConfig, ServerEvent } from '@countersign/engine';
 import { endSession, touch, type CapsState } from '../caps.js';
+import { createBundle, endBundle, recordServerEvent, summarizeBundle, type DiagnosticsState } from '../diagnostics.js';
 import type { AaiSocket } from '../aai/types.js';
 import type { ServerConfig } from '../config.js';
 import { CallSession } from '../call/session.js';
@@ -69,6 +70,12 @@ export interface BrowserWsDeps {
   /** Creates the AAI connection for one call session. index.ts supplies a `FakeAaiSocket`
    *  factory under `COUNTERSIGN_FAKE_AAI=1`; the real adapter (S3) plugs in here too. */
   createAai: (session_id: string) => AaiSocket;
+  /** Flight recorder (founder's ask, 2026-09-02): shared with http.ts (its GET/POST
+   *  .../diagnostics routes) so both sides read/write the SAME in-memory bundles, the same
+   *  way `caps` (CapsState) is shared today. A fresh bundle is created here, on the first
+   *  `/ws/call/:id` attach for a session (never on a reattach) -- diagnostics.ts's own
+   *  `createBundle` doc explains the ring-eviction/readability contract. */
+  diagnostics: DiagnosticsState;
   seed?: SeedConfig;
   corpusDir?: string;
   /** How to build the (currently fixed, simulated) telephony context for a call. Scenario
@@ -182,6 +189,15 @@ function makeEntrySink(
       }
       activeCalls.delete(session_id);
       endSession(deps.caps, session_id);
+      // Flight recorder: close out this call's DiagnosticBundle and print the ONE NDJSON
+      // summary line Render's log stream carries per session end (founder's ask: "data that
+      // keeps reporting back"). `endBundle` returns null only if this session_id was never
+      // tracked (or the ring already evicted it) -- both harmless no-ops here.
+      const bundle = endBundle(deps.diagnostics, session_id, deps.now(), e.reason);
+      if (bundle) {
+        // eslint-disable-next-line no-console -- this line IS the feature: Render's log tail.
+        console.log(JSON.stringify({ countersign_diag: summarizeBundle(bundle) }));
+      }
     }
     entry.deliver(e);
   };
@@ -285,13 +301,25 @@ function handleCallSocket(
     return;
   }
 
+  // Flight recorder: this is the FIRST `/ws/call/:id` attach for this session (a reattach
+  // returned above, via `reattach`) -- "from the moment I start the script" starts the
+  // bundle's clock right here, before the AAI connect even begins.
+  createBundle(deps.diagnostics, session_id, deps.now());
+  recordServerEvent(deps.diagnostics, session_id, deps.now(), 'link', { leg: 'browser', state: 'attach' });
+
   const seed = deps.seed ?? MERIDIAN;
   const call = (deps.buildCallContext ?? defaultCallContext)(session_id);
 
   let aai: AaiSocket;
+  recordServerEvent(deps.diagnostics, session_id, deps.now(), 'aai_connect_start', {});
   try {
     aai = deps.createAai(session_id);
-  } catch {
+  } catch (err) {
+    recordServerEvent(deps.diagnostics, session_id, deps.now(), 'error', {
+      message: err instanceof Error ? err.message : String(err),
+      where: 'createAai',
+    });
+    endBundle(deps.diagnostics, session_id, deps.now(), 'aai_unavailable');
     ws.close(4500, 'aai unavailable');
     return;
   }
@@ -321,6 +349,10 @@ function handleCallSocket(
     // just a browser message -- a caller who's talking but whose browser happens to be
     // between keepalive frames must never look idle.
     onActivity: () => touch(deps.caps, session_id, deps.now()),
+    // Flight recorder: every server_event CallSession itself records (evaluate, tool.call,
+    // terminal actions, AAI session.ready/error/ended, link changes, caught errors) lands in
+    // THIS session's bundle -- created just above, before the AAI connect even started.
+    onDiagnostic: (kind, detail) => recordServerEvent(deps.diagnostics, session_id, deps.now(), kind, detail),
   });
   entry.session = session;
   activeCalls.set(session_id, entry);
@@ -384,6 +416,14 @@ export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): Brow
     const entry = activeCalls.get(session_id);
     if (entry) {
       const ws = entry.ws;
+      // Flight recorder: a distinct, easy-to-grep `cap` server_event for the two abuse-cap
+      // paths (BRIEF's cap timer above, and index.ts's idle reaper) BEFORE the generic
+      // `session_ended` diag CallSession.end() itself records -- "caps events (cap reached,
+      // idle timeout)" per the founder's ask, not just inferable from end_reason after the
+      // fact.
+      if (reason === 'cap_reached' || reason === 'idle_timeout') {
+        recordServerEvent(deps.diagnostics, session_id, deps.now(), 'cap', { event: reason });
+      }
       // `entry.session.end(reason)` emits `ended`, which `makeEntrySink` already routes into
       // clearing both timers, `activeCalls.delete`, and `endSession` -- idempotent, so a
       // call that already ended between the caller's check and this call is a harmless no-op.

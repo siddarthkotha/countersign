@@ -49,6 +49,11 @@ export interface CallSessionOpts {
    *  previously only a browser-side message reset it, so a caller who stayed on the line but
    *  wasn't the one generating browser traffic could still be idle-reaped mid-conversation. */
   onActivity?: () => void;
+  /** Flight recorder (founder's ask, 2026-09-02): append one server_event to this call's
+   *  DiagnosticBundle (diagnostics.ts, via ws/browser.ts). Optional -- a caller that doesn't
+   *  wire diagnostics (most existing tests) sees no behavior change at all; `kind`/`detail`
+   *  are diagnostics vocabulary only, never Evidence (LAW 4) and never a verdict (LAW 3). */
+  onDiagnostic?: (kind: string, detail: unknown) => void;
 }
 
 interface PendingToolResult {
@@ -132,6 +137,13 @@ export class CallSession {
   end(reason: string): void {
     if (this.ended) return;
     this.ended = true;
+    // Flight recorder: whatever this AAI adapter never modeled (mapServerEvent's `default`
+    // branch, aai/session.ts) surfaced once here, at the one point every ended call passes
+    // through -- `stats()` is optional (FakeAaiSocket has none, since tests only ever emit
+    // shapes it knows), so this is a no-op for every fake-AAI call and every test.
+    const stats = this.opts.aai.stats?.();
+    if (stats) this.diag('aai_unknown_events', stats);
+    this.diag('session_ended', { reason });
     try {
       this.opts.aai.close();
     } catch {
@@ -153,6 +165,7 @@ export class CallSession {
       t_ms: this.nowT(),
       detail: `browser:${state}`,
     });
+    this.diag('link', { leg: 'browser', state });
   }
 
   /** Task R1: lets the transport layer (ws/browser.ts) tell an ended call apart from a call
@@ -179,6 +192,12 @@ export class CallSession {
     return `${this.opts.session_id}-tool-${this.toolCounter}`;
   }
 
+  /** Flight recorder: forwards one server_event to `opts.onDiagnostic`, if wired. Never
+   *  throws, never touches `logs`/`last` -- diagnostics is a side channel, not evidence. */
+  private diag(kind: string, detail: unknown): void {
+    this.opts.onDiagnostic?.(kind, detail);
+  }
+
   private buildEngineInput(): EngineInput {
     return {
       conversation: this.logs.conversation,
@@ -189,10 +208,25 @@ export class CallSession {
     };
   }
 
+  /** Flight recorder: every per-event handler below can throw (a malformed AAI event, a
+   *  bug in the engine, anything) -- this is the one place that can never let such a throw
+   *  escape uncaught (it's invoked synchronously from `aai.on`'s emit loop, which would
+   *  otherwise crash the process or the whole call). Caught, logged as an `error`
+   *  server_event with `where` naming the event type, then swallowed: the founder's ask was
+   *  "tell you where it went wrong", not "take the call down with it". */
   private handleAaiEvent(evt: AaiEvent): void {
     if (this.ended) return;
+    try {
+      this.dispatchAaiEvent(evt);
+    } catch (err) {
+      this.diag('error', { message: err instanceof Error ? err.message : String(err), where: `handleAaiEvent:${evt.type}` });
+    }
+  }
+
+  private dispatchAaiEvent(evt: AaiEvent): void {
     switch (evt.type) {
       case 'session.ready':
+        this.diag('aai_session_ready', { session_id: evt.session_id });
         break;
 
       case 'transcript.user':
@@ -237,6 +271,7 @@ export class CallSession {
         break;
 
       case 'session.error':
+        this.diag('aai_session_error', { code: evt.code, message: evt.message });
         this.end(`aai_error:${evt.code}`);
         return;
 
@@ -244,6 +279,7 @@ export class CallSession {
         // Round 3 (S3 re-review): the real adapter sets `reason: 'link_lost'` when its own
         // bounded resume-on-drop gives up; a genuine AssemblyAI-originated session.ended
         // never carries one, so this still falls back to the existing 'aai_ended' reason.
+        this.diag('aai_session_ended', { reason: evt.reason ?? 'aai_ended' });
         this.end(evt.reason ?? 'aai_ended');
         return;
 
@@ -264,6 +300,7 @@ export class CallSession {
           t_ms: this.nowT(),
           detail: `aai:${evt.state}:${evt.attempt}`,
         });
+        this.diag('link', { leg: 'aai', state: evt.state, attempt: evt.attempt });
         this.opts.onServerEvent({ type: 'link', state: evt.state, leg: 'aai' });
         break;
     }
@@ -297,11 +334,18 @@ export class CallSession {
   }
 
   private handleToolCall(evt: Extract<AaiEvent, { type: 'tool.call' }>): void {
+    // Flight recorder: wall-clock duration of this tool.call's handling (validation +
+    // dispatch to the mock backend) -- the mock backend is a synchronous pure function
+    // (LAW: no real integrations), so this is normally sub-millisecond; it's still recorded
+    // so a genuinely slow validation/repair step would show up.
+    const startedAt = performance.now();
+
     if (!isToolName(evt.name) || !(this.last?.allowed_tools.includes(evt.name) ?? false)) {
       const result = { error: 'not_allowed_in_state' };
       const args = { ...evt.arguments, ignored: true };
       this.logs.tools.push(toolLogEntryFromCall(evt, this.nowT(), args, result));
       this.pendingToolResults.push({ call_id: evt.call_id, result, is_error: true });
+      this.diag('tool_call', { name: evt.name, duration_ms: performance.now() - startedAt, status: 'not_allowed_in_state' });
       return;
     }
 
@@ -325,6 +369,7 @@ export class CallSession {
       const result = { error: 'invalid_arguments', rejected: validation.rejected };
       this.logs.tools.push(toolLogEntryFromCall(evt, this.nowT(), loggedArgs, result));
       this.pendingToolResults.push({ call_id: evt.call_id, result, is_error: true });
+      this.diag('tool_call', { name, duration_ms: performance.now() - startedAt, status: 'invalid_arguments' });
       return;
     }
 
@@ -334,6 +379,11 @@ export class CallSession {
     if (name === 'open_incident') this.mockCtx.incident_index += 1;
     this.logs.tools.push(toolLogEntryFromCall(evt, this.nowT(), finalLoggedArgs, result));
     this.pendingToolResults.push({ call_id: evt.call_id, result, is_error: Boolean(result.error) });
+    this.diag('tool_call', {
+      name,
+      duration_ms: performance.now() - startedAt,
+      status: result.error ? 'error' : 'ok',
+    });
   }
 
   /** LAW/docs rule (aai-docs-check §e): "Send tool.result when reply.done is the latest
@@ -397,6 +447,10 @@ export class CallSession {
 
   private applyEvaluate(): void {
     const output = evaluate(this.buildEngineInput());
+    // Flight recorder: every engine evaluate, compact (verdict + state only -- never the
+    // full EngineOutput, which would duplicate Evidence/reasons into a channel that is
+    // explicitly NOT evidence).
+    this.diag('evaluate', { verdict: output.verdict, state: output.state });
     const goalKey = JSON.stringify(output.goal);
     if (goalKey !== this.previousGoalKey) {
       this.previousGoalKey = goalKey;
@@ -438,6 +492,7 @@ export class CallSession {
 
     this.terminalActionsRun = true;
     const verdictBeforeActions = output.verdict;
+    this.diag('terminal_action', { verdict: verdictBeforeActions, actions: output.required_actions });
 
     runOwedTerminalActions(
       this.logs.tools,
@@ -452,6 +507,7 @@ export class CallSession {
     this.applyEvaluate();
     const after = this.last;
     this.countersignRecomputed = after ? after.verdict === verdictBeforeActions : false;
+    this.diag('countersign', { recomputed: this.countersignRecomputed, verdict: after?.verdict ?? null });
 
     if (after) {
       this.pendingExport = buildEvidenceExport(this.opts.session_id, after, new Date(this.opts.now()).toISOString())

@@ -6,6 +6,7 @@ import { loadConfig } from './config.js';
 import { createHttpServer } from './http.js';
 import { createStaticServer } from './static.js';
 import { reapIdle } from './caps.js';
+import { newDiagnosticsState } from './diagnostics.js';
 import { attachWebSocketServer } from './ws/browser.js';
 import { FakeAaiSocket } from './aai/fake.js';
 import type { AaiEvent, AaiSocket } from './aai/types.js';
@@ -54,6 +55,11 @@ const cfg = useFakeAai && !loadedCfg.assemblyai_api_key
 // `server.listen` until after both are wired).
 let endCallImpl: ((session_id: string, reason: string) => boolean) | null = null;
 
+// Flight recorder (founder's ask, 2026-09-02): ONE DiagnosticsState for the process's whole
+// life, shared between http.ts's GET/POST .../diagnostics routes and ws/browser.ts's own
+// writes into it -- same pattern as `state` (CapsState) just below.
+const diagnostics = newDiagnosticsState();
+
 const { server, state } = createHttpServer(cfg, {
   fetchImpl: fetch,
   now: () => Date.now(),
@@ -63,6 +69,7 @@ const { server, state } = createHttpServer(cfg, {
   // false (so this never activates) unless `npm run build:web` has actually produced
   // packages/web/dist, which keeps plain `dev:server` (no build) working exactly as before.
   staticServer: createStaticServer(webDistDir),
+  diagnostics,
 });
 
 // COUNTERSIGN_FAKE_AAI=1 (founder ruling, Task S2): every call session gets a scripted
@@ -173,6 +180,7 @@ const { endCall } = attachWebSocketServer(server, {
   // Origin fix round 1: the WS upgrade handler's own origin gate (ws/browser.ts) needs the
   // same allowlist + proxy-trust bit http.ts's CORS already uses -- same `cfg`, not a copy.
   cfg,
+  diagnostics,
   // Task R1 fix round 1: without this, a dropped browser socket always got the deps-level
   // default (ws/browser.ts's DEFAULT_BROWSER_GRACE_MS) regardless of what an operator set
   // for COUNTERSIGN_BROWSER_GRACE_MS -- the env var parsed into `cfg` but was never actually
