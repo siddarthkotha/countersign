@@ -13,6 +13,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import { request as httpRequest } from 'node:http';
 import WebSocket from 'ws';
 import { MERIDIAN, mockToolResult } from '@countersign/engine';
 import type { CallContext, MockCtx, SeedConfig, ServerEvent, ToolName } from '@countersign/engine';
@@ -23,9 +24,15 @@ import {
   endBundle,
   getBundle,
   addClientEvents,
+  checkClientPostRate,
   summarizeBundle,
   MAX_CLIENT_EVENTS_PER_REQUEST,
   MAX_CLIENT_BODY_BYTES,
+  MAX_CLIENT_EVENTS_PER_SESSION,
+  MAX_CLIENT_BYTES_PER_SESSION,
+  MAX_CLIENT_EVENT_KIND_LENGTH,
+  MAX_CLIENT_EVENT_DETAIL_BYTES,
+  MAX_CLIENT_POSTS_PER_MINUTE,
 } from '../src/diagnostics.js';
 import { CallSession } from '../src/call/session.js';
 import { FakeAaiSocket } from '../src/aai/fake.js';
@@ -196,6 +203,106 @@ describe('diagnostics.ts — pure functions', () => {
       const events = Array.from({ length: MAX_CLIENT_EVENTS_PER_REQUEST + 1 }, (_, i) => ({ t_ms: i, kind: 'x' }));
       expect(addClientEvents(state, 'sess-1', JSON.stringify({ events }))).toEqual({ ok: false, reason: 'invalid' });
     });
+
+    // Fix round 1 (IMPORTANT review finding): per-event caps -- a single adversarial event
+    // (an oversize `detail`, or a `kind` string used as a dumping ground) must not itself be
+    // able to dominate the per-session cumulative budget checked below.
+    it('rejects an event whose kind exceeds MAX_CLIENT_EVENT_KIND_LENGTH', () => {
+      const { state } = setup();
+      const longKind = 'x'.repeat(MAX_CLIENT_EVENT_KIND_LENGTH + 1);
+      expect(addClientEvents(state, 'sess-1', JSON.stringify({ events: [{ t_ms: 1, kind: longKind }] }))).toEqual({
+        ok: false,
+        reason: 'invalid',
+      });
+      // Exactly at the limit is still fine.
+      const exactKind = 'x'.repeat(MAX_CLIENT_EVENT_KIND_LENGTH);
+      expect(addClientEvents(state, 'sess-1', JSON.stringify({ events: [{ t_ms: 1, kind: exactKind }] }))).toEqual({
+        ok: true,
+        accepted: 1,
+      });
+    });
+
+    it('rejects an event whose detail exceeds MAX_CLIENT_EVENT_DETAIL_BYTES when serialized', () => {
+      const { state } = setup();
+      const bigDetail = { blob: 'x'.repeat(MAX_CLIENT_EVENT_DETAIL_BYTES) }; // the wrapper alone pushes it over 1 KB
+      expect(addClientEvents(state, 'sess-1', JSON.stringify({ events: [{ t_ms: 1, kind: 'x', detail: bigDetail }] }))).toEqual({
+        ok: false,
+        reason: 'invalid',
+      });
+    });
+
+    // Note: `addClientEvents` also guards `JSON.stringify(detail)` in a try/catch (see its
+    // own comment) as defensive-in-depth, but there's no way to reach that branch through the
+    // public API -- `detail` only ever exists after `JSON.parse(rawBody)`, which by
+    // construction can never produce a circular reference or a throwing `toJSON` (JSON simply
+    // cannot represent either). Not tested here for exactly that reason: it isn't reachable.
+
+    // Fix round 1 (IMPORTANT review finding): the SESSION-WIDE cumulative budget -- many
+    // individually-valid POSTs must not be able to grow one bundle without bound. Whole-
+    // request rejection (never partial truncation) once either budget would be exceeded.
+    it('rejects a request that would push the session over MAX_CLIENT_EVENTS_PER_SESSION, without partially ingesting it', () => {
+      const { state } = setup();
+      // Fill to exactly the session cap across several requests (each under the per-request
+      // cap), then prove the next single valid event is rejected whole, not truncated in.
+      const perRequest = 100;
+      for (let i = 0; i < MAX_CLIENT_EVENTS_PER_SESSION / perRequest; i++) {
+        const events = Array.from({ length: perRequest }, (_, j) => ({ t_ms: i * perRequest + j, kind: 'x' }));
+        expect(addClientEvents(state, 'sess-1', JSON.stringify({ events }))).toEqual({ ok: true, accepted: perRequest });
+      }
+      expect(getBundle(state, 'sess-1')?.client_events).toHaveLength(MAX_CLIENT_EVENTS_PER_SESSION);
+
+      const result = addClientEvents(state, 'sess-1', JSON.stringify({ events: [{ t_ms: 999999, kind: 'one-more' }] }));
+      expect(result).toEqual({ ok: false, reason: 'session_full' });
+      // Rejected whole -- the bundle did not grow at all from the rejected request.
+      expect(getBundle(state, 'sess-1')?.client_events).toHaveLength(MAX_CLIENT_EVENTS_PER_SESSION);
+    });
+
+    it('rejects a request that would push the session over MAX_CLIENT_BYTES_PER_SESSION', () => {
+      const { state } = setup();
+      // One near-max-size event per request, well under the event-COUNT cap, until the
+      // cumulative BYTE budget itself is what blocks the next one.
+      const nearMaxDetail = { blob: 'x'.repeat(MAX_CLIENT_EVENT_DETAIL_BYTES - 32) };
+      let lastResult: ReturnType<typeof addClientEvents> = { ok: true, accepted: 0 };
+      let requests = 0;
+      while (lastResult.ok && requests < MAX_CLIENT_EVENTS_PER_SESSION) {
+        lastResult = addClientEvents(state, 'sess-1', JSON.stringify({ events: [{ t_ms: requests, kind: 'x', detail: nearMaxDetail }] }));
+        requests += 1;
+      }
+      expect(lastResult).toEqual({ ok: false, reason: 'session_full' });
+      // Failed on bytes, well before ever reaching the (much higher, in this scenario)
+      // event-count cap.
+      expect(requests).toBeLessThan(MAX_CLIENT_EVENTS_PER_SESSION);
+      expect(getBundle(state, 'sess-1')!.client_bytes).toBeLessThanOrEqual(MAX_CLIENT_BYTES_PER_SESSION);
+    });
+  });
+
+  describe('checkClientPostRate', () => {
+    it('allows up to MAX_CLIENT_POSTS_PER_MINUTE, then rate-limits further posts in the same window', () => {
+      const state = newDiagnosticsState();
+      createBundle(state, 'sess-1', 0);
+      let now = 0;
+      for (let i = 0; i < MAX_CLIENT_POSTS_PER_MINUTE; i++) {
+        expect(checkClientPostRate(state, 'sess-1', now)).toBe('ok');
+        now += 100;
+      }
+      expect(checkClientPostRate(state, 'sess-1', now)).toBe('rate_limited');
+    });
+
+    it('the window slides -- a post older than 60s ages out and frees up a slot', () => {
+      const state = newDiagnosticsState();
+      createBundle(state, 'sess-1', 0);
+      for (let i = 0; i < MAX_CLIENT_POSTS_PER_MINUTE; i++) {
+        expect(checkClientPostRate(state, 'sess-1', i)).toBe('ok');
+      }
+      expect(checkClientPostRate(state, 'sess-1', 100)).toBe('rate_limited');
+      // 61s after the FIRST post -- it's aged out of the 60s window, freeing one slot.
+      expect(checkClientPostRate(state, 'sess-1', 61_000)).toBe('ok');
+    });
+
+    it('returns not_found for an unknown session id (never counts against any window)', () => {
+      const state = newDiagnosticsState();
+      expect(checkClientPostRate(state, 'nope', 0)).toBe('not_found');
+    });
   });
 
   it('summarizeBundle counts kinds, surfaces the last evaluate verdict, and counts errors', () => {
@@ -313,6 +420,22 @@ describe('CallSession — onDiagnostic', () => {
     // The call itself is still alive -- a caught internal error is diagnostics, not a
     // terminal condition.
     expect(session.hasEnded()).toBe(false);
+
+    // Fix round 1 (IMPORTANT review finding): a throw partway through `reply.done`'s own
+    // handling used to skip that event's trailing `tick()` entirely -- the engine never
+    // re-evaluated, and the call just sat on stale state. `recoverFromDispatchError` now
+    // runs `tick()` from its catch block, so the LAST diag event recorded for this turn is a
+    // fresh `evaluate` (from the caught event's own recovery), not the `error` itself sitting
+    // unfollowed.
+    const lastEvent = events.at(-1)!;
+    expect(lastEvent.kind).toBe('evaluate');
+
+    // And the call still reaches a real terminal state afterward -- a caught mid-dispatch
+    // error must never leave it stuck relying on cap/idle to force it closed; `end()` still
+    // works exactly as it would have with no error at all.
+    session.end('cap_reached');
+    expect(session.hasEnded()).toBe(true);
+    expect(events.some((e) => e.kind === 'session_ended' && (e.detail as { reason: string }).reason === 'cap_reached')).toBe(true);
   });
 
   it('records session_ended (with reason) and aai_unknown_events (when the socket reports stats) on end', () => {
@@ -367,6 +490,100 @@ describe('CallSession — onDiagnostic', () => {
     const errorEvents = events.filter((e) => e.kind === 'error');
     expect(errorEvents).toHaveLength(1);
     expect((errorEvents[0]!.detail as { message: string }).message).toBe('mock backend exploded');
+
+    // Fix round 1 (IMPORTANT review finding): a throw inside `handleToolCall` (here, the
+    // mock backend itself) used to leave NO trace in `logs.tools` -- the `ToolLogEntry` push
+    // only happens AFTER a successful mock call, so a throwing mock meant AAI would wait
+    // forever for a `tool.result` that was never queued, and the engine's own I4 rule
+    // (rules.ts: a tool result carrying an error forces ESCALATE/NO_ACTION, never STAGE)
+    // never got a failed result to see. `recoverFromDispatchError` now backfills one.
+    const backfilled = session.logs.tools.find((t) => t.id === 't1');
+    expect(backfilled?.name).toBe('get_request_history');
+    expect(backfilled?.result?.error).toBe('internal_error');
+    expect(session.logs.tools.filter((t) => t.id === 't1')).toHaveLength(1); // no double-log
+
+    // ...and it's queued to actually reach AAI, not silently dropped -- the very next
+    // reply.done flushes it, same as any other tool.result would be.
+    aai.emit({ type: 'reply.started', reply_id: 'tools-1' });
+    aai.emit({ type: 'reply.done', reply_id: 'tools-1', status: 'completed' });
+    const sentResult = aai.sent.find((m) => (m as { type?: string; call_id?: string }).call_id === 't1') as
+      | { type: string; is_error: boolean }
+      | undefined;
+    expect(sentResult?.type).toBe('tool.result');
+    expect(sentResult?.is_error).toBe(true);
+
+    // The engine itself now sees a failed tool result -- I4 forces ESCALATE/NO_ACTION, and
+    // LAW 2 (the ceiling is STAGE, but never reached via a failure path) means it must never
+    // be STAGE.
+    expect(session.last?.verdict).not.toBe('STAGE');
+    expect(['ESCALATE', 'NO_ACTION']).toContain(session.last?.verdict);
+  });
+
+  it('a caught mid-dispatch error still lets tick() re-run for THAT event, not just the next one', () => {
+    // Narrower than the reply.done test above: proves the fix's core claim directly on
+    // `tool.call` (the other throwing path) -- the diag sequence for the SAME synchronous
+    // `emit()` call is [error, evaluate, ...], never just [error] followed by silence until
+    // some unrelated later event. Only `check_sso_context` throws (the other two evidence
+    // tools aren't called in this test), so the verdict stays short of terminal and
+    // `runTerminalActionsIfNeeded` has nothing to do -- keeps this test isolated to the
+    // `tool.call`-throw recovery path, not the (separately tested below) nested-failure case.
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const events: { kind: string; detail: unknown }[] = [];
+    const throwingMock: typeof mockToolResult = (name, args, seed, ctx) => {
+      if (name === 'check_sso_context') throw new Error('boom');
+      return mockToolResult(name, args, seed, ctx);
+    };
+    const session = newSession(clock, aai, events, throwingMock);
+
+    session.start();
+    driveScenarioBIntoEvidence(session, aai, clock);
+    const evaluateCountBefore = events.filter((e) => e.kind === 'evaluate').length;
+
+    clock.now = 60000;
+    aai.emit({ type: 'tool.call', call_id: 't1', name: 'check_sso_context', arguments: { identity_id: session.last?.claimed_identity_id } });
+
+    const evaluateCountAfter = events.filter((e) => e.kind === 'evaluate').length;
+    expect(evaluateCountAfter).toBeGreaterThan(evaluateCountBefore); // tick() ran for this event
+    // ...and kept running: the backfilled failed result makes this verdict terminal (I4), so
+    // recovery's `tick()` goes all the way through `runTerminalActionsIfNeeded` too -- the
+    // last diag event is neither the `error` itself nor silence, but real forward progress.
+    expect(events.at(-1)?.kind).not.toBe('error');
+  });
+
+  it('survives even a NESTED failure -- the recovery tick() itself throwing (e.g. every tool including a terminal action fails) -- without crashing the call', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const events: { kind: string; detail: unknown }[] = [];
+    // Throws for every tool, including whatever `runTerminalActionsIfNeeded` tries once the
+    // backfilled failed result (from the FIRST throw) pushes the verdict terminal -- the
+    // recovery path's own `tick()` call throws AGAIN, from inside the catch block that's
+    // already handling the first throw. Must still not crash.
+    const alwaysThrowingMock: typeof mockToolResult = () => {
+      throw new Error('every tool is broken');
+    };
+    const session = newSession(clock, aai, events, alwaysThrowingMock);
+
+    session.start();
+    driveScenarioBIntoEvidence(session, aai, clock);
+
+    clock.now = 60000;
+    expect(() =>
+      aai.emit({ type: 'tool.call', call_id: 't1', name: 'check_sso_context', arguments: { identity_id: session.last?.claimed_identity_id } }),
+    ).not.toThrow();
+
+    // Two distinct caught faults recorded: the original tool.call throw, and the nested
+    // failure from recovery's own tick() -- both diagnosed, neither one crashed the call.
+    const errorEvents = events.filter((e) => e.kind === 'error');
+    expect(errorEvents.length).toBeGreaterThanOrEqual(2);
+    expect(errorEvents.some((e) => (e.detail as { where: string }).where === 'handleAaiEvent:tool.call')).toBe(true);
+    expect(errorEvents.some((e) => (e.detail as { where: string }).where === 'recoverFromDispatchError:tick')).toBe(true);
+    expect(session.hasEnded()).toBe(false);
+
+    // The call is still fully alive afterward -- a nested nested failure doesn't leave it in
+    // some half-constructed state that a normal end() can't close out.
+    expect(() => session.end('caller_ended')).not.toThrow();
+    expect(session.hasEnded()).toBe(true);
   });
 });
 
@@ -398,7 +615,7 @@ describe('GET/POST /api/session/:id/diagnostics', () => {
     for (const close of closers.splice(0)) await close();
   });
 
-  async function start(): Promise<{
+  async function start(opts: { diagnostics_post_timeout_ms?: number } = {}): Promise<{
     base: string;
     wsBase: string;
     state: CapsState;
@@ -416,6 +633,7 @@ describe('GET/POST /api/session/:id/diagnostics', () => {
       randomId: () => ids[counter++] ?? `id-${counter}`,
       endCall: (id, reason) => wsApi.endCall(id, reason),
       diagnostics,
+      ...(opts.diagnostics_post_timeout_ms !== undefined ? { diagnostics_post_timeout_ms: opts.diagnostics_post_timeout_ms } : {}),
     });
 
     const wsApi = attachWebSocketServer(server, {
@@ -549,8 +767,12 @@ describe('GET/POST /api/session/:id/diagnostics', () => {
    *  but still need a real bundle behind the id for those checks to be reachable at all
    *  (400/413 both run before or independent of the not_found check, but a clean setup that
    *  mirrors how the route is actually used beats relying on check ordering). */
-  async function startAndAttach(): Promise<{ base: string; session_id: string; ws: WebSocket }> {
-    const { base, wsBase } = await start();
+  async function startAndAttach(opts: { diagnostics_post_timeout_ms?: number } = {}): Promise<{
+    base: string;
+    session_id: string;
+    ws: WebSocket;
+  }> {
+    const { base, wsBase } = await start(opts);
     const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
     const { session_id, ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
     const ws = new WebSocket(`${wsBase}${ws_path}`, { origin: selfOriginFor(wsBase) });
@@ -610,5 +832,99 @@ describe('GET/POST /api/session/:id/diagnostics', () => {
       body: JSON.stringify({ events: [{ t_ms: 1, kind: 'x' }] }),
     });
     expect(res.status).toBe(404);
+  });
+
+  // Fix round 1 (IMPORTANT review finding): per-event size caps, end to end over real HTTP.
+  it('POST 400s a single event whose kind or detail exceeds the per-event cap', async () => {
+    const { base, session_id, ws } = await startAndAttach();
+
+    const longKind = await fetch(`${base}/api/session/${session_id}/diagnostics`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: [{ t_ms: 1, kind: 'x'.repeat(65) }] }),
+    });
+    expect(longKind.status).toBe(400);
+
+    const bigDetail = await fetch(`${base}/api/session/${session_id}/diagnostics`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: [{ t_ms: 1, kind: 'x', detail: { blob: 'x'.repeat(2000) } }] }),
+    });
+    expect(bigDetail.status).toBe(400);
+    ws.close();
+  });
+
+  // Fix round 1 (IMPORTANT review finding): the SESSION-WIDE cumulative cap, end to end --
+  // many individually-valid POSTs adding up must eventually 413, with a JSON reason, rather
+  // than growing the bundle without bound.
+  it('POST 413s once the session-wide cumulative event/byte budget is exhausted, across multiple POSTs', async () => {
+    const { base, session_id, ws } = await startAndAttach();
+
+    // One request, right at the per-request/session cap (500 == 500) -- accepted whole.
+    const fill = await fetch(`${base}/api/session/${session_id}/diagnostics`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: Array.from({ length: MAX_CLIENT_EVENTS_PER_REQUEST }, (_, i) => ({ t_ms: i, kind: 'x' })) }),
+    });
+    expect(fill.status).toBe(200);
+
+    // The next POST -- individually well-formed, a single tiny event -- is rejected whole
+    // because the SESSION is now full, with a JSON body naming why.
+    const overflow = await fetch(`${base}/api/session/${session_id}/diagnostics`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: [{ t_ms: 999, kind: 'one-more' }] }),
+    });
+    expect(overflow.status).toBe(413);
+    const overflowBody = (await overflow.json()) as { error: string };
+    expect(overflowBody.error).toBe('session_full');
+    ws.close();
+  });
+
+  // Fix round 1 (IMPORTANT review finding): the per-session POST rate limit, end to end.
+  it('POST 429s once MAX_CLIENT_POSTS_PER_MINUTE is exceeded for one session', async () => {
+    const { base, session_id, ws } = await startAndAttach();
+
+    const post = () =>
+      fetch(`${base}/api/session/${session_id}/diagnostics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events: [{ t_ms: 1, kind: 'x' }] }),
+      });
+
+    for (let i = 0; i < MAX_CLIENT_POSTS_PER_MINUTE; i++) {
+      const res = await post();
+      expect(res.status).toBe(200);
+    }
+    const limited = await post();
+    expect(limited.status).toBe(429);
+    const limitedBody = (await limited.json()) as { error: string };
+    expect(limitedBody.error).toBe('rate_limited');
+    ws.close();
+  });
+
+  // Fix round 1 (MINOR review finding): the explicit read-body timeout, end to end -- a body
+  // that trickles in below the byte cap but never actually finishes must not hang the
+  // request forever; a short configured timeout (this test overrides the 10s default) means
+  // the server gives up and answers 408 instead.
+  it('POST 408s a body that never finishes arriving, past the configured timeout', async () => {
+    const { base, session_id, ws } = await startAndAttach({ diagnostics_post_timeout_ms: 100 });
+
+    const url = new URL(`${base}/api/session/${session_id}/diagnostics`);
+    const clientReq = httpRequest(
+      { hostname: url.hostname, port: url.port, path: url.pathname, method: 'POST', headers: { 'Content-Type': 'application/json' } },
+    );
+    // Write a partial, syntactically-incomplete JSON body and never call `.end()` -- a
+    // slow/stalled client, not a malformed-but-complete one (that's the 400 test's job).
+    clientReq.write('{"events":[{"t_ms":1,"kind":"x"');
+
+    const res = await new Promise<{ statusCode: number | undefined }>((resolve, reject) => {
+      clientReq.once('response', (r) => resolve({ statusCode: r.statusCode }));
+      clientReq.once('error', reject);
+    });
+    expect(res.statusCode).toBe(408);
+
+    clientReq.destroy();
+    ws.close();
   });
 });

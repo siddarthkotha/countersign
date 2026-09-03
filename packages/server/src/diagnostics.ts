@@ -14,14 +14,33 @@
 // server logs by hand.
 
 const MAX_SERVER_EVENTS_PER_BUNDLE = 2000;
-const MAX_CLIENT_EVENTS_PER_BUNDLE = 2000;
 const MAX_BUNDLES = 50;
 
 /** A client POST's own caps (BRIEF abuse-cap discipline, same spirit as caps.ts): one
  *  request can add at most this many events, and the raw JSON body can be at most this many
- *  bytes -- both enforced in http.ts before this module ever sees the payload. */
+ *  bytes -- both enforced in http.ts (the raw byte cap) and this module (the shape/count
+ *  cap) before a payload is ever trusted. */
 export const MAX_CLIENT_EVENTS_PER_REQUEST = 500;
 export const MAX_CLIENT_BODY_BYTES = 64 * 1024;
+
+/** Fix round 1 (review finding, IMPORTANT): the per-REQUEST caps above bound one POST, but
+ *  said nothing about many small, individually-valid POSTs adding up over a session's life --
+ *  a client holding one valid id could otherwise grow one bundle to ~2000 events x ~64 KB
+ *  each, unbounded by anything except the (much larger) per-bundle event-count cap. These are
+ *  SESSION-WIDE, cumulative across every POST this session ever makes: once either is hit,
+ *  the next POST is rejected outright (413) rather than silently truncated. */
+export const MAX_CLIENT_EVENTS_PER_SESSION = 500;
+export const MAX_CLIENT_BYTES_PER_SESSION = 64 * 1024;
+/** Fix round 1: per-EVENT caps, so one adversarial event can't itself dominate the session
+ *  budget above -- `kind` is a short label, `detail` is meant for small structured facts
+ *  (a permission code, a device string), never a payload dump. */
+export const MAX_CLIENT_EVENT_KIND_LENGTH = 64;
+export const MAX_CLIENT_EVENT_DETAIL_BYTES = 1024;
+/** Fix round 1: a per-session sliding-window rate limit on the POST route itself (distinct
+ *  from the byte/count budgets above -- this bounds REQUEST FREQUENCY, not payload size), same
+ *  spirit as `caps.ts`'s `mint_rate_per_minute` gate on `/api/session/start`. */
+export const MAX_CLIENT_POSTS_PER_MINUTE = 10;
+const CLIENT_POST_RATE_WINDOW_MS = 60_000;
 
 export interface DiagnosticEvent {
   t_ms: number;
@@ -37,6 +56,17 @@ export interface DiagnosticBundle {
   deployed_commit: string | null;
   server_events: DiagnosticEvent[];
   client_events: DiagnosticEvent[];
+  /** Fix round 1: running total of `client_events` payload bytes ever accepted for this
+   *  session (cumulative across every POST, never decremented) -- what
+   *  `MAX_CLIENT_BYTES_PER_SESSION` is actually checked against. Not part of the public GET
+   *  response shape's documented contract, but harmless to expose (no secret, just a byte
+   *  count) so it isn't worth a separate internal-only type. */
+  client_bytes: number;
+  /** Fix round 1: epoch-ms timestamps of accepted (rate-limit-passing) POSTs to THIS
+   *  session's `.../diagnostics`, pruned to the last `CLIENT_POST_RATE_WINDOW_MS` on every
+   *  check -- the sliding window `checkClientPostRate` enforces
+   *  `MAX_CLIENT_POSTS_PER_MINUTE` against. */
+  client_post_times: number[];
 }
 
 export interface DiagnosticsState {
@@ -64,6 +94,8 @@ export function createBundle(state: DiagnosticsState, session_id: string, now: n
     deployed_commit: process.env.RENDER_GIT_COMMIT ?? null,
     server_events: [],
     client_events: [],
+    client_bytes: 0,
+    client_post_times: [],
   };
   // A restart of the same session id (should not happen -- ids are UUIDs -- but a bundle
   // already at that key is replaced outright, never merged silently) never double-counts
@@ -105,17 +137,48 @@ export function getBundle(state: DiagnosticsState, session_id: string): Diagnost
   return state.bundles.get(session_id) ?? null;
 }
 
+export type ClientPostRateResult = 'ok' | 'not_found' | 'rate_limited';
+
+/** Fix round 1: the per-session sliding-window POST rate limit -- call ONCE per POST,
+ *  before the body is even read (http.ts does this), so an attempted flood is rejected
+ *  before it costs any body-parsing work, not just before it's accepted into the bundle.
+ *  Pruning-then-checking-then-recording in one pass means only ACCEPTED posts occupy a slot
+ *  in the window -- a client that's currently rate-limited doesn't dig itself deeper by
+ *  retrying; the window just needs its oldest accepted post to age out. */
+export function checkClientPostRate(state: DiagnosticsState, session_id: string, now: number): ClientPostRateResult {
+  const bundle = state.bundles.get(session_id);
+  if (!bundle) return 'not_found';
+  const windowStart = now - CLIENT_POST_RATE_WINDOW_MS;
+  bundle.client_post_times = bundle.client_post_times.filter((t) => t > windowStart);
+  if (bundle.client_post_times.length >= MAX_CLIENT_POSTS_PER_MINUTE) return 'rate_limited';
+  bundle.client_post_times.push(now);
+  return 'ok';
+}
+
 export type AddClientEventsResult =
   | { ok: true; accepted: number }
-  | { ok: false; reason: 'not_found' | 'invalid' };
+  | { ok: false; reason: 'not_found' | 'invalid' | 'session_full' };
 
-/** Validates and appends the client's own POSTed events. Body-size (413) is enforced by the
- *  caller (http.ts, which knows the raw byte length before this ever runs) -- this function
- *  only validates SHAPE: `{ events: [{t_ms: number, kind: string, detail?: unknown}, ...] }`,
- *  at most `MAX_CLIENT_EVENTS_PER_REQUEST` entries, each with a finite numeric `t_ms` and a
- *  non-empty string `kind`. Any violation rejects the WHOLE request (no partial ingest) --
- *  a client reporting its own diagnostics can retry cleanly, and a malformed batch never
- *  silently drops just the bad half. */
+/** The serialized-byte size of one event as it would count against the session's cumulative
+ *  budget -- `detail`'s own JSON size (the field actually capped per-event) plus a small
+ *  fixed allowance for `kind`/`t_ms`/object overhead, so the tracked total stays a reasonable
+ *  proxy for what's actually retained in memory without having to re-serialize the whole
+ *  `client_events` array on every check. */
+function eventByteCost(kind: string, detailBytes: number): number {
+  return detailBytes + kind.length + 24;
+}
+
+/** Validates and appends the client's own POSTed events. Raw body-size (413) is enforced by
+ *  the caller (http.ts, which knows the byte length before this ever runs) -- this function
+ *  validates SHAPE (`{ events: [{t_ms: number, kind: string (<= 64 chars), detail?: unknown
+ *  (<= 1 KB serialized)}, ...] }`, at most `MAX_CLIENT_EVENTS_PER_REQUEST` entries in ONE
+ *  request) and the SESSION-WIDE cumulative budget (`MAX_CLIENT_EVENTS_PER_SESSION` events,
+ *  `MAX_CLIENT_BYTES_PER_SESSION` bytes, across every POST this session has ever made). Any
+ *  shape violation rejects the whole request as `'invalid'` (no partial ingest -- a client
+ *  reporting its own diagnostics can retry cleanly, and a malformed batch never silently
+ *  drops just the bad half); a request that's individually well-formed but would push the
+ *  session over either cumulative budget is rejected whole as `'session_full'` -- never
+ *  partially truncated into the bundle the way an earlier version of this function did. */
 export function addClientEvents(state: DiagnosticsState, session_id: string, rawBody: string): AddClientEventsResult {
   const bundle = state.bundles.get(session_id);
   if (!bundle) return { ok: false, reason: 'not_found' };
@@ -132,22 +195,34 @@ export function addClientEvents(state: DiagnosticsState, session_id: string, raw
     return { ok: false, reason: 'invalid' };
   }
 
-  const validated: DiagnosticEvent[] = [];
+  const validated: { event: DiagnosticEvent; bytes: number }[] = [];
   for (const raw of events) {
     if (typeof raw !== 'object' || raw === null) return { ok: false, reason: 'invalid' };
     const { t_ms, kind, detail } = raw as Record<string, unknown>;
     if (typeof t_ms !== 'number' || !Number.isFinite(t_ms)) return { ok: false, reason: 'invalid' };
-    if (typeof kind !== 'string' || kind.length === 0) return { ok: false, reason: 'invalid' };
-    validated.push({ t_ms, kind, detail: detail === undefined ? null : detail });
+    if (typeof kind !== 'string' || kind.length === 0 || kind.length > MAX_CLIENT_EVENT_KIND_LENGTH) {
+      return { ok: false, reason: 'invalid' };
+    }
+    const detailValue = detail === undefined ? null : detail;
+    let detailBytes: number;
+    try {
+      detailBytes = detailValue === null ? 0 : Buffer.byteLength(JSON.stringify(detailValue), 'utf-8');
+    } catch {
+      // Circular or otherwise unserializable `detail` -- reject rather than crash.
+      return { ok: false, reason: 'invalid' };
+    }
+    if (detailBytes > MAX_CLIENT_EVENT_DETAIL_BYTES) return { ok: false, reason: 'invalid' };
+    validated.push({ event: { t_ms, kind, detail: detailValue }, bytes: eventByteCost(kind, detailBytes) });
   }
 
-  let accepted = 0;
-  for (const v of validated) {
-    if (bundle.client_events.length >= MAX_CLIENT_EVENTS_PER_BUNDLE) break;
-    bundle.client_events.push(v);
-    accepted += 1;
-  }
-  return { ok: true, accepted };
+  const addedCount = validated.length;
+  const addedBytes = validated.reduce((sum, v) => sum + v.bytes, 0);
+  if (bundle.client_events.length + addedCount > MAX_CLIENT_EVENTS_PER_SESSION) return { ok: false, reason: 'session_full' };
+  if (bundle.client_bytes + addedBytes > MAX_CLIENT_BYTES_PER_SESSION) return { ok: false, reason: 'session_full' };
+
+  for (const v of validated) bundle.client_events.push(v.event);
+  bundle.client_bytes += addedBytes;
+  return { ok: true, accepted: addedCount };
 }
 
 /** The NDJSON `countersign_diag` summary line (index.ts's docs / Render's log stream carry

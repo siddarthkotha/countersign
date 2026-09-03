@@ -213,13 +213,77 @@ export class CallSession {
    *  escape uncaught (it's invoked synchronously from `aai.on`'s emit loop, which would
    *  otherwise crash the process or the whole call). Caught, logged as an `error`
    *  server_event with `where` naming the event type, then swallowed: the founder's ask was
-   *  "tell you where it went wrong", not "take the call down with it". */
+   *  "tell you where it went wrong", not "take the call down with it".
+   *
+   *  Fix round 1 (review finding, IMPORTANT): a throw partway through `dispatchAaiEvent`
+   *  used to exit it entirely -- skipping its trailing `tick()` (so the engine never
+   *  re-evaluated the event that just happened, and the call just sat on stale state until
+   *  the next unrelated AAI event or the cap/idle timer forced it closed) and, for a throw
+   *  during `reply.done` specifically, skipping `flushToolResults`/
+   *  `discardPendingToolResults` too (any `tool.result` already queued from an earlier
+   *  `tool.call` would never reach AAI on schedule). `recoverFromDispatchError` below runs
+   *  whatever the throw preempted, so a caught fault degrades gracefully instead of stalling
+   *  the call. No new `ServerEvent` kind is added to surface this to the browser -- none of
+   *  the existing kinds (`state`/`audio`/`flush`/`ended`/`link`) fit a generic internal
+   *  fault, and the protocol is out of this task's scope; `GET .../diagnostics` remains the
+   *  way to see it, same as before this fix. */
   private handleAaiEvent(evt: AaiEvent): void {
     if (this.ended) return;
     try {
       this.dispatchAaiEvent(evt);
     } catch (err) {
-      this.diag('error', { message: err instanceof Error ? err.message : String(err), where: `handleAaiEvent:${evt.type}` });
+      this.recoverFromDispatchError(evt, err);
+    }
+  }
+
+  private recoverFromDispatchError(evt: AaiEvent, err: unknown): void {
+    this.diag('error', { message: err instanceof Error ? err.message : String(err), where: `handleAaiEvent:${evt.type}` });
+
+    // If the throw happened while handling a `tool.call` (e.g. the mock backend itself threw,
+    // or a bug in validation), the `ToolLogEntry` may never have been logged and no
+    // `tool.result` was ever queued for `evt.call_id` -- AAI would then wait forever for a
+    // reply that's never coming, and the engine's own I4 rule (rules.ts: "any tool result
+    // carrying an error... makes the evaluation incomplete: ESCALATE/NO_ACTION, never STAGE")
+    // never gets a chance to fire, because there's no failed result for it to see. Backfill
+    // one now -- idempotent (only if this call_id truly never got logged), so a throw AFTER
+    // the entry was already pushed (e.g. inside `this.diag` itself, which can't actually
+    // throw, but defensively) never double-logs it.
+    if (evt.type === 'tool.call' && !this.logs.tools.some((t) => t.id === evt.call_id)) {
+      const result = { error: 'internal_error' };
+      this.logs.tools.push(toolLogEntryFromCall(evt, this.nowT(), { ...evt.arguments, dispatch_failed: true }, result));
+      this.pendingToolResults.push({ call_id: evt.call_id, result, is_error: true });
+    }
+
+    // A throw inside `reply.done`'s own handling (e.g. `recordGoalCompletionAction`, which
+    // runs BEFORE the flush/discard branch) means neither `flushToolResults` nor
+    // `discardPendingToolResults` ran for this turn. Run whichever this event would have run,
+    // so any `tool.result` already queued (from this event or an earlier `tool.call`) still
+    // goes out on schedule rather than stalling until some later, unrelated `reply.done`.
+    if (evt.type === 'reply.done') {
+      if (evt.status === 'interrupted') this.discardPendingToolResults();
+      else this.flushToolResults();
+    }
+
+    // Keep the call moving: re-run the engine over whatever DID make it into the logs before
+    // the throw (including the backfilled failed tool result above, if any) and push the
+    // resulting ScreenState. A caught internal error must never leave the call sitting on
+    // stale state until cap/idle forcibly ends it -- this is the fix for exactly that.
+    //
+    // `tick()` itself can throw again here -- e.g. a broken mock backend that fails EVERY
+    // tool, including a terminal action `runTerminalActionsIfNeeded` now tries to run because
+    // the backfilled failed result above just made the verdict terminal. Uncaught, that
+    // throw would escape this catch block entirely (this method is itself only ever called
+    // FROM a catch), taking the whole call down -- the exact failure mode this fix exists to
+    // close. One more try/catch, never recursing back into `recoverFromDispatchError`: just
+    // log it and give up on ticking for THIS event. The next real AAI event still gets a
+    // normal (non-recovery) `tick()`.
+    try {
+      this.tick();
+    } catch (tickErr) {
+      this.diag('error', {
+        message: tickErr instanceof Error ? tickErr.message : String(tickErr),
+        where: 'recoverFromDispatchError:tick',
+      });
     }
   }
 
@@ -389,12 +453,17 @@ export class CallSession {
   /** LAW/docs rule (aai-docs-check §e): "Send tool.result when reply.done is the latest
    *  event you've received. Not earlier, not later." -- results are queued in
    *  `pendingToolResults` and only sent here, from the reply.done handler. */
+  /** Fix round 1: removes each entry from `pendingToolResults` BEFORE sending it (rather than
+   *  clearing the whole array only after the loop completes) -- makes this safely re-callable
+   *  after a partial failure (e.g. `aai.send` itself throwing mid-loop, which
+   *  `recoverFromDispatchError` above may end up doing exactly that: calling this again for
+   *  the SAME `reply.done` a throw already interrupted). Without this, a retry would re-send
+   *  whatever the first attempt already got out before it died. */
   private flushToolResults(): void {
-    if (this.pendingToolResults.length === 0) return;
-    for (const p of this.pendingToolResults) {
+    while (this.pendingToolResults.length > 0) {
+      const p = this.pendingToolResults.shift()!;
       this.opts.aai.send({ type: 'tool.result', call_id: p.call_id, result: JSON.stringify(p.result), is_error: p.is_error });
     }
-    this.pendingToolResults = [];
   }
 
   /** The interrupted-reply.done counterpart to `flushToolResults`: never sends the queued
