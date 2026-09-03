@@ -100,6 +100,26 @@ for ev in events[last_user_idx + 1:]:
             launched = True
 
 reply = "\n".join(reply_parts)
+
+# The final assistant text is sometimes not yet flushed to the transcript when Stop hooks
+# run (observed 2026-09-02: three false blocks, each on a turn whose reply followed tool
+# calls). Prefer the message the harness hands us directly; otherwise fall back to the last
+# assistant text anywhere in the transcript rather than judging an empty slice.
+direct = hook.get("last_assistant_message")
+if isinstance(direct, str) and direct.strip():
+    reply = direct
+elif not reply.strip():
+    for ev in reversed(events):
+        if ev.get("type") != "assistant":
+            continue
+        texts = [b.get("text", "") for b in content_blocks(ev)
+                 if isinstance(b, dict) and b.get("type") == "text"]
+        if texts:
+            reply = "\n".join(texts)
+            break
+    if not reply.strip():
+        sys.exit(0)
+
 reports_background = bool(re.search(
     r"\b(running|in flight|still (building|running|writing)|waiting (on|for)|dispatched|"
     r"background|lanes?)\b", reply, re.I))
