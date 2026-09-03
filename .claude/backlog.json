@@ -88,6 +88,17 @@
       "held_because": "needs the founder's word 'push'",
       "agent_id": "",
       "started_at": ""
+    },
+    {
+      "id": "SUB1",
+      "title": "lablab submission text draft (docs/SUBMISSION-DRAFT.md)",
+      "files": [
+        "docs/SUBMISSION-DRAFT.md"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "aa4e312de73d8f8b8",
+      "started_at": "2026-09-03T01:52:00Z"
     }
   ]
 }
