@@ -29,3 +29,5 @@ BEFORE the submission form is filed. Every box below gets checked, with evidence
       checklist. Target Sep 27–28 (deadline Sep 30, 10:00 AM Central — a MORNING deadline).
 
 - [ ] Commit 8afaf2a (D1 build) carries a polluted message (backtick expansion pasted ~4.6 KB of npm output; no secrets, scanned 2026-09-02). Reword it before the public flip — history rewrite is a founder-run step (`git rebase -i cc40f79`, reword 8afaf2a; clean message text kept in .superpowers/sdd/2026-09-02-plan2-voice-path/d1-clean-message.txt). The controller was denied the rewrite on 2026-09-02, by design.
+
+- [ ] npm audit (2026-09-02): esbuild (moderate) + vite (high), BOTH dev-only build tooling, not in the deployed server. Fix is a breaking Vite major bump (5 → 8). Ruling: not during the build; decide at the flip (upgrade on a branch with the full suite, or document as dev-only). Report: docs/audit-2026-09-02.md.
