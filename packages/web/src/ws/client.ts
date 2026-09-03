@@ -12,6 +12,10 @@ import type { LinkPost } from './worker';
 export interface CallClient {
   send(e: BrowserEvent): void;
   onState(cb: (state: ScreenState) => void): void;
+  /** Task W8: multicast -- every registered `cb` runs on every audio chunk, in registration
+   *  order (`connect()`'s own playback wiring, then any caller-added listener, e.g. a
+   *  timing observer). Calling `onAudio` twice ADDS a second listener; it never replaces the
+   *  first. */
   onAudio(cb: (base64: string) => void): void;
   onFlush(cb: () => void): void;
   onEnded(cb: (reason: string) => void): void;
@@ -37,7 +41,11 @@ export function connectSocketOnly(ws_path: string, workerFactory: WorkerFactory 
   const worker = workerFactory();
 
   let stateCb: ((state: ScreenState) => void) | null = null;
-  let audioCb: ((data: string) => void) | null = null;
+  // Task W8: multicast, not a single overwritable slot -- `connect()` (below) always wires
+  // its own `onAudio` callback to feed `playback.push`; a caller-timing observer (Call.tsx)
+  // needs to register a SECOND listener without clobbering that wiring, which a single `let
+  // audioCb` would have done (the second `onAudio` call would silently replace the first).
+  const audioCbs: ((data: string) => void)[] = [];
   let flushCb: (() => void) | null = null;
   let endedCb: ((reason: string) => void) | null = null;
   let linkCb: ((leg: 'browser' | 'aai', state: 'lost' | 'restored') => void) | null = null;
@@ -50,7 +58,7 @@ export function connectSocketOnly(ws_path: string, workerFactory: WorkerFactory 
   worker.onmessage = (event: MessageEvent<ServerEvent | LinkPost>) => {
     const msg = event.data;
     if (msg.type === 'state') stateCb?.(msg.state);
-    else if (msg.type === 'audio') audioCb?.(msg.data);
+    else if (msg.type === 'audio') for (const cb of audioCbs) cb(msg.data);
     else if (msg.type === 'flush') flushCb?.();
     else if (msg.type === 'ended') endedCb?.(msg.reason);
     else if (msg.type === 'link') linkCb?.(msg.leg, msg.state);
@@ -66,7 +74,7 @@ export function connectSocketOnly(ws_path: string, workerFactory: WorkerFactory 
       stateCb = cb;
     },
     onAudio(cb) {
-      audioCb = cb;
+      audioCbs.push(cb);
     },
     onFlush(cb) {
       flushCb = cb;

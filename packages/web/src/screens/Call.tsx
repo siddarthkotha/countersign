@@ -26,6 +26,23 @@ export type CallProps = {
   onWatch: () => void;
 };
 
+// Task W8 (G5 rehearsal latency): three browser-measured timings, all via `performance.now()`
+// -- start (the Start Call click) -> ready (the first `state` ServerEvent the server sends
+// back, the earliest "the call/link is up" signal that exists on the wire today -- there is
+// no separate `ready` message), ready -> first agent audio chunk, and per agent turn the gap
+// from the transcript growing a new caller line (end of that turn's user speech, as this
+// browser first saw it) to the next agent audio chunk. These are UI-only rehearsal telemetry
+// -- nothing here is added to `ScreenState`/the wire protocol, and nothing here is a verdict
+// or evidence; CallView.tsx renders them as plain browser-measured numbers, not proof of
+// anything server-side.
+export type CallTimings = {
+  startReadyMs: number | null;
+  readyFirstAudioMs: number | null;
+  turnGapsMs: number[];
+};
+
+const EMPTY_TIMINGS: CallTimings = { startReadyMs: null, readyFirstAudioMs: null, turnGapsMs: [] };
+
 // Reasons the server is known to send today (packages/server/src/call/session.ts) plus the
 // Amendment 2 reasons (idle disconnect, session cap) that surface once the server side of
 // that behaviour lands. Unknown reasons still get a plain-words fallback -- never a raw code
@@ -68,7 +85,44 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
   const [screenState, setScreenState] = useState<ScreenState | null>(null);
   const [endedReason, setEndedReason] = useState<string | null>(null);
   const [micError, setMicError] = useState(false);
+  const [timings, setTimings] = useState<CallTimings>(EMPTY_TIMINGS);
   const clientRef = useRef<CallClient | null>(null);
+
+  // Task W8: the raw clock -- kept in a ref (not state) so the async ServerEvent callbacks
+  // below always read the CURRENT call's numbers, never a stale render's closure, and so a
+  // value already computed (e.g. `readyAt`) is never overwritten by a later, later-arriving
+  // event of the same kind. `transcriptLenRef`/`pendingTurnStartRt` track, respectively, how
+  // many transcript lines this call has already seen (to spot a newly-appended one) and the
+  // `performance.now()` at which the most recent NEW caller line appeared, cleared the moment
+  // that turn's first agent audio chunk closes the gap.
+  const clockRef = useRef<{ startAt: number | null; readyAt: number | null; firstAudioAt: number | null }>({
+    startAt: null,
+    readyAt: null,
+    firstAudioAt: null,
+  });
+  const transcriptLenRef = useRef(0);
+  const pendingTurnStartRef = useRef<number | null>(null);
+  const loggedRef = useRef(false);
+
+  // Task W8: one JSON line per call, on end (whichever path ends it first -- the caller's own
+  // "End Call" click in `handleEnd`, or the server ending the call, e.g. idle timeout --
+  // `loggedRef` keeps this to exactly one line per call). Read straight off `timingsRef` -- a
+  // handler running inside `handleEnd` cannot rely on the `timings` state closure, since a
+  // `setTimings` call from the same tick as `handleEnd` may not have re-rendered yet.
+  const timingsRef = useRef<CallTimings>(EMPTY_TIMINGS);
+
+  function logTimingsOnce() {
+    if (loggedRef.current) return;
+    loggedRef.current = true;
+    // eslint-disable-next-line no-console -- deliberate: this IS the founder-facing output
+    // (BRIEF/CLAUDE.md: "measured in this browser", copy-pasteable from the console).
+    console.info('[countersign:timings]', {
+      session_id: session.session_id,
+      start_to_ready_ms: timingsRef.current.startReadyMs,
+      ready_to_first_audio_ms: timingsRef.current.readyFirstAudioMs,
+      turn_gaps_ms: timingsRef.current.turnGapsMs,
+    });
+  }
 
   useEffect(
     () => () => {
@@ -79,13 +133,64 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
 
   async function handleStart() {
     setMicError(false);
+    // Task W8: captured before `await connect(...)` -- `connect()` itself does the mic-
+    // permission prompt and Web Audio setup, which is real elapsed time the founder's
+    // rehearsal latency should include, same as the Start Call click a stranger actually felt.
+    const startAt = performance.now();
+    clockRef.current = { startAt, readyAt: null, firstAudioAt: null };
+    transcriptLenRef.current = 0;
+    pendingTurnStartRef.current = null;
+    loggedRef.current = false;
+    timingsRef.current = EMPTY_TIMINGS;
+    setTimings(EMPTY_TIMINGS);
     try {
       const audioContext = new AudioContext();
       const client = await connect(session.ws_path, audioContext);
-      client.onState((state) => setScreenState(state));
+      client.onState((state) => {
+        const now = performance.now();
+        // The first `state` ServerEvent back from the server is the earliest signal on the
+        // wire today that the call/link is up -- there is no separate `ready` message.
+        if (clockRef.current.readyAt === null) {
+          clockRef.current.readyAt = now;
+          const startReadyMs = clockRef.current.startAt === null ? null : now - clockRef.current.startAt;
+          timingsRef.current = { ...timingsRef.current, startReadyMs };
+          setTimings(timingsRef.current);
+        }
+        // A newly-appended caller transcript line is the end of that turn's user speech, as
+        // this browser first saw it -- `pendingTurnStartRef` closes against the next agent
+        // audio chunk, below.
+        const prevLen = transcriptLenRef.current;
+        if (state.transcript.length > prevLen) {
+          const newLines = state.transcript.slice(prevLen);
+          transcriptLenRef.current = state.transcript.length;
+          if (newLines.some((line) => line.speaker === 'caller')) {
+            pendingTurnStartRef.current = now;
+          }
+        }
+        setScreenState(state);
+      });
+      // Task W8: a SECOND `onAudio` listener alongside `connect()`'s own (client.ts now
+      // multicasts, so this never touches the playback wiring) -- purely for timing, never
+      // touches the audio itself.
+      client.onAudio(() => {
+        const now = performance.now();
+        if (clockRef.current.firstAudioAt === null) {
+          clockRef.current.firstAudioAt = now;
+          const readyFirstAudioMs = clockRef.current.readyAt === null ? null : now - clockRef.current.readyAt;
+          timingsRef.current = { ...timingsRef.current, readyFirstAudioMs };
+          setTimings(timingsRef.current);
+        }
+        if (pendingTurnStartRef.current !== null) {
+          const gap = now - pendingTurnStartRef.current;
+          pendingTurnStartRef.current = null;
+          timingsRef.current = { ...timingsRef.current, turnGapsMs: [...timingsRef.current.turnGapsMs, gap] };
+          setTimings(timingsRef.current);
+        }
+      });
       client.onEnded((reason) => {
         setEndedReason(reason);
         setLink('ended');
+        logTimingsOnce();
       });
       client.onLink((leg, state) => {
         // The AssemblyAI session and the evidence stay put on the server through a dropped
@@ -106,6 +211,7 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
     clientRef.current?.close();
     clientRef.current = null;
     setLink('ended');
+    logTimingsOnce();
     void fetch(`/api/session/${session.session_id}/end`, { method: 'POST' }).catch(() => {
       // Best-effort -- the frozen last state stays on screen either way.
     });
@@ -163,7 +269,7 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
       {endedReason && <p role="status">{endedReasonToPlainWords(endedReason)}</p>}
 
       {screenState ? (
-        <CallView screen={screenState} />
+        <CallView screen={screenState} timings={timings} />
       ) : (
         <p>Click Start Call to begin.</p>
       )}

@@ -38,6 +38,14 @@ export type CallViewProps = {
    *  default OPEN in Replay (Replay.tsx passes `true`). Purely which way `showWhy` starts --
    *  no other behaviour changes. */
   defaultForensicOpen?: boolean;
+  /** Task W8 (G5 rehearsal latency): browser-measured `performance.now()` timings for THIS
+   *  call, computed in Call.tsx -- start (Start Call click) -> ready (first `state`
+   *  ServerEvent), ready -> first agent audio chunk, and each turn's user-final-line ->
+   *  first-agent-audio gap. Deliberately NOT part of `ScreenState`/the protocol -- this is
+   *  UI-only rehearsal telemetry, never evidence or a verdict input. Omitted (no prop, or all
+   *  fields still null/empty) before a call has produced any of these yet; Replay.tsx never
+   *  passes it (a recorded playback has no live "Start Call" moment to measure from). */
+  timings?: { startReadyMs: number | null; readyFirstAudioMs: number | null; turnGapsMs: number[] } | null;
 };
 
 // Task W5, requirement E: anywhere the UI names the agent, it says "Countersign" -- never a
@@ -252,7 +260,14 @@ function withHashEllipsis(subline: string, exportHash: string | null) {
   );
 }
 
-export default function CallView({ screen, defaultForensicOpen }: CallViewProps) {
+/** Task W8: `null`/`undefined` (not yet measured this call) renders as an em dash, never a
+ *  fabricated number -- truth discipline (CLAUDE.md): no ms value on screen that was not
+ *  actually measured in this browser. */
+function formatMs(ms: number | null | undefined): string {
+  return ms === null || ms === undefined ? '—' : `${Math.round(ms)}ms`;
+}
+
+export default function CallView({ screen, defaultForensicOpen, timings }: CallViewProps) {
   const [showWhy, setShowWhy] = useState(defaultForensicOpen ?? false);
   // Fix round 1, Important: brief requirement C asks for an auto-scrolling transcript with
   // newest at the bottom. `.transcript` (styles.css) is a fixed-height `overflow-y: auto`
@@ -532,6 +547,19 @@ export default function CallView({ screen, defaultForensicOpen }: CallViewProps)
             <p className="countersign">
               server verdict {screen.forensic.countersign.server_verdict}, recomputed: {screen.forensic.countersign.recomputed ? 'yes' : 'no'}
             </p>
+
+            {/* Task W8 (G5 rehearsal latency): rehearsal-only browser telemetry, not part of
+                the protocol/evidence -- omitted entirely on a screen with no `timings` prop
+                (e.g. Replay.tsx) rather than shown as all-dashes. */}
+            {timings && (
+              <>
+                <h3>Timings (measured in this browser)</h3>
+                <p className="timings-line">
+                  start→ready {formatMs(timings.startReadyMs)} · ready→first audio {formatMs(timings.readyFirstAudioMs)} · turns{' '}
+                  {timings.turnGapsMs.length > 0 ? timings.turnGapsMs.map((g) => formatMs(g)).join(', ') : '—'}
+                </p>
+              </>
+            )}
           </section>
         )}
       </div>

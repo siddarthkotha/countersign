@@ -788,6 +788,14 @@ input {
   font-size: 0.9rem;
 }
 
+/* Task W8: G5 rehearsal-latency line -- plain monospace text, no animation/transition (there
+   is nothing here for prefers-reduced-motion to guard). */
+.timings-line {
+  font-family: var(--cs-font-mono);
+  font-size: 0.85rem;
+  color: var(--cs-muted);
+}
+
 .evidence-card {
   border-bottom: 1px solid var(--cs-row-border);
   padding: 0.4rem 0;
