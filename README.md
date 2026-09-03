@@ -85,6 +85,67 @@ Pre-kickoff scaffold. Product code begins with the event build window.
   connection, times connect → `session.ready`, then times `session.ready` → the first
   `reply.audio` byte. It's opt-in only (`--live` plus `ASSEMBLYAI_API_KEY`) and never runs in CI.
 
+## How a verdict is decided
+
+A pure, dependency-free function (`decide` in `packages/engine/src/rules.ts`) turns structured
+evidence into a verdict. No LLM call, no randomness, no clock read — same evidence in, same
+verdict out, always. There are two possible terminal outcomes, and a positive ceiling that
+never moves:
+
+- **STAGE** — the request is queued for a second, independent human approval. Voice alone never
+  releases anything; STAGE is as far as a verified call can ever go
+  (`packages/engine/src/rules.ts`, rule row 11; `packages/engine/src/fsm.ts`'s `ACTION_ALLOWLIST`
+  has no release tool, ever).
+- **FREEZE** — the transfer rail is frozen and an incident is opened for a human to work
+  (`rules.ts` row 8).
+
+Two more outcomes keep the call moving without staging or freezing anything: **PENDING** holds
+the floor for more evidence (identity, a challenge, a readback, a pending check — rows 3–7, 12);
+**ESCALATE** hands the case to a human callback with nothing moved by voice (structuring across
+amounts, a first-time beneficiary, or the catch-all row 13). An out-of-scope call (a judge
+testing the demo, or a dead line with nothing at stake) becomes **NO_ACTION** — nothing ever
+opens (`fsm.ts` state `OUT_OF_SCOPE`).
+
+Four invariants are checked last and override every rule (`rules.ts` lines 300–304, `RULES_DOC`):
+1. There is no release verdict, tool, or action anywhere in the engine — STAGE is the ceiling.
+2. STAGE fires only when every item on the assurance checklist reads true.
+3. A changed critical fact (amount, account, beneficiary) invalidates every check gathered
+   before the change — stale evidence is never treated as a pass.
+4. A tool result that errored or is still missing past its timeout makes the evaluation
+   incomplete, which can only ever become ESCALATE (or NO_ACTION with nothing open) — never STAGE.
+
+Before STAGE can fire, ten checklist items must each read **true** — affirmative checks, never
+"zero failures" (`AssuranceChecklist` in `packages/engine/src/types.ts`, gated in `rules.ts` row
+11): identity claimed; the SSO/identity check currently passing; the out-of-band check currently
+confirmed; the context check currently passing; no unresolved contradiction in what the caller
+said; every critical field read back and confirmed; the running total under the exposure limit;
+enough challenges passed for the risk level; no unresolved identity switch; and no first-time
+beneficiary.
+
+**Challenges** are picked and phrased by the engine (`selectChallenge` in
+`packages/engine/src/challenges.ts`), which hands the LLM only a question to ask — never the
+expected answer. Grading is the engine's job alone: `gradeChallenges` compares the caller's
+transcribed reply against the known fact by plain text matching, deterministically. The model
+can ask; it can never decide PASS or FAIL.
+
+Every fact the caller states is committed to a **story ledger** (`packages/engine/src/ledger.ts`)
+with a lifecycle: STATED (first said), CONFIRMED (read back and affirmed), APPROXIMATE (hedged,
+e.g. "about $1.8 million"), CORRECTED (a later value with a correction cue, or inside the
+readback-repair window), CONTRADICTED (a later, different value with no correction signal), or
+UNKNOWN (a readback the caller negated). Contradictions and failed/ambiguous challenges feed the
+tally that drives FREEZE and ESCALATE (`computeTally` in `rules.ts`).
+
+The **counterfactual panel** (`packages/engine/src/counterfactual.ts`) answers "what would flip
+this?": for every evidence card, it re-runs the real `evaluate` with just that one card's status
+flipped and reports which flips would change the verdict — nothing here is simulated separately
+from the real engine.
+
+**Replay guarantee:** the same inputs always produce the same verdict. `packages/engine/corpus/`
+holds 18 recorded transcripts replayed through this real engine on every test run
+(`test/corpus.test.ts`), and mutation tests (`test/mutants.test.ts`) deliberately break each rule
+one at a time to prove every row and invariant above is load-bearing, not decorative — see
+"Replay the corpus" below.
+
 ## Replay the corpus
 
 `packages/engine/corpus/*.json` holds 18 transcripts replayed through the real engine every
