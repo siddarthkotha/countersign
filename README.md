@@ -142,9 +142,13 @@ from the real engine.
 
 **Replay guarantee:** the same inputs always produce the same verdict. `packages/engine/corpus/`
 holds 18 recorded transcripts replayed through this real engine on every test run
-(`test/corpus.test.ts`), and mutation tests (`test/mutants.test.ts`) deliberately break each rule
-one at a time to prove every row and invariant above is load-bearing, not decorative — see
-"Replay the corpus" below.
+(`test/corpus.test.ts`). Every rule-table row and invariant is also exercised directly, one
+scenario at a time, in `test/rules.test.ts`; on top of that, mutation tests
+(`test/mutants.test.ts`) deliberately break four specific rule mechanics — the readback gate
+(row 5), the freeze AND-vs-OR logic (row 8a), contradiction-triggered freeze (row 8b), and the
+exposure/structuring check (row 9) — one at a time, replaying the full 18-transcript corpus
+under each break to prove those mechanics are load-bearing, not decorative — see "Replay the
+corpus" below.
 
 ## Replay the corpus
 
