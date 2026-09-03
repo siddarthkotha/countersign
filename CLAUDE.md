@@ -109,3 +109,17 @@ not swap ideas casually.
   clear messages; the history is part of the submission story.
 - Founder communication: plain English, one decision at a time with a concrete
   recommendation, questions batched up front.
+
+## Session open / close (ported from ShadePath 2026-09-02; only the parts that apply here)
+**"open countersign"** → read docs/STATE.md, .claude/backlog.json, the tail of
+docs/AUTOPILOT_LOG.md, the ledgers under .superpowers/sdd; `git status -sb`; curl the live
+/health; run the watchdog (it fires on the prompt); print "Ready. What are we working on?"
+**"close countersign"** → (1) ask "what should next session pick up?" unless obvious;
+(2) OVERWRITE docs/STATE.md (snapshot, never append, ≤100 lines, ends with a "Next session"
+handoff line); (3) reconcile .claude/backlog.json (done / held-with-reason / running with
+agent_id); (4) append one closing line to docs/AUTOPILOT_LOG.md; (5) run `npm test` +
+`npm run typecheck` once and report real numbers; (6) commit with pathspecs; (7) push main —
+the phrase "close countersign" IS the founder's push word for that session's reviewed
+commits; (8) update the state memory; (9) print the session summary with the resume line.
+Not ported (not applicable): CHANGELOG (git history is the submission story), three-location
+doc sync, feature-branch rule (lanes commit to main with pathspecs behind the pre-commit gate).
