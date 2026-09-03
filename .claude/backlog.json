@@ -2,18 +2,22 @@
   "items": [
     {
       "id": "S5",
-      "title": "S5 flight recorder server",
-      "files": ["packages/server/**"],
+      "title": "S5 flight recorder server (fix round 2 landed 4e23a6c; re-review pending)",
+      "files": [
+        "packages/server/**"
+      ],
       "status": "running",
       "held_because": "",
-      "agent_id": "",
+      "agent_id": "a27b1f3997b54ec86",
       "started_at": "2026-09-03T00:52:55Z"
     },
     {
       "id": "W9",
       "title": "W9 flight recorder browser",
-      "files": ["packages/web/**"],
-      "status": "running",
+      "files": [
+        "packages/web/**"
+      ],
+      "status": "done",
       "held_because": "",
       "agent_id": "",
       "started_at": "2026-09-03T00:52:55Z"
@@ -21,8 +25,10 @@
     {
       "id": "H1",
       "title": "H1 orchestration tooling",
-      "files": [".claude/**"],
-      "status": "running",
+      "files": [
+        ".claude/**"
+      ],
+      "status": "done",
       "held_because": "",
       "agent_id": "",
       "started_at": "2026-09-03T00:52:55Z"
@@ -53,6 +59,15 @@
       "held_because": "founder-run history rewrite at the flip",
       "agent_id": "",
       "started_at": ""
+    },
+    {
+      "id": "S5-rereview-2",
+      "title": "S5 re-review round 2",
+      "files": [],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "af38da1a3485dafc1",
+      "started_at": "2026-09-03T01:46:00Z"
     }
   ]
 }
