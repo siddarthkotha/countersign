@@ -311,6 +311,10 @@ describe('Call.tsx flight recorder wiring (Task W9)', () => {
 
     const { events } = lastFetchBody(fetchMock);
     expect(events.some((e) => e.kind === 'timings')).toBe(true);
+    // W9 review, fix round 1 (Moderate): `socket_close` must be recorded BEFORE the payload
+    // snapshot is taken on unmount -- previously it was recorded one line AFTER the flush,
+    // so a bare unmount's own socket_close never reached the server at all.
+    expect(events.some((e) => e.kind === 'socket_close')).toBe(true);
   });
 
   it('uses navigator.sendBeacon (not fetch) on pagehide, with the same events+timings body, and only once', async () => {

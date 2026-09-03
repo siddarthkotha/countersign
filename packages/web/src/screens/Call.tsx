@@ -17,7 +17,13 @@ import Masthead from '../components/Masthead';
 import Footer from '../components/Footer';
 import { connect, type CallClient } from '../ws/client';
 import type { StartResult } from '../api';
-import { buildDiagnosticsPayload, markStartClick, recordEvent } from '../diagnostics/flightRecorder';
+import {
+  buildDiagnosticsPayload,
+  markStartClick,
+  recordEvent,
+  recordStateEvent,
+  recordTranscriptLine,
+} from '../diagnostics/flightRecorder';
 
 export type StartedSession = Extract<StartResult, { session_id: string }>;
 
@@ -212,9 +218,15 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
       // W8 review (Important): unmount is itself a call-ending path (Start Over, a parent
       // screen switch, or any route other than the "End Call" button/a server `ended` event)
       // -- it must report the same way those do, not silently drop the numbers.
+      // W9 review, fix round 1 (Moderate): `socket_close` must be recorded BEFORE
+      // `flushDiagnosticsFetch()` snapshots the buffer -- `flushDiagnosticsFetch` serializes
+      // whatever is in the ring buffer at the exact moment it runs, so recording this call's
+      // own `socket_close` AFTER that snapshot (the previous order) meant the payload sent on
+      // a bare unmount never contained its own close event. Matches `handleEnd()`'s order
+      // (recordEvent('socket_close') before flushDiagnosticsFetch(), below).
       logTimingsOnce();
-      flushDiagnosticsFetch();
       recordEvent('socket_close');
+      flushDiagnosticsFetch();
       clientRef.current?.close();
     },
     [],
@@ -247,7 +259,11 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
         // Task W9: the status word off every state event this browser sees, throttled
         // batches included -- the ask is explicit that a throttled-away intermediate status
         // is fine to miss (only the ones that actually reach the browser are recorded).
-        recordEvent('state', { status: state.agent_status });
+        // W9 review, fix round 1 (Minor): the flight recorder module exports
+        // `recordStateEvent` for exactly this line -- calling it directly (rather than
+        // duplicating its `recordEvent('state', {status})` body here) keeps one source of
+        // truth for the event's shape.
+        recordStateEvent(state.agent_status);
         // The first `state` ServerEvent back from the server is the earliest signal on the
         // wire today that the call/link is up -- there is no separate `ready` message.
         if (clockRef.current.readyAt === null) {
@@ -265,8 +281,10 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
           transcriptLenRef.current = state.transcript.length;
           // Task W9: role + length only, per LAW 4 -- never `line.text` (the server already
           // has the verbatim transcript; this is a debugging aid, not a second evidence copy).
+          // W9 review, fix round 1 (Minor): same reasoning as `recordStateEvent` above --
+          // `recordTranscriptLine` is the one source of truth for this event's shape.
           for (const line of newLines) {
-            recordEvent('transcript_line', { role: line.speaker, length: line.text.length });
+            recordTranscriptLine(line.speaker, line.text.length);
           }
           if (newLines.some((line) => line.speaker === 'caller')) {
             // Minor (W8 review): a turn that never got its own agent audio back (a silent,

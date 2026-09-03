@@ -151,24 +151,46 @@ export function recordStateEvent(status: ScreenState['agent_status']): void {
 
 let listenersRegistered = false;
 
+// W9 review, fix round 1: this module is now also imported from packages/server's own test
+// suite (a real-server integration test, read-only against `@countersign/web`'s real code --
+// see packages/server/test/diagnostics-browser-integration.test.ts), whose tsconfig has no
+// `"DOM"` in `lib` (server code never runs in a browser). Referencing the bare, DOM-lib-only
+// identifiers `window`/`ErrorEvent`/`PromiseRejectionEvent` directly would make THIS file fail
+// to type-check under that project even though nothing here actually needs the DOM lib's
+// global declarations -- a structural, hand-written shape (`MinimalWindowLike` below) plus a
+// `globalThis` lookup says exactly the same thing (`typeof window === 'undefined'`'s runtime
+// behaviour is unchanged: in a real browser or under jsdom, `globalThis.window` is the same
+// object `window` would have named; under plain Node, it's `undefined`) without ever naming a
+// DOM-lib-only type.
+type MinimalErrorEvent = { message?: string; error?: unknown };
+type MinimalRejectionEvent = { reason?: unknown };
+interface MinimalWindowLike {
+  addEventListener(type: 'error', listener: (event: MinimalErrorEvent) => void): void;
+  addEventListener(type: 'unhandledrejection', listener: (event: MinimalRejectionEvent) => void): void;
+}
+
 /** Registers the window `'error'`/`'unhandledrejection'` listeners exactly once (guarded by
  *  `listenersRegistered`, so importing this module more than once within a test file -- or a
  *  hot reload in dev -- never double-registers and never double-counts an error). Runs once,
  *  as a side effect of importing this module (see the call at the bottom of this file) --
  *  these two events can fire at any point in the page's life, including before Start Call is
- *  ever clicked, so they cannot wait for a component to mount. */
+ *  ever clicked, so they cannot wait for a component to mount. A no-op under plain Node
+ *  (`globalThis.window` is undefined there) -- safe for packages/server's own test suite to
+ *  import this module for its real event-recording functions without ever touching a DOM API. */
 export function registerGlobalErrorListeners(): void {
-  if (listenersRegistered || typeof window === 'undefined') return;
+  if (listenersRegistered) return;
+  const win = (globalThis as { window?: MinimalWindowLike }).window;
+  if (!win) return;
   listenersRegistered = true;
 
-  window.addEventListener('error', (event: ErrorEvent) => {
+  win.addEventListener('error', (event) => {
     const message = event.message || 'window error';
     const stack = event.error instanceof Error ? (event.error.stack ?? '') : '';
     recordEvent('window_error', { text: truncate(stack ? `${message} | ${stack}` : message, ERROR_DETAIL_MAX_CHARS) });
   });
 
-  window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
-    const reason = event.reason as unknown;
+  win.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason;
     const message = reason instanceof Error ? reason.message : String(reason);
     const stack = reason instanceof Error ? (reason.stack ?? '') : '';
     recordEvent('unhandledrejection', { text: truncate(stack ? `${message} | ${stack}` : message, ERROR_DETAIL_MAX_CHARS) });
