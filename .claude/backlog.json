@@ -6,7 +6,7 @@
       "files": [
         "packages/server/**"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
       "agent_id": "a27b1f3997b54ec86",
       "started_at": "2026-09-03T00:52:55Z"
@@ -64,10 +64,30 @@
       "id": "S5-rereview-2",
       "title": "S5 re-review round 2",
       "files": [],
-      "status": "running",
+      "status": "done",
       "held_because": "",
       "agent_id": "af38da1a3485dafc1",
       "started_at": "2026-09-03T01:46:00Z"
+    },
+    {
+      "id": "throttle-flake-2",
+      "title": "browser-ws real-socket throttle test flaked once under full-suite load (post-de-flake)",
+      "files": [
+        "packages/server/test/browser-ws.test.ts"
+      ],
+      "status": "held",
+      "held_because": "needs observation: reproduce under load 10\u00d7 before changing; not blocking",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "push-4",
+      "title": "push 4: flight recorder (S5+W9), hook tooling (H1), docs",
+      "files": [],
+      "status": "held",
+      "held_because": "needs the founder's word 'push'",
+      "agent_id": "",
+      "started_at": ""
     }
   ]
 }
