@@ -585,6 +585,59 @@ describe('CallSession — onDiagnostic', () => {
     expect(events.at(-1)?.kind).not.toBe('error');
   });
 
+  /** Fix round 2 (re-review finding, IMPORTANT): `aai.send` throwing (a real closing/closed
+   *  WebSocket can do this) inside `flushToolResults` used to be able to throw a SECOND time
+   *  from `recoverFromDispatchError`'s own retry of it, unguarded -- escaping
+   *  `handleAaiEvent` entirely. This double-throwing stub reproduces exactly that: it fails
+   *  every `tool.result` send (never anything else), so the ORIGINAL `flushToolResults` call
+   *  (from the normal `reply.done` case) throws once, and recovery's retry of the SAME call
+   *  throws again on whatever was still queued. */
+  class ThrowingSendAaiSocket extends FakeAaiSocket {
+    toolResultSendAttempts = 0;
+    override send(msg: object): void {
+      if ((msg as { type?: string }).type === 'tool.result') {
+        this.toolResultSendAttempts += 1;
+        throw new Error(`aai.send failed for tool.result (attempt ${this.toolResultSendAttempts})`);
+      }
+      super.send(msg);
+    }
+  }
+
+  it('fix round 2: aai.send throwing TWICE (original flush, then recovery\'s own retry) never escapes handleAaiEvent, and the session still reaches a terminal state', () => {
+    const clock = { now: 0 };
+    const aai = new ThrowingSendAaiSocket();
+    const events: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, aai, events);
+
+    session.start();
+    driveScenarioBIntoEvidence(session, aai, clock);
+
+    // Two tool.calls, both succeed and both queue a tool.result -- neither is flushed yet
+    // (that only happens on reply.done), so BOTH are still pending when reply.done fires.
+    clock.now = 51000;
+    aai.emit({ type: 'tool.call', call_id: 't1', name: 'check_sso_context', arguments: { identity_id: session.last?.claimed_identity_id } });
+    clock.now = 51500;
+    aai.emit({ type: 'tool.call', call_id: 't2', name: 'get_request_history', arguments: { identity_id: session.last?.claimed_identity_id } });
+
+    clock.now = 52000;
+    aai.emit({ type: 'reply.started', reply_id: 'a-flush' });
+    // The normal `reply.done` handling flushes t1 -> `aai.send` throws (attempt 1) -- caught
+    // by `handleAaiEvent`, recovery retries the flush for whatever's left (t2) -> `aai.send`
+    // throws again (attempt 2). Neither throw may escape.
+    expect(() => aai.emit({ type: 'reply.done', reply_id: 'a-flush', status: 'completed' })).not.toThrow();
+
+    expect(aai.toolResultSendAttempts).toBe(2);
+    const errorEvents = events.filter((e) => e.kind === 'error');
+    expect(errorEvents.some((e) => (e.detail as { where: string }).where === 'handleAaiEvent:reply.done')).toBe(true);
+    expect(errorEvents.some((e) => (e.detail as { where: string }).where === 'recover_flush')).toBe(true);
+    expect(session.hasEnded()).toBe(false);
+
+    // The session still reaches a real terminal state afterward -- two stacked send
+    // failures don't leave it unable to close out cleanly.
+    session.end('caller_ended');
+    expect(session.hasEnded()).toBe(true);
+  });
+
   it('survives a NESTED failure -- every tool including every terminal action failing -- without crashing the call; fix round 2 catches each terminal action individually now, so recovery\'s tick() itself no longer needs to', () => {
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
