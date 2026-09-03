@@ -1,10 +1,9 @@
 // packages/server/src/aai/fake.ts
-// A scripted fake AssemblyAI socket. Used two ways:
+// A fake AssemblyAI socket for tests and dev mode. Used two ways:
 //  1. Tests drive it directly with `.emit(event)` -- full control, no timers, pairs with an
 //     injected clock on CallSession so t_ms in the resulting logs is deterministic.
 //  2. `COUNTERSIGN_FAKE_AAI=1` dev mode (`src/index.ts`) hands one to every call session so
-//     `npm run dev:server` runs the whole stack without an AssemblyAI API key. `playScript`
-//     drives it from a corpus-shaped timeline in real (wall-clock) time.
+//     `npm run dev:server` runs the whole stack without an AssemblyAI API key.
 // Implements the same `AaiSocket` interface the real S3 adapter will -- CallSession never
 // knows which one it is holding.
 import type { AaiEvent, AaiSocket } from './types.js';
@@ -40,23 +39,4 @@ export class FakeAaiSocket implements AaiSocket {
     if (this.closed) return;
     for (const handler of this.handlers) handler(evt);
   }
-}
-
-export interface TimedAaiEvent {
-  t_ms: number;
-  event: AaiEvent;
-}
-
-/** Plays a timeline of events into `aai` using real setTimeout, scaled by `speed` (2 = twice
- *  as fast). Only used by dev mode -- tests use `FakeAaiSocket.emit` directly so they never
- *  depend on real timers. Returns a `stop()` to cancel any still-pending events (call on
- *  session end so a stale timer doesn't fire into a closed session). */
-export function playScript(aai: FakeAaiSocket, script: TimedAaiEvent[], speed = 1): { stop: () => void } {
-  const safeSpeed = Number.isFinite(speed) && speed > 0 ? speed : 1;
-  const timers = script.map(({ t_ms, event }) => setTimeout(() => aai.emit(event), t_ms / safeSpeed));
-  return {
-    stop: () => {
-      for (const t of timers) clearTimeout(t);
-    },
-  };
 }
