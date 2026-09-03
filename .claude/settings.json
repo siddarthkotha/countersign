@@ -62,6 +62,11 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/local-time-gate.sh\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/lane-gate.sh\"",
+            "timeout": 20
           }
         ]
       }
