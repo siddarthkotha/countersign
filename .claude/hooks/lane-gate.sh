@@ -78,6 +78,10 @@ for i, ev in enumerate(events):
     joined = "\n".join(texts)
     if "<system-reminder>" in joined or "task-notification" in joined:
         continue
+    # A hook's own feedback is not a founder message; judging the slice after it would
+    # drop the reply that already carried the split line (false block on 2026-09-02).
+    if joined.lstrip().startswith("Stop hook feedback") or "hook blocking error" in joined:
+        continue
     last_user_idx = i
 
 if last_user_idx is None:
@@ -103,7 +107,7 @@ reports_background = bool(re.search(
 if not (launched or reports_background):
     sys.exit(0)
 
-m = re.search(r"^\s*\**lanes:\**\s*(.+)$", reply, re.I | re.M)
+m = re.search(r"\**lanes:\**\s*(.+)$", reply, re.I | re.M)
 ok = False
 if m:
     line = m.group(1)
