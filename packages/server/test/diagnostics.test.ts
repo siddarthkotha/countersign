@@ -347,6 +347,40 @@ describe('CallSession — onDiagnostic', () => {
     });
   }
 
+  /** Fix round 2: same as `newSession` above but also captures `ServerEvent`s, so a test can
+   *  inspect the actual `ScreenState` (`export_hash`, `verdict`) the terminal-action retry/
+   *  abandon logic produces -- most tests in this file only care about the diagnostics
+   *  channel, so this stays a separate helper rather than changing `newSession`'s signature
+   *  (and every existing call site) for the few that need it. */
+  function newSessionWithState(
+    clockRef: { now: number },
+    aai: FakeAaiSocket,
+    events: { kind: string; detail: unknown }[],
+    mock: typeof mockToolResult = mockToolResult,
+  ): { session: CallSession; sent: ServerEvent[] } {
+    const sent: ServerEvent[] = [];
+    const session = new CallSession({
+      session_id: CALL_B.session_id,
+      seed: MERIDIAN,
+      call: CALL_B,
+      aai,
+      now: () => clockRef.now,
+      onServerEvent: (e) => sent.push(e),
+      mock,
+      onDiagnostic: (kind, detail) => events.push({ kind, detail }),
+    });
+    return { session, sent };
+  }
+
+  /** The most recent `state` ServerEvent's own `ScreenState`, if any have been sent yet. */
+  function latestState(sent: ServerEvent[]): Extract<ServerEvent, { type: 'state' }>['state'] | null {
+    for (let i = sent.length - 1; i >= 0; i--) {
+      const e = sent[i]!;
+      if (e.type === 'state') return e.state;
+    }
+    return null;
+  }
+
   it('records at least one evaluate event on start, and a tool_call event with a duration and status for a rejected call', () => {
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
@@ -551,14 +585,13 @@ describe('CallSession — onDiagnostic', () => {
     expect(events.at(-1)?.kind).not.toBe('error');
   });
 
-  it('survives even a NESTED failure -- the recovery tick() itself throwing (e.g. every tool including a terminal action fails) -- without crashing the call', () => {
+  it('survives a NESTED failure -- every tool including every terminal action failing -- without crashing the call; fix round 2 catches each terminal action individually now, so recovery\'s tick() itself no longer needs to', () => {
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const events: { kind: string; detail: unknown }[] = [];
     // Throws for every tool, including whatever `runTerminalActionsIfNeeded` tries once the
-    // backfilled failed result (from the FIRST throw) pushes the verdict terminal -- the
-    // recovery path's own `tick()` call throws AGAIN, from inside the catch block that's
-    // already handling the first throw. Must still not crash.
+    // backfilled failed result (from the FIRST throw) pushes the verdict terminal. Must still
+    // not crash.
     const alwaysThrowingMock: typeof mockToolResult = () => {
       throw new Error('every tool is broken');
     };
@@ -572,18 +605,126 @@ describe('CallSession — onDiagnostic', () => {
       aai.emit({ type: 'tool.call', call_id: 't1', name: 'check_sso_context', arguments: { identity_id: session.last?.claimed_identity_id } }),
     ).not.toThrow();
 
-    // Two distinct caught faults recorded: the original tool.call throw, and the nested
-    // failure from recovery's own tick() -- both diagnosed, neither one crashed the call.
+    // Fix round 2 (LAW 2/3 re-review finding): `runTerminalActionsIfNeeded` now catches each
+    // owed action's own throw individually -- `tick()` itself no longer throws just because
+    // EVERY terminal action also fails, so recovery's own nested `tick()` try/catch (still
+    // present, still defensive) never actually fires here anymore. Exactly ONE generic
+    // `error` event (the original `tool.call` throw), never a second
+    // `recoverFromDispatchError:tick` one for this scenario -- the terminal-action failures
+    // are diagnosed through their own, more specific `terminal_action_result` events instead.
     const errorEvents = events.filter((e) => e.kind === 'error');
-    expect(errorEvents.length).toBeGreaterThanOrEqual(2);
-    expect(errorEvents.some((e) => (e.detail as { where: string }).where === 'handleAaiEvent:tool.call')).toBe(true);
-    expect(errorEvents.some((e) => (e.detail as { where: string }).where === 'recoverFromDispatchError:tick')).toBe(true);
+    expect(errorEvents).toHaveLength(1);
+    expect((errorEvents[0]!.detail as { where: string }).where).toBe('handleAaiEvent:tool.call');
+    expect(errorEvents.some((e) => (e.detail as { where: string }).where === 'recoverFromDispatchError:tick')).toBe(false);
+
+    // ESCALATE (the verdict the backfilled failure pushes this to) owes open_incident/
+    // alert_principal/seal_evidence_record -- each attempted once on this one tick, each
+    // caught individually and diagnosed, none of them abandoned yet (bounded to 3 attempts).
+    const failures = events.filter((e) => e.kind === 'terminal_action_result' && (e.detail as { status: string }).status === 'error');
+    expect(failures.map((e) => (e.detail as { name: string }).name).sort()).toEqual(
+      ['alert_principal', 'open_incident', 'seal_evidence_record'].sort(),
+    );
+    expect(events.some((e) => e.kind === 'terminal_action_abandoned')).toBe(false);
     expect(session.hasEnded()).toBe(false);
 
-    // The call is still fully alive afterward -- a nested nested failure doesn't leave it in
+    // The call is still fully alive afterward -- a stack of caught faults doesn't leave it in
     // some half-constructed state that a normal end() can't close out.
     expect(() => session.end('caller_ended')).not.toThrow();
     expect(session.hasEnded()).toBe(true);
+  });
+
+  it('fix round 2: a throwing terminal action that SUCCEEDS on retry still lets the other owed actions land, and the export is produced only after everything succeeds', async () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const events: { kind: string; detail: unknown }[] = [];
+    let freezeCalls = 0;
+    const flakyMock: typeof mockToolResult = (name, args, seed, ctx) => {
+      if (name === 'freeze_transaction_rail') {
+        freezeCalls += 1;
+        if (freezeCalls === 1) throw new Error('rail backend hiccup');
+      }
+      return mockToolResult(name, args, seed, ctx);
+    };
+    const { session, sent } = newSessionWithState(clock, aai, events, flakyMock);
+
+    session.start();
+    driveScenarioBIntoEvidence(session, aai, clock);
+
+    // Drive the scenario the rest of the way to FREEZE, same three evidence tool.calls
+    // session.test.ts's own Scenario B walk uses.
+    clock.now = 51000;
+    aai.emit({ type: 'tool.call', call_id: 't1', name: 'check_sso_context', arguments: { identity_id: session.last?.claimed_identity_id } });
+    clock.now = 51500;
+    aai.emit({ type: 'tool.call', call_id: 't2', name: 'get_request_history', arguments: { identity_id: session.last?.claimed_identity_id } });
+    clock.now = 52000;
+    aai.emit({ type: 'tool.call', call_id: 't3', name: 'verify_out_of_band', arguments: { identity_id: session.last?.claimed_identity_id } });
+
+    expect(session.last?.verdict).toBe('FREEZE');
+    // First tick after FREEZE: freeze_transaction_rail throws (attempt 1), but incident/
+    // alert/seal are independent -- they still fire in the SAME pass, not blocked by
+    // freeze's own failure.
+    expect(session.logs.tools.some((t) => t.name === 'open_incident' && !t.result?.error)).toBe(true);
+    expect(session.logs.tools.some((t) => t.name === 'alert_principal' && !t.result?.error)).toBe(true);
+    expect(session.logs.tools.some((t) => t.name === 'seal_evidence_record' && !t.result?.error)).toBe(true);
+    // freeze_transaction_rail's own failed attempt is logged too (evidence of what was tried).
+    expect(session.logs.tools.some((t) => t.name === 'freeze_transaction_rail' && t.result?.error === 'internal_error')).toBe(true);
+    // Not settled yet -- no export/countersign until freeze itself lands.
+    expect(latestState(sent)?.forensic.export_hash).toBeNull();
+
+    // Next tick (any AAI event) retries freeze -- this time it succeeds.
+    clock.now = 53000;
+    aai.emit({ type: 'transcript.user', item_id: 'c-extra', text: 'still there?' });
+
+    expect(session.logs.tools.some((t) => t.name === 'freeze_transaction_rail' && !t.result?.error)).toBe(true);
+    await session.whenIdle();
+    expect(latestState(sent)?.forensic.export_hash).not.toBeNull();
+  });
+
+  it('fix round 2: a terminal action that fails MAX_TERMINAL_ACTION_ATTEMPTS times is abandoned -- no export ever, diagnostics records it, verdict stays exactly what it was before any terminal action was attempted', async () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const events: { kind: string; detail: unknown }[] = [];
+    const freezeAlwaysFails: typeof mockToolResult = (name, args, seed, ctx) => {
+      if (name === 'freeze_transaction_rail') throw new Error('rail backend permanently down');
+      return mockToolResult(name, args, seed, ctx);
+    };
+    const { session, sent } = newSessionWithState(clock, aai, events, freezeAlwaysFails);
+
+    session.start();
+    driveScenarioBIntoEvidence(session, aai, clock);
+    clock.now = 51000;
+    aai.emit({ type: 'tool.call', call_id: 't1', name: 'check_sso_context', arguments: { identity_id: session.last?.claimed_identity_id } });
+    clock.now = 51500;
+    aai.emit({ type: 'tool.call', call_id: 't2', name: 'get_request_history', arguments: { identity_id: session.last?.claimed_identity_id } });
+    clock.now = 52000;
+    aai.emit({ type: 'tool.call', call_id: 't3', name: 'verify_out_of_band', arguments: { identity_id: session.last?.claimed_identity_id } });
+
+    expect(session.last?.verdict).toBe('FREEZE');
+    const verdictBeforeActions = session.last?.verdict;
+
+    // Two more ticks (attempts 2 and 3) -- freeze keeps failing every time.
+    clock.now = 53000;
+    aai.emit({ type: 'transcript.user', item_id: 'c-extra-1', text: 'hello?' });
+    clock.now = 54000;
+    aai.emit({ type: 'transcript.user', item_id: 'c-extra-2', text: 'still there?' });
+
+    const abandoned = events.find((e) => e.kind === 'terminal_action_abandoned');
+    expect((abandoned?.detail as { name: string } | undefined)?.name).toBe('freeze_transaction_rail');
+    expect((abandoned?.detail as { attempts: number } | undefined)?.attempts).toBe(3);
+
+    // A fourth tick proves it's truly abandoned, not just slow -- no further attempt.
+    const freezeAttemptsBefore = session.logs.tools.filter((t) => t.name === 'freeze_transaction_rail').length;
+    clock.now = 55000;
+    aai.emit({ type: 'transcript.user', item_id: 'c-extra-3', text: 'one more' });
+    expect(session.logs.tools.filter((t) => t.name === 'freeze_transaction_rail').length).toBe(freezeAttemptsBefore);
+
+    // Never exported, never countersigned -- and the verdict this call shows is EXACTLY what
+    // it was before any terminal action was ever attempted (LAW 2/3: an incomplete
+    // containment step must never look complete).
+    await session.whenIdle();
+    expect(latestState(sent)?.forensic.export_hash).toBeNull();
+    expect(latestState(sent)?.verdict).toBe(verdictBeforeActions);
+    expect(session.last?.verdict).toBe(verdictBeforeActions);
   });
 });
 

@@ -20,6 +20,7 @@ import {
   type ToolLogEntry,
   type ToolName,
   type Utterance,
+  type Verdict,
   type mockToolResult,
   type MockCtx,
 } from '@countersign/engine';
@@ -31,7 +32,7 @@ import { toolSchemasFor, paramsFor } from './allowlist.js';
 import { deriveScreenState } from '../screen/state.js';
 import { validateToolArgs } from './validate.js';
 import { stallKindFor, stallLineFor, type StallKind } from './stalls.js';
-import { runOwedTerminalActions } from './terminalActions.js';
+import { argsForTerminalTool } from './terminalActions.js';
 
 export interface CallSessionOpts {
   session_id: string;
@@ -92,7 +93,34 @@ export class CallSession {
   private actionCounter = 0;
   private toolCounter = 0;
   private mockCtx: MockCtx = { evidence_count: 0, incident_index: 0 };
-  private terminalActionsRun = false;
+  /** Fix round 2 (LAW 2/3 re-review finding, IMPORTANT): replaces the old set-once
+   *  `terminalActionsRun` boolean. The old code set that flag TRUE before running the owed
+   *  actions, so a mid-loop throw (a broken mock -- fix round 1's own "nested failure" test
+   *  proved this reachable) permanently skipped whatever hadn't run yet (e.g. `open_incident`,
+   *  `alert_principal` -- the actual containment LAW 2 requires alongside a freeze), with no
+   *  retry and nothing visible on the screen (a partial failure renders identically to "still
+   *  computing": normal banner, just missing the incident id / export hash sublines).
+   *
+   *  `terminalActionsOwed` is a ONE-TIME snapshot of `output.required_actions`, captured the
+   *  moment a terminal verdict is first observed with owed actions -- deliberately never
+   *  re-read from a later `evaluate()`. The engine's own `requiredActions()` (fsm.ts) treats
+   *  ANY logged tool result (even an error one, from `t.result !== undefined`) as "done" and
+   *  drops it from a freshly recomputed list -- which would silently un-own a genuinely
+   *  FAILED action the moment its failed attempt gets logged (see below), exactly defeating
+   *  the retry this fix exists to provide. Retry bookkeeping is therefore this class's OWN
+   *  state, independent of the engine's: `terminalActionSucceeded` (landed for real),
+   *  `terminalActionAttempts` (failure count per name, bounded by
+   *  `MAX_TERMINAL_ACTION_ATTEMPTS`), `terminalActionsAbandoned` (permanently gave up on).
+   *  `terminalActionsSettled` is true once every owed action is EITHER succeeded or
+   *  abandoned -- `runTerminalActionsIfNeeded` becomes a no-op from then on, exactly once,
+   *  same lifecycle shape the old boolean had. */
+  private static readonly MAX_TERMINAL_ACTION_ATTEMPTS = 3;
+  private terminalActionsOwed: ToolName[] | null = null;
+  private terminalVerdictSnapshot: Verdict | null = null;
+  private readonly terminalActionSucceeded = new Set<ToolName>();
+  private readonly terminalActionAttempts = new Map<ToolName, number>();
+  private readonly terminalActionsAbandoned = new Set<ToolName>();
+  private terminalActionsSettled = false;
   private exportHash: string | null = null;
   private countersignRecomputed = false;
   /** Finding 5 (final review): the in-flight export-hash promise, if any -- `whenIdle()`
@@ -259,9 +287,30 @@ export class CallSession {
     // `discardPendingToolResults` ran for this turn. Run whichever this event would have run,
     // so any `tool.result` already queued (from this event or an earlier `tool.call`) still
     // goes out on schedule rather than stalling until some later, unrelated `reply.done`.
+    //
+    // Fix round 2 (re-review finding, IMPORTANT): this retry call can ITSELF throw --
+    // `flushToolResults` calls `this.opts.aai.send(...)`, which is exactly what a real,
+    // closing/closed WebSocket can throw from (not just a synthetic test double). If the
+    // ORIGINAL `flushToolResults` (from the normal `reply.done` case in `dispatchAaiEvent`)
+    // already failed because of that, this retry hits the SAME failing socket and throws
+    // again -- and until this fix, nothing here caught it: it would propagate straight out of
+    // `recoverFromDispatchError`, past `handleAaiEvent`'s own try/catch (which only wraps the
+    // call to `dispatchAaiEvent`, not this method), right back into `aai.on()`'s synchronous
+    // emit loop. That is precisely the "never let a throw escape uncaught" guarantee this
+    // whole method exists to provide -- one more try/catch closes it, same pattern as the
+    // `tick()` guard below: log it (`where: 'recover_flush'`) and continue to `tick()`
+    // regardless, rather than leaving whatever's left in `pendingToolResults` to be retried
+    // (or not) some other way.
     if (evt.type === 'reply.done') {
-      if (evt.status === 'interrupted') this.discardPendingToolResults();
-      else this.flushToolResults();
+      try {
+        if (evt.status === 'interrupted') this.discardPendingToolResults();
+        else this.flushToolResults();
+      } catch (flushErr) {
+        this.diag('error', {
+          message: flushErr instanceof Error ? flushErr.message : String(flushErr),
+          where: 'recover_flush',
+        });
+      }
     }
 
     // Keep the call moving: re-run the engine over whatever DID make it into the logs before
@@ -549,30 +598,94 @@ export class CallSession {
    *  once the engine has already decided the verdict), then re-runs `evaluate` over the now-
    *  frozen logs: `countersign.recomputed` is the proof that adding the record of the
    *  actions taken did not change the verdict that authorized them.
-   *  IMPORTANT 3 (final review): the tool-running step itself now lives in
-   *  `runOwedTerminalActions` (call/terminalActions.ts), shared verbatim with replay.ts --
-   *  previously only a live call ever ran it, so a replay of the same corpus file never
-   *  showed the export/countersign a live run always reached. */
+   *  IMPORTANT 3 (final review): the tool-running step itself used to live in
+   *  `runOwedTerminalActions` (call/terminalActions.ts), shared verbatim with replay.ts.
+   *  Fix round 2 (LAW 2/3 re-review finding, IMPORTANT): the live-call path now runs its own
+   *  per-action, try/catch, retry-and-abandon-bounded loop below instead -- `terminalActions
+   *  .ts`'s `runOwedTerminalActions` is UNCHANGED and still used verbatim by replay.ts (a
+   *  single-pass corpus replay against the deterministic mock has no live "next tick" to
+   *  retry on, and no history of ever needing to -- see replay.test.ts's own unchanged
+   *  18-corpus-result assertion). `argsForTerminalTool` (still exported from
+   *  terminalActions.ts) is reused here, not reimplemented. Called from every `tick()` until
+   *  it settles (see `terminalActionsSettled`'s own doc comment on the class fields above),
+   *  not just once. */
   private runTerminalActionsIfNeeded(): void {
-    if (this.terminalActionsRun || !this.last) return;
+    if (this.terminalActionsSettled || !this.last) return;
     const output = this.last;
-    const terminal = output.verdict === 'STAGE' || output.verdict === 'FREEZE' || output.verdict === 'ESCALATE';
-    if (!terminal || output.required_actions.length === 0) return;
 
-    this.terminalActionsRun = true;
-    const verdictBeforeActions = output.verdict;
-    this.diag('terminal_action', { verdict: verdictBeforeActions, actions: output.required_actions });
+    if (this.terminalActionsOwed === null) {
+      const terminal = output.verdict === 'STAGE' || output.verdict === 'FREEZE' || output.verdict === 'ESCALATE';
+      if (!terminal || output.required_actions.length === 0) return;
+      // First tick a terminal verdict with owed actions is observed: freeze the snapshot
+      // this whole retry loop works from (see the class-field doc comment on why this is
+      // never re-read from a later `evaluate()`), and freeze which verdict "recomputed"
+      // means matching -- `this.last` itself is not reassigned again until (if ever) every
+      // owed action actually succeeds.
+      this.terminalActionsOwed = [...output.required_actions];
+      this.terminalVerdictSnapshot = output.verdict;
+      this.diag('terminal_action', { verdict: output.verdict, actions: this.terminalActionsOwed });
+    }
 
-    runOwedTerminalActions(
-      this.logs.tools,
-      output,
-      this.opts.seed,
-      this.opts.mock,
-      this.mockCtx,
-      () => this.nextToolId(),
-      () => this.nowT(),
-    );
+    const owed = this.terminalActionsOwed;
+    const stillOwed = owed.filter((name) => !this.terminalActionSucceeded.has(name) && !this.terminalActionsAbandoned.has(name));
 
+    for (const name of stillOwed) {
+      try {
+        const args = argsForTerminalTool(name, this.opts.seed, output);
+        const result = this.opts.mock(name, args, this.opts.seed, this.mockCtx);
+        if (name === 'open_incident') this.mockCtx.incident_index += 1;
+        this.logs.tools.push({ id: this.nextToolId(), name, t_ms: this.nowT(), args, result });
+        this.terminalActionSucceeded.add(name);
+        this.diag('terminal_action_result', { name, status: 'ok' });
+      } catch (err) {
+        const attempts = (this.terminalActionAttempts.get(name) ?? 0) + 1;
+        this.terminalActionAttempts.set(name, attempts);
+        const message = err instanceof Error ? err.message : String(err);
+        // Record the failed attempt as a real (failed) tool call -- evidence of what was
+        // actually tried, same shape a live tool.call's own backfill uses
+        // (recoverFromDispatchError above). LAW 3/I4 note: this does NOT retroactively
+        // change `output`/`this.last` (already computed and frozen for this pass) -- it only
+        // affects a FUTURE `evaluate()`, which this method deliberately does not call again
+        // until every owed action has actually succeeded (see below).
+        this.logs.tools.push({
+          id: this.nextToolId(),
+          name,
+          t_ms: this.nowT(),
+          args: { request_version: output.request_version, attempt: attempts },
+          result: { error: 'internal_error', message },
+        });
+        this.diag('terminal_action_result', { name, status: 'error', attempt: attempts, message });
+        if (attempts >= CallSession.MAX_TERMINAL_ACTION_ATTEMPTS) {
+          this.terminalActionsAbandoned.add(name);
+          this.diag('terminal_action_abandoned', { name, attempts });
+        }
+      }
+    }
+
+    const remaining = owed.filter((name) => !this.terminalActionSucceeded.has(name) && !this.terminalActionsAbandoned.has(name));
+    if (remaining.length > 0) return; // still retryable actions left -- try again on the next tick
+
+    this.terminalActionsSettled = true;
+    if (this.terminalActionsAbandoned.size > 0) {
+      // At least one required action was abandoned after MAX_TERMINAL_ACTION_ATTEMPTS: per
+      // the ruling, the export/countersign line must NEVER be produced in this case (no new
+      // ScreenState/protocol field exists for "a terminal action failed", and adding one is
+      // out of this fix's scope) -- the screen simply, visibly lacks the export hash instead
+      // of looking complete, exactly as it would mid-call. `exportHash`/`countersignRecomputed`
+      // are left exactly as they already were (null/false) -- THIS method never calls
+      // `applyEvaluate()` again once settled-with-abandonment. `this.last` itself is NOT
+      // frozen (every `tick()` still re-derives it at the top, before this method even runs,
+      // independent of terminal-action status) -- but I4 (rules.ts) only ever downgrades a
+      // STAGE/PENDING verdict for an incomplete evaluation, never FREEZE/ESCALATE, so a
+      // failed terminal action's own logged error never perturbs a verdict that's already
+      // terminal; the screen's verdict stays what it was, the export hash simply never
+      // appears.
+      return;
+    }
+
+    // Every owed action landed for real: NOW (and only now) re-run the engine over the
+    // frozen logs (the countersign) and build the export.
+    const verdictBeforeActions = this.terminalVerdictSnapshot;
     this.applyEvaluate();
     const after = this.last;
     this.countersignRecomputed = after ? after.verdict === verdictBeforeActions : false;
