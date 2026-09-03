@@ -93,6 +93,32 @@ describe('playback', () => {
     expect(() => playback.flush()).not.toThrow();
   });
 
+  it('underrunCount() starts at 0, never counts the first chunk, and counts a chunk that arrives after the queue ran dry', () => {
+    const { ctx, fake } = makeContext();
+    const playback = createPlayback(ctx);
+    expect(playback.underrunCount()).toBe(0);
+
+    // First chunk: `nextStartTime` starts at 0 and `currentTime` is already 0 too -- not an
+    // underrun (there was no previous chunk to have run out).
+    playback.push(base64OfSilence(480));
+    expect(playback.underrunCount()).toBe(0);
+
+    // Second chunk arrives while the first is still playing (currentTime has not caught up
+    // to nextStartTime) -- not an underrun either.
+    playback.push(base64OfSilence(480));
+    expect(playback.underrunCount()).toBe(0);
+
+    // The clock advances PAST where playback was scheduled to be -- the queue ran dry before
+    // this next chunk arrived, an audible gap.
+    fake.currentTime = 10;
+    playback.push(base64OfSilence(480));
+    expect(playback.underrunCount()).toBe(1);
+
+    // flush() is a deliberate barge-in, not an underrun -- the count survives it.
+    playback.flush();
+    expect(playback.underrunCount()).toBe(1);
+  });
+
   it('level() reflects the peak of the most recently pushed chunk and resets to 0 on flush', () => {
     const { ctx } = makeContext();
     const playback = createPlayback(ctx);

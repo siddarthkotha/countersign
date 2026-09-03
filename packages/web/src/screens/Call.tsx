@@ -17,6 +17,7 @@ import Masthead from '../components/Masthead';
 import Footer from '../components/Footer';
 import { connect, type CallClient } from '../ws/client';
 import type { StartResult } from '../api';
+import { buildDiagnosticsPayload, markStartClick, recordEvent } from '../diagnostics/flightRecorder';
 
 export type StartedSession = Extract<StartResult, { session_id: string }>;
 
@@ -103,6 +104,12 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
   const transcriptLenRef = useRef(0);
   const pendingTurnStartRef = useRef<number | null>(null);
   const loggedRef = useRef(false);
+  // Task W9 (flight recorder): guards the diagnostics POST/beacon the same way `loggedRef`
+  // guards the console line -- whichever path ends the call first (End Call, a server
+  // `ended` event, unmount, or the tab actually closing) sends exactly one payload, never
+  // one per path.
+  const diagSentRef = useRef(false);
+  const lastUnderrunRef = useRef(0);
 
   // Task W8: one JSON line per call, on end (whichever path ends it first -- the caller's own
   // "End Call" click in `handleEnd`, or the server ending the call, e.g. idle timeout --
@@ -115,7 +122,9 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
     if (loggedRef.current) return;
     loggedRef.current = true;
     // eslint-disable-next-line no-console -- deliberate: this IS the founder-facing output
-    // (BRIEF/CLAUDE.md: "measured in this browser", copy-pasteable from the console).
+    // (BRIEF/CLAUDE.md: "measured in this browser", copy-pasteable from the console; the
+    // full, untruncated session_id is included -- W8 review -- so it can be pasted straight
+    // into a bug report or a GET .../diagnostics lookup).
     console.info('[countersign:timings]', {
       session_id: session.session_id,
       start_to_ready_ms: timingsRef.current.startReadyMs,
@@ -124,8 +133,88 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
     });
   }
 
+  // Task W9: shared by every "the call is over" path below (End Call, a server `ended`
+  // event, and -- W8 review, Important -- unmount). Pushes one final `timings` event (the
+  // W8 numbers) onto the flight recorder buffer, then POSTs the whole buffer with
+  // `keepalive:true` so the request has a chance to finish even if the tab is mid-navigation.
+  // `diagSentRef` makes this (and `flushDiagnosticsBeacon` below) a true single-shot: whichever
+  // of the several call-end paths runs first wins, every later one is a no-op.
+  function flushDiagnosticsFetch() {
+    if (diagSentRef.current) return;
+    diagSentRef.current = true;
+    recordEvent('timings', { ...timingsRef.current });
+    const body = buildDiagnosticsPayload();
+    // A full try/catch, not just a trailing `.catch()`: this can run from the unmount
+    // cleanup effect below, at a point where a test environment (or an unusual browser) may
+    // not have a `fetch` global at all -- `fetch(...)` itself can throw SYNCHRONOUSLY (before
+    // ever returning a promise), which a bare `.catch()` would never see.
+    try {
+      void fetch(`/api/session/${session.session_id}/diagnostics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        keepalive: true,
+      }).catch(() => {
+        // Best-effort -- diagnostics are for founder debugging; they must never block or
+        // alter the call UI, and there is no user-facing recovery for a failed POST.
+      });
+    } catch {
+      // See the comment above -- same "never break the call over a debugging aid" reasoning.
+    }
+  }
+
+  // Task W9: the pagehide/beforeunload path -- a `fetch`, even with `keepalive:true`, is not
+  // guaranteed to be given the time it needs once the page is actually being torn down;
+  // `navigator.sendBeacon` is the browser-native mechanism built for exactly this. Same
+  // `diagSentRef` guard as `flushDiagnosticsFetch`, so a beacon fired after an ordinary End
+  // Call already flushed is a no-op, not a duplicate POST.
+  function flushDiagnosticsBeacon() {
+    if (diagSentRef.current) return;
+    diagSentRef.current = true;
+    recordEvent('timings', { ...timingsRef.current });
+    const body = buildDiagnosticsPayload();
+    try {
+      // A plain string body (sendBeacon accepts one directly) rather than wrapping it in a
+      // `Blob` -- one less moving part, and jsdom's own `Blob` implementation (unlike a real
+      // browser's) doesn't implement `.text()`/`.arrayBuffer()`, which would make this
+      // impossible to assert against in a test without a real network request.
+      navigator.sendBeacon(`/api/session/${session.session_id}/diagnostics`, body);
+    } catch {
+      // Best-effort -- an environment without sendBeacon (or one that throws on a bad URL)
+      // must never break the page teardown it's attached to.
+    }
+  }
+
+  // Task W9 / W8 review (Important): a call that ends by the caller navigating away,
+  // refreshing, or closing the tab -- rather than clicking End Call, or the server sending
+  // its own `ended` -- used to lose its timings silently (no console line, no diagnostics).
+  // `pagehide` is the recommended, bfcache-safe event; `beforeunload` is registered too since
+  // some environments only reliably fire one of the two. Both funnel into the same
+  // once-only guards above, so a page that fires both still reports exactly once.
+  useEffect(() => {
+    function handlePageHide() {
+      logTimingsOnce();
+      flushDiagnosticsBeacon();
+    }
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('beforeunload', handlePageHide);
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handlePageHide);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberate: mount-once, same as
+    // the unmount-close effect below; `session.session_id` is stable for the life of this
+    // component (a new session always means a fresh Call mount, per App.tsx).
+  }, []);
+
   useEffect(
     () => () => {
+      // W8 review (Important): unmount is itself a call-ending path (Start Over, a parent
+      // screen switch, or any route other than the "End Call" button/a server `ended` event)
+      // -- it must report the same way those do, not silently drop the numbers.
+      logTimingsOnce();
+      flushDiagnosticsFetch();
+      recordEvent('socket_close');
       clientRef.current?.close();
     },
     [],
@@ -141,13 +230,24 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
     transcriptLenRef.current = 0;
     pendingTurnStartRef.current = null;
     loggedRef.current = false;
+    diagSentRef.current = false;
+    lastUnderrunRef.current = 0;
     timingsRef.current = EMPTY_TIMINGS;
     setTimings(EMPTY_TIMINGS);
+    // Task W9: `markStartClick` sets the flight recorder's zero point -- every event's
+    // reported `t_ms` (including this very click) is relative to THIS instant from here on.
+    markStartClick();
+    recordEvent('start_click');
     try {
       const audioContext = new AudioContext();
       const client = await connect(session.ws_path, audioContext);
+      recordEvent('socket_open');
       client.onState((state) => {
         const now = performance.now();
+        // Task W9: the status word off every state event this browser sees, throttled
+        // batches included -- the ask is explicit that a throttled-away intermediate status
+        // is fine to miss (only the ones that actually reach the browser are recorded).
+        recordEvent('state', { status: state.agent_status });
         // The first `state` ServerEvent back from the server is the earliest signal on the
         // wire today that the call/link is up -- there is no separate `ready` message.
         if (clockRef.current.readyAt === null) {
@@ -163,7 +263,20 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
         if (state.transcript.length > prevLen) {
           const newLines = state.transcript.slice(prevLen);
           transcriptLenRef.current = state.transcript.length;
+          // Task W9: role + length only, per LAW 4 -- never `line.text` (the server already
+          // has the verbatim transcript; this is a debugging aid, not a second evidence copy).
+          for (const line of newLines) {
+            recordEvent('transcript_line', { role: line.speaker, length: line.text.length });
+          }
           if (newLines.some((line) => line.speaker === 'caller')) {
+            // Minor (W8 review): a turn that never got its own agent audio back (a silent,
+            // tool-only turn) used to have `pendingTurnStartRef` overwritten right here with
+            // no record anywhere that it happened -- not a wrong number, just a silently
+            // shorter `turnGapsMs` than the number of caller turns. Recording it here makes
+            // that drop visible instead of invisible.
+            if (pendingTurnStartRef.current !== null) {
+              recordEvent('turn_no_audio', { pending_ms: Math.round(now - pendingTurnStartRef.current) });
+            }
             pendingTurnStartRef.current = now;
           }
         }
@@ -186,38 +299,62 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
           timingsRef.current = { ...timingsRef.current, turnGapsMs: [...timingsRef.current.turnGapsMs, gap] };
           setTimings(timingsRef.current);
         }
+        // Task W9: playback.ts now counts underruns (a chunk that arrived after the queue
+        // already ran dry) -- only a NEW count is worth an event, not one per audio chunk.
+        const underruns = client.playback.underrunCount?.() ?? 0;
+        if (underruns > lastUnderrunRef.current) {
+          recordEvent('audio_underrun', { count: underruns });
+          lastUnderrunRef.current = underruns;
+        }
       });
-      client.onEnded((reason) => {
-        setEndedReason(reason);
-        setLink('ended');
-        logTimingsOnce();
+      // Task W9: a SECOND `onFlush` listener, same multicast reasoning as `onAudio` above --
+      // `connect()`'s own listener still does the actual barge-in (`playback.flush()`); this
+      // one only records that it happened.
+      client.onFlush(() => {
+        recordEvent('flush');
       });
-      client.onLink((leg, state) => {
+      client.onLink((leg, state, dropped_frames) => {
+        recordEvent('link', { leg, state, dropped_frames: dropped_frames ?? null });
         // The AssemblyAI session and the evidence stay put on the server through a dropped
         // link (Task R1) -- only the chip/status line move; nothing about screenState resets.
         setLinkLeg(state === 'lost' ? leg : null);
         setLink(state === 'lost' ? 'reconnecting' : 'live');
       });
+      client.onEnded((reason) => {
+        recordEvent('ended', { reason });
+        setEndedReason(reason);
+        setLink('ended');
+        logTimingsOnce();
+        flushDiagnosticsFetch();
+      });
       clientRef.current = client;
       client.send({ type: 'start' });
       setLink('live');
     } catch {
+      // Task W9: a failed connect (mic denied, no device, worker/socket setup threw) is
+      // exactly the kind of rough call this feature exists to help debug -- record it before
+      // falling through to the existing mic-failure banner.
+      recordEvent('connect_failed');
       setMicError(true);
     }
   }
 
   function handleEnd() {
+    recordEvent('end_click');
     clientRef.current?.send({ type: 'end' });
+    recordEvent('socket_close');
     clientRef.current?.close();
     clientRef.current = null;
     setLink('ended');
     logTimingsOnce();
+    flushDiagnosticsFetch();
     void fetch(`/api/session/${session.session_id}/end`, { method: 'POST' }).catch(() => {
       // Best-effort -- the frozen last state stays on screen either way.
     });
   }
 
   function handleStartOver() {
+    recordEvent('socket_close');
     clientRef.current?.close();
     clientRef.current = null;
     onStartOver();

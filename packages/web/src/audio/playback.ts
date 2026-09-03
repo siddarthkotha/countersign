@@ -14,6 +14,13 @@ export interface PlaybackHandle {
   flush(): void;
   /** 0..1 peak amplitude of the most recently pushed chunk, for a trace/level meter. */
   level(): number;
+  /** Task W9 (flight recorder): count of pushed chunks that arrived after the previously
+   *  scheduled audio had already finished playing (`context.currentTime` had moved past
+   *  `nextStartTime` by the time this chunk was scheduled) -- i.e. a gap the listener would
+   *  have heard as silence, not caused by a deliberate `flush()`. Monotonically increasing;
+   *  never reset by `flush()` (a barge-in is not an underrun) -- only a fresh
+   *  `createPlayback()` call starts a new count. */
+  underrunCount(): number;
   close(): void;
 }
 
@@ -30,6 +37,8 @@ function base64ToInt16(base64: string): Int16Array {
 
 export function createPlayback(context: AudioContext): PlaybackHandle {
   let nextStartTime = 0;
+  let hasScheduled = false;
+  let underruns = 0;
   const scheduled: AudioBufferSourceNode[] = [];
   let currentLevel = 0;
 
@@ -44,6 +53,13 @@ export function createPlayback(context: AudioContext): PlaybackHandle {
       if (abs > peak) peak = abs;
     }
     currentLevel = peak;
+
+    // Task W9: a chunk arriving after the queue already ran dry (the clock has moved past
+    // where the previous chunk was scheduled to end) is an audible gap -- skip the very
+    // first chunk of a call, since `nextStartTime` starts at 0 and `context.currentTime` is
+    // almost always already past that by the time anything is pushed.
+    if (hasScheduled && context.currentTime > nextStartTime) underruns += 1;
+    hasScheduled = true;
 
     const source = context.createBufferSource();
     source.buffer = buffer;
@@ -79,6 +95,9 @@ export function createPlayback(context: AudioContext): PlaybackHandle {
     },
     level() {
       return currentLevel;
+    },
+    underrunCount() {
+      return underruns;
     },
     close() {
       this.flush();

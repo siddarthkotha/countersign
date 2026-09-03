@@ -796,6 +796,15 @@ input {
   color: var(--cs-muted);
 }
 
+/* W8 review, Minor: the throttle disclosure below the timings line -- smaller/dimmer than
+   the numbers themselves, no animation/transition (nothing for prefers-reduced-motion to
+   guard, same as .timings-line above). */
+.timings-note {
+  font-size: 0.78rem;
+  color: var(--cs-muted);
+  font-style: italic;
+}
+
 .evidence-card {
   border-bottom: 1px solid var(--cs-row-border);
   padding: 0.4rem 0;

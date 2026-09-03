@@ -6,6 +6,7 @@
 // plain-word reason -- never left empty. The result WORD always leads the sentence (colour
 // is decoration only, never the sole carrier -- brief requirement D).
 import { useState } from 'react';
+import { recordEvent } from '../diagnostics/flightRecorder';
 
 /** `'passed'` is the only success reason; every failure reason gets its own plain sentence
  *  below (QA finding 2's explicit list: NotAllowedError, NotFoundError, NotReadableError, a
@@ -122,11 +123,16 @@ export default function MicCheck({ onResult, timeoutMs }: MicCheckProps) {
         kind: 'passed',
         text: deviceLabel ? `PASSED — Microphone ready (${deviceLabel}).` : 'PASSED — Microphone ready.'
       });
+      // Task W9 (flight recorder): mic check result + device label, if the browser gave one --
+      // recorded here (not left to Landing.tsx) so it captures every MicCheck use, on any
+      // screen that ever mounts this component.
+      recordEvent('mic_check', { ok: true, reason: 'passed', deviceLabel });
       onResult({ ok: true, reason: 'passed', deviceLabel });
     } catch (err) {
       const reason = err instanceof MicCheckTimeoutError ? 'timeout' : classifyGetUserMediaError(err);
       const text = reason === 'timeout' ? timeoutSentence(effectiveTimeoutMs) : FAILURE_SENTENCES[reason];
       setLine({ kind: 'failed', text });
+      recordEvent('mic_check', { ok: false, reason, deviceLabel: null });
       onResult({ ok: false, reason, deviceLabel: null });
     }
   }

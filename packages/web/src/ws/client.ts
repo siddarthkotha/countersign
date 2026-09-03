@@ -17,6 +17,9 @@ export interface CallClient {
    *  timing observer). Calling `onAudio` twice ADDS a second listener; it never replaces the
    *  first. */
   onAudio(cb: (base64: string) => void): void;
+  /** Task W9 (flight recorder): multicast, same reasoning/shape as `onAudio` above --
+   *  `connect()`'s own playback-flushing listener registers first; Call.tsx adds a second,
+   *  logging-only listener without clobbering it. */
   onFlush(cb: () => void): void;
   onEnded(cb: (reason: string) => void): void;
   /** Task R1: the browser<->server link dropped or was re-established while the call itself
@@ -25,8 +28,11 @@ export interface CallClient {
    *  client's own WebSocket to our server, detected by src/ws/worker.ts's own reconnect
    *  logic) or `'aai'` (server<->AssemblyAI, merely forwarded through unchanged). The two
    *  used to be indistinguishable on screen; Call.tsx now shows a different status line for
-   *  each. */
-  onLink(cb: (leg: 'browser' | 'aai', state: 'lost' | 'restored') => void): void;
+   *  each. Task W9: a THIRD, optional `dropped_frames` argument is passed through from
+   *  worker.ts's own `LinkPost` when this is a browser-leg event (undefined for an
+   *  AAI-leg `ServerEvent`, which never carries that field) -- purely additive, existing
+   *  callers that only read the first two arguments are unaffected. */
+  onLink(cb: (leg: 'browser' | 'aai', state: 'lost' | 'restored', dropped_frames?: number) => void): void;
   close(): void;
 }
 
@@ -46,22 +52,27 @@ export function connectSocketOnly(ws_path: string, workerFactory: WorkerFactory 
   // needs to register a SECOND listener without clobbering that wiring, which a single `let
   // audioCb` would have done (the second `onAudio` call would silently replace the first).
   const audioCbs: ((data: string) => void)[] = [];
-  let flushCb: (() => void) | null = null;
+  // Task W9: multicast for the same reason `audioCbs` is (above) -- `connect()`'s own
+  // `onFlush(() => playback.flush())` registers first; a flight-recorder logging listener
+  // (Call.tsx) needs to add a SECOND one without clobbering it.
+  const flushCbs: (() => void)[] = [];
   let endedCb: ((reason: string) => void) | null = null;
-  let linkCb: ((leg: 'browser' | 'aai', state: 'lost' | 'restored') => void) | null = null;
+  let linkCb: ((leg: 'browser' | 'aai', state: 'lost' | 'restored', dropped_frames?: number) => void) | null = null;
 
   // IMPORTANT 2 (final review): the worker posts either an ordinary `ServerEvent` (relayed
   // verbatim from the server -- a `link` one carries `leg:'aai'` for an AAI-transport drop)
   // or its own `LinkPost` (worker.ts's own browser<->server socket dropping, always
   // `leg:'browser'`) -- both are `{type:'link', state, leg, ...}` shaped, so one check covers
-  // either origin.
+  // either origin. Task W9: `dropped_frames` only ever exists on the `LinkPost` shape (an
+  // AAI-leg `ServerEvent` never carries it) -- read defensively via a cast rather than a
+  // narrowing that TS can't express across the union.
   worker.onmessage = (event: MessageEvent<ServerEvent | LinkPost>) => {
     const msg = event.data;
     if (msg.type === 'state') stateCb?.(msg.state);
     else if (msg.type === 'audio') for (const cb of audioCbs) cb(msg.data);
-    else if (msg.type === 'flush') flushCb?.();
+    else if (msg.type === 'flush') for (const cb of flushCbs) cb();
     else if (msg.type === 'ended') endedCb?.(msg.reason);
-    else if (msg.type === 'link') linkCb?.(msg.leg, msg.state);
+    else if (msg.type === 'link') linkCb?.(msg.leg, msg.state, (msg as { dropped_frames?: number }).dropped_frames);
   };
 
   worker.postMessage({ type: '__connect', ws_path });
@@ -77,7 +88,7 @@ export function connectSocketOnly(ws_path: string, workerFactory: WorkerFactory 
       audioCbs.push(cb);
     },
     onFlush(cb) {
-      flushCb = cb;
+      flushCbs.push(cb);
     },
     onEnded(cb) {
       endedCb = cb;

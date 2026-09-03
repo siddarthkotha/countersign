@@ -57,8 +57,13 @@ function scenarioBFinalState(): ScreenState {
 function makeFakeClient() {
   let stateCb: ((state: ScreenState) => void) | null = null;
   let endedCb: ((reason: string) => void) | null = null;
-  let flushCb: (() => void) | null = null;
-  let linkCb: ((leg: 'browser' | 'aai', state: 'lost' | 'restored') => void) | null = null;
+  // Task W9: multicast, mirroring the real client.ts contract (the same reason
+  // test/call-timings.test.tsx's fake `onAudio` is an array, not a single overwritable slot)
+  // -- Call.tsx now registers a SECOND `onFlush` listener (flight-recorder logging) alongside
+  // this fake's own internal one below; a single `let flushCb` would let the second
+  // registration silently clobber the first and hide a real regression.
+  const flushCbs: (() => void)[] = [];
+  let linkCb: ((leg: 'browser' | 'aai', state: 'lost' | 'restored', dropped_frames?: number) => void) | null = null;
   const playbackFlush = vi.fn();
   const send = vi.fn<(e: BrowserEvent) => void>();
   const close = vi.fn();
@@ -72,17 +77,17 @@ function makeFakeClient() {
       // Not exercised here -- playback wiring for actual audio chunks belongs to client.ts.
     },
     onFlush(cb: () => void) {
-      flushCb = cb;
+      flushCbs.push(cb);
     },
     onEnded(cb: (reason: string) => void) {
       endedCb = cb;
     },
-    onLink(cb: (leg: 'browser' | 'aai', state: 'lost' | 'restored') => void) {
+    onLink(cb: (leg: 'browser' | 'aai', state: 'lost' | 'restored', dropped_frames?: number) => void) {
       linkCb = cb;
     },
     close,
     capture: { stop: vi.fn() },
-    playback: { flush: playbackFlush, push: vi.fn(), level: vi.fn(), close: vi.fn() },
+    playback: { flush: playbackFlush, push: vi.fn(), level: vi.fn(), close: vi.fn(), underrunCount: vi.fn().mockReturnValue(0) },
   };
 
   // Mirrors the real connect()'s documented wiring (src/ws/client.ts): a `flush` ServerEvent
@@ -94,8 +99,8 @@ function makeFakeClient() {
     client,
     emitState: (state: ScreenState) => stateCb?.(state),
     emitEnded: (reason: string) => endedCb?.(reason),
-    emitFlush: () => flushCb?.(),
-    emitLink: (leg: 'browser' | 'aai', state: 'lost' | 'restored') => linkCb?.(leg, state),
+    emitFlush: () => flushCbs.forEach((cb) => cb()),
+    emitLink: (leg: 'browser' | 'aai', state: 'lost' | 'restored', dropped_frames?: number) => linkCb?.(leg, state, dropped_frames),
     playbackFlush,
     send,
     close,

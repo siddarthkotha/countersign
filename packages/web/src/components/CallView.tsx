@@ -558,6 +558,15 @@ export default function CallView({ screen, defaultForensicOpen, timings }: CallV
                   start→ready {formatMs(timings.startReadyMs)} · ready→first audio {formatMs(timings.readyFirstAudioMs)} · turns{' '}
                   {timings.turnGapsMs.length > 0 ? timings.turnGapsMs.map((g) => formatMs(g)).join(', ') : '—'}
                 </p>
+                {/* W8 review, Minor: the per-turn gap above is measured from a `state` event
+                    reaching this browser, which sits behind both the client-side and the
+                    server-side ~66ms state throttle (src/ws/worker.ts's STATE_THROTTLE_MS) --
+                    a separate paragraph, not appended to `.timings-line` above, so the exact
+                    numbers stay machine-checkable on their own. */}
+                <p className="timings-note">
+                  Turn gaps include up to ~66–132ms of client+server state-throttle delay, not
+                  pure agent response time.
+                </p>
               </>
             )}
           </section>
