@@ -20,6 +20,7 @@ everything Claude does — only the one moment it's posted at.
 | Hook | Fires on | What it refuses |
 |---|---|---|
 | `lane-gate.sh` | Claude finishing a reply | If the reply mentions background/running work but doesn't end with a `Lanes:` line, or the backlog file (below) has an item sitting idle or a "held" item with no reason written down. |
+| `worktree-gate.sh` | Claude launching any helper agent | Launching a helper that doesn't say which files it will touch (no `LANE-FILES:` line, no READ-ONLY marker, no worktree isolation), or that declares files already claimed by another currently-running lane without using a separate git worktree. |
 | `agent-watchdog.sh` | Claude finishing a reply, and every time you send a new message | If a backlog item marked "running" hasn't produced any output in over 20 minutes — flags it as stalled. Blocks the reply on finish; just leaves a note when you send a new message (it never blocks *you*). |
 | `local-time-gate.sh` | Claude finishing a reply | If the reply doesn't include the real local clock time. |
 | `autopilot-guard.sh` | Every tool Claude tries to use | Risky or outward actions (pushing code, deleting things, publishing) while "autopilot" mode is on. |
@@ -78,6 +79,12 @@ Lanes: running: S5, W9 · held: judge-sim-preload because founder ruling Sep 12
 
 This is the mechanical proof that nothing was left idle without a reason. If
 everything currently in flight is already running, it can say `held: none`.
+
+Two lanes touching the same file is not, by itself, a reason to wait: the rule
+(founder ruling 2026-09-03) is that a shared file means launch it as its own
+git worktree lane, not serialize it behind the other one; `worktree-gate.sh`
+enforces this at launch time by checking every new agent's `LANE-FILES:` line
+against the files of any lane already marked `running` in the backlog.
 
 ## Known gaps (so you're not surprised)
 

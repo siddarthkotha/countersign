@@ -142,7 +142,8 @@ if not ok:
     reasons.append(
         "lane-gate (founder orchestration law, mechanical since 2026-09-02): this turn "
         "reports background work without stating the split. Before finishing: (1) list the "
-        "open backlog; (2) LAUNCH every item that touches files no running lane touches — "
+        "open backlog; (2) LAUNCH every dependency-free item; a shared file is NOT a "
+        "dependency: launch it with isolation: \"worktree\" and state the merge order — "
         "'waiting' is only legal when zero dependency-free work exists; (3) end the reply "
         "with ONE line: 'Lanes: running: <names> · held: <item> because <dependency>' "
         "(or 'held: none')."
