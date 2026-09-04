@@ -441,12 +441,12 @@
         "docs/SUBMISSION-DRAFT.md",
         "docs/VIDEO-SHOT-LIST.md"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
       "agent_id": "a43e9850b17cc1288",
       "started_at": "2026-09-04T05:06:07.531Z",
       "id": "D2",
-      "title": "D2 judge-facing honesty: prior art, tools trade-off, video year, business figure"
+      "title": "D2 judge-facing honesty: prior art, tools trade-off, video year, business figure - committed dac8f9a"
     },
     {
       "files": [],
@@ -550,6 +550,29 @@
       "held_because": "changes what the screen shows before any judge click; founder behaviour decision",
       "agent_id": "",
       "started_at": ""
+    },
+    {
+      "files": [
+        "docs/SUBMISSION-DRAFT.md"
+      ],
+      "status": "held",
+      "held_because": "UNKNOWN whether lablab enforces 400 as a hard cap; founder decides whether and what to trim",
+      "agent_id": "",
+      "started_at": "",
+      "id": "SUB-WORDCOUNT",
+      "title": "submission long description is 524 words, was 399"
+    },
+    {
+      "files": [
+        "README.md",
+        "docs/PREFLIP_CHECKLIST.md"
+      ],
+      "status": "held",
+      "held_because": "goes stale the moment the pending fixes deploy; refresh at the flip",
+      "agent_id": "",
+      "started_at": "",
+      "id": "README-STATUS-REFRESH",
+      "title": "README Status names a live blocker and a specific commit; refresh before the public flip"
     }
   ]
 }
