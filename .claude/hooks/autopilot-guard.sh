@@ -53,10 +53,17 @@ print("\n".join(out))' 2>/dev/null) || cmd_nohd="$cmd"
   [ -z "$cmd_nohd" ] && cmd_nohd="$cmd"
 
   # Rail 1 — outward / durable
-  if printf '%s' "$cmd_nohd" | grep -qE '(^|[;&|[:space:]])(git[[:space:]]+(push|merge|tag)|git[[:space:]]+branch[[:space:]]+-[dD]|git[[:space:]]+stash[[:space:]]+(drop|clear)|gh[[:space:]]+(pr|release|repo[[:space:]]+(edit|delete))|npm[[:space:]]+(publish|version)|(render|flyctl|fly|vercel|wrangler)[[:space:]]+(deploy|launch|publish|up))([[:space:]]|$)'; then
-    if [ -f "$FLAG" ]; then
-      deny "AUTOPILOT RAIL 1: push, merge, tag, PR, release, publish and deploy are blocked on autopilot. Local commits on main are allowed. Log the finished work in docs/AUTOPILOT_LOG.md and continue with the next item; the founder pushes or deploys when back."
-    else
+  # NARROWED by founder ruling 2026-09-03 11:25 PM CDT: on autopilot, `git push` and deploy
+  # (render/fly/vercel/wrangler) are ALLOWED so the overnight fix->push->deploy->retest loop
+  # runs unattended. Still blocked on autopilot: merge, tag, branch delete, stash drop, PR,
+  # release, repo edit/delete, and npm publish/version -- durable or publishing acts the
+  # founder did not unlock. Off autopilot, the FULL set still asks for his explicit yes.
+  if [ -f "$FLAG" ]; then
+    if printf '%s' "$cmd_nohd" | grep -qE '(^|[;&|[:space:]])(git[[:space:]]+(merge|tag)|git[[:space:]]+branch[[:space:]]+-[dD]|git[[:space:]]+stash[[:space:]]+(drop|clear)|gh[[:space:]]+(pr|release|repo[[:space:]]+(edit|delete))|npm[[:space:]]+(publish|version))([[:space:]]|$)'; then
+      deny "AUTOPILOT RAIL 1 (narrowed 2026-09-03): merge, tag, branch delete, stash drop, PR, release and npm publish/version remain blocked on autopilot. git push and deploy are now allowed per the founder's ruling; use those. For the rest, log it in docs/AUTOPILOT_LOG.md and leave it for the founder."
+    fi
+  else
+    if printf '%s' "$cmd_nohd" | grep -qE '(^|[;&|[:space:]])(git[[:space:]]+(push|merge|tag)|git[[:space:]]+branch[[:space:]]+-[dD]|git[[:space:]]+stash[[:space:]]+(drop|clear)|gh[[:space:]]+(pr|release|repo[[:space:]]+(edit|delete))|npm[[:space:]]+(publish|version)|(render|flyctl|fly|vercel|wrangler)[[:space:]]+(deploy|launch|publish|up))([[:space:]]|$)'; then
       ask "FOUNDER RAIL: this is an outward or durable action — needs the founder's explicit yes."
     fi
   fi

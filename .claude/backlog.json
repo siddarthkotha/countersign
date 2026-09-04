@@ -219,22 +219,22 @@
     },
     {
       "id": "R2",
-      "title": "R2 synthetic-caller rehearsal harness (scripts/rehearse, macOS say → live stack)",
+      "title": "R2 synthetic-caller rehearsal harness (scripts/rehearse, macOS say → live stack) — landed uncommitted; first real run: harness works, Dana FAIL is a scripted-caller limitation (trap question)",
       "files": [
         "scripts/rehearse/**",
         "docs/REHEARSAL-HARNESS.md",
         "package.json"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
       "agent_id": "ada5f3b601d9c6d75",
       "started_at": "2026-09-04T03:43:00Z"
     },
     {
       "id": "PUSH5",
-      "title": "push 5: deadlock fix + recorder + hook (needs the founder's push word)",
+      "title": "push 5: deadlock fix + recorder + hook (needs the founder's push word) — pushed 10:59 PM (9466de6..e62a39e)",
       "files": [],
-      "status": "held",
+      "status": "done",
       "held_because": "founder said 'push when green' 10:53 PM; autopilot rail denies push: needs 'autopilot stop' or the founder's own `! git push origin main`; re-review must pass first",
       "agent_id": "",
       "started_at": ""
@@ -247,6 +247,73 @@
       "held_because": "",
       "agent_id": "a30a42fd7be84e637",
       "started_at": "2026-09-04T03:57:23.632Z"
+    },
+    {
+      "id": "FIX4",
+      "title": "FIX4 voice model offered no tools; standing rule: never ask for ids — committed 42d720f",
+      "files": [
+        "packages/server/src/index.ts",
+        "packages/server/src/call/prompt.ts",
+        "packages/server/src/call/session.ts",
+        "packages/engine/src/fsm.ts",
+        "packages/server/test/**",
+        "packages/engine/test/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a77fcf6c8e9566298",
+      "started_at": "2026-09-04T04:09:47.731Z"
+    },
+    {
+      "id": "C1",
+      "title": "C1 multi-model critique runner (scripts/critique, dry-run verified)",
+      "files": [
+        "scripts/critique/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a32c97f78bf3fe8c8",
+      "started_at": ""
+    },
+    {
+      "id": "FIX5",
+      "title": "FIX5 GET /version deploy-verification endpoint (committed de6c796)",
+      "files": [
+        "packages/server/src/http.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "FIX4-review",
+      "title": "FIX4 review (read-only)",
+      "files": [],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "a4c464b9a0366b6d6",
+      "started_at": "2026-09-04T04:36:27.917Z"
+    },
+    {
+      "id": "DEPLOY-VERIFY",
+      "title": "verify Render auto-deploy via GET /version after next push",
+      "files": [],
+      "status": "held",
+      "held_because": "needs /version pushed and live first",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "gitignore-critique",
+      "title": "add scripts/critique/reports and scripts/rehearse output dirs to .gitignore",
+      "files": [
+        ".gitignore"
+      ],
+      "status": "held",
+      "held_because": "folding into the next docs/config commit",
+      "agent_id": "",
+      "started_at": ""
     }
   ]
 }
