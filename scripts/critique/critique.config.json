@@ -1,0 +1,12 @@
+{
+  "_comment": "Founder-editable. Model ids are UNKNOWN-to-be-current (providers rename/retire models) -- see docs/CRITIQUE-LOOP.md before trusting these without checking OpenRouter's model list. 'gemini/<name>' ids route to the direct Gemini API (GEMINI_API_KEY); every other id routes to OpenRouter (OPENROUTER_API_KEY) as-is.",
+  "packet_cap_chars": 60000,
+  "max_calls": 20,
+  "request_timeout_ms": 30000,
+  "models": [
+    { "id": "openai/gpt-4o", "label": "ChatGPT (gpt-4o via OpenRouter)" },
+    { "id": "x-ai/grok-2", "label": "Grok 2 (via OpenRouter)" },
+    { "id": "perplexity/sonar-pro", "label": "Perplexity Sonar Pro (via OpenRouter)" },
+    { "id": "google/gemini-pro", "label": "Gemini Pro (via OpenRouter)" }
+  ]
+}

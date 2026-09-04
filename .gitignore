@@ -31,3 +31,6 @@ Thumbs.db
 # Synthetic-caller rehearsal harness: synthesized clips and per-run reports
 scripts/rehearse/.cache/
 scripts/rehearse/reports/
+
+# Multi-model critique runner: per-run reports
+scripts/critique/reports/
