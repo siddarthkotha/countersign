@@ -1,4 +1,4 @@
-# Countersign — session snapshot (overwritten at every close; never appended)
+# Countersign, session snapshot (overwritten at every close; never appended)
 
 Last close: Friday 2026-09-04, ~1:10 AM CDT (Day 3 ran past midnight, autopilot on).
 Founder asleep. Autopilot still ON: say "autopilot stop" to take back the wheel.
