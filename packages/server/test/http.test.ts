@@ -383,6 +383,47 @@ describe('http server', () => {
     const r2 = await fetch(`${base}/api/session/start`, { method: 'POST' });
     expect(r2.status).toBe(200);
   });
+
+  // Judge review finding (2026-09-04), defect 2: docs/SUBMISSION-DRAFT.md tells a judge to
+  // click Replay first and expect "a full recorded interrogation" -- the flagship
+  // scenario-b-miller-fraud attack -- but the dropdown used to be 18 bare filenames in
+  // alphabetical order (flagship 14th), no descriptions. This runs against the REAL corpus
+  // directory (same as replay.test.ts) -- not a fixture -- so it catches a real corpus file
+  // missing a usable `title` the same way a judge's actual dropdown would.
+  it('/api/replay keeps the original bare file list and adds a labeled recording per file, flagship first and marked recommended', async () => {
+    const { base } = await start();
+    const r = await fetch(`${base}/api/replay`);
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      files: string[];
+      recordings: Array<{ file: string; label: string; recommended: boolean }>;
+    };
+
+    // Backward compatible: `files` is exactly what this route always returned -- bare corpus
+    // names (no `.json`), alphabetically sorted.
+    expect(body.files).toEqual([...body.files].sort());
+    expect(body.files.every((f) => !f.endsWith('.json'))).toBe(true);
+    expect(body.files).toContain('scenario-b-miller-fraud');
+    expect(body.files.length).toBeGreaterThanOrEqual(18);
+
+    // New: one `recordings` entry per file in `files`, same values, nothing dropped or added.
+    expect(body.recordings.map((rec) => rec.file).sort()).toEqual([...body.files].sort());
+
+    // The flagship sorts first and is the only one marked recommended -- an honest label
+    // (its own corpus file's `title`, prefixed) rather than the raw filename.
+    expect(body.recordings[0]).toEqual({
+      file: 'scenario-b-miller-fraud',
+      label: 'Recommended: Robert Miller — the fraudulent CEO-impersonation call',
+      recommended: true,
+    });
+    expect(body.recordings.filter((rec) => rec.recommended)).toHaveLength(1);
+
+    // Every recording gets a non-empty label that is never just the raw filename.
+    for (const rec of body.recordings) {
+      expect(rec.label.length).toBeGreaterThan(0);
+      expect(rec.label).not.toBe(rec.file);
+    }
+  });
 });
 
 // D1 fix round 1 #1: the static-server mount (http.ts) used to gate on `req.method ===

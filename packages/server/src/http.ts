@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { ServerConfig } from './config.js';
 import { newCapsState, canStartSession, startSession, type CapsState } from './caps.js';
-import { defaultCorpusDir, listCorpusFiles } from './replay.js';
+import { defaultCorpusDir, listCorpusFiles, loadCorpusFile } from './replay.js';
 import type { StaticServer } from './static.js';
 import { isAllowedOrigin } from './origin.js';
 import { addClientEvents, checkClientPostRate, getBundle, MAX_CLIENT_BODY_BYTES, type DiagnosticsState } from './diagnostics.js';
@@ -112,6 +112,22 @@ function statusForDecisionReason(reason: 'kill_switch' | 'session_in_use' | 'dai
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Judge review finding (2026-09-04), defect 2: docs/SUBMISSION-DRAFT.md tells a judge to
+// click Replay first and expect "a full recorded interrogation" -- the flagship attack
+// scenario -- but the dropdown used to be 18 bare filenames in alphabetical order, so the
+// flagship sat 14th with no description. `scenario-b-miller-fraud` is that flagship (BRIEF
+// §4 attack path); it now sorts first in `recordings` below and its label is marked
+// "Recommended", instead of moving it to be the pre-selected/auto-started recording (that
+// would change what the screen shows on mount before any judge click -- a visual/behaviour
+// decision parked for the founder, not made here).
+const FLAGSHIP_RECORDING = 'scenario-b-miller-fraud';
+
+interface ReplayRecording {
+  file: string;
+  label: string;
+  recommended: boolean;
+}
+
 export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: Server; state: CapsState } {
   const state = newCapsState();
 
@@ -157,9 +173,28 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
     // exist in replay.ts (S2) -- this route just exposes them over HTTP; the whitelist
     // behaviour (no path can escape the corpus directory) lives entirely in replay.ts and is
     // unchanged by this route.
+    //
+    // Judge review finding (2026-09-04), defect 2: `files` alone forced the browser to show
+    // the raw corpus filename as the only option text, alphabetically sorted -- the flagship
+    // scenario buried 14th, no indication of what any recording actually is. `files` is left
+    // exactly as it was (same values, same order) so any existing caller keeps working;
+    // `recordings` is additive -- one entry per file, `label` taken verbatim from that
+    // corpus's own `title` field (never invented copy), flagship-first with `recommended:
+    // true` so the screen can mark it without a second source of truth for which one it is.
     if (req.method === 'GET' && path === '/api/replay') {
-      const files = Array.from(listCorpusFiles(defaultCorpusDir())).sort();
-      sendJson(res, 200, { files });
+      const corpusDir = defaultCorpusDir();
+      const files = Array.from(listCorpusFiles(corpusDir)).sort();
+      const recordings: ReplayRecording[] = files.map((file) => {
+        const recommended = file === FLAGSHIP_RECORDING;
+        const corpus = loadCorpusFile(corpusDir, file);
+        const label = corpus ? (recommended ? `Recommended: ${corpus.title}` : corpus.title) : file;
+        return { file, label, recommended };
+      });
+      recordings.sort((a, b) => {
+        if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
+        return a.file.localeCompare(b.file);
+      });
+      sendJson(res, 200, { files, recordings });
       return;
     }
 

@@ -146,4 +146,38 @@ describe('Landing', () => {
       'No microphone found — the recorded attack works without one'
     );
   });
+
+  // Judge review finding (2026-09-04), defect 1: the demo runs on Render's free tier, which
+  // sleeps after 15 minutes and can take up to about a minute to wake -- before this fix, the
+  // button just went disabled with unchanged text for that whole minute, indistinguishable
+  // from broken. `startSession` is held pending (not resolved) here specifically to observe
+  // that in-between window, the same way the mic-check tests above observe CHECKING before
+  // PASSED/FAILED.
+  it('shows a cold-start message in the helper text and button title while starting, then reverts once it resolves', async () => {
+    mockGetUserMedia('resolve');
+    let resolveStart: (value: Awaited<ReturnType<typeof startSession>>) => void = () => {};
+    const pending = new Promise<Awaited<ReturnType<typeof startSession>>>((resolve) => {
+      resolveStart = resolve;
+    });
+    vi.mocked(startSession).mockReturnValue(pending);
+    const user = userEvent.setup();
+    render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Check microphone' }));
+    await screen.findByText('Microphone ready');
+
+    await user.click(screen.getByRole('button', { name: 'Try to break it' }));
+
+    const COLD_START_TEXT = 'Waking the server — this can take up to a minute on the free plan';
+    expect(await screen.findByText(COLD_START_TEXT)).toHaveAttribute('id', 'try-break-helper');
+    const tryButton = screen.getByRole('button', { name: 'Try to break it' });
+    expect(tryButton).toHaveAttribute('title', COLD_START_TEXT);
+    expect(tryButton).toBeDisabled();
+
+    resolveStart({ session_id: 'sess-1', ws_path: '/ws/call/sess-1', cap_seconds: 300 });
+
+    await screen.findByText('Microphone ready');
+    expect(screen.queryByText(COLD_START_TEXT)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try to break it' })).toHaveAttribute('title', 'Microphone ready');
+  });
 });

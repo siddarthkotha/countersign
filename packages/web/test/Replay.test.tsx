@@ -25,7 +25,14 @@ vi.mock('../src/ws/client', () => ({
 }));
 
 const scenarioB = scenarioBJson as unknown as CorpusFile;
-const RECORDING = 'scenario-b-miller-fraud.json';
+// Judge review finding (2026-09-04), defect 2: no `.json` suffix -- matches the bare value
+// the real `/api/replay` (packages/server/src/http.ts) actually returns (`listCorpusFiles`
+// strips the extension), which is also the value the WS route expects as `:file`.
+const RECORDING = 'scenario-b-miller-fraud';
+// The label the real server derives from this corpus file's own `title` field (see
+// scenario-b-miller-fraud.json), "Recommended:"-prefixed because this is the flagship BRIEF
+// §4 attack scenario -- verified against the corpus file, not invented for this test.
+const RECORDING_LABEL = 'Recommended: Robert Miller — the fraudulent CEO-impersonation call';
 
 function scenarioBFinalState(): ScreenState {
   const engineInput: EngineInput = {
@@ -84,7 +91,14 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ files: [RECORDING] }),
+      // `files` kept alongside `recordings` -- same shape the real endpoint now returns
+      // (packages/server/src/http.ts), so this fixture exercises the same response shape
+      // Replay.tsx actually parses (`toRecordings`), not a stand-in for it.
+      json: () =>
+        Promise.resolve({
+          files: [RECORDING],
+          recordings: [{ file: RECORDING, label: RECORDING_LABEL, recommended: true }],
+        }),
     }),
   );
 });
@@ -98,7 +112,9 @@ describe('Replay', () => {
   // anywhere in client state, so the masthead's meta line is omitted entirely (not padded).
   it('omits the masthead meta line before a recording is chosen', async () => {
     render(<Replay />);
-    await screen.findByRole('option', { name: RECORDING });
+    // Judge review finding (2026-09-04), defect 2: waits for the option's plain-English
+    // label, not the raw filename -- that's what the dropdown actually shows now.
+    await screen.findByRole('option', { name: RECORDING_LABEL });
     expect(screen.queryByText(/Treasury desk/)).not.toBeInTheDocument();
   });
 
@@ -220,5 +236,81 @@ describe('Replay', () => {
     await screen.findByText(/Claimed identity:/);
 
     expect(screen.getAllByText('Every system here is simulated.')).toHaveLength(1);
+  });
+
+  // Judge review finding (2026-09-04), defect 1: before this fix the list was fetched with no
+  // loading state at all, so a judge who opened the dropdown while the request was still in
+  // flight saw a silently empty list -- indistinguishable from broken. The select's own
+  // placeholder option now carries that status instead.
+  it('shows a loading message in the recording dropdown while the list is being fetched, then the real options once it resolves', async () => {
+    let resolveFetch: (value: { json: () => Promise<unknown> }) => void = () => {};
+    const pending = new Promise<{ json: () => Promise<unknown> }>((resolve) => {
+      resolveFetch = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(pending));
+    render(<Replay />);
+
+    expect(await screen.findByRole('option', { name: 'Loading recordings…' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: RECORDING_LABEL })).not.toBeInTheDocument();
+
+    resolveFetch({
+      json: () =>
+        Promise.resolve({
+          files: [RECORDING],
+          recordings: [{ file: RECORDING, label: RECORDING_LABEL, recommended: true }],
+        }),
+    });
+
+    expect(await screen.findByRole('option', { name: RECORDING_LABEL })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Loading recordings…' })).not.toBeInTheDocument();
+  });
+
+  // Judge review finding (2026-09-04), defect 1: a failed fetch used to leave the dropdown
+  // silently empty forever, with no indication anything had gone wrong. Plain English, and
+  // says what to do, through the same placeholder option.
+  it('shows a plain-English error in the recording dropdown if the list fails to load', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
+    render(<Replay />);
+
+    expect(
+      await screen.findByRole('option', { name: 'Could not load recordings — reload the page to try again' }),
+    ).toBeInTheDocument();
+  });
+
+  // Judge review finding (2026-09-04), defect 2: the dropdown used to show the raw corpus
+  // filename with no description. It now shows each recording's own plain-English label
+  // (never a filename), in whatever order the server sent them -- flagship-first sorting is
+  // the server's job (packages/server/test/http.test.ts covers that against the real corpus).
+  it('shows each recording\'s plain-English label instead of its raw filename', async () => {
+    const OTHER = 'scenario-a-dana-legitimate';
+    const OTHER_LABEL = 'Dana Whitfield — the legitimate urgent request';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: () =>
+          Promise.resolve({
+            files: [OTHER, RECORDING],
+            recordings: [
+              { file: RECORDING, label: RECORDING_LABEL, recommended: true },
+              { file: OTHER, label: OTHER_LABEL, recommended: false },
+            ],
+          }),
+      }),
+    );
+    render(<Replay />);
+
+    const select = await screen.findByLabelText('Recording');
+    await screen.findByRole('option', { name: RECORDING_LABEL });
+    expect(screen.getByRole('option', { name: OTHER_LABEL })).toBeInTheDocument();
+
+    // The raw filenames never appear as option text.
+    expect(screen.queryByRole('option', { name: RECORDING })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: OTHER })).not.toBeInTheDocument();
+
+    // Replay.tsx renders `recordings` in the order the server sent it -- the flagship first,
+    // right after the placeholder option.
+    const optionTexts = Array.from(select.querySelectorAll('option')).map((o) => o.textContent);
+    expect(optionTexts[1]).toBe(RECORDING_LABEL);
+    expect(optionTexts[2]).toBe(OTHER_LABEL);
   });
 });

@@ -15,12 +15,39 @@ import { connectSocketOnly, type CallClient } from '../ws/client';
 const SPEEDS = [1, 4, 20] as const;
 type Speed = (typeof SPEEDS)[number];
 
-interface ReplayListResponse {
-  files: string[];
+// Judge review finding (2026-09-04), defect 2: one entry per corpus recording, with a plain-
+// English `label` (the corpus file's own `title`, added server-side in http.ts's
+// `/api/replay` -- never invented on this side) instead of the raw filename, and
+// `recommended` marking the flagship attack scenario the submission draft points a judge to
+// first. `file` is still the bare value the WS route expects, same as `files` always was.
+interface ReplayRecording {
+  file: string;
+  label: string;
+  recommended: boolean;
 }
 
+interface ReplayListResponse {
+  files: string[];
+  recordings?: ReplayRecording[];
+}
+
+// A response with no `recordings` (an older server) still lists every file -- the filename
+// itself, same as this screen showed before this fix -- rather than an empty dropdown.
+function toRecordings(body: ReplayListResponse): ReplayRecording[] {
+  if (body.recordings) return body.recordings;
+  return body.files.map((file) => ({ file, label: file, recommended: false }));
+}
+
+// Judge review finding (2026-09-04), defect 1: the recording list used to be fetched with no
+// loading state at all, so the dropdown silently sat empty while the request was in flight,
+// and silently stayed empty forever if it failed -- a judge had no way to tell "still
+// loading" from "broken". Tracked separately from `recordings` itself so a failed refetch
+// can't be confused with "zero recordings exist".
+type ListState = 'loading' | 'ready' | 'error';
+
 export default function Replay() {
-  const [files, setFiles] = useState<string[]>([]);
+  const [recordings, setRecordings] = useState<ReplayRecording[]>([]);
+  const [listState, setListState] = useState<ListState>('loading');
   const [selected, setSelected] = useState<string | null>(null);
   const [speed, setSpeed] = useState<Speed>(1);
   const [screenState, setScreenState] = useState<ScreenState | null>(null);
@@ -32,10 +59,14 @@ export default function Replay() {
     fetch('/api/replay')
       .then((res) => res.json() as Promise<ReplayListResponse>)
       .then((body) => {
-        if (!cancelled) setFiles(body.files);
+        if (cancelled) return;
+        setRecordings(toRecordings(body));
+        setListState('ready');
       })
       .catch(() => {
-        if (!cancelled) setFiles([]);
+        if (cancelled) return;
+        setRecordings([]);
+        setListState('error');
       });
     return () => {
       cancelled = true;
@@ -89,12 +120,24 @@ export default function Replay() {
             if (file) startReplay(file, speed);
           }}
         >
+          {/* Judge review finding (2026-09-04), defect 1: this placeholder option is the
+              existing element that carries the list's own loading/error status -- reused
+              rather than adding a new one -- so a judge who opens the dropdown mid-fetch, or
+              after a failed one, reads "still loading" or "broken, here's what to do" instead
+              of a silently empty list. */}
           <option value="" disabled>
-            Choose a recording
+            {listState === 'loading'
+              ? 'Loading recordings…'
+              : listState === 'error'
+                ? 'Could not load recordings — reload the page to try again'
+                : 'Choose a recording'}
           </option>
-          {files.map((f) => (
-            <option key={f} value={f}>
-              {f}
+          {/* Judge review finding (2026-09-04), defect 2: option text is now the recording's
+              plain-English label (the flagship's is prefixed "Recommended:" and sorted first
+              by the server), not the raw corpus filename. */}
+          {recordings.map((r) => (
+            <option key={r.file} value={r.file}>
+              {r.label}
             </option>
           ))}
         </select>

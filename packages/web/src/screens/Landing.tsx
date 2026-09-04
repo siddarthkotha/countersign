@@ -31,6 +31,20 @@ function micHelperText(result: MicCheckResultInfo | null): string {
   return result.ok ? MIC_HELPER_PASSED : MIC_HELPER_BY_REASON[result.reason];
 }
 
+// Judge review finding (2026-09-04), defect 1: the demo runs on Render's free tier, which
+// sleeps after 15 minutes idle and can take up to about a minute to wake. Before this, the
+// button just went disabled with unchanged text while `starting` was true -- a stranger had
+// no way to tell "waking up" from "broken". This takes priority over the mic-result text
+// (below) for exactly as long as `starting` is true, through the SAME helper element and
+// button `title` that finding 1 (above) already wired up -- one sentence, both places, same
+// as before.
+const STARTING_HELPER = 'Waking the server — this can take up to a minute on the free plan';
+
+function tryButtonHelperText(result: MicCheckResultInfo | null, starting: boolean): string {
+  if (starting) return STARTING_HELPER;
+  return micHelperText(result);
+}
+
 const REPLAY_ONLY_REASONS: Record<string, string> = {
   session_in_use: 'another judge is on the line',
   daily_cap: "today's call budget is used up",
@@ -88,7 +102,7 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
           onClick={handleTry}
           disabled={!micOk || starting}
           aria-describedby="try-break-helper"
-          title={micHelperText(micResult)}
+          title={tryButtonHelperText(micResult, starting)}
         >
           Try to break it
         </button>
@@ -96,8 +110,10 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
 
       {/* Task W6, finding 1: always-visible, plain-words statement of why the button above
           is (or isn't) locked -- same words as the button's own `title`, referenced by
-          `aria-describedby` so assistive tech gets it too, not just a hover tooltip. */}
-      <p id="try-break-helper">{micHelperText(micResult)}</p>
+          `aria-describedby` so assistive tech gets it too, not just a hover tooltip.
+          Judge review finding (2026-09-04), defect 1: while `starting` is true this shows the
+          cold-start sentence instead (see `tryButtonHelperText` above). */}
+      <p id="try-break-helper">{tryButtonHelperText(micResult, starting)}</p>
 
       {unavailableReason && (
         <p className="banner" role="alert">Live calls are unavailable right now: {unavailableReason}</p>
