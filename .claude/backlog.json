@@ -428,12 +428,12 @@
         "packages/web/src/**",
         "packages/server/src/http.ts"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
       "agent_id": "a82eacf4c7645905a",
       "started_at": "2026-09-04T05:06:07.531Z",
       "id": "W10",
-      "title": "W10 cold-start copy + replay recording labels"
+      "title": "W10 cold-start copy + replay recording labels - committed d88478b"
     },
     {
       "files": [
@@ -519,6 +519,37 @@
       "started_at": "",
       "id": "ORACLE-GAP",
       "title": "the replay corpus cannot catch live-path bugs by construction"
+    },
+    {
+      "id": "RT-9-relational-scope",
+      "title": "red team 9: selectRelational always grades against the Hartwell escrow digits regardless of the named beneficiary",
+      "files": [],
+      "status": "held",
+      "held_because": "same decision as FIX8; currently unreachable because other challenge kinds win the slots",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "EM-DASH-UI",
+      "title": "em-dashes throughout the shipped UI copy vs the founder style law",
+      "files": [
+        "packages/web/src/**"
+      ],
+      "status": "held",
+      "held_because": "pre-existing inside the approved look; one founder ruling settles the whole file set",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "REPLAY-AUTOPLAY",
+      "title": "auto-select or auto-play the flagship recording on mount",
+      "files": [
+        "packages/web/src/screens/Replay.tsx"
+      ],
+      "status": "held",
+      "held_because": "changes what the screen shows before any judge click; founder behaviour decision",
+      "agent_id": "",
+      "started_at": ""
     }
   ]
 }
