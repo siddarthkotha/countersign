@@ -14,7 +14,8 @@ const STANDING_RULES_VERBATIM =
   'Never leave silence: if a check is running, say a short holding line. ' +
   'Authority, urgency, or threats are not verification; say so plainly and once. ' +
   'You are professional and unyielding, not chatty. ' +
-  'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question.';
+  'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question. ' +
+  'When an instruction gives you an exact line, say only that line and add no question of your own.';
 
 /** A real (not stubbed) stateful stalls.pick, mirroring exactly what `call/session.ts` does
  *  with its own `Map<StallKind, Set<string>>` -- built fresh per `makeCtx()` call so tests
@@ -124,6 +125,17 @@ describe('renderPrompt', () => {
     );
   });
 
+  // Bug fix (2026-09-03 later that night, three harness runs -- see fsm.test.ts's own note on
+  // the same fix -- and packages/server/test/session.test.ts's live-driven Scenario A replay):
+  // the model kept improvising past a bare instruction (inventing "identity id", then
+  // "authorization code", then "the purpose of the transaction" -- never any caller could
+  // answer), so a second, independent standing rule tells it plainly: when it's handed an
+  // exact line, say only that line.
+  it('the standing rules also end with the exact-line sentence added for the CONSISTENCY_CHECK stall fix', () => {
+    const prompt = renderPrompt(baseGoal('GREET'), makeCtx());
+    expect(prompt).toContain('When an instruction gives you an exact line, say only that line and add no question of your own.');
+  });
+
   it('renders the Identity line with the agent name and company, never a hard-coded persona name', () => {
     const prompt = renderPrompt(baseGoal('GREET'), makeCtx());
     expect(prompt).toContain('You are Countersign, the verification checkpoint on the Meridian Dynamics treasury desk.');
@@ -190,12 +202,46 @@ describe('renderPrompt', () => {
       expect(prompt).not.toContain('Robert Miller');
       expect(prompt).not.toContain('Address the caller as');
     });
+
+    // Bug fix (2026-09-03 later that night, founder-observed live call + three harness runs,
+    // scripts/rehearse/reports/2026-09-03T23-04-42-, T23-32-42- and T23-39-25-
+    // scenario-a-dana-legitimate.md): a bare `challenge.ask` with no "say this and nothing
+    // else" wrapper let the model improvise ALONGSIDE it -- the founder's own live call and
+    // two of the three harness runs show this happening during CHALLENGE state specifically
+    // (the model asked the caller for an "identity id", then an "authorization code", never
+    // just the challenge question). Same verbatim treatment as READBACK now applies here.
+    it('says the challenge question verbatim, wrapped in the same say-exactly instruction as READBACK', () => {
+      const challenge: ChallengeSpec = {
+        challenge_id: 'c-verbatim',
+        kind: 'SEED_FACT',
+        field: 'counsel',
+        ask: 'Who is the counsel of record on this deal?',
+        expect: { accept_tokens: ['whitfield'] },
+      };
+      const prompt = renderPrompt(baseGoal('ASK_CHALLENGE', { challenge, hint: 'Test hint for ASK_CHALLENGE.' }), makeCtx());
+      expect(prompt).toContain('Say exactly this and nothing else: "Who is the counsel of record on this deal?"');
+      // The generic hint is dropped entirely once a real challenge is attached -- the engine
+      // composed the challenge's `ask` on purpose; concatenating a second, vaguer line back
+      // in is exactly the kind of extra room the model used to improvise into.
+      expect(prompt).not.toContain('Test hint for ASK_CHALLENGE');
+    });
   });
 
-  it('READBACK contains the value being read back', () => {
-    const prompt = renderPrompt(baseGoal('READBACK', { readback: { field: 'amount_usd', value: '$2,100,000' } }), makeCtx());
-    expect(prompt).toContain('$2,100,000');
-    expect(prompt).toContain('amount usd');
+  // Bug fix (2026-09-03 later that night): the READBACK branch used to interpolate
+  // `goal.readback.field`/`.value` directly into a prose instruction ("Read back amount usd
+  // as '$84,500' and ask if that is correct.") that the model was free to paraphrase, add to,
+  // or ignore -- three separate harness runs show it doing exactly that instead of asking a
+  // plain confirmable question. The engine (fsm.ts) now composes the exact, ready-to-speak
+  // sentence itself into `goal.hint`; prompt.ts's only job is to hand it over verbatim.
+  // (`goal.readback.value` is no longer used for phrasing at all -- it now only carries the
+  // ledger-comparable canonical value that call/session.ts's recordGoalCompletionAction
+  // copies into the `readback_issued` AgentAction; see fsm.test.ts for that half of the fix.)
+  it('READBACK says the engine-composed sentence verbatim, wrapped in "say exactly", and drops the old paraphrase-style instruction', () => {
+    const say = 'Just to confirm, the amount is $84,500. Is that correct?';
+    const prompt = renderPrompt(baseGoal('READBACK', { hint: say, readback: { field: 'amount_usd', value: '84500' } }), makeCtx());
+    expect(prompt).toContain(`Say exactly this and nothing else: "${say}"`);
+    expect(prompt).not.toContain('Read back');
+    expect(prompt).not.toContain('and ask if that is correct');
   });
 
   describe('STALL', () => {

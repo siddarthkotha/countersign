@@ -155,6 +155,162 @@ describe('CallSession — Scenario B (Robert Miller, fraudulent) replayed as liv
   });
 });
 
+// ---------------------------------------------------------------------------------------
+// Regression: 2026-09-03 later that night. THE BUG (founder-observed live call + three
+// harness runs, scripts/rehearse/reports/2026-09-03T23-04-42-, T23-32-42- and T23-39-25-
+// scenario-a-dana-legitimate.md): the legitimate-caller scenario never reached STAGE -- it
+// looped in CONSISTENCY_CHECK until idle timeout. Two compounding engine bugs, both fixed in
+// fsm.ts (see its own doc comment on `readbackSentence`): (1) the READBACK goal handed the
+// model prose, not an exact sentence, so it improvised past it; (2) independently,
+// `goal.readback.value` -- what this session logs verbatim as the `readback_issued`
+// AgentAction's `value`, which ledger.ts later re-normalizes to test the caller's reply
+// against -- was a DISPLAY string for amount_usd ("$84,500", not `Number()`-parseable) and
+// the full cue-phrase quote for account_last4 ("ending 4471", never equal to the bare-digit
+// claim "4471"), so those two fields could never be confirmed even by a perfectly cooperative
+// caller. This test drives a FULLY COOPERATIVE call -- the caller states the request, the
+// agent reads each critical field back, the caller affirms every one -- through the REAL
+// `CallSession` (real `recordGoalCompletionAction`, real `runLookupsIfNeeded`, real
+// `evaluate`/ledger underneath) and proves the call actually reaches STAGE. On the pre-fix
+// code this test fails exactly where the live calls did: stuck in CONSISTENCY_CHECK,
+// amount_usd never leaving STATED.
+// ---------------------------------------------------------------------------------------
+describe('CallSession — Scenario A (Dana, legitimate, fully cooperative) replayed as live AAI events', () => {
+  it('passes the opening trap-fact challenge, reads back each critical field, the caller affirms each, and the call reaches STAGE/SEALED', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-a-live', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = newSession(clock, call, aai, sent);
+
+    session.start(); // INTAKE
+
+    // c1: identity + the full request (amount, beneficiary, account) in one utterance, word-
+    // for-word Scenario A's own line (docs/BRIEF.md §4 / corpus/scenario-a-dana-legitimate.json).
+    clock.now = 1000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c1',
+      text: 'This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday\'s close meeting.',
+    });
+
+    // Identity + request are both now claimed. Unlike `evaluate.test.ts`'s hand-authored
+    // Scenario A (a ONE-SHOT evaluate() over the whole finished conversation, where the
+    // context-check tool result already shows this as an exact match to an existing
+    // scheduled payment, so no challenge is required at all), a LIVE call evaluates
+    // incrementally: at this exact instant no tool has run yet, so the engine doesn't yet
+    // know this is a mere amendment -- rule row 4 requires the DEFAULT one challenge before
+    // any readback can begin (`runLookupsIfNeeded` itself only fires once state is ALREADY
+    // EVIDENCE/CONSISTENCY_CHECK, so it can't run yet either). This is real, correct behavior
+    // (BRIEF: even a legitimate caller proves a knowledge fact before critical fields get
+    // read back) and exactly what the founder's own harness reports show (the same
+    // TRAP_FACT-on-beneficiary challenge, naming "Northgate Partners", at the same point).
+    expect(session.last?.state).toBe('CHALLENGE');
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+    expect(session.last?.goal.challenge?.kind).toBe('TRAP_FACT');
+    expect(session.last?.goal.challenge?.field).toBe('beneficiary');
+    expect(session.last?.goal.challenge?.expect).toMatchObject({ trap_value: 'Northgate Partners' });
+
+    // a1: the agent puts the trap to the caller (deliberately wrong beneficiary).
+    clock.now = 1500;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'a1',
+      text: 'You are requesting a wire transfer of $84,500 to Northgate Partners. Is that correct?',
+      reply_id: 'a1',
+      interrupted: false,
+    });
+    clock.now = 2000;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+    expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(true);
+
+    // c2: the caller catches the trap and states the true beneficiary -- word for word the
+    // founder's own live call and harness runs (gradeTrapFact PASSes on a reply containing
+    // the true claim's value, "meridian supply").
+    clock.now = 2500;
+    aai.emit({ type: 'transcript.user', item_id: 'c2', text: "No, that's wrong. It's Meridian Supply." });
+
+    // The challenge PASSED (passedChallenges 1 >= need 1), so row 4 no longer blocks; no
+    // critical field is confirmed yet, so row 5 fires: CONSISTENCY_CHECK, READBACK on the
+    // oldest unconfirmed critical field. All three critical claims share c1's timestamp, so
+    // `oldestUnconfirmedCritical`'s tie-break (CRITICAL_FIELDS order) picks amount_usd first,
+    // exactly like the corpus's own r1. `runLookupsIfNeeded` also gets its first chance to
+    // run in this same tick (state is now CONSISTENCY_CHECK) and resolves SSO/history/OOB.
+    expect(session.last?.state).toBe('CONSISTENCY_CHECK');
+    expect(session.last?.goal.code).toBe('READBACK');
+    expect(session.last?.goal.readback?.field).toBe('amount_usd');
+    // The fix's own regression check: the canonical value logged for the ledger, never a
+    // "$"/"," display string (see fsm.ts's `readbackSentence` doc comment for why that broke
+    // confirmation entirely for this field on the pre-fix code).
+    expect(session.last?.goal.readback?.value).toBe('84500');
+    // The engine composed a real, speakable confirmation sentence -- not the old prose.
+    expect(session.last?.goal.hint).toMatch(/\$84,500.*is that correct\?/i);
+
+    // a2: the agent reads back the amount. The exact wording spoken doesn't affect what gets
+    // logged (recordGoalCompletionAction reads the GOAL's own field/value, never the
+    // transcript text -- LAW 3, the LLM never writes evidence) -- using the engine's own
+    // composed sentence here anyway, for realism.
+    clock.now = 3000;
+    aai.emit({ type: 'reply.started', reply_id: 'a2' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a2', text: session.last!.goal.hint, reply_id: 'a2', interrupted: false });
+    clock.now = 3500;
+    aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
+
+    const readback1 = session.logs.actions.find((a) => a.kind === 'readback_issued' && a.field === 'amount_usd');
+    expect(readback1?.value).toBe('84500');
+
+    // c3: the caller affirms the amount.
+    clock.now = 4000;
+    aai.emit({ type: 'transcript.user', item_id: 'c3', text: "Yes, that's right." });
+
+    // amount_usd is now CONFIRMED; account_last4 becomes the new oldest unconfirmed critical
+    // field (this is the exact transition the pre-fix code could never make for this field).
+    expect(session.last?.state).toBe('CONSISTENCY_CHECK');
+    expect(session.last?.goal.readback?.field).toBe('account_last4');
+    expect(session.last?.goal.readback?.value).toBe('4471');
+
+    // a3 + c4: read back and affirm the account.
+    clock.now = 4500;
+    aai.emit({ type: 'reply.started', reply_id: 'a3' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a3', text: session.last!.goal.hint, reply_id: 'a3', interrupted: false });
+    clock.now = 5000;
+    aai.emit({ type: 'reply.done', reply_id: 'a3', status: 'completed' });
+    clock.now = 5500;
+    aai.emit({ type: 'transcript.user', item_id: 'c4', text: 'Yes, correct.' });
+
+    expect(session.last?.state).toBe('CONSISTENCY_CHECK');
+    expect(session.last?.goal.readback?.field).toBe('beneficiary');
+    expect(session.last?.goal.readback?.value).toBe('meridian supply');
+
+    // a4 + c5: read back and affirm the beneficiary -- the last unconfirmed critical field.
+    clock.now = 6000;
+    aai.emit({ type: 'reply.started', reply_id: 'a4' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a4', text: session.last!.goal.hint, reply_id: 'a4', interrupted: false });
+    clock.now = 6500;
+    aai.emit({ type: 'reply.done', reply_id: 'a4', status: 'completed' });
+    clock.now = 7000;
+    aai.emit({ type: 'transcript.user', item_id: 'c5', text: "Yes, that's right." });
+
+    // All three critical fields are now CONFIRMED; SSO/history/out-of-band were already
+    // resolved by `runLookupsIfNeeded` back when CONSISTENCY_CHECK was first reached (it
+    // fires on every tick the state stays EVIDENCE/CONSISTENCY_CHECK) -- so this is the tick
+    // that finally clears rule row 5, and with every other gate already clean, reaches STAGE.
+    // `runTerminalActionsIfNeeded` then runs stage_payment_for_second_approval/
+    // alert_principal/seal_evidence_record synchronously in the same tick, same as Scenario
+    // B's FREEZE path reaching SEALED above.
+    expect(session.last?.verdict).toBe('STAGE');
+    expect(session.last?.state).toBe('SEALED');
+    expect(Object.values(session.last!.assurance).every((v) => v === true)).toBe(true);
+
+    const readbackActions = session.logs.actions.filter((a) => a.kind === 'readback_issued');
+    expect(readbackActions.map((a) => ({ field: a.field, value: a.value }))).toEqual([
+      { field: 'amount_usd', value: '84500' },
+      { field: 'account_last4', value: '4471' },
+      { field: 'beneficiary', value: 'meridian supply' },
+    ]);
+  });
+});
+
 describe('CallSession — protocol rules independent of any one scenario', () => {
   it('ignores an out-of-state tool call, logs it, and still answers with an error tool.result after the next reply.done', () => {
     const clock = { now: 0 };

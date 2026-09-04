@@ -131,6 +131,62 @@ function oldestUnconfirmedCritical(claims: Claim[]): { field: ClaimField; claim:
   return best;
 }
 
+/** Bug fix (2026-09-03 later that night, founder-observed live call + three harness runs --
+ *  scripts/rehearse/reports/2026-09-03T23-04-42-, T23-32-42- and T23-39-25-
+ *  scenario-a-dana-legitimate.md): the legitimate-caller scenario never reached STAGE. Two
+ *  compounding bugs, both fixed here:
+ *
+ *  1. The READBACK goal used to hand the model only a PROSE instruction ("Read back amount
+ *     usd as '$84,500' and ask them to confirm it."), never an exact sentence. Across the
+ *     three runs the model improvised past it and invented a different unanswerable demand
+ *     each time ("identity id", then "authorization code", then "the purpose of the
+ *     transaction") instead of asking a plain confirmable question -- so the caller never
+ *     had anything to confirm, and the call sat in CONSISTENCY_CHECK until idle timeout.
+ *     `readbackSentence` below composes the exact, ready-to-speak sentence itself (natural
+ *     per-field phrasing, `money()` for amount so it reads naturally); it's carried in
+ *     `goal.hint` (not a new field on `goal.readback` -- that type lives in types.ts,
+ *     outside this fix's file), and prompt.ts's nowSection hands it to the model verbatim
+ *     with a "say exactly this and nothing else" instruction, the same treatment STALL's
+ *     holding lines already get.
+ *
+ *  2. A second, independent bug found while fixing the first: `goal.readback.value` is what
+ *     call/session.ts's recordGoalCompletionAction copies verbatim into the `readback_issued`
+ *     AgentAction, which ledger.ts later re-normalizes (`normalizeValue(field,
+ *     pending.action.value)`) to test against the caller's affirm/negate reply. The OLD code
+ *     put the DISPLAY string here -- `money()`-formatted for amount_usd (e.g. "$84,500") and
+ *     the full extractor-quote match for account_last4 (e.g. "ending 4471", the cue phrase
+ *     included, not the bare digits). Both are wrong for this purpose (see normalize.ts):
+ *     `normalizeValue('amount_usd', ...)` is a bare `Number(v)` call, and `Number('$84,500')`
+ *     is `NaN` (a "$" or a "," is not valid `Number()` input); `normalizeValue('account_last4',
+ *     ...)` is `String(v)` with no parsing at all, so "ending 4471" can never equal the
+ *     bare-digit claim value "4471" it's compared against. So amount_usd and account_last4
+ *     could NEVER be confirmed via the live path, no matter how well the model spoke the
+ *     readback and no matter how plainly the caller affirmed it (beneficiary happened to
+ *     already work, since its quote IS the bare name and `normalizeText` is idempotent on
+ *     it). `value` is now always `String(claim.value)` -- the SAME already-normalized form
+ *     the ledger itself stored the claim as -- for every critical field uniformly, matching
+ *     the convention every corpus fixture and evaluate.test.ts's hand-authored Scenario A
+ *     actions already use (e.g. corpus/scenario-a-dana-legitimate.json's own readback_issued
+ *     actions: "84500", "4471", "Meridian Supply" -- never a display string). Corpus replay
+ *     is unaffected either way: a corpus file supplies its OWN fixed `actions` array straight
+ *     to `evaluate()`/`buildLedger` -- this function's output never feeds back into that.
+ *
+ *  See fsm.test.ts ("READBACK carries a ready-to-speak exact sentence" and "READBACK closes
+ *  the loop") and packages/server/test/session.test.ts's live-driven Scenario A replay for
+ *  the regression tests. */
+function readbackSentence(field: ClaimField, claim: Claim): string {
+  switch (field) {
+    case 'amount_usd':
+      return `Just to confirm, the amount is ${money(Number(claim.value))}. Is that correct?`;
+    case 'account_last4':
+      return `Just to confirm, the account ends in ${claim.value}. Is that correct?`;
+    case 'beneficiary':
+      return `Just to confirm, the beneficiary is ${claim.quote.text}. Is that correct?`;
+    default:
+      return `Just to confirm, the ${field.replace(/_/g, ' ')} is ${claim.quote.text}. Is that correct?`;
+  }
+}
+
 /** seed keyterms + every proper noun/amount the caller has stated, fed to `session.update`
  *  as listening vocabulary. For an amount, BOTH forms go in -- the caller's verbatim quote
  *  (e.g. "$1.8 million" or "one point eight million") and the normalized display string
@@ -221,14 +277,9 @@ export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
   if (state === 'CONSISTENCY_CHECK') {
     const oldest = oldestUnconfirmedCritical(ledger);
     if (oldest) {
-      const displayValue = oldest.field === 'amount_usd' ? money(Number(oldest.claim.value)) : oldest.claim.quote.text;
-      return goal(
-        'READBACK',
-        `Read the ${oldest.field.replace('_', ' ')} back to the caller as "${displayValue}" and ask them to confirm it.`,
-        keyterms,
-        patient,
-        { readback: { field: oldest.field, value: displayValue } },
-      );
+      return goal('READBACK', readbackSentence(oldest.field, oldest.claim), keyterms, patient, {
+        readback: { field: oldest.field, value: String(oldest.claim.value) },
+      });
     }
     const flag = evidence.find((e) => e.kind === 'consistency_flag' && e.status === 'FAIL');
     if (flag && flag.quotes.length >= 2) {

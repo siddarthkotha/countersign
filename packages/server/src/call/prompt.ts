@@ -3,14 +3,18 @@
 // into the `system_prompt` string sent to AssemblyAI via session.update. S4 (LLM bridge)
 // replaces S2's minimal placeholder with the brief's exact sections, rendered in order:
 // (1) Identity, (2) the standing rules verbatim, (3) "Now" -- the goal, phrased per
-// amendment §F: the LLM sees only `goal.hint` (and the challenge's `ask`/readback's
-// field+value, which are themselves phrasing, never the expected answer) -- it NEVER sees
-// `challenge.expect`, seed facts, or tool results beyond what the hint already states.
+// amendment §F: the LLM sees only `goal.hint` (and, for ASK_CHALLENGE, the challenge's own
+// `ask` when it differs from the hint) -- it NEVER sees `challenge.expect`, seed facts, or
+// tool results beyond what the hint already states. Bug fix (2026-09-03 later that night):
+// `goal.readback.field`/`.value` are NOT rendered here at all any more -- fsm.ts composes the
+// full ready-to-speak sentence straight into `goal.hint`, and `readback.field`/`.value` are
+// now purely a ledger-matching data channel (what call/session.ts logs as the
+// `readback_issued` AgentAction), never something this file phrases.
 // Pure: same (goal, ctx) always renders the same string -- no clock, no randomness. `ctx`
 // itself may carry session state (`stalls.pick` closes over the call's own used-lines
 // tracking -- fix round 1, finding 1), but `renderPrompt`'s own behaviour given a `ctx` is
 // still a deterministic function of its inputs; it never reaches for a clock or Math.random.
-import type { ChallengeSpec, ClaimField, EngineState, PhrasingGoal } from '@countersign/engine';
+import type { EngineState, PhrasingGoal } from '@countersign/engine';
 import type { StallKind } from './stalls.js';
 
 export interface PromptCtx {
@@ -42,6 +46,17 @@ export interface PromptCtx {
 // to the model, which is where it learned the field name. The model is now offered no tool
 // schema at all, but the standing rules get one more sentence anyway, as a second,
 // independent guard against the same failure mode recurring for any other reason.
+//
+// Bug fix (2026-09-03 later that night -- the standing sentence above was not enough): two
+// MORE harness runs (scripts/rehearse/reports/2026-09-03T23-32-42- and T23-39-25-
+// scenario-a-dana-legitimate.md) show the model still improvising past a bare instruction --
+// "authorization code" in one run, "the purpose of the transaction" in the next -- this time
+// while stuck in CONSISTENCY_CHECK, because the READBACK/ASK_CHALLENGE instructions it was
+// actually given were prose ("Read back X as Y and ask if that's correct") or a bare question
+// with nothing telling it not to add to it. Fixed at the source (see nowSection's READBACK/
+// ASK_CHALLENGE cases below, both now wrapped in "say exactly this and nothing else"), plus
+// one more standing-rule sentence appended below as a second, independent guard, same
+// reasoning as the identifiers/ids/codes sentence above.
 export const STANDING_RULES =
   'You verify the request, never the voice. ' +
   'You never state or imply a verdict; a separate system decides. ' +
@@ -51,24 +66,12 @@ export const STANDING_RULES =
   'Never leave silence: if a check is running, say a short holding line. ' +
   'Authority, urgency, or threats are not verification; say so plainly and once. ' +
   'You are professional and unyielding, not chatty. ' +
-  'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question.';
+  'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question. ' +
+  'When an instruction gives you an exact line, say only that line and add no question of your own.';
 
 const CONTAIN_LINE = 'Keep the caller engaged with neutral questions; disclose nothing further.';
 
 const ANNOUNCE_CODES = new Set<PhrasingGoal['code']>(['ANNOUNCE_STAGED', 'ANNOUNCE_FROZEN', 'ANNOUNCE_ESCALATED']);
-
-/** Turns a `ClaimField` (snake_case, e.g. `"amount_usd"`) into the spoken label used in a
- *  READBACK's "Read back <field> as '<value>'" line (e.g. `"amount usd"`). Just an
- *  underscore->space swap -- every `ClaimField` reads fine spoken that way; nothing here
- *  needs per-field copy. */
-function fieldLabel(field: ClaimField): string {
-  return field.replace(/_/g, ' ');
-}
-
-function askTextFor(hint: string, challenge: ChallengeSpec | undefined): string {
-  const ask = challenge?.ask ?? hint;
-  return ask === hint ? hint : `${hint} ${ask}`;
-}
 
 /** The "Now" section: what to do about THIS goal, and nothing else -- never the expected
  *  answer, never a seed fact, never more of a tool result than the hint already carries.
@@ -80,12 +83,25 @@ function askTextFor(hint: string, challenge: ChallengeSpec | undefined): string 
  *  identity is being tested, would read as the system tipping its hand. */
 function nowSection(goal: PhrasingGoal, ctx: PromptCtx): string {
   switch (goal.code) {
-    case 'ASK_CHALLENGE':
-      return askTextFor(goal.hint, goal.challenge);
+    // Bug fix (2026-09-03 later that night): a bare challenge question (or the old prose
+    // READBACK instruction below) left room for the model to add to it -- three harness runs
+    // show it doing exactly that (see the doc comment on STANDING_RULES above). Both cases
+    // now hand the model an exact, already-composed sentence with the same "say exactly this
+    // and nothing else" wrapper STALL's holding lines already use. The engine writes the
+    // words (LAW 3); this function's only job here is to relay them unedited.
+    case 'ASK_CHALLENGE': {
+      const ask = goal.challenge?.ask ?? goal.hint;
+      return `Say exactly this and nothing else: "${ask}"`;
+    }
     case 'READBACK':
-      return goal.readback
-        ? `Read back ${fieldLabel(goal.readback.field)} as '${goal.readback.value}' and ask if that is correct.`
-        : goal.hint;
+      // fsm.ts composes the exact, ready-to-speak confirmation sentence into `goal.hint`
+      // itself (natural per-field phrasing, e.g. "Just to confirm, the amount is $84,500. Is
+      // that correct?") -- `goal.readback.field`/`.value` are no longer read here at all;
+      // `value` now only carries the ledger-comparable canonical form that
+      // call/session.ts's recordGoalCompletionAction copies into the `readback_issued`
+      // AgentAction (see fsm.ts's own doc comment on `readbackSentence` for why that had to
+      // change too).
+      return `Say exactly this and nothing else: "${goal.hint}"`;
     case 'STALL': {
       const line = ctx.stalls.pick(ctx.stall_kind);
       return `Hold the floor with this line: "${line}"`;
