@@ -100,6 +100,17 @@ export class CallSession {
   private ended = false;
   private speaking = false;
   private previousGoalKey: string | null = null;
+  /** Flight recorder flood fix (2026-09-03, founder-observed live): the last `evaluate`
+   *  signature actually RECORDED to diagnostics (verdict + state + goal code + which rules
+   *  fired) -- `applyEvaluate` below only emits a fresh `evaluate` diag event when this
+   *  changes, so a call that sits in one state for minutes (nothing said, nothing decided)
+   *  stops producing one diag event per tick. Never affects what tick() computes -- only
+   *  whether a duplicate gets written to the bundle. */
+  private lastEvaluateSignature: string | null = null;
+  /** Flight recorder: true once the FIRST `reply.audio` frame of the CURRENT reply has been
+   *  recorded -- reset by `reply.started` -- so a 50-frame reply produces exactly one
+   *  `reply.audio.first` diag event instead of one per frame. */
+  private replyFirstAudioRecorded = false;
   private pendingToolResults: PendingToolResult[] = [];
   private actionCounter = 0;
   private toolCounter = 0;
@@ -361,27 +372,69 @@ export class CallSession {
 
   private dispatchAaiEvent(evt: AaiEvent): void {
     switch (evt.type) {
+      // PROVEN flight-recorder bug fix (2026-09-03): `tick()` re-runs the full engine
+      // `evaluate(this.buildEngineInput())` and logs a diagnostics `evaluate` event -- worth
+      // paying for only when something `buildEngineInput()` reads (conversation, tools,
+      // actions, call, seed) actually changed. Below, each case that does NOT touch any of
+      // those `return`s without ticking instead of falling through to the shared `tick()`
+      // at the bottom; every case that DOES (or otherwise needs the emitState() a tick
+      // produces) still falls through to it, unchanged.
+
       case 'session.ready':
+        // Diagnostics only -- doesn't touch conversation/tools/actions, doesn't set
+        // `speaking`. `start()` already ticks once on its own, so this would be a pure
+        // no-op re-evaluation even in the one-time (non-flood) case.
+        // Real-call note (2026-09-03, softened per review): this does not fire on the
+        // initial connect, because `connectAai` (packages/server/src/aai/session.ts)
+        // consumes the `session.ready` message itself while resolving its connect
+        // promise, before the `RealAaiSocket` (and therefore this dispatch) exists. It
+        // might still fire after a resume, if the service re-sends one then (UNVERIFIED).
+        // The "AAI connected/ready" diagnostic for the initial connect is recorded from
+        // `connectAai`'s own `onReady` hook instead (wired in index.ts).
         this.diag('aai_session_ready', { session_id: evt.session_id });
-        break;
+        return;
 
       case 'transcript.user':
       case 'transcript.agent':
+        // Changes `conversation`, part of EngineInput -- must tick.
         this.logs.conversation.push(utteranceFromTranscript(evt, this.nowT()));
         this.opts.onActivity?.();
+        // Flight recorder: role + text LENGTH only -- never the transcript text itself
+        // (that stays evidence-only, LAW 4; diagnostics is not evidence).
+        this.diag('transcript', { role: evt.type === 'transcript.user' ? 'user' : 'agent', length: evt.text.length });
         break;
 
       case 'reply.started':
+        // Doesn't touch EngineInput, but flips `this.speaking`, which `emitState()` (called
+        // by `tick()`) pushes to the browser as the speaking indicator -- fires once per
+        // agent turn (not per-frame), so ticking here costs nothing like `reply.audio` does.
+        // Skipping it would leave the browser showing "not speaking" for the whole reply.
         this.speaking = true;
+        this.replyFirstAudioRecorded = false;
+        this.diag('reply.started', {});
         break;
 
       case 'reply.audio':
+        // THE FIX: fires once per AAI audio frame (~100/sec while the agent talks) and
+        // touches none of conversation/tools/actions/seed/speaking -- ticking here was the
+        // root cause of the flood (1,998 `evaluate` events in 46s, PROVEN from the
+        // 2026-09-03 flight-recorder bundle). Forward the frame to the browser and stop
+        // (no tick) -- the one-time first-frame diagnostic below still records normally.
         this.opts.onServerEvent({ type: 'audio', data: evt.data });
-        break;
+        // Flight recorder: only the FIRST audio frame of this reply -- a reply can carry
+        // dozens of frames, and recording every one was the bulk of what starved the live
+        // bundle's event cap (2026-09-03 finding). This is enough to see when audio actually
+        // started going out relative to `reply.started`.
+        if (!this.replyFirstAudioRecorded) {
+          this.replyFirstAudioRecorded = true;
+          this.diag('reply.audio.first', {});
+        }
+        return;
 
       case 'reply.done':
         this.speaking = false;
         this.recordGoalCompletionAction(evt.status);
+        this.diag('reply.done', { status: evt.status });
         if (evt.status === 'interrupted') {
           this.opts.onServerEvent({ type: 'flush' });
           // docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md: "If reply.done.status == 'interrupted'
@@ -396,11 +449,16 @@ export class CallSession {
         break;
 
       case 'input.speech.started':
+        // Sends its own 'flush' ServerEvent directly (not via tick/emitState) and touches no
+        // EngineInput field -- no reason to re-run evaluate too.
         this.opts.onServerEvent({ type: 'flush' });
-        break;
+        this.diag('input.speech.started', {});
+        return;
 
       case 'input.speech.stopped':
-        break;
+        // No-op today; touches nothing evaluate reads.
+        this.diag('input.speech.stopped', {});
+        return;
 
       case 'tool.call':
         this.handleToolCall(evt);
@@ -423,8 +481,13 @@ export class CallSession {
         // S3's AAI-transport reconnect (server<->AssemblyAI dropped and resumed) surfaced
         // to whichever browser is currently attached -- distinct from Task R1's own
         // browser<->server link (ws/browser.ts owns that one entirely; this is a pass-
-        // through, not a state change). The engine's verdict is untouched either way, so
-        // this never goes through applyEvaluate/emitState -- just forward the signal.
+        // through, not a state change).
+        // 2026-09-03 correction: this DOES still fall through to the shared `tick()` below
+        // (unlike the flood-prone cases skipped above) -- it appends a `link_changed` entry
+        // to `logs.actions`, which IS part of EngineInput, so `evaluate` must re-run to keep
+        // `this.last`/the evidence export consistent with the logs, even though no rule
+        // keys off this particular action kind (LAW 3 unaffected either way: no
+        // verdict-bearing `AgentActionKind` here).
         // IMPORTANT 2 (final review): tagged `leg: 'aai'` (browser-leg drops are ws/
         // browser.ts's own, tagged 'browser') so the UI can tell the two apart, and logged as
         // a `link_changed` action -- evidence of what happened to the call's transport,
@@ -680,10 +743,25 @@ export class CallSession {
 
   private applyEvaluate(): void {
     const output = evaluate(this.buildEngineInput());
-    // Flight recorder: every engine evaluate, compact (verdict + state only -- never the
-    // full EngineOutput, which would duplicate Evidence/reasons into a channel that is
-    // explicitly NOT evidence).
-    this.diag('evaluate', { verdict: output.verdict, state: output.state });
+    // Flight recorder flood fix (2026-09-03, founder-observed live): a five-minute live call
+    // produced 1,998 `evaluate` diag events -- one per tick() -- and hit the bundle's
+    // MAX_SERVER_EVENTS_PER_BUNDLE cap at 46 seconds, crowding out everything else. Only
+    // record a fresh `evaluate` event when the verdict, state, goal code, or which rules
+    // fired (`reasons`) actually changed from the last one RECORDED (the first is always
+    // kept) -- this changes only whether a diag event is written, never what tick() itself
+    // computes (`output`/`this.last` are unaffected). The detail payload is unchanged
+    // (verdict + state only -- never the full EngineOutput, which would duplicate
+    // Evidence/reasons into a channel that is explicitly NOT evidence).
+    const evaluateSignature = JSON.stringify({
+      verdict: output.verdict,
+      state: output.state,
+      goal: output.goal.code,
+      reasons: output.reasons,
+    });
+    if (evaluateSignature !== this.lastEvaluateSignature) {
+      this.lastEvaluateSignature = evaluateSignature;
+      this.diag('evaluate', { verdict: output.verdict, state: output.state });
+    }
     const goalKey = JSON.stringify(output.goal);
     if (goalKey !== this.previousGoalKey) {
       this.previousGoalKey = goalKey;

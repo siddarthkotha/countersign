@@ -6,7 +6,7 @@ import { loadConfig } from './config.js';
 import { createHttpServer } from './http.js';
 import { createStaticServer } from './static.js';
 import { reapIdle } from './caps.js';
-import { newDiagnosticsState } from './diagnostics.js';
+import { newDiagnosticsState, recordServerEvent } from './diagnostics.js';
 import { attachWebSocketServer } from './ws/browser.js';
 import { FakeAaiSocket } from './aai/fake.js';
 import type { AaiEvent, AaiSocket } from './aai/types.js';
@@ -135,7 +135,7 @@ class PendingAaiSocket implements AaiSocket {
   }
 }
 
-function createAai(_session_id: string): AaiSocket {
+function createAai(session_id: string): AaiSocket {
   if (useFakeAai) return new FakeAaiSocket();
 
   if (!cfg.assemblyai_api_key) {
@@ -168,6 +168,11 @@ function createAai(_session_id: string): AaiSocket {
     fetchImpl: fetch,
     WebSocketImpl: WebSocket as unknown as new (url: string) => WsLike,
     now: () => Date.now(),
+    // Flight recorder bug fix (2026-09-03): the one place a real connect is awaited --
+    // records "AAI connected/ready" with the elapsed ms since this connect started, the
+    // fact the live-call bundle previously had no way to show at all (see aai/session.ts's
+    // `onReady` doc comment).
+    onReady: (ms) => recordServerEvent(diagnostics, session_id, Date.now(), 'aai_ready', { ms_since_connect_start: ms }),
   });
 
   return new PendingAaiSocket(connecting);

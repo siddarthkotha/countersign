@@ -468,11 +468,17 @@ describe('CallSession — onDiagnostic', () => {
     // Fix round 1 (IMPORTANT review finding): a throw partway through `reply.done`'s own
     // handling used to skip that event's trailing `tick()` entirely -- the engine never
     // re-evaluated, and the call just sat on stale state. `recoverFromDispatchError` now
-    // runs `tick()` from its catch block, so the LAST diag event recorded for this turn is a
-    // fresh `evaluate` (from the caught event's own recovery), not the `error` itself sitting
-    // unfollowed.
-    const lastEvent = events.at(-1)!;
-    expect(lastEvent.kind).toBe('evaluate');
+    // runs `tick()` from its catch block, so `session.last` (poisoned above with an
+    // undefined `goal`, right before the throw) is freshly recomputed by that recovery
+    // tick, not left stale.
+    // (2026-09-03 flood-prevention fix note: this no longer guarantees a SECOND `evaluate`
+    // diag event lands after the `error` one -- `applyEvaluate` now only records a fresh
+    // `evaluate` event when the verdict/state/goal/reasons actually change from the last
+    // one recorded, and re-running it here over the exact same conversation/tools/actions
+    // logs as the prior tick lands on the identical output, so it's correctly deduped. The
+    // recomputation itself -- proven by `session.last.goal` no longer being the poisoned
+    // `undefined` -- is what this assertion checks instead.)
+    expect(session.last?.goal).toBeDefined();
 
     // And the call still reaches a real terminal state afterward -- a caught mid-dispatch
     // error must never leave it stuck relying on cap/idle to force it closed; `end()` still
@@ -594,13 +600,18 @@ describe('CallSession — onDiagnostic', () => {
 
     session.start();
     driveScenarioBIntoEvidence(session, aai, clock);
-    const evaluateCountBefore = events.filter((e) => e.kind === 'evaluate').length;
+
+    // Merge note (2026-09-03, FIX1 + FIX3 landing together): the old proof here was "the
+    // evaluate diag count grew", which stopped being a valid proxy once the recorder dedupes
+    // evaluate events whose verdict/state/goal/reasons did not change. Same technique as the
+    // "thrown error inside event handling" test above: poison `last.goal` right before the
+    // event, then check applyEvaluate really ran for THIS emit() by seeing it restored.
+    (session.last as unknown as { goal: unknown }).goal = undefined;
 
     clock.now = 60000;
     aai.emit({ type: 'tool.call', call_id: 't1', name: 'check_sso_context', arguments: { identity_id: session.last?.claimed_identity_id } });
 
-    const evaluateCountAfter = events.filter((e) => e.kind === 'evaluate').length;
-    expect(evaluateCountAfter).toBeGreaterThan(evaluateCountBefore); // tick() ran for this event
+    expect(session.last?.goal).toBeDefined(); // tick() ran for this event
     // ...and kept running: the backfilled failed result makes this verdict terminal (I4), so
     // recovery's `tick()` goes all the way through `runTerminalActionsIfNeeded` too -- the
     // last diag event is neither the `error` itself nor silence, but real forward progress.
@@ -812,6 +823,129 @@ describe('CallSession — onDiagnostic', () => {
     expect(latestState(sent)?.forensic.export_hash).toBeNull();
     expect(latestState(sent)?.verdict).toBe(verdictBeforeActions);
     expect(session.last?.verdict).toBe(verdictBeforeActions);
+  });
+
+  // Bug fix (2026-09-03, founder-observed live): a five-minute live call's flight-recorder
+  // bundle held only one `link`, one `aai_connect_start`, and 1,998 `evaluate` events -- the
+  // MAX_SERVER_EVENTS_PER_BUNDLE cap hit at 46 seconds, so nothing else about that call was
+  // ever recorded. Every `evaluate` used to fire on every single tick() regardless of whether
+  // anything about the verdict actually changed; these tests prove the flood is fixed
+  // (identical-state ticks collapse to one event, a real change still gets recorded) and that
+  // the recorder now also captures the latency-relevant events it previously starved out:
+  // reply lifecycle (started/first-audio/done) and transcripts (role+length only).
+  it('collapses evaluate events across identical-state ticks, and records a new one on a real state change', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const events: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, aai, events);
+
+    session.start(); // one evaluate, INTAKE
+    expect(events.filter((e) => e.kind === 'evaluate')).toHaveLength(1);
+
+    // N ticks where nothing about conversation/tools/actions changed between them -- every
+    // re-evaluation lands on the exact same verdict/state/goal/reasons as the last recorded
+    // one, so no new `evaluate` diag should be added.
+    for (let i = 0; i < 8; i++) {
+      clock.now += 100;
+      aai.emit({ type: 'input.speech.stopped' });
+    }
+    expect(events.filter((e) => e.kind === 'evaluate')).toHaveLength(1);
+
+    // The caller's opening line moves the call past INTAKE -- a real change, so a second
+    // `evaluate` event is recorded.
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    expect(events.filter((e) => e.kind === 'evaluate').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('records exactly one reply.started, one first-audio event, and one reply.done for a reply carrying 50 audio frames', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const events: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, aai, events);
+
+    session.start();
+    clock.now = 1000;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    for (let i = 0; i < 50; i++) {
+      aai.emit({ type: 'reply.audio', data: `frame-${i}` });
+    }
+    clock.now = 2000;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    expect(events.filter((e) => e.kind === 'reply.started')).toHaveLength(1);
+    expect(events.filter((e) => e.kind === 'reply.audio.first')).toHaveLength(1);
+    const doneEvents = events.filter((e) => e.kind === 'reply.done');
+    expect(doneEvents).toHaveLength(1);
+    expect((doneEvents[0]!.detail as { status: string }).status).toBe('completed');
+  });
+
+  it('a second reply gets its own single first-audio event', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const events: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, aai, events);
+
+    session.start();
+    clock.now = 1000;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({ type: 'reply.audio', data: 'f1' });
+    aai.emit({ type: 'reply.audio', data: 'f2' });
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    clock.now = 2000;
+    aai.emit({ type: 'reply.started', reply_id: 'a2' });
+    aai.emit({ type: 'reply.audio', data: 'f3' });
+    aai.emit({ type: 'reply.audio', data: 'f4' });
+    aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
+
+    expect(events.filter((e) => e.kind === 'reply.audio.first')).toHaveLength(2);
+  });
+
+  it('records transcript diagnostics with role and text length only -- never the transcript text itself', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const events: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, aai, events);
+
+    session.start();
+    clock.now = 1000;
+    const userText = scenarioB.conversation[0]!.text;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: userText });
+
+    clock.now = 4000;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    const agentText = scenarioB.conversation[1]!.text;
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: agentText, reply_id: 'a1', interrupted: false });
+
+    const transcriptEvents = events.filter((e) => e.kind === 'transcript');
+    expect(transcriptEvents).toHaveLength(2);
+
+    const userDetail = transcriptEvents[0]!.detail as { role: string; length: number };
+    expect(userDetail.role).toBe('user');
+    expect(userDetail.length).toBe(userText.length);
+    expect(JSON.stringify(userDetail)).not.toContain(userText);
+
+    const agentDetail = transcriptEvents[1]!.detail as { role: string; length: number };
+    expect(agentDetail.role).toBe('agent');
+    expect(agentDetail.length).toBe(agentText.length);
+    expect(JSON.stringify(agentDetail)).not.toContain(agentText);
+  });
+
+  it('records input.speech.started and input.speech.stopped', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const events: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, aai, events);
+
+    session.start();
+    clock.now = 1000;
+    aai.emit({ type: 'input.speech.started' });
+    clock.now = 1500;
+    aai.emit({ type: 'input.speech.stopped' });
+
+    expect(events.some((e) => e.kind === 'input.speech.started')).toBe(true);
+    expect(events.some((e) => e.kind === 'input.speech.stopped')).toBe(true);
   });
 });
 

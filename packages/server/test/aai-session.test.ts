@@ -148,6 +148,35 @@ describe('connectAai', () => {
     expect(resolved).toBe(true);
   });
 
+  // Bug fix (2026-09-03, founder-observed live): the server-side flight recorder could never
+  // answer "when did AssemblyAI become ready" for a real call -- `connectAai` itself consumes
+  // the `session.ready` message while resolving its connect promise, before the RealAaiSocket
+  // (and therefore `call/session.ts`'s own event dispatch) exists, so no `session.ready`
+  // AaiEvent is ever emitted for a real adapter. `deps.onReady` is the fix: called once,
+  // right here, with the elapsed ms from `connectAai`'s own entry to the moment
+  // `session.ready` actually arrived -- index.ts wires it straight into the flight recorder.
+  it('calls deps.onReady once, with the elapsed ms from connect start to session.ready, and never before session.ready arrives', async () => {
+    const { deps, sockets } = makeDeps();
+    let clock = 0;
+    deps.now = () => clock;
+    const readyCalls: number[] = [];
+    deps.onReady = (ms) => readyCalls.push(ms);
+
+    const connectPromise = connectAai(cfg(), deps);
+    await waitFor(() => expect(sockets.length).toBe(1));
+    clock = 40;
+    sockets[0]!.triggerOpen();
+    await waitFor(() => expect(sockets[0]!.sent.length).toBe(1));
+
+    expect(readyCalls).toHaveLength(0); // not yet -- session.ready hasn't arrived
+
+    clock = 137;
+    sockets[0]!.triggerMessage({ type: 'session.ready', session_id: 'sess-1' });
+    await connectPromise;
+
+    expect(readyCalls).toEqual([137]);
+  });
+
   it('maps transcript, reply, tool.call and session.error events onto AaiEvent', async () => {
     const { deps, sockets } = makeDeps();
     const aai = await connectAndReady(deps, sockets);

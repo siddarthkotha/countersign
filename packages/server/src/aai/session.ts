@@ -53,6 +53,16 @@ export interface AaiConnectDeps {
   /** Defaults to OPEN_TIMEOUT_MS. Tests shrink this to exercise a never-opening socket
    *  without a slow real wait. */
   openTimeoutMs?: number;
+  /** Flight recorder bug fix (2026-09-03, founder-observed live): a real call's server-side
+   *  diagnostics bundle can never answer "when did AssemblyAI become ready" -- `connectAai`
+   *  consumes the `session.ready` message itself while resolving (below), before the
+   *  `RealAaiSocket` (and therefore `call/session.ts`'s own event dispatch) exists, so no
+   *  `session.ready` AaiEvent is ever emitted for the real adapter. Called at most once, the
+   *  moment `session.ready` actually arrives, with the elapsed ms since this `connectAai`
+   *  call started (mint + open + handshake) -- index.ts wires this straight into the
+   *  diagnostics bundle. Optional so every existing test/caller that doesn't pass it sees no
+   *  behavior change. */
+  onReady?: (ms_since_connect_start: number) => void;
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -280,6 +290,7 @@ class RealAaiSocket implements AaiSocket {
  *  session.ready arrives (or rejects on session.error / a connect failure / timeout). The
  *  returned AaiSocket owns resume-on-drop for the rest of the call's life. */
 export async function connectAai(cfg: AaiSessionConfig, deps: AaiConnectDeps): Promise<AaiSocket> {
+  const connectStartedAt = deps.now();
   const { token } = await mintToken(cfg, deps.fetchImpl);
   const voice = resolveVoice(cfg.voice);
   const effectiveCfg: AaiSessionConfig = voice === cfg.voice ? cfg : { ...cfg, voice };
@@ -301,6 +312,7 @@ export async function connectAai(cfg: AaiSessionConfig, deps: AaiConnectDeps): P
       if (msg.type === 'session.ready' && typeof msg.session_id === 'string') {
         settled = true;
         clearTimeout(timeout);
+        deps.onReady?.(deps.now() - connectStartedAt);
         resolve(new RealAaiSocket(ws, msg.session_id, effectiveCfg, deps));
       } else if (msg.type === 'session.error') {
         settled = true;
