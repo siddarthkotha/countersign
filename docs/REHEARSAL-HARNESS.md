@@ -26,6 +26,22 @@ This is a **test harness**, not part of the product. It is never imported by any
 The LLM-driven caller is the same thing one level up: an external model role-playing a
 caller for the test, never a claim that anything here detects a real one.
 
+## Before you test an engine change live, rebuild the engine
+
+The local dev server does NOT load `packages/engine/src`. It loads the compiled
+`packages/engine/dist`, because the engine package points at `dist`. So a change you just
+made inside `packages/engine/src` will silently not be there when you run a live call, and
+you will spend a call's worth of credits watching the old behaviour.
+
+Run this first, every time, then restart the server:
+
+    npm run build:engine
+
+This cost a real live call on 2026-09-04: a fix was verified green in the tests, then the
+first live run reproduced the exact old symptom, because the server was still serving a build
+from before the fix. The second run, after rebuilding, behaved correctly. The deployed site is
+not affected, because deploying runs the full build.
+
 ## Two caller modes
 
 ### Reactive (default, `--caller reactive`)
