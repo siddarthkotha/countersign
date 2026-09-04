@@ -78,7 +78,7 @@ function selectLiveCommitment(
     challenge_id: challengeId,
     kind: 'LIVE_COMMITMENT',
     field: best.field,
-    ask: `Ask the caller to restate the ${best.field} they gave earlier. Do not say the value yourself.`,
+    ask: `Ask the caller to restate the ${spokenField(best.field)} they gave earlier. Do not say the value yourself.`,
     expect: { commitment_claim_id: best.claim.id },
   };
 }
@@ -121,6 +121,14 @@ function arraysEqual(a: string[], b: string[]): boolean {
 
 // Exported for compose.ts's `isLegalSpec`: a recorded SEED_FACT spec's `field` must equal
 // this same mapping for its `fact_id`, or it's not a spec `selectSeedFact` could have built.
+/** Correction (2026-09-04, caught on a live call): challenge directions interpolated the raw
+ *  ClaimField id, so the agent said "restate the amount_usd" out loud. Spoken labels only. */
+function spokenField(field: string): string {
+  if (field === 'amount_usd') return 'amount in dollars';
+  if (field === 'account_last4') return 'last four digits of the account';
+  return field.replace(/_/g, ' ');
+}
+
 export function seedFieldForEntry(id: string): ClaimField {
   if (id === 'counsel_of_record') return 'counsel';
   if (id === 'escrow_institution') return 'escrow_institution';

@@ -128,7 +128,7 @@ async function runOne(
 
   let session;
   try {
-    session = await mintSession(url);
+    session = await mintSession(url, scenario.demo_persona);
   } catch (err) {
     return protocolErrorResult(scenario, url, startedAtIso, callerMode, `could not mint a session: ${err instanceof Error ? err.message : String(err)}`);
   }

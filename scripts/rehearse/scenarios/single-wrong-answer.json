@@ -30,20 +30,31 @@
       "text": "Yes, that's right.",
       "pause_ms": 400,
       "respond": {
-        "rules": [{ "if_agent_says_any": ["Northgate"], "say": "No, that's wrong, it's Meridian Supply." }]
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          }
+        ]
       }
     },
     {
       "id": "c6",
       "text": "Yes, that's right.",
       "pause_ms": 400,
-      "respond": { "rules": [] }
+      "respond": {
+        "rules": []
+      }
     },
     {
       "id": "c8",
       "text": "Yes, that's right.",
       "pause_ms": 400,
-      "respond": { "rules": [] }
+      "respond": {
+        "rules": []
+      }
     },
     {
       "id": "c9",
@@ -64,5 +75,6 @@
   "expected": {
     "verdict": "ESCALATE",
     "max_wall_ms": 240000
-  }
+  },
+  "demo_persona": "attacker"
 }

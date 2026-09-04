@@ -26,8 +26,20 @@
       "pause_ms": 400,
       "respond": {
         "rules": [
-          { "if_agent_says_any": ["Northgate"], "say": "No, that's wrong, it's Meridian Supply." },
-          { "if_agent_says_any": ["identity id", "identification id", "id number"], "say": "I don't have an identity id. This is Dana Whitfield." }
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield."
+          }
         ]
       }
     },
@@ -35,29 +47,247 @@
       "id": "c3",
       "text": "Yes, correct.",
       "pause_ms": 400,
-      "respond": { "rules": [] }
+      "respond": {
+        "rules": []
+      }
     },
     {
       "id": "c4",
       "text": "Yes, that's right.",
       "pause_ms": 400,
-      "respond": { "rules": [] }
+      "respond": {
+        "rules": []
+      }
     },
     {
       "id": "c5",
       "text": "Yes, that's right. This is Dana Whitfield.",
       "pause_ms": 400,
-      "respond": { "rules": [] }
+      "respond": {
+        "rules": []
+      }
     },
     {
       "id": "c6",
       "text": "Yes, that's right. This is Dana Whitfield.",
       "pause_ms": 400,
-      "respond": { "rules": [] }
+      "respond": {
+        "rules": []
+      }
+    },
+    {
+      "id": "c7",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars."
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday."
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one."
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
+    },
+    {
+      "id": "c8",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars."
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday."
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one."
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
+    },
+    {
+      "id": "c9",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars."
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday."
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one."
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
+    },
+    {
+      "id": "c10",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars."
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday."
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one."
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
     }
   ],
   "expected": {
     "verdict": "STAGE",
     "max_wall_ms": 150000
-  }
+  },
+  "demo_persona": "legitimate",
+  "max_wall_ms": 240000
 }

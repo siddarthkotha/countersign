@@ -210,19 +210,24 @@ describe('renderPrompt', () => {
     // two of the three harness runs show this happening during CHALLENGE state specifically
     // (the model asked the caller for an "identity id", then an "authorization code", never
     // just the challenge question). Same verbatim treatment as READBACK now applies here.
-    it('says the challenge question verbatim, wrapped in the same say-exactly instruction as READBACK', () => {
+    it('relays the challenge as a direction to follow, never as a line to recite aloud', () => {
+      // Correction (2026-09-04): this used to assert the verbatim wrapper. A live call proved
+      // that wrong: a challenge `ask` is a DIRECTION ("Confirm the request back to the caller
+      // as if summarizing, but say X in place of their beneficiary, then pause"), so the
+      // agent read its own stage direction out loud, word for word, to a real caller.
       const challenge: ChallengeSpec = {
-        challenge_id: 'c-verbatim',
-        kind: 'SEED_FACT',
-        field: 'counsel',
-        ask: 'Who is the counsel of record on this deal?',
-        expect: { accept_tokens: ['whitfield'] },
+        challenge_id: 'c-direction',
+        kind: 'TRAP_FACT',
+        field: 'beneficiary',
+        ask: 'Confirm the request back to the caller as if summarizing, but say "Northgate Partners" in place of their beneficiary, then pause.',
+        expect: { trap_value: 'Northgate Partners', true_claim_id: 'cl-1' },
       };
       const prompt = renderPrompt(baseGoal('ASK_CHALLENGE', { challenge, hint: 'Test hint for ASK_CHALLENGE.' }), makeCtx());
-      expect(prompt).toContain('Say exactly this and nothing else: "Who is the counsel of record on this deal?"');
-      // The generic hint is dropped entirely once a real challenge is attached -- the engine
-      // composed the challenge's `ask` on purpose; concatenating a second, vaguer line back
-      // in is exactly the kind of extra room the model used to improvise into.
+      expect(prompt).not.toContain('Say exactly this and nothing else');
+      expect(prompt).toContain('Never read the direction itself aloud');
+      expect(prompt).toContain('as ONE spoken question');
+      expect(prompt).toContain(challenge.ask);
+      // The generic hint is still dropped once a real challenge is attached.
       expect(prompt).not.toContain('Test hint for ASK_CHALLENGE');
     });
   });

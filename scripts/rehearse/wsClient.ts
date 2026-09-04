@@ -75,11 +75,20 @@ export function baseWsUrl(httpBaseUrl: string): string {
  *  server's `replay_only` response, a non-2xx status, or a network failure) -- the harness
  *  treats "could not even mint a session" as a protocol/connection error (exit code 2), not
  *  a scenario failure. */
-export async function mintSession(baseUrl: string): Promise<MintResult> {
+export async function mintSession(baseUrl: string, demoPersona?: string): Promise<MintResult> {
   const url = `${trimTrailingSlash(baseUrl)}/api/session/start`;
   let res: Response;
+  // 2026-09-04: the server maps a NAMED demo persona to the call's simulated telemetry
+  // (packages/server/src/personas.ts). Without one it falls back to the attacker context, in
+  // which the sign-in check fails by design and a staged outcome is unreachable. A scenario
+  // that expects STAGE must therefore name the legitimate persona, exactly as a visitor picks
+  // a role card. The harness never sends telemetry values, only the name; the server owns the
+  // mapping.
+  const init: RequestInit = demoPersona
+    ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ persona: demoPersona }) }
+    : { method: 'POST' };
   try {
-    res = await fetch(url, { method: 'POST' });
+    res = await fetch(url, init);
   } catch (err) {
     throw new Error(`mintSession: could not reach ${url}: ${err instanceof Error ? err.message : String(err)}`);
   }

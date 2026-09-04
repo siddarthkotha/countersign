@@ -17,11 +17,15 @@
       "id": "c2",
       "text": "That's right, just testing. I don't have a real request.",
       "pause_ms": 400,
-      "respond": { "rules": [], "else_say": "That's right, just testing. I don't have a real request." }
+      "respond": {
+        "rules": [],
+        "else_say": "That's right, just testing. I don't have a real request."
+      }
     }
   ],
   "expected": {
     "verdict": "NO_ACTION",
     "max_wall_ms": 60000
-  }
+  },
+  "demo_persona": "attacker"
 }

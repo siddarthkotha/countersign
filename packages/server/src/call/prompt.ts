@@ -90,8 +90,23 @@ function nowSection(goal: PhrasingGoal, ctx: PromptCtx): string {
     // and nothing else" wrapper STALL's holding lines already use. The engine writes the
     // words (LAW 3); this function's only job here is to relay them unedited.
     case 'ASK_CHALLENGE': {
+      // Correction (2026-09-04, caught on a live run): a challenge's `ask` is written as a
+      // DIRECTION to the agent, not as a line a person would say. Wrapping it in "say exactly
+      // this" made the agent read its own stage directions aloud, verbatim, on a real call:
+      // "Confirm the request back to the caller as if summarizing, but say Northgate Partners
+      // in place of their beneficiary, then pause." It also read an internal field name out
+      // loud ("restate the amount_usd"). So a challenge is relayed as an instruction to
+      // follow, never as a line to recite, with the two rules that the verbatim wrapper was
+      // there to enforce stated explicitly instead. READBACK below keeps the verbatim
+      // treatment, because the engine composes a genuinely speakable sentence for it.
+      // Parked follow-up: have the engine compose speakable challenge questions too, so this
+      // branch can go back to relaying exact words.
       const ask = goal.challenge?.ask ?? goal.hint;
-      return `Say exactly this and nothing else: "${ask}"`;
+      return (
+        `Do what this direction says, in your own words, as ONE spoken question. ` +
+        `Never read the direction itself aloud, and never say a field name like "amount_usd". ` +
+        `The direction: ${ask}`
+      );
     }
     case 'READBACK':
       // fsm.ts composes the exact, ready-to-speak confirmation sentence into `goal.hint`

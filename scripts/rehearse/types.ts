@@ -94,6 +94,11 @@ export interface Scenario {
    *  read by the reactive caller. Optional -- required only to use `--caller llm` on this
    *  scenario. */
   persona?: string;
+  /** Which demo persona the server should use for this call's simulated telemetry
+   *  ("legitimate" or "attacker"). The server owns the mapping; this only names it, exactly
+   *  as a visitor picks a role card. A scenario expecting STAGE must set "legitimate",
+   *  because the fallback context fails the sign-in check by design. */
+  demo_persona?: string;
 }
 
 export interface TurnGapRecord {
