@@ -4,6 +4,7 @@ import { newCapsState, canStartSession, startSession, type CapsState } from './c
 import { defaultCorpusDir, listCorpusFiles, loadCorpusFile } from './replay.js';
 import type { StaticServer } from './static.js';
 import { isAllowedOrigin } from './origin.js';
+import { resolvePersona } from './personas.js';
 import { addClientEvents, checkClientPostRate, getBundle, MAX_CLIENT_BODY_BYTES, type DiagnosticsState } from './diagnostics.js';
 
 export interface HttpDeps {
@@ -204,8 +205,42 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
         sendJson(res, statusForDecisionReason(decision.reason), { replay_only: true, reason: decision.reason });
         return;
       }
+
+      // Bug fix (2026-09-04): the browser may NAME a demo persona; it never supplies
+      // telemetry values -- `origin_kind`/`origin_geo` are never read from this body, only
+      // `persona`, and only through personas.ts's strict allowlist (`resolvePersona`). An
+      // empty body (the pre-existing client's own behaviour, and every test that posts with
+      // none) is "no persona given", not a parse error -- only a NON-EMPTY body that fails to
+      // parse as JSON is rejected. Same read-then-branch shape as the diagnostics POST route
+      // below (413/408 from `readBodyLimited`'s own result), reused here for consistency.
+      const bodyResult = await readBodyLimited(req, MAX_CLIENT_BODY_BYTES);
+      if (!bodyResult.ok) {
+        if (bodyResult.reason === 'timeout') {
+          sendJson(res, 408, { error: 'request_timeout' });
+          res.socket?.end();
+          return;
+        }
+        sendJson(res, 413, { error: 'payload_too_large' });
+        return;
+      }
+      let personaInput: unknown;
+      const trimmedBody = bodyResult.body.trim();
+      if (trimmedBody.length > 0) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(trimmedBody);
+        } catch {
+          sendJson(res, 400, { error: 'bad_request' });
+          return;
+        }
+        if (parsed !== null && typeof parsed === 'object') {
+          personaInput = (parsed as Record<string, unknown>).persona;
+        }
+      }
+      const persona = resolvePersona(personaInput);
+
       const id = deps.randomId();
-      startSession(state, now, id);
+      startSession(state, now, id, persona);
       sendJson(res, 200, { session_id: id, ws_path: `/ws/call/${id}`, cap_seconds: cfg.session_cap_seconds });
       return;
     }

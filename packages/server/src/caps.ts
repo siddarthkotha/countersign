@@ -1,7 +1,12 @@
 import type { ServerConfig } from './config.js';
+import { DEFAULT_PERSONA, type DemoPersona } from './personas.js';
 
 export interface CapsState {
-  active: Map<string, { started_at: number; last_activity_at: number }>;
+  // Bug fix (2026-09-04): the demo persona rides alongside the session id in this SAME
+  // entry -- no separate channel -- so `/ws/call/:id`'s attach can look up which simulated
+  // telemetry a session was minted with (see `personaFor` below and ws/browser.ts's
+  // `defaultCallContext`).
+  active: Map<string, { started_at: number; last_activity_at: number; persona: DemoPersona }>;
   daily: { day: string; count: number };
   mints: number[];
   killed: boolean;
@@ -37,8 +42,8 @@ export function canStartSession(state: CapsState, cfg: ServerConfig, now: number
   return { ok: true };
 }
 
-export function startSession(state: CapsState, now: number, id: string): void {
-  state.active.set(id, { started_at: now, last_activity_at: now });
+export function startSession(state: CapsState, now: number, id: string, persona: DemoPersona = DEFAULT_PERSONA): void {
+  state.active.set(id, { started_at: now, last_activity_at: now, persona });
   const day = utcDay(now);
   if (state.daily.day === day) {
     state.daily.count += 1;
@@ -48,6 +53,12 @@ export function startSession(state: CapsState, now: number, id: string): void {
   const windowStart = now - 60_000;
   state.mints = state.mints.filter((t) => t > windowStart);
   state.mints.push(now);
+}
+
+/** The persona a session was minted with -- `DEFAULT_PERSONA` (the safe fallback) for a
+ *  session id `active` has no record of, same as an unknown/malformed persona at mint time. */
+export function personaFor(state: CapsState, session_id: string): DemoPersona {
+  return state.active.get(session_id)?.persona ?? DEFAULT_PERSONA;
 }
 
 export function touch(state: CapsState, session_id: string, now: number): void {

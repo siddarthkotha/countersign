@@ -9,6 +9,10 @@ import { newDiagnosticsState, type DiagnosticsState } from '../src/diagnostics.j
 import type { CapsState } from '../src/caps.js';
 import type { ServerConfig } from '../src/config.js';
 import type { ServerEvent } from '@countersign/engine';
+// Bug fix (2026-09-04) end-to-end test: Scenario A is BRIEF's own "fully cooperative call"
+// (every critical field read back and affirmed) -- reused here to drive a LIVE session
+// through the real HTTP + WS stack, not just the engine in isolation.
+import scenarioA from '../../engine/corpus/scenario-a-dana-legitimate.json' with { type: 'json' };
 
 function cfg(overrides: Partial<ServerConfig> = {}): ServerConfig {
   return {
@@ -464,5 +468,68 @@ describe('ws/browser — /ws/call/:id', () => {
     const { wsBase } = await start();
     const raw = await rawUpgradeRequest(wsBase, '/ws/replay/scenario-a-dana-legitimate?speed=50', 'http://evil.example');
     expect(raw.split('\r\n')[0]).toBe('HTTP/1.1 403 Forbidden');
+  });
+
+  // Bug fix (2026-09-04): end-to-end proof of the fix's consequence. Before this fix, the
+  // live `defaultCallContext` was hardcoded to `unverified_voip`/`unknown` for every call, so
+  // `evidenceFromTools.ssoEvidence` failed always -- STAGE was structurally unreachable no
+  // matter how a caller behaved. This drives Scenario A's own conversation (BRIEF's "fully
+  // cooperative call": every critical field read back and affirmed) through the REAL
+  // /api/session/start -> /ws/call/:id -> CallSession chain, once per persona, and checks
+  // only the SSO evidence card -- not the overall verdict. Reaching a full STAGE verdict here
+  // also depends on the readback-confirmation bug another lane is fixing concurrently in
+  // packages/engine; that is out of scope for this test on purpose.
+  it('BUG FIX: persona flows end to end -- legitimate is SSO PASS, attacker is SSO FAIL for the SAME cooperative call', async () => {
+    const { base, wsBase, aaiInstances } = await start();
+
+    async function ssoStatusFor(persona: 'legitimate' | 'attacker'): Promise<string> {
+      const startRes = await fetch(`${base}/api/session/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona }),
+      });
+      const { session_id, ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
+
+      const { ws, messages } = await connectAndCollect(`${wsBase}${ws_path}`);
+      ws.send(JSON.stringify({ type: 'start' }));
+      await pollUntil(() => messages.some((m) => m.type === 'state'));
+
+      const aai = aaiInstances.get(session_id)!;
+      const turns = scenarioA.conversation;
+
+      // c1 (claim: identity + amount + account + beneficiary) -> a1 (readback amount+
+      // account) -> c2 (confirm) -> a2 (readback account) -> c3 (confirm) -> a3 (readback
+      // beneficiary) -> c4 (confirm) reaches EVIDENCE the instant c4 lands, which
+      // auto-runs check_sso_context/get_request_history/verify_out_of_band server-side
+      // (session.ts's `runLookupsIfNeeded`) -- no model tool.call needed, same as the
+      // recorded corpus's own tools log.
+      aai.emit({ type: 'transcript.user', item_id: turns[0]!.id, text: turns[0]!.text });
+      aai.emit({ type: 'reply.started', reply_id: turns[1]!.id });
+      aai.emit({ type: 'transcript.agent', item_id: turns[1]!.id, text: turns[1]!.text, reply_id: turns[1]!.id, interrupted: false });
+      aai.emit({ type: 'reply.done', reply_id: turns[1]!.id, status: 'completed' });
+      aai.emit({ type: 'transcript.user', item_id: turns[2]!.id, text: turns[2]!.text });
+      aai.emit({ type: 'reply.started', reply_id: turns[3]!.id });
+      aai.emit({ type: 'transcript.agent', item_id: turns[3]!.id, text: turns[3]!.text, reply_id: turns[3]!.id, interrupted: false });
+      aai.emit({ type: 'reply.done', reply_id: turns[3]!.id, status: 'completed' });
+      aai.emit({ type: 'transcript.user', item_id: turns[4]!.id, text: turns[4]!.text });
+      aai.emit({ type: 'reply.started', reply_id: turns[5]!.id });
+      aai.emit({ type: 'transcript.agent', item_id: turns[5]!.id, text: turns[5]!.text, reply_id: turns[5]!.id, interrupted: false });
+      aai.emit({ type: 'reply.done', reply_id: turns[5]!.id, status: 'completed' });
+      aai.emit({ type: 'transcript.user', item_id: turns[6]!.id, text: turns[6]!.text });
+
+      function lastState(): Extract<ServerEvent, { type: 'state' }> | undefined {
+        const stateEvents = messages.filter((m): m is Extract<ServerEvent, { type: 'state' }> => m.type === 'state');
+        return stateEvents[stateEvents.length - 1];
+      }
+
+      await pollUntil(() => lastState()?.state.forensic.evidence.some((e) => e.id === 'ev-sso') ?? false);
+
+      const sso = lastState()!.state.forensic.evidence.find((e) => e.id === 'ev-sso')!;
+      ws.close();
+      return sso.status;
+    }
+
+    expect(await ssoStatusFor('legitimate')).toBe('PASS');
+    expect(await ssoStatusFor('attacker')).toBe('FAIL');
   });
 });

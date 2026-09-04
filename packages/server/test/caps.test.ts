@@ -6,6 +6,7 @@ import {
   touch,
   endSession,
   reapIdle,
+  personaFor,
 } from '../src/caps.js';
 import type { ServerConfig } from '../src/config.js';
 
@@ -109,5 +110,26 @@ describe('caps', () => {
     expect(canStartSession(state, c, 1000)).toEqual({ ok: false, reason: 'session_in_use' });
     endSession(state, 'a');
     expect(canStartSession(state, c, 1000)).toEqual({ ok: true });
+  });
+
+  // Bug fix (2026-09-04): the demo persona rides alongside the session id in the SAME
+  // `active` map entry `/api/session/start` already creates -- no separate channel.
+  describe('demo persona', () => {
+    it('startSession stores the given persona; personaFor reads it back', () => {
+      const state = newCapsState();
+      startSession(state, 1000, 'a', 'legitimate');
+      expect(personaFor(state, 'a')).toBe('legitimate');
+    });
+
+    it('startSession defaults to the attacker persona when none is given', () => {
+      const state = newCapsState();
+      startSession(state, 1000, 'a');
+      expect(personaFor(state, 'a')).toBe('attacker');
+    });
+
+    it('personaFor falls back to the attacker persona for a session id it never recorded', () => {
+      const state = newCapsState();
+      expect(personaFor(state, 'never-started')).toBe('attacker');
+    });
   });
 });

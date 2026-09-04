@@ -2,7 +2,7 @@ import { useState } from 'react';
 import MicCheck, { type MicCheckReason, type MicCheckResultInfo } from '../components/MicCheck';
 import RoleCards from '../components/RoleCards';
 import Masthead from '../components/Masthead';
-import { startSession, type StartResult } from '../api';
+import { startSession, type DemoPersona, type StartResult } from '../api';
 
 type StartedSession = Extract<StartResult, { session_id: string }>;
 
@@ -61,12 +61,17 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
   const [micResult, setMicResult] = useState<MicCheckResultInfo | null>(null);
   const [starting, setStarting] = useState(false);
   const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
+  // Bug fix (2026-09-04): which role card the visitor picked, so the server can build the
+  // matching simulated call telemetry instead of a hardcoded default. Landing.tsx had no
+  // existing state tracking this -- added for this fix; null (no card picked) sends no
+  // persona at all, and the server applies its own safe default.
+  const [role, setRole] = useState<DemoPersona | null>(null);
   const micOk = micResult?.ok ?? false;
 
   async function handleTry() {
     setStarting(true);
     setUnavailableReason(null);
-    const result = await startSession();
+    const result = await startSession(role);
     setStarting(false);
     if ('replay_only' in result) {
       setUnavailableReason(reasonToPlainWords(result.reason));
@@ -121,7 +126,7 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
 
       <MicCheck onResult={setMicResult} />
 
-      <RoleCards />
+      <RoleCards selected={role} onSelect={setRole} />
 
       <p>Desktop Chrome recommended. Every system here is simulated; nothing moves real money.</p>
     </main>

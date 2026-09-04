@@ -31,12 +31,13 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { MERIDIAN, mockToolResult } from '@countersign/engine';
 import type { BrowserEvent, CallContext, SeedConfig, ServerEvent } from '@countersign/engine';
-import { endSession, touch, type CapsState } from '../caps.js';
+import { endSession, personaFor, touch, type CapsState } from '../caps.js';
 import { createBundle, endBundle, recordServerEvent, summarizeBundle, type DiagnosticsState } from '../diagnostics.js';
 import type { AaiSocket } from '../aai/types.js';
 import type { ServerConfig } from '../config.js';
 import { CallSession } from '../call/session.js';
 import { isAllowedOrigin } from '../origin.js';
+import { callContextForPersona } from '../personas.js';
 import { defaultCorpusDir, loadCorpusFile, runReplay } from '../replay.js';
 import { makeThrottle, THROTTLE_WINDOW_MS } from './throttle.js';
 
@@ -120,8 +121,15 @@ interface CallEntry {
   audioBuffer: { data: string; t: number }[];
 }
 
-function defaultCallContext(session_id: string): CallContext {
-  return { session_id, origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+/** Bug fix (2026-09-04): this used to hardcode `unverified_voip`/`unknown` for every live
+ *  call, which made the SSO check fail always (evidenceFromTools.ssoEvidence), which made
+ *  STAGE structurally unreachable no matter how a caller behaved. The persona a session was
+ *  minted with (`/api/session/start`, stored via caps.ts's `startSession`) now drives the
+ *  simulated telemetry instead -- `personaFor` falls back to the safe `attacker` persona for
+ *  a session id caps never recorded one for, same as an unknown/malformed persona at mint
+ *  time. */
+function defaultCallContext(session_id: string, caps: CapsState): CallContext {
+  return callContextForPersona(session_id, personaFor(caps, session_id));
 }
 
 function safeSend(ws: WebSocket, msg: object): void {
@@ -308,7 +316,7 @@ function handleCallSocket(
   recordServerEvent(deps.diagnostics, session_id, deps.now(), 'link', { leg: 'browser', state: 'attach' });
 
   const seed = deps.seed ?? MERIDIAN;
-  const call = (deps.buildCallContext ?? defaultCallContext)(session_id);
+  const call = deps.buildCallContext ? deps.buildCallContext(session_id) : defaultCallContext(session_id, deps.caps);
 
   let aai: AaiSocket;
   recordServerEvent(deps.diagnostics, session_id, deps.now(), 'aai_connect_start', {});

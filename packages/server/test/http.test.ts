@@ -424,6 +424,96 @@ describe('http server', () => {
       expect(rec.label).not.toBe(rec.file);
     }
   });
+
+  // Bug fix (2026-09-04): the live CallContext used to be hardcoded to `unverified_voip`/
+  // `unknown` for EVERY call (packages/server/src/ws/browser.ts's old `defaultCallContext`),
+  // which made the SSO check fail always, which made STAGE structurally unreachable. The
+  // browser may now NAME a demo persona; the server alone maps that name to the simulated
+  // telemetry (packages/server/src/personas.ts). These tests cover the POST route's half of
+  // that fix: strict allowlisting, safe fallback, and that origin_kind/origin_geo posted by
+  // a client are never read at all.
+  describe('POST /api/session/start -- demo persona', () => {
+    it('a legitimate persona is stored against the minted session id', async () => {
+      const { base, state } = await start();
+      const r = await fetch(`${base}/api/session/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: 'legitimate' }),
+      });
+      expect(r.status).toBe(200);
+      const { session_id } = (await r.json()) as StartResponseBody;
+      expect(state.active.get(session_id)?.persona).toBe('legitimate');
+    });
+
+    it('an attacker persona is stored against the minted session id', async () => {
+      const { base, state } = await start();
+      const r = await fetch(`${base}/api/session/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: 'attacker' }),
+      });
+      expect(r.status).toBe(200);
+      const { session_id } = (await r.json()) as StartResponseBody;
+      expect(state.active.get(session_id)?.persona).toBe('attacker');
+    });
+
+    it('an absent body (the pre-existing client) still succeeds and falls back to attacker', async () => {
+      const { base, state } = await start();
+      const r = await fetch(`${base}/api/session/start`, { method: 'POST' });
+      expect(r.status).toBe(200);
+      const { session_id } = (await r.json()) as StartResponseBody;
+      expect(state.active.get(session_id)?.persona).toBe('attacker');
+    });
+
+    it('an unknown persona name falls back to attacker, never the permissive persona', async () => {
+      const { base, state } = await start();
+      const r = await fetch(`${base}/api/session/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: 'ceo-override' }),
+      });
+      expect(r.status).toBe(200);
+      const { session_id } = (await r.json()) as StartResponseBody;
+      expect(state.active.get(session_id)?.persona).toBe('attacker');
+    });
+
+    it('a body that is not valid JSON does not crash the route -- rejected with the existing error shape', async () => {
+      const { base } = await start();
+      const r = await fetch(`${base}/api/session/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'this is not json{{{',
+      });
+      expect(r.status).toBe(400);
+      expect(await r.json()).toEqual({ error: 'bad_request' });
+    });
+
+    it('a browser cannot influence origin telemetry: origin_kind/origin_geo in the body have no effect', async () => {
+      const { base, state } = await start();
+      const r = await fetch(`${base}/api/session/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // No persona named -- if origin_kind/origin_geo had any effect at all, this forged
+        // body (shaped exactly like the legitimate persona's telemetry) would flip the
+        // result away from the safe default.
+        body: JSON.stringify({ origin_kind: 'registered_device', origin_geo: 'Austin, TX' }),
+      });
+      expect(r.status).toBe(200);
+      const { session_id } = (await r.json()) as StartResponseBody;
+      expect(state.active.get(session_id)?.persona).toBe('attacker');
+    });
+
+    it('does not add a persona field to the success response body (public shape unchanged)', async () => {
+      const { base } = await start();
+      const r = await fetch(`${base}/api/session/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: 'legitimate' }),
+      });
+      const body = (await r.json()) as Record<string, unknown>;
+      expect(body).not.toHaveProperty('persona');
+    });
+  });
 });
 
 // D1 fix round 1 #1: the static-server mount (http.ts) used to gate on `req.method ===

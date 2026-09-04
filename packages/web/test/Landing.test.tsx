@@ -180,4 +180,53 @@ describe('Landing', () => {
     expect(screen.queryByText(COLD_START_TEXT)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try to break it' })).toHaveAttribute('title', 'Microphone ready');
   });
+
+  // Bug fix (2026-09-04): the role cards used to be decorative -- the server always built a
+  // live call's simulated telemetry from a hardcoded default, so which card a visitor read
+  // changed nothing. Landing now tracks which card was picked and passes it through
+  // `startSession` so the server can use the matching persona.
+  describe('demo persona selection (bug fix 2026-09-04)', () => {
+    it('passes the legitimate persona to startSession after the Dana Whitfield card is picked', async () => {
+      mockGetUserMedia('resolve');
+      vi.mocked(startSession).mockResolvedValue({ session_id: 's1', ws_path: '/ws/call/s1', cap_seconds: 300 });
+      const user = userEvent.setup();
+      render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+      await user.click(screen.getByRole('button', { name: 'Check microphone' }));
+      await screen.findByText('Microphone ready');
+
+      await user.click(screen.getByText('Dana Whitfield, treasury manager'));
+      await user.click(screen.getByRole('button', { name: 'Try to break it' }));
+
+      expect(startSession).toHaveBeenCalledWith('legitimate');
+    });
+
+    it('passes the attacker persona to startSession after the CEO-claim card is picked', async () => {
+      mockGetUserMedia('resolve');
+      vi.mocked(startSession).mockResolvedValue({ session_id: 's1', ws_path: '/ws/call/s1', cap_seconds: 300 });
+      const user = userEvent.setup();
+      render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+      await user.click(screen.getByRole('button', { name: 'Check microphone' }));
+      await screen.findByText('Microphone ready');
+
+      await user.click(screen.getByText('A caller claiming to be the CEO'));
+      await user.click(screen.getByRole('button', { name: 'Try to break it' }));
+
+      expect(startSession).toHaveBeenCalledWith('attacker');
+    });
+
+    it('passes no persona (null) to startSession when no card was picked -- the server applies the safe default', async () => {
+      mockGetUserMedia('resolve');
+      vi.mocked(startSession).mockResolvedValue({ session_id: 's1', ws_path: '/ws/call/s1', cap_seconds: 300 });
+      const user = userEvent.setup();
+      render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+      await user.click(screen.getByRole('button', { name: 'Check microphone' }));
+      await screen.findByText('Microphone ready');
+      await user.click(screen.getByRole('button', { name: 'Try to break it' }));
+
+      expect(startSession).toHaveBeenCalledWith(null);
+    });
+  });
 });
