@@ -14,9 +14,17 @@ export interface ToolEvidenceCtx {
   request_version: number;
 }
 
+/** Bug fix note (2026-09-03): a call/session.ts `tool.call` that arrives when the tool is
+ *  NOT on the current state's allowlist is logged as a real `ToolLogEntry` too (evidence of
+ *  what was attempted, args tagged `ignored: true`) -- but it is never actually run against
+ *  the mock backend, so it carries no real result and must never be allowed to shadow a
+ *  genuine prior result for the same tool name. Before this guard, "last entry of this name
+ *  wins" would let exactly that happen: a late or duplicate model tool.call arriving after
+ *  the call already has fresh evidence (or has already gone terminal) reverts that evidence
+ *  to PENDING and can change the verdict, even though nothing new was actually checked. */
 function latest(tools: ToolLogEntry[], name: ToolName): ToolLogEntry | undefined {
   let found: ToolLogEntry | undefined;
-  for (const t of tools) if (t.name === name) found = t; // last entry of this name wins
+  for (const t of tools) if (t.name === name && t.args?.ignored !== true) found = t; // last REAL entry of this name wins
   return found;
 }
 

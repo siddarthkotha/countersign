@@ -75,6 +75,17 @@ function resolveAgentName(explicit: string | undefined): string {
  *  a spoofed or altered value can never reach the mock backend. */
 const IDENTITY_ARG_TOOLS = new Set<ToolName>(['get_request_history', 'check_sso_context', 'verify_out_of_band', 'alert_principal']);
 
+/** Bug fix (2026-09-03, founder-observed live): the EVIDENCE/CONSISTENCY_CHECK STALL prompt
+ *  (call/prompt.ts) only ever tells the model to hold the floor -- it never asks it to call
+ *  get_request_history/check_sso_context/verify_out_of_band, and nothing else in this file
+ *  ran the mock backend except `handleToolCall`, which only fires from an actual `tool.call`
+ *  AAI event. A model that never decides to call one deadlocks the call in EVIDENCE forever
+ *  (rules.ts row 7 stays PENDING with nothing to ever change it) until the session cap ends
+ *  it with no verdict. `runLookupsIfNeeded` below is these three tools, server-initiated,
+ *  same pattern as `runTerminalActionsIfNeeded` -- the deterministic core drives the checks,
+ *  not the model's whim (LAW 3). */
+const LOOKUP_TOOLS: ToolName[] = ['get_request_history', 'check_sso_context', 'verify_out_of_band'];
+
 export class CallSession {
   readonly logs: { conversation: Utterance[]; tools: ToolLogEntry[]; actions: AgentAction[] } = {
     conversation: [],
@@ -121,6 +132,18 @@ export class CallSession {
   private readonly terminalActionAttempts = new Map<ToolName, number>();
   private readonly terminalActionsAbandoned = new Set<ToolName>();
   private terminalActionsSettled = false;
+  /** Same bounded-retry-then-abandon shape as the terminal-action bookkeeping just above,
+   *  scoped per (tool name, request_version) since I3 means a lookup that's already
+   *  abandoned for version 1 must still be attempted fresh for version 2. Without this, a
+   *  broken mock (a real bug, not a model failing to call anything) would make
+   *  `runLookupsIfNeeded` retry it on every single tick forever -- unlike a model-issued
+   *  `tool.call`, which only ever throws once per explicit call, this runner fires on every
+   *  tick for as long as the state stays EVIDENCE/CONSISTENCY_CHECK, so an uncaught,
+   *  unbounded throw here would spam the flight recorder and never let the call proceed to
+   *  even a degraded verdict. */
+  private static readonly MAX_LOOKUP_ATTEMPTS = 3;
+  private readonly lookupAttempts = new Map<string, number>();
+  private readonly lookupAbandoned = new Set<string>();
   private exportHash: string | null = null;
   private countersignRecomputed = false;
   /** Finding 5 (final review): the in-flight export-hash promise, if any -- `whenIdle()`
@@ -533,8 +556,100 @@ export class CallSession {
    *  push the resulting ScreenState. Called once per AAI event and once from start(). */
   private tick(): void {
     this.applyEvaluate();
+    this.runLookupsIfNeeded();
     this.runTerminalActionsIfNeeded();
     this.emitState();
+  }
+
+  /** The latest logged entry for `name` (last one wins, same convention as the engine's own
+   *  `evidence/fromTools.ts`), or undefined if the model has never called it this session. */
+  private latestToolEntry(name: ToolName): ToolLogEntry | undefined {
+    let found: ToolLogEntry | undefined;
+    for (const t of this.logs.tools) if (t.name === name) found = t;
+    return found;
+  }
+
+  /** True when `name`'s latest logged entry is missing, errored, or was obtained for a
+   *  different request_version than `requestVersion` -- exactly the same staleness test
+   *  `evidence/fromTools.ts`'s `pendingCard` uses to grade it PENDING, mirrored here so the
+   *  runner and the engine agree on what "still needs an answer" means. Checked against the
+   *  RESULT's own echoed `request_version` (every mock result carries one), not the logged
+   *  `args`, for the same reason: a model-issued call that raced ahead with a stale version
+   *  in its arguments would still get a stale-tagged result back from the mock. */
+  private lookupNeedsRun(name: ToolName, requestVersion: number): boolean {
+    const entry = this.latestToolEntry(name);
+    if (!entry || !entry.result) return true;
+    if (entry.result.error !== undefined && entry.result.error !== null) return true;
+    return Number(entry.result.request_version) !== requestVersion;
+  }
+
+  /** Server-initiated lookup runner (bug fix above): whenever the current state is EVIDENCE
+   *  or CONSISTENCY_CHECK (the only two states `allowedTools` offers these three tools in),
+   *  run whichever of get_request_history/check_sso_context/verify_out_of_band is still
+   *  missing/errored/stale for the CURRENT request_version, using the identity the ENGINE
+   *  claims (never anything from the model -- same rule `handleToolCall`'s IDENTITY_ARG_TOOLS
+   *  guard already enforces for a model-issued call), then re-evaluate so the state can
+   *  advance within this same tick.
+   *
+   *  These are synthetic, server-originated calls: no AAI `call_id` ever asked for them, so
+   *  nothing here touches `pendingToolResults` -- there is no tool.result to send back over
+   *  the wire, only a ToolLogEntry (evidence of what was checked, same shape a model-issued
+   *  call would produce) and a diagnostics event (flight recorder visibility).
+   *
+   *  If the model DOES call one of these itself first, `lookupNeedsRun` sees a fresh result
+   *  already logged for the current version and skips it -- no double-run, and I3 (a version
+   *  bump makes the prior version's evidence stale) still re-triggers every one of the three,
+   *  model-issued or not, exactly as it did before this fix for a model-issued call.
+   *
+   *  Never touches a terminal/ACTION tool -- that stays `runTerminalActionsIfNeeded`'s job
+   *  alone, and this method only ever fires in EVIDENCE/CONSISTENCY_CHECK, states no terminal
+   *  tool is ever offered in. LAW 2 is unaffected: this can only ever produce more
+   *  PENDING-state evidence, never a verdict, and the ceiling this call can reach on its own
+   *  is still whatever the engine computes -- STAGE at most. */
+  private runLookupsIfNeeded(): void {
+    if (!this.last) return;
+    const output = this.last;
+    if (output.state !== 'EVIDENCE' && output.state !== 'CONSISTENCY_CHECK') return;
+    if (!output.claimed_identity_id) return;
+
+    let ran = false;
+    for (const name of LOOKUP_TOOLS) {
+      if (!this.lookupNeedsRun(name, output.request_version)) continue;
+      const key = `${name}@${output.request_version}`;
+      if (this.lookupAbandoned.has(key)) continue; // a real backend bug, not a model that never called it -- see the field doc comment
+
+      const args = { identity_id: output.claimed_identity_id, request_version: output.request_version };
+      try {
+        const result = this.opts.mock(name, args, this.opts.seed, this.mockCtx);
+        this.logs.tools.push({ id: this.nextToolId(), name, t_ms: this.nowT(), args, result });
+        // Deliberately its own diag kind, never 'error' -- 'error' is `recoverFromDispatchError`'s
+        // channel for a caught THROW during real AAI event dispatch; a lookup the mock
+        // simply answered (even with `{error: ...}` inside the result) is not that.
+        this.diag('server_lookup', { name, request_version: output.request_version, status: result.error ? 'error' : 'ok' });
+        ran = true;
+      } catch (err) {
+        const attempts = (this.lookupAttempts.get(key) ?? 0) + 1;
+        this.lookupAttempts.set(key, attempts);
+        const message = err instanceof Error ? err.message : String(err);
+        this.diag('server_lookup_error', { name, request_version: output.request_version, attempt: attempts, message });
+        if (attempts >= CallSession.MAX_LOOKUP_ATTEMPTS) {
+          this.lookupAbandoned.add(key);
+          // One logged failed entry -- evidence of what was tried (`pendingCard` in
+          // evidence/fromTools.ts grades an errored result PENDING, same as "never ran") --
+          // so the flight recorder and the tools log both show this lookup was genuinely
+          // attempted and genuinely failed, not silently skipped.
+          this.logs.tools.push({
+            id: this.nextToolId(),
+            name,
+            t_ms: this.nowT(),
+            args: { ...args, attempt: attempts },
+            result: { error: 'internal_error', message },
+          });
+          this.diag('server_lookup_abandoned', { name, request_version: output.request_version, attempts });
+        }
+      }
+    }
+    if (ran) this.applyEvaluate();
   }
 
   /** Fix round 1, finding 1: picks (and remembers) the next stall line for `kind`, scoped to

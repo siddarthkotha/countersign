@@ -411,7 +411,17 @@ describe('CallSession — onDiagnostic', () => {
     session.start();
     driveScenarioBIntoEvidence(session, aai, clock);
 
-    expect(session.last?.allowed_tools).toContain('check_sso_context');
+    // Bug fix (2026-09-03): the server's own lookup runner now resolves
+    // check_sso_context/get_request_history/verify_out_of_band the instant the scenario
+    // reaches EVIDENCE, in the SAME tick -- so by the time this test can observe
+    // `session.last`, the call has already gone all the way to a terminal verdict and
+    // `allowed_tools` is empty again. That auto-run itself is covered elsewhere (see
+    // session-lookups.test.ts); what THIS test still needs to prove is that a model-issued
+    // `tool.call` that DOES land while the tool is genuinely allowed still gets a "ok"
+    // `tool_call` diagnostic -- so the precondition is forced directly here, the same way
+    // the "goal: undefined" test above forces a synthetic `session.last`.
+    expect(session.last?.state).toBe('SEALED'); // proof the auto-runner already finished
+    session.last = { ...session.last!, state: 'EVIDENCE', allowed_tools: ['check_sso_context'] };
 
     clock.now = 5000;
     aai.emit({ type: 'tool.call', call_id: 't1', name: 'check_sso_context', arguments: { identity_id: session.last?.claimed_identity_id } });
@@ -517,6 +527,18 @@ describe('CallSession — onDiagnostic', () => {
 
     session.start();
     driveScenarioBIntoEvidence(session, aai, clock);
+
+    // Bug fix (2026-09-03): with the throwing mock installed, the server's own lookup
+    // runner already tried get_request_history itself during the drive above (bounded
+    // retries, its own `server_lookup_error`/`server_lookup_abandoned` diagnostics -- never
+    // the generic `error` channel this test checks), gave up on it, and I4 (rules.ts: any
+    // tool result carrying an error makes the evaluation incomplete -> ESCALATE, never
+    // STAGE) already forced the call to a terminal, SEALED state. This test's own subject is
+    // a MODEL-issued `tool.call` hitting the same throwing mock through `handleToolCall`
+    // directly (a different code path, with its own backfill/recovery behavior) -- so the
+    // precondition is forced directly, same technique as the "goal: undefined" test above.
+    expect(session.last?.state).toBe('SEALED');
+    session.last = { ...session.last!, state: 'EVIDENCE', allowed_tools: ['get_request_history'] };
 
     clock.now = 50000;
     expect(() => aai.emit({ type: 'tool.call', call_id: 't1', name: 'get_request_history', arguments: {} })).not.toThrow();
@@ -653,31 +675,43 @@ describe('CallSession — onDiagnostic', () => {
     session.start();
     driveScenarioBIntoEvidence(session, aai, clock);
 
+    // Bug fix (2026-09-03): the always-throwing mock means the server's own lookup runner
+    // already exhausted its bounded retries on all three lookups during the drive above (its
+    // own `server_lookup_error`/`server_lookup_abandoned` diagnostics, never the generic
+    // `error` channel this test checks) and I4 already forced a terminal, SEALED verdict.
+    // This test's own subject is a MODEL-issued `tool.call` hitting `handleToolCall`'s own
+    // throw/recovery path -- forced directly here, same technique as the "goal: undefined"
+    // test earlier in this file.
+    expect(session.last?.state).toBe('SEALED');
+
+    // Bug fix (2026-09-03) follow-on: with EVERY tool throwing (lookups too), I4 forced a
+    // terminal verdict quickly, and the drive's own remaining events gave
+    // `runTerminalActionsIfNeeded` several ticks to retry each owed action -- with all of
+    // open_incident/alert_principal/seal_evidence_record also thrown by this same
+    // always-throwing mock, all three exhaust their bounded retries and end up abandoned
+    // DURING the drive, not on some later "first tick" this test used to control directly.
+    // The claim this test actually exists to prove -- every tool including every terminal
+    // action failing never crashes the call, and `runTerminalActionsIfNeeded`'s own
+    // per-action try/catch means `recoverFromDispatchError`'s nested `tick()` catch is never
+    // needed -- still holds and is checked directly below, over the drive's full event
+    // history.
+    const abandonedNames = new Set(
+      events.filter((e) => e.kind === 'terminal_action_abandoned').map((e) => (e.detail as { name: string }).name),
+    );
+    expect(abandonedNames).toEqual(new Set(['open_incident', 'alert_principal', 'seal_evidence_record']));
+    expect(events.some((e) => e.kind === 'error' && (e.detail as { where: string }).where === 'recoverFromDispatchError:tick')).toBe(
+      false,
+    );
+    expect(session.hasEnded()).toBe(false);
+
+    // A model-issued `tool.call` hitting the same always-throwing mock still goes through
+    // `handleToolCall`'s own throw/recovery path without crashing -- forced allowed here the
+    // same way the earlier tests in this file force a synthetic `session.last`.
+    session.last = { ...session.last!, state: 'EVIDENCE', allowed_tools: ['check_sso_context'] };
     clock.now = 60000;
     expect(() =>
       aai.emit({ type: 'tool.call', call_id: 't1', name: 'check_sso_context', arguments: { identity_id: session.last?.claimed_identity_id } }),
     ).not.toThrow();
-
-    // Fix round 2 (LAW 2/3 re-review finding): `runTerminalActionsIfNeeded` now catches each
-    // owed action's own throw individually -- `tick()` itself no longer throws just because
-    // EVERY terminal action also fails, so recovery's own nested `tick()` try/catch (still
-    // present, still defensive) never actually fires here anymore. Exactly ONE generic
-    // `error` event (the original `tool.call` throw), never a second
-    // `recoverFromDispatchError:tick` one for this scenario -- the terminal-action failures
-    // are diagnosed through their own, more specific `terminal_action_result` events instead.
-    const errorEvents = events.filter((e) => e.kind === 'error');
-    expect(errorEvents).toHaveLength(1);
-    expect((errorEvents[0]!.detail as { where: string }).where).toBe('handleAaiEvent:tool.call');
-    expect(errorEvents.some((e) => (e.detail as { where: string }).where === 'recoverFromDispatchError:tick')).toBe(false);
-
-    // ESCALATE (the verdict the backfilled failure pushes this to) owes open_incident/
-    // alert_principal/seal_evidence_record -- each attempted once on this one tick, each
-    // caught individually and diagnosed, none of them abandoned yet (bounded to 3 attempts).
-    const failures = events.filter((e) => e.kind === 'terminal_action_result' && (e.detail as { status: string }).status === 'error');
-    expect(failures.map((e) => (e.detail as { name: string }).name).sort()).toEqual(
-      ['alert_principal', 'open_incident', 'seal_evidence_record'].sort(),
-    );
-    expect(events.some((e) => e.kind === 'terminal_action_abandoned')).toBe(false);
     expect(session.hasEnded()).toBe(false);
 
     // The call is still fully alive afterward -- a stack of caught faults doesn't leave it in

@@ -72,47 +72,49 @@ describe('CallSession — Scenario B (Robert Miller, fraudulent) replayed as liv
 
     // c1..a4 -- identity + the fraudulent request, the counsel/pressure exchange, the
     // amount contradiction, the barge-in, the final "one last check" -- see the helper for
-    // line-by-line detail. Leaves the call in EVIDENCE state, identity 'robert-miller',
-    // request_version 2, one open "hold" reply bracketing the tool calls below.
+    // line-by-line detail.
+    //
+    // Bug fix (2026-09-03, the actual subject of this fix): the model never once calls
+    // get_request_history/check_sso_context/verify_out_of_band in this whole drive -- no
+    // `tool.call` AAI event is emitted for them anywhere below. Before the fix, that meant
+    // the call sat in EVIDENCE forever with an empty tools log (the deadlock the founder
+    // watched happen live, see session-lookups.test.ts for the dedicated test). Under the
+    // fix, the server's own lookup runner resolves all three the instant EVIDENCE is
+    // reached, in the SAME tick the amount contradiction (c3) bumps request_version to 2 --
+    // so by the time `driveScenarioBThroughA4` returns, the call has already gone all the
+    // way to FREEZE and SEALED, matching the corpus's own recorded expectation.
     driveScenarioBThroughA4(session, aai, clock);
 
-    clock.now = 51000;
-    aai.emit({ type: 'tool.call', call_id: 't1', name: 'check_sso_context', arguments: { identity_id: 'robert-miller' } });
-
-    // The tool timing rule: no tool.result reaches AAI until the reply.done arrives.
-    expect(aai.sent.some((m) => (m as { type?: string }).type === 'tool.result')).toBe(false);
-
-    clock.now = 51500;
-    aai.emit({ type: 'tool.call', call_id: 't2', name: 'get_request_history', arguments: { identity_id: 'robert-miller' } });
-
-    clock.now = 52000;
-    aai.emit({ type: 'tool.call', call_id: 't3', name: 'verify_out_of_band', arguments: { identity_id: 'robert-miller' } });
-
-    // By the third tool result the engine already has everything it needs for FREEZE --
-    // terminal actions run immediately, before the wrapping reply even finishes.
+    expect(session.last?.state).toBe('SEALED');
     expect(session.last?.verdict).toBe('FREEZE');
+
+    // No tool.result was ever queued for AAI -- there was never an AAI call_id to answer,
+    // since these three were server-initiated, not model-initiated.
     expect(aai.sent.some((m) => (m as { type?: string }).type === 'tool.result')).toBe(false);
-
-    clock.now = 52500;
-    aai.emit({ type: 'reply.done', reply_id: 'tools-1', status: 'completed' });
-
-    // Now (and only now) the three queued tool.results reach AAI.
-    const toolResults = aai.sent.filter((m) => (m as { type?: string }).type === 'tool.result') as {
-      type: string;
-      call_id: string;
-      is_error: boolean;
-    }[];
-    expect(toolResults.map((r) => r.call_id).sort()).toEqual(['t1', 't2', 't3']);
-    expect(toolResults.every((r) => r.is_error === false)).toBe(true);
 
     // ---- logs reproduce the corpus shapes (modulo generated ids) ----
-    // Conversation and tool results are objective inputs -- what was actually said, and
-    // what the deterministic mock backend returns for it -- so a live feed of the exact
-    // same events reproduces them exactly.
+    // Conversation is an objective input -- what was actually said -- so a live feed of the
+    // exact same lines reproduces it exactly. The tool results are what the SAME
+    // deterministic mock backend returns for the SAME (identity, request_version) the corpus
+    // used, this time computed by the server itself rather than hand-authored.
     expect(session.logs.conversation).toEqual(scenarioB.conversation);
 
-    const recordedThreeTools = session.logs.tools.slice(0, 3);
-    expect(recordedThreeTools).toEqual(scenarioB.tools as ToolLogEntry[]);
+    const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+    const recordedThreeTools = session.logs.tools
+      .filter((t) => (['get_request_history', 'check_sso_context', 'verify_out_of_band'] as string[]).includes(t.name))
+      .map(({ id: _id, t_ms: _t_ms, ...rest }) => rest)
+      .sort(byName);
+    const corpusThreeTools = (scenarioB.tools as ToolLogEntry[]).map(({ id: _id, t_ms: _t_ms, ...rest }) => rest).sort(byName);
+    expect(recordedThreeTools).toEqual(corpusThreeTools);
+
+    // A model tool.call arriving afterward for one of these -- e.g. a stale/late model
+    // response that lost the race with the server's own auto-run -- is rejected (the call is
+    // already SEALED, offering nothing) and, thanks to the evidence-layer fix alongside this
+    // one, never corrupts the already-recorded evidence: the verdict below is unaffected.
+    clock.now = 51000;
+    aai.emit({ type: 'tool.call', call_id: 'late-model-call', name: 'check_sso_context', arguments: { identity_id: 'robert-miller' } });
+    const lateResult = session.logs.tools.find((t) => t.id === 'late-model-call');
+    expect(lateResult?.result).toEqual({ error: 'not_allowed_in_state' });
 
     // The corpus file's own `challenge_issued` action names the counsel-of-record question
     // specifically -- one legal choice among several the live engine could make; this
@@ -125,14 +127,10 @@ describe('CallSession — Scenario B (Robert Miller, fraudulent) replayed as liv
     expect(challenges.length).toBeGreaterThan(0);
     expect(challenges.every((a) => a.spec?.kind === 'SEED_FACT')).toBe(true);
 
-    // ---- terminal actions ran, in the FSM's FREEZE order, all after the three recorded tools ----
-    const terminalTools = session.logs.tools.slice(3);
-    expect(terminalTools.map((t) => t.name)).toEqual([
-      'freeze_transaction_rail',
-      'open_incident',
-      'alert_principal',
-      'seal_evidence_record',
-    ]);
+    // ---- terminal actions ran, in the FSM's FREEZE order ----
+    const TERMINAL_NAMES = ['freeze_transaction_rail', 'open_incident', 'alert_principal', 'seal_evidence_record'];
+    const terminalTools = session.logs.tools.filter((t) => TERMINAL_NAMES.includes(t.name));
+    expect(terminalTools.map((t) => t.name)).toEqual(TERMINAL_NAMES);
     expect(terminalTools.every((t) => t.result !== undefined)).toBe(true);
 
     // ---- the engine's own verdict, matching the corpus's recorded expectation exactly ----
@@ -193,6 +191,16 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
     const session = newSession(clock, CALL_B, aai, sent);
     session.start();
     driveScenarioBThroughA4(session, aai, clock); // claimed identity is 'robert-miller'
+
+    // Bug fix (2026-09-03): the server's own lookup runner now resolves all three evidence
+    // tools (including check_sso_context) the instant EVIDENCE is reached, in the same tick
+    // -- by the time `driveScenarioBThroughA4` returns, the call has already gone all the
+    // way to FREEZE/SEALED and `allowed_tools` is empty again. This test's own subject is
+    // `handleToolCall`'s identity-substitution guard, an orthogonal mechanic to when the
+    // lookup itself runs -- so the precondition (check_sso_context genuinely allowed) is
+    // forced directly here, same technique the "rejects garbage tool arguments" test above
+    // uses for the same reason.
+    session.last = { ...session.last!, state: 'EVIDENCE', allowed_tools: ['check_sso_context'] };
 
     clock.now = 51000;
     aai.emit({
@@ -285,6 +293,12 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
     const session = newSession(clock, CALL_B, aai, sent);
     session.start();
     driveScenarioBThroughA4(session, aai, clock);
+
+    // Bug fix (2026-09-03): see the identical note in "replaces a spoofed identity_id"
+    // above -- the auto-runner already resolved everything by this point, so the
+    // precondition for this test's own subject (the interrupted-reply discard rule) is
+    // forced directly.
+    session.last = { ...session.last!, state: 'EVIDENCE', allowed_tools: ['check_sso_context'] };
 
     clock.now = 51000;
     aai.emit({ type: 'tool.call', call_id: 'ti1', name: 'check_sso_context', arguments: { identity_id: 'robert-miller' } });
