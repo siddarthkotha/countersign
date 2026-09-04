@@ -288,32 +288,237 @@
     },
     {
       "id": "FIX4-review",
-      "title": "FIX4 review (read-only)",
+      "title": "FIX4 review (read-only) — PASS, no critical/important",
       "files": [],
-      "status": "running",
+      "status": "done",
       "held_because": "",
       "agent_id": "a4c464b9a0366b6d6",
       "started_at": "2026-09-04T04:36:27.917Z"
     },
     {
       "id": "DEPLOY-VERIFY",
-      "title": "verify Render auto-deploy via GET /version after next push",
+      "title": "verify Render auto-deploy via GET /version after next push — PROVEN live at de6c796, auto-deploy healthy (~5 min)",
       "files": [],
-      "status": "held",
+      "status": "done",
       "held_because": "needs /version pushed and live first",
       "agent_id": "",
       "started_at": ""
     },
     {
       "id": "gitignore-critique",
-      "title": "add scripts/critique/reports and scripts/rehearse output dirs to .gitignore",
+      "title": "add scripts/critique/reports and scripts/rehearse output dirs to .gitignore — d757568",
       "files": [
         ".gitignore"
       ],
-      "status": "held",
+      "status": "done",
       "held_because": "folding into the next docs/config commit",
       "agent_id": "",
       "started_at": ""
+    },
+    {
+      "id": "CRIT-SE",
+      "title": "internal critic: social engineer attacking LAW 2/3 (read-only) - 4 critical, 3 important, 2 minor; two blockers verified by me",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a2c2a8c0203d0fd0a",
+      "started_at": "2026-09-04T04:41:24.974Z"
+    },
+    {
+      "id": "CRIT-JUDGE",
+      "title": "internal critic: hackathon judge scoring the rubric (read-only) - 26/40, does not place as it stands",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "ab6e9a70bab5c5504",
+      "started_at": "2026-09-04T04:41:24.975Z"
+    },
+    {
+      "id": "FIX6-parked",
+      "title": "compose.ts computeEvaluationIncomplete ignores the ignored tag (invariant I4)",
+      "files": [
+        "packages/engine/src/compose.ts"
+      ],
+      "status": "held",
+      "held_because": "fail-safe and unreachable now that the model holds no tools; touching invariant I4 unattended is the wrong risk, founder decides",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "CI-TUNE",
+      "title": "CI workflow tuning to save Actions minutes (concurrency cancel, path filters)",
+      "files": [
+        ".github/workflows/ci.yml"
+      ],
+      "status": "held",
+      "held_because": "protected oracle file, autopilot is blocked from editing it; founder-run",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "SCEN-MORE",
+      "title": "more adversarial live scenarios (injection, identity switch, structuring, hangup)",
+      "files": [
+        "scripts/rehearse/scenarios/**"
+      ],
+      "status": "held",
+      "held_because": "must use the truth/respond schema R3 is still writing",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "EXT-CRITIQUE",
+      "title": "external four-model critique round (ChatGPT, Perplexity, Grok, Gemini)",
+      "files": [],
+      "status": "held",
+      "held_because": "OPENROUTER_API_KEY / GEMINI_API_KEY are not in .env; founder must add them",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "R3",
+      "title": "R3 reactive + model-driven caller (committed 9cf20f6; scenario B PASSES, A fails)",
+      "files": [
+        "scripts/rehearse/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "aa5523b935713fb50",
+      "started_at": ""
+    },
+    {
+      "id": "FIX7",
+      "title": "FIX7 engine composes the exact readback sentence; model speaks it verbatim",
+      "files": [
+        "packages/server/src/call/prompt.ts",
+        "packages/engine/src/fsm.ts",
+        "packages/server/test/**",
+        "packages/engine/test/**"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "adf78ac4403e273c9",
+      "started_at": "2026-09-04T04:44:57.216Z"
+    },
+    {
+      "id": "LIVE-VERIFY",
+      "title": "run both scenarios against the DEPLOYED url once each after FIX7",
+      "files": [],
+      "status": "held",
+      "held_because": "needs FIX7 landed and pushed first; ~2 minutes of credits",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "files": [
+        "packages/server/src/http.ts",
+        "packages/server/src/ws/browser.ts",
+        "packages/web/src/api.ts",
+        "packages/web/src/screens/Landing.tsx"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "ada6703b1fa798d53",
+      "started_at": "2026-09-04T05:06:07.531Z",
+      "id": "FIX9",
+      "title": "FIX9 demo role drives the server-side call context (STAGE was unreachable live)"
+    },
+    {
+      "files": [
+        "packages/web/src/**",
+        "packages/server/src/http.ts"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "a82eacf4c7645905a",
+      "started_at": "2026-09-04T05:06:07.531Z",
+      "id": "W10",
+      "title": "W10 cold-start copy + replay recording labels"
+    },
+    {
+      "files": [
+        "README.md",
+        "docs/SUBMISSION-DRAFT.md",
+        "docs/VIDEO-SHOT-LIST.md"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "a43e9850b17cc1288",
+      "started_at": "2026-09-04T05:06:07.531Z",
+      "id": "D2",
+      "title": "D2 judge-facing honesty: prior art, tools trade-off, video year, business figure"
+    },
+    {
+      "files": [],
+      "status": "held",
+      "held_because": "design ruling: require at least one graded PASS before STAGE regardless of the carve-out; founder decides",
+      "agent_id": "",
+      "started_at": "",
+      "id": "RT-1-amendment",
+      "title": "red team 1: amendment carve-out asks zero challenges (need=0)"
+    },
+    {
+      "files": [],
+      "status": "held",
+      "held_because": "design ruling: bound the forgiving correction, for example flag above about 2x; founder decides",
+      "agent_id": "",
+      "started_at": "",
+      "id": "RT-2-approximate",
+      "title": "red team 2: an APPROXIMATE hedge buys one unbounded unflagged jump"
+    },
+    {
+      "files": [],
+      "status": "held",
+      "held_because": "needs a spent-fact rule across challenge kinds; founder decides the policy",
+      "agent_id": "",
+      "started_at": "",
+      "id": "RT-3-trap-oracle",
+      "title": "red team 3: trap question speaks the seed truth, the same fact can be asked again"
+    },
+    {
+      "files": [],
+      "status": "held",
+      "held_because": "orchestrator recommends fixing: force ESCALATE plus incident when a call ends with a pending verdict; awaiting founder go",
+      "agent_id": "",
+      "started_at": "",
+      "id": "RT-4-timeout-no-incident",
+      "title": "red team 4: idle timeout or cap ends a call with no incident, freeze or export (LAW 2 hole)"
+    },
+    {
+      "files": [],
+      "status": "held",
+      "held_because": "zero weight is deliberate; the single-state phrasing gap probably is not. Founder decides",
+      "agent_id": "",
+      "started_at": "",
+      "id": "RT-5-injection-weight",
+      "title": "red team 5: injection marker weighs zero and only shifts phrasing in one state"
+    },
+    {
+      "files": [],
+      "status": "held",
+      "held_because": "small and safe; queued behind the blocking fixes",
+      "agent_id": "",
+      "started_at": "",
+      "id": "RT-7-spoken-million",
+      "title": "red team 7: a bare scale word turns a common idiom into a million dollar claim"
+    },
+    {
+      "files": [],
+      "status": "held",
+      "held_because": "cosmetic, containment already ran; queued",
+      "agent_id": "",
+      "started_at": "",
+      "id": "RT-8-export-race",
+      "title": "red team 8: hanging up fast can suppress the on-screen export hash"
+    },
+    {
+      "files": [],
+      "status": "held",
+      "held_because": "changing how the oracle works is a founder decision, not an autopilot one",
+      "agent_id": "",
+      "started_at": "",
+      "id": "ORACLE-GAP",
+      "title": "the replay corpus cannot catch live-path bugs by construction"
     }
   ]
 }
