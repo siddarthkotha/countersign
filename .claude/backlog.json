@@ -76,7 +76,7 @@
         "packages/server/test/browser-ws.test.ts"
       ],
       "status": "held",
-      "held_because": "needs observation: reproduce under load 10\u00d7 before changing; not blocking",
+      "held_because": "needs observation: reproduce under load 10× before changing; not blocking",
       "agent_id": "",
       "started_at": ""
     },
@@ -99,6 +99,145 @@
       "held_because": "",
       "agent_id": "aa4e312de73d8f8b8",
       "started_at": "2026-09-03T01:52:00Z"
+    },
+    {
+      "id": "V1",
+      "title": "V1 video shot list from BRIEF section 8 (docs/VIDEO-SHOT-LIST.md)",
+      "files": [
+        "docs/VIDEO-SHOT-LIST.md"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a718bca2cf3653f4b",
+      "started_at": "2026-09-04T02:50:40.140Z"
+    },
+    {
+      "id": "REH1",
+      "title": "rehearsal 1 report (founder ran Scenario B live 2026-09-03 ~10 PM CDT; deadlock found) — docs/REHEARSAL-REPORT-2026-09-03.md",
+      "files": [
+        "docs/REHEARSAL-*.md"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "main",
+      "started_at": "2026-09-04T03:07:46.571Z"
+    },
+    {
+      "id": "FIX1",
+      "title": "FIX1 live-call deadlock: server runs the three lookups itself (row 7 stall forever) — landed 422d750",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/test/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a0a57a75a3e38fb55",
+      "started_at": "2026-09-04T03:07:46.571Z"
+    },
+    {
+      "id": "FIX2",
+      "title": "FIX2 evaluate storm: no engine tick on reply.audio frames (worktree lane) — patch saved; merge after FIX1 lands — landed b6e5ba7",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/test/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a7ee1ba61adfc55b3",
+      "started_at": "2026-09-04T03:19:29.591Z"
+    },
+    {
+      "id": "LAT1",
+      "title": "LAT1 explain 15 s ready-to-first-audio + 89 underruns (read-only) (answer: cause UNKNOWN from data; recorder lacks timing events)",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a44a8736e0e6e6777",
+      "started_at": "2026-09-04T03:19:29.591Z"
+    },
+    {
+      "id": "FIX3",
+      "title": "FIX3 recorder timing events (AAI ready, reply start/first audio/done, transcripts) + evaluate dedupe (worktree lane) — patch saved; merge after FIX1+FIX2 — landed b6e5ba7",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/src/diagnostics.ts",
+        "packages/server/test/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "aa567db9be21305cc",
+      "started_at": "2026-09-04T03:22:36.215Z"
+    },
+    {
+      "id": "FIX2-review",
+      "title": "FIX2 patch review (read-only) — PASS, 1 minor (lookup delay during a reply; accepted)",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a972e3557b4387d2b",
+      "started_at": "2026-09-04T03:24:45.723Z"
+    },
+    {
+      "id": "FIX3-review",
+      "title": "FIX3 patch review (read-only) — PASS w/ findings (dedupe scope accepted; merge conflict with FIX2 confirmed)",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a4cfedee3d6bbabc2",
+      "started_at": "2026-09-04T03:30:48.877Z"
+    },
+    {
+      "id": "MERGE23",
+      "title": "MERGE23 combine FIX2+FIX3 into one patch on base, hand-resolved, green (worktree) — fix23.patch 519 lines, 691/691, typecheck clean",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a79be5bf96532eeb3",
+      "started_at": "2026-09-04T03:35:51.701Z"
+    },
+    {
+      "id": "H2",
+      "title": "H2 worktree-gate hook: same file = worktree lane, never serialize (founder ruling 10:38 PM) — landed e4474ec, 18/18 hook tests",
+      "files": [
+        ".claude/hooks/**",
+        ".claude/settings.json",
+        "docs/ORCHESTRATION.md"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a27ba045eefac5d4b",
+      "started_at": "2026-09-04T03:39:07.724Z"
+    },
+    {
+      "id": "REVIEW-LAND",
+      "title": "combined review of 422d750+b6e5ba7+e4474ec on one tree (read-only)",
+      "files": [],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "a9c999456144845f4",
+      "started_at": "2026-09-04T03:48:26.912Z"
+    },
+    {
+      "id": "R2",
+      "title": "R2 synthetic-caller rehearsal harness (scripts/rehearse, macOS say → live stack)",
+      "files": [
+        "scripts/rehearse/**",
+        "docs/REHEARSAL-HARNESS.md",
+        "package.json"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "ada5f3b601d9c6d75",
+      "started_at": "2026-09-04T03:43:00Z"
+    },
+    {
+      "id": "PUSH5",
+      "title": "push 5: deadlock fix + recorder + hook (needs the founder's push word)",
+      "files": [],
+      "status": "held",
+      "held_because": "needs the founder's word 'push'; review REVIEW-LAND must pass first",
+      "agent_id": "",
+      "started_at": ""
     }
   ]
 }

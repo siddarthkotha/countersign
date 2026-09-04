@@ -25,3 +25,9 @@ Thumbs.db
 .claude/autopilot.on
 .claude/compaction-log.txt
 !.env.example
+
+# Agent worktrees (isolated lanes; their diffs land on main as patches, never committed from here)
+.claude/worktrees/
+# Synthetic-caller rehearsal harness: synthesized clips and per-run reports
+scripts/rehearse/.cache/
+scripts/rehearse/reports/
