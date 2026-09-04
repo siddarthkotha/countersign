@@ -156,6 +156,16 @@ describe('http server', () => {
     expect(body).toEqual({ ok: true, active: 0, killed: false, has_key: true });
   });
 
+  it('version reports the deployed commit (null in local dev)', async () => {
+    const { base } = await start();
+    const r = await fetch(`${base}/version`);
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { commit: string | null };
+    expect(body).toHaveProperty('commit');
+    // RENDER_GIT_COMMIT is unset under the test, so the running process reports null here.
+    expect(body.commit).toBe(process.env.RENDER_GIT_COMMIT ?? null);
+  });
+
   it('unknown path returns 404', async () => {
     const { base } = await start();
     const r = await fetch(`${base}/nope`);

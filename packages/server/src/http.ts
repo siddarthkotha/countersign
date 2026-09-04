@@ -142,6 +142,16 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
       return;
     }
 
+    // Deploy-verification endpoint (added 2026-09-03): reports the commit the running
+    // process was built from, so a redeploy can be confirmed without a WebSocket attach.
+    // Server-only changes leave the Vite bundle hash unchanged, so the bundle name is a
+    // false negative for "did the server redeploy" -- this is the reliable signal. Render
+    // sets RENDER_GIT_COMMIT automatically on every deploy; null in local dev.
+    if (req.method === 'GET' && path === '/version') {
+      sendJson(res, 200, { commit: process.env.RENDER_GIT_COMMIT ?? null });
+      return;
+    }
+
     // W2 (replay screen): the corpus file names, without extension, so the browser's file
     // picker never has to hard-code the list. `listCorpusFiles`/`defaultCorpusDir` already
     // exist in replay.ts (S2) -- this route just exposes them over HTTP; the whitelist
