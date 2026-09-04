@@ -1,0 +1,68 @@
+{
+  "name": "single-wrong-answer",
+  "title": "Single wrong answer to a knowledge challenge escalates",
+  "description": "A Dana-shaped, otherwise-legitimate-looking request where the caller answers ONE verification challenge (restate who approved it) with the wrong name, contradicting their own earlier claim. Verbatim caller-only turns from packages/engine/corpus/single-wrong-answer-escalates.json (ids c1,c2,c4,c6,c8,c9,c10,c11 -- the corpus's own a3/a5/a7 agent lines are NOT scripted here; the live agent generates its own challenge/readback wording). Turns c4/c6/c8 (the plain 'Yes, that's right.' confirmations) are REACTIVE (`respond`): this scenario's own beneficiary/approver claims make it just as vulnerable to a planted TRAP readback as scenario A was, so these turns react to whatever the live agent actually said instead of blindly confirming. Turns c9-c11 stay FIXED on purpose -- c9 is the deliberate self-contradiction this scenario exists to test, not something the reactive engine should be allowed to \"fix\". Expects ESCALATE (a contradiction never repairs itself, but this is not an overdetermined fraud attempt either -- human callback, not FREEZE).",
+  "source": "packages/engine/corpus/single-wrong-answer-escalates.json (caller turns c1,c2,c4,c6,c8,c9,c10,c11, read-only source)",
+  "truth": {
+    "identity": "Dana Whitfield",
+    "beneficiary": "Meridian Supply",
+    "amount_usd": 84600,
+    "account_last4": "4471",
+    "counsel": null,
+    "escrow_institution": null,
+    "approver": "Marcus Obi",
+    "deadline": null
+  },
+  "persona": "You are Dana Whitfield, corporate treasury, making an otherwise normal, honest wire correction request: $84,600 to Meridian Supply, account ending 4471, a small correction from the number on file, approved by Marcus Obi as far as you first recall. Partway through the call you realize you misspoke -- it was actually Elena Park who approved it -- and you correct yourself plainly the moment you notice, then do not backtrack again. Otherwise confirm any readback that matches what you said, and firmly correct any that don't. Keep it brief -- under 30 words per line.",
+  "turns": [
+    {
+      "id": "c1",
+      "text": "This is Dana Whitfield, corporate treasury. This has been approved by Marcus Obi.",
+      "pause_ms": 500
+    },
+    {
+      "id": "c2",
+      "text": "I need to wire it to Meridian Supply, $84,600, account ending 4471, a small correction from the number in the system.",
+      "pause_ms": 400
+    },
+    {
+      "id": "c4",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [{ "if_agent_says_any": ["Northgate"], "say": "No, that's wrong, it's Meridian Supply." }]
+      }
+    },
+    {
+      "id": "c6",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": { "rules": [] }
+    },
+    {
+      "id": "c8",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": { "rules": [] }
+    },
+    {
+      "id": "c9",
+      "text": "No, it was approved by Elena Park.",
+      "pause_ms": 400
+    },
+    {
+      "id": "c10",
+      "text": "It's $84,600, same as I said.",
+      "pause_ms": 400
+    },
+    {
+      "id": "c11",
+      "text": "Meridian Supply, that's right.",
+      "pause_ms": 400
+    }
+  ],
+  "expected": {
+    "verdict": "ESCALATE",
+    "max_wall_ms": 240000
+  }
+}

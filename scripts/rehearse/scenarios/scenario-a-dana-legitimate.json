@@ -1,0 +1,63 @@
+{
+  "name": "scenario-a-dana-legitimate",
+  "title": "Dana Whitfield -- the legitimate urgent request",
+  "description": "BRIEF section 4 golden path, the caller lines verbatim from packages/engine/corpus/scenario-a-dana-legitimate.json's conversation (its own caller-only turns, ids c1-c4, plus two harness-added buffer turns c5/c6 -- not from the corpus -- so the reactive caller has room to answer further live-agent follow-ups, e.g. an identity-id ask, beyond the corpus's original four exchanges). Every critical field is affirmed when the live agent reads it back -- turns c2-c6 are REACTIVE (`respond`): they react to whatever the live agent actually said, using this scenario's `truth` block, instead of blindly confirming. This is the fix for the run recorded in scripts/rehearse/reports/2026-09-03T23-04-42-scenario-a-dana-legitimate.md, where a fixed 'Yes, that's right.' line confirmed a planted TRAP question (the engine's deliberate substitution of a decoy name into its own readback) instead of correcting it, and the call FROZE instead of STAGING. Expects the call to reach STAGE (never higher -- LAW 2, there is no release) with no barge-in.",
+  "source": "docs/BRIEF.md section 4 \"Scenario A\" + packages/engine/corpus/scenario-a-dana-legitimate.json (caller turns c1-c4, read-only source)",
+  "truth": {
+    "identity": "Dana Whitfield",
+    "beneficiary": "Meridian Supply",
+    "amount_usd": 84500,
+    "account_last4": "4471",
+    "counsel": null,
+    "escrow_institution": null,
+    "approver": null,
+    "deadline": "today"
+  },
+  "persona": "You are Dana Whitfield, corporate treasury at Meridian Dynamics. You are calling to move a real, already-approved wire payment earlier than scheduled: $84,500 to Meridian Supply, account ending 4471, approved in yesterday's close meeting, moving today instead of Friday. You know these facts exactly. When the agent reads a number or name back to you, confirm it if it matches what you said; firmly and plainly correct it with the true value if it does not (never agree with something wrong just to move things along). If asked for something you were never given (an id, a code, a PIN), say plainly that you do not have that and repeat your name. Stay calm, cooperative, and brief -- under 30 words per line.",
+  "turns": [
+    {
+      "id": "c1",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply, $84,500, account ending 4471, moving today instead of Friday, approved in yesterday's close meeting.",
+      "pause_ms": 500
+    },
+    {
+      "id": "c2",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          { "if_agent_says_any": ["Northgate"], "say": "No, that's wrong, it's Meridian Supply." },
+          { "if_agent_says_any": ["identity id", "identification id", "id number"], "say": "I don't have an identity id. This is Dana Whitfield." }
+        ]
+      }
+    },
+    {
+      "id": "c3",
+      "text": "Yes, correct.",
+      "pause_ms": 400,
+      "respond": { "rules": [] }
+    },
+    {
+      "id": "c4",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": { "rules": [] }
+    },
+    {
+      "id": "c5",
+      "text": "Yes, that's right. This is Dana Whitfield.",
+      "pause_ms": 400,
+      "respond": { "rules": [] }
+    },
+    {
+      "id": "c6",
+      "text": "Yes, that's right. This is Dana Whitfield.",
+      "pause_ms": 400,
+      "respond": { "rules": [] }
+    }
+  ],
+  "expected": {
+    "verdict": "STAGE",
+    "max_wall_ms": 150000
+  }
+}

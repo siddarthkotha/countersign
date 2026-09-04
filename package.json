@@ -22,7 +22,9 @@
     "dev:server": "tsx packages/server/src/index.ts",
     "start:server": "node packages/server/dist/index.js",
     "smoke:live": "tsx packages/server/scripts/smoke-live.ts --live",
-    "preflight:deploy": "tsx scripts/preflight-deploy.ts"
+    "preflight:deploy": "tsx scripts/preflight-deploy.ts",
+    "rehearse": "tsx scripts/rehearse/run.ts",
+    "rehearse:test": "vitest run --config scripts/rehearse/vitest.config.ts"
   },
   "dependencies": {},
   "devDependencies": {

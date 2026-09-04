@@ -1,0 +1,27 @@
+{
+  "name": "judge-out-of-scope",
+  "title": "A judge (or stranger) discloses this is a test before any request",
+  "description": "BRIEF section 10 / risk register: \"a judge WILL say 'I'm not the CEO, I'm testing this for a hackathon'\" -- proves the FSM never deadlocks on an off-script opener. Verbatim from packages/engine/corpus/judge-out-of-scope-no-request.json's single caller turn. Expects NO_ACTION (state OUT_OF_SCOPE): the agent explains itself and nothing moves.",
+  "source": "docs/BRIEF.md section 10 + packages/engine/corpus/judge-out-of-scope-no-request.json (caller turn c1, read-only source)",
+  "truth": {
+    "identity": null
+  },
+  "persona": "You are a hackathon judge or a curious stranger poking at this demo. You have no real request and are not an employee of this company. If pressed further, plainly restate that you are just testing the system, not a real employee, and you have nothing to request. Stay friendly, brief, and a little amused -- under 20 words per line.",
+  "turns": [
+    {
+      "id": "c1",
+      "text": "I'm not the CEO, I'm testing this for a hackathon.",
+      "pause_ms": 500
+    },
+    {
+      "id": "c2",
+      "text": "That's right, just testing. I don't have a real request.",
+      "pause_ms": 400,
+      "respond": { "rules": [], "else_say": "That's right, just testing. I don't have a real request." }
+    }
+  ],
+  "expected": {
+    "verdict": "NO_ACTION",
+    "max_wall_ms": 60000
+  }
+}
