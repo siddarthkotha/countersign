@@ -1,42 +1,79 @@
 # Countersign — session snapshot (overwritten at every close; never appended)
 
-Last close: Wednesday 2026-09-02, ~10:15 PM CDT (Day 2). Founder travelling until Sep 8;
-picks up Sep 9–10. Reachable on the phone app.
+Last close: Friday 2026-09-04, ~1:10 AM CDT (Day 3 ran past midnight, autopilot on).
+Founder asleep. Autopilot still ON: say "autopilot stop" to take back the wheel.
 
-## Where the product stands (PROVEN unless labelled)
-- Live: https://countersign-bf8q.onrender.com (Render free plan; the plain
-  countersign.onrender.com is an UNRELATED product — never link it). Auto-deploy on push.
-- Main at e92bb7a+ (four pushes today), 684 tests green ×5, typecheck clean, preflight
-  passes, 18/18 corpus replays exact. CI green on GitHub.
-- Built and reviewed: engine (rules v2, ledger, challenges, counterfactuals, hash-chained
-  export), server relay (caps, token mint, call session, AAI adapter with bounded resume,
-  static serving, origin gate on HTTP + WebSocket, flight recorder), web (look 6 board,
-  landing with mic check + helper text, click-a-check-row → exact quote, per-call timings,
-  browser flight recorder), README (API section + verdict rules, fact-checked), deploy
-  runbook, submission draft (docs/SUBMISSION-DRAFT.md).
-- Gates: G1 closed Sep 2 (two stranger walks); G3, G4 proven by tests/reviews; G2, G5, G6
-  need the founder's voice (Sep 9+).
+## The one-paragraph version
 
-## Open on the founder
-1. Rehearsal 1 data from the Sep 2, 8 PM run: verdict screenshots, `[countersign:timings]`
-   console lines (they carry the session ids), reset count. → G2 evidence + first
-   flight-recorder read.
-2. Naming collision (BRIEF §12 risk 13): keep "Countersign" with explicit links, or add a
-   qualifier in the submission title.
-3. Reaction to docs/SUBMISSION-DRAFT.md; the form itself waits until video + public repo
-   exist (or "submit now" once the browser link works again).
-4. Pre-flip items: reword commit 8afaf2a (founder-run), npm audit decision (dev-only Vite).
+Your rehearsal at 10 PM found that the demo never reached a verdict. Two separate,
+unconditional bugs meant a staged outcome was impossible for ANY caller, and the call looped
+until the cap. Both are fixed, reviewed and deployed. The fraud interrogation now runs end to
+end on the live site with no human: FREEZE in 58 seconds, PROVEN at 1:07 AM against
+https://countersign-bf8q.onrender.com. The legitimate path no longer stalls but ends in
+ESCALATE rather than STAGE, and that last gap is the first thing to look at.
 
-## Orchestration state
-- .claude/backlog.json is the live board (lane-gate v2 + agent-watchdog read it); every
-  dispatch writes agent_id there. docs/ORCHESTRATION.md explains every hook.
-- Lessons today: never idle backlog lanes on a chain (hook now enforces the "Lanes:" line);
-  list each lane's FILE SET before calling lanes independent (P2/E1 overlap made main red
-  for 13 min); copy the injected local-time line exactly; probe WebSockets with
-  `curl --http1.1`; a diagnostics bundle exists only after the first WS attach.
+## Live and PROVEN (each verified by me tonight, not from notes)
+
+- Deployed: https://countersign-bf8q.onrender.com serves commit bc88761 (GET /version, added
+  tonight precisely so a deploy can be confirmed without guessing). Health ok. CI green.
+- Fraud path PASSES on the DEPLOYED site: scenario B, FREEZE, 57.9s, zero human input.
+  Report: scripts/rehearse/reports/2026-09-04T01-07-41-scenario-b-miller-fraud.md
+- 809 tests green three runs in a row, typecheck clean, all 18 recorded calls replay exactly.
+- Roughly 19 minutes of AssemblyAI credits spent tonight (ESTIMATE, harness wall clock).
+- GitHub Actions: 6 runs and about 10 billed minutes of 2000 this month. The keepalive cron
+  stays disabled; enabled it would burn thousands of runs.
+
+## What was wrong, and what fixed it
+
+1. Nobody ran the three background checks on a live call, so the engine held forever. The
+   server now runs them itself from the state machine (422d750).
+2. The engine re-ran on every audio frame, about 100 times a second, filling the flight
+   recorder in 46 seconds. Fixed, and the recorder gained real timing events (b6e5ba7).
+3. The model was offered tool schemas, read a field name off one, and demanded an "identity
+   id" no caller could know. It is now offered no tools at all (42d720f).
+4. The readback confirmation compared a formatted string against a raw number, so two of the
+   three critical fields could never be confirmed. The engine now composes the exact sentence
+   and stores a comparable value (571ee31).
+5. Every live call was labelled an unverified gateway, which fails the sign-in check by
+   design, so staging was unreachable. A named demo persona now maps, server-side only, to
+   the simulated telemetry (3ff88d3).
+6. My own mistake: I shipped a change that made the agent read its stage directions aloud to
+   a caller, after its own author warned me it would. Caught on the next live call and fixed
+   (c2fc4bd). The lesson is in the log: a flagged risk in an agent's report is a blocker.
+
+## Open on you (in the order I would take them)
+
+1. **The staging gap.** The legitimate call reaches ESCALATE, not STAGE. The terminal action
+   fires as the third challenge is asked, before the caller's answer arrives. UNKNOWN whether
+   that is engine grading, the challenge budget, or my scripted caller being too slow. Needs
+   an investigation, not another live call.
+2. **What an honest caller gets asked.** Every seeded knowledge fact belongs to the
+   fraudster's deal, so an honest caller can be asked something she cannot answer. The fix is
+   built and tested but NOT committed, because on its own it leaves her with no question at
+   all. Two options and my recommendation: docs/PARKED-CHALLENGE-SCOPING.md.
+3. **Six more attack paths** found by a red-team agent, each needing a policy ruling rather
+   than a patch: docs/RED-TEAM-2026-09-03.md. The one I would fix first is that an abandoned
+   call leaves no incident at all, which is a real hole in LAW 2.
+4. **The judge card: 26 of 40, "does not place as it stands."** docs/JUDGE-SIM-2026-09-03.md.
+   Most of its findings are already fixed; the rest are your calls.
+5. **Small rulings:** the submission's judged section grew to 524 words from 399; em-dashes
+   are all through the shipped interface copy while your style law bans them; should the
+   flagship recording play automatically for a judge.
+6. **The external model panel never ran.** No OpenRouter or Gemini key is in .env, and the
+   keys are not in the ShadePath files either. The runner is built and dry-run verified, so
+   it fires the moment you drop a key in.
+
+## How to test without being the tester
+
+`npm run rehearse` plays scripted callers against the real stack with a synthesised voice and
+grades the result. Read docs/REHEARSAL-HARNESS.md first, including the trap: the local server
+loads the COMPILED engine, so run `npm run build:engine` before testing an engine change or
+you will test the old code.
 
 ## Next session
-"Day 3 resume: read docs/STATE.md, .claude/backlog.json, the tail of docs/AUTOPILOT_LOG.md
-and the ledgers under .superpowers/sdd; if rehearsal data arrived, read the three bundles via
-GET /api/session/<id>/diagnostics and write the rehearsal report; then the video shot list
-from BRIEF §8; judge-sim agent is built on first use Sep 12, not before."
+
+"Day 4 resume: read docs/STATE.md, docs/RED-TEAM-2026-09-03.md and
+docs/PARKED-CHALLENGE-SCOPING.md, then .claude/backlog.json and the tail of
+docs/AUTOPILOT_LOG.md. First job is the staging gap: find why the legitimate call ends in
+ESCALATE instead of STAGE, using the harness locally rather than live calls. Then bring the
+founder the challenge-scoping decision. The fraud path is proven live and must not regress."
