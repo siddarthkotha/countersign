@@ -566,7 +566,12 @@ export class CallSession {
 
     if (!validation.ok) {
       const result = { error: 'invalid_arguments', rejected: validation.rejected };
-      this.logs.tools.push(toolLogEntryFromCall(evt, this.nowT(), loggedArgs, result));
+      // Landing review 2026-09-03 (Important): like `not_allowed_in_state` above, this call
+      // never reached the mock backend, so it is no real attempt at the check. Tag it
+      // `ignored` so evidence/fromTools.ts's `latest()` cannot let a late, malformed model
+      // call shadow evidence the server-initiated lookup already resolved.
+      const rejectedArgs = { ...loggedArgs, ignored: true };
+      this.logs.tools.push(toolLogEntryFromCall(evt, this.nowT(), rejectedArgs, result));
       this.pendingToolResults.push({ call_id: evt.call_id, result, is_error: true });
       this.diag('tool_call', { name, duration_ms: performance.now() - startedAt, status: 'invalid_arguments' });
       return;

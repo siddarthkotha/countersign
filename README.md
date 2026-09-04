@@ -66,6 +66,17 @@ Pre-kickoff scaffold. Product code begins with the event build window.
   `discarded_on_interrupt: true` so the discard itself is visible, not silent
   (`packages/server/src/call/session.ts`, the `flushToolResults`/`discardPendingToolResults`
   methods).
+- **The three evidence lookups run server-side, not at the model's discretion.** The moment
+  the engine's state needs them (EVIDENCE or CONSISTENCY_CHECK), the server itself runs
+  `get_request_history`, `check_sso_context` and `verify_out_of_band` against the simulated
+  backend, using the engine's own claimed identity, and re-runs them whenever a critical
+  fact changes the request version. These server-initiated calls carry no AssemblyAI
+  `call_id`, so no `tool.result` message is ever sent for them; they appear in the evidence
+  log like any other tool entry. A model-initiated call for the same lookup in the same
+  request version is honoured once and never duplicated; a late or malformed one is logged
+  as ignored so it can never shadow resolved evidence (`runLookupsIfNeeded` in
+  `packages/server/src/call/session.ts`; found by the first live rehearsal on 2026-09-03,
+  when a call held on "one moment" for five minutes because nobody ran the lookups).
 - **Bounded reconnect on a dropped link.** If the AssemblyAI socket drops unexpectedly, the
   server re-mints a token, opens a new socket, and sends `session.resume` with the previous
   `session_id` — up to 3 attempts total for the life of the call (not per drop), each backed off

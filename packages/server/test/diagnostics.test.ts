@@ -725,6 +725,18 @@ describe('CallSession — onDiagnostic', () => {
     ).not.toThrow();
     expect(session.hasEnded()).toBe(false);
 
+    // Landing review 2026-09-03 (Important, restored): the model-issued throw must be
+    // diagnosed as exactly ONE generic `error` event from the tool.call handler, and never a
+    // second `recoverFromDispatchError:tick` one -- the terminal-action and server-lookup
+    // failures are reported through their own specific kinds, not this channel.
+    const toolCallErrors = events.filter(
+      (e) => e.kind === 'error' && (e.detail as { where: string }).where === 'handleAaiEvent:tool.call',
+    );
+    expect(toolCallErrors).toHaveLength(1);
+    expect(events.some((e) => e.kind === 'error' && (e.detail as { where: string }).where === 'recoverFromDispatchError:tick')).toBe(
+      false,
+    );
+
     // The call is still fully alive afterward -- a stack of caught faults doesn't leave it in
     // some half-constructed state that a normal end() can't close out.
     expect(() => session.end('caller_ended')).not.toThrow();
