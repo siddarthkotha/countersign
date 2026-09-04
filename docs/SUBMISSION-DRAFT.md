@@ -64,7 +64,15 @@ $2.1 million mid-call with no explanation, a live inconsistency Countersign catc
 names aloud, not scripted.
 <!-- source: docs/BRIEF.md §4, "Scenario B: THE INTERROGATION" -->
 This is the failure mode behind real CEO-fraud and deepfake wire losses: a human
-alone, under pressure, with no second check. Countersign's rule is structural, not
+alone, under pressure, with no second check. PROVEN by the FBI's Internet Crime
+Complaint Center 2025 Internet Crime Report (ic3.gov): Business Email Compromise cost
+$3,046,598,558 in 2025, and $30,256,592 of that was lost to BEC scams the report
+itself flags as AI-involved, specifically naming voice cloning as one of the tactics.
+<!-- source: FBI IC3, "2025 IC3 Annual Report," https://www.ic3.gov/AnnualReport/Reports/2025_IC3Report.pdf,
+     page 26 (three-year BEC loss table) and page 40 ("AI References by Complaint Loss"
+     table and surrounding text); fetched and figures independently confirmed
+     2026-09-04 -->
+Countersign's rule is structural, not
 optional: "a call can request a privileged action, it can never authorize one."
 <!-- source: docs/BRIEF.md §16, ratified 2026-09-01 language -->
 A verified request still needs an independent second human before money moves, and a
@@ -86,9 +94,23 @@ behaviorally: what the caller knows, whether their story stays consistent across
 turns, and what independent, out-of-band checks confirm, a layer that holds when a
 synthetic voice is perfect. A finite-state policy engine, not the language model, owns
 every verdict. The engine's positive ceiling is "stage for second approval," never
-"release": that verdict and that tool do not exist in the system.
+"release": that verdict and that tool do not exist in the system. This pattern, a
+policy engine rather than the model owning the verdict, is published prior art, not
+our invention: PROVEN by the APort Vault CTF (a security capture-the-flag contest),
+which measured social engineering succeeding 74.6 percent of the time against
+model-only defenses versus 0 percent against a policy engine, across 879 attempts.
+What's new here is the assembled application: live conversational interrogation of an
+inbound caller, feeding a deterministic engine whose best possible outcome is staging
+for an independent second human.
 <!-- source: README.md "How a verdict is decided": STAGE ceiling, no RELEASE verdict -->
-<!-- word count: 399 (labels included); verified via `wc -w` before commit -->
+<!-- source: docs/BRIEF.md §13 "Honesty constraint": APort Vault CTF figures cited verbatim -->
+<!-- word count, all four paragraphs combined: 524 (was 399), verified 2026-09-04 by a
+     script that strips this heading and every HTML comment before running `wc -w`;
+     see the same date's added prior-art and business-value sentences. This is over
+     this section's original 400-word target, and a founder call is needed on whether
+     the lablab.ai form enforces that as a hard limit (UNKNOWN to this session) or it
+     was self-imposed; trim before submitting if the form truncates or rejects longer
+     text -->
 
 ---
 

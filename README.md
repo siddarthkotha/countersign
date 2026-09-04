@@ -17,7 +17,13 @@ Hackathon (lablab.ai, September 1–30, 2026).
 
 ## Status
 
-Pre-kickoff scaffold. Product code begins with the event build window.
+Countersign is built and deployed. PROVEN just now by `GET /version` and `GET /health` on the
+live demo at https://countersign-bf8q.onrender.com (the `-bf8q` suffix matters; the plain
+address belongs to an unrelated product): the live site serves commit `de6c796` and reports
+healthy. PROVEN by running the test suite just now: 761 tests pass across 50 files, and all 18
+recorded call transcripts replay correctly through the real policy engine. An adversarial review
+on the night of 2026-09-03 found two bugs that currently stop a legitimate caller's request from
+completing on the live site; the fixes are written and being tested but not yet deployed.
 
 ## How Countersign uses the AssemblyAI Voice Agent API
 
@@ -96,6 +102,22 @@ Pre-kickoff scaffold. Product code begins with the event build window.
   real socket, not estimated: `packages/server/scripts/smoke-live.ts` mints a token, opens the
   connection, times connect → `session.ready`, then times `session.ready` → the first
   `reply.audio` byte. It's opt-in only (`--live` plus `ASSEMBLYAI_API_KEY`) and never runs in CI.
+
+**What we tried first, and why the model ended up with zero tools.** The build did not start
+this way. The first working version offered the voice model all eight tool schemas at connect
+time, including the three evidence lookups (`get_request_history`, `check_sso_context`,
+`verify_out_of_band`), each of which requires an `identity_id` parameter so the mock backend
+knows which record to check. In a live rehearsal on 2026-09-03
+(`scripts/rehearse/reports/2026-09-03T23-04-42-scenario-a-dana-legitimate.md`), the model read
+that field name straight off the schema and began asking a legitimate caller, out loud, to state
+an "identity id", a value no real caller could ever know, three separate times as the call went
+on. The caller never got past it: that recorded run ends with the engine freezing a transfer it
+should have staged. The fix was not a better prompt; it was to stop showing the model the schema
+at all. Since commit `42d720f`, the voice model is offered zero tools in every state
+(`allowedTools` in `packages/engine/src/fsm.ts` always returns `[]`); the server now runs every
+lookup and every terminal action itself, from the policy engine's own state machine, and a stray
+tool call from the model is rejected and logged as ignored. This makes the LAW 3 boundary
+stronger, not weaker: the model cannot act at all now, in any state. It can only speak.
 
 ## How a verdict is decided
 
@@ -184,6 +206,18 @@ feature: it's the layer that still works when synthetic voices are perfect.
 Every quote in the evidence record is AssemblyAI's own transcribed text, verbatim — never a
 paraphrase written by the agent. Facts are stored separately from interpretation, so no evidence
 card ever depends on how the agent chose to phrase anything mid-call.
+
+**On prior art.** The core architecture pattern here, a deterministic policy engine rather than
+the language model owning every verdict, is published prior art, not our invention. That the
+pattern works is PROVEN by the APort Vault CTF (a security capture-the-flag contest), which
+measured social engineering succeeding 74.6 percent of the time against model-only defenses and
+0 percent against a policy engine, across 879 attempts. Separately, a US Bancorp patent
+(US12562169B1, priority 2025-09-16) covers the same two mechanics, adaptive challenge generation
+and a deterministic engine paired with immutable logging, but built as an assist tool for human
+call-center staff, not as autonomous voice interrogation. What's new here is the assembled
+application: live conversational interrogation of an inbound caller, feeding a deterministic
+engine whose best possible outcome is staging the request for an independent second human, never
+releasing it.
 
 ## Disclosure
 
