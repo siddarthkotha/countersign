@@ -40,4 +40,42 @@ describe('RoleCards', () => {
 
     expect(onSelect).toHaveBeenCalledWith('attacker');
   });
+
+  // Accessibility (2026-09-04, review finding): the cards were made clickable with a click
+  // handler on a plain section, which is mouse-only. They now carry a button role and take
+  // focus, so a keyboard user must be able to reach and activate them the way a button works.
+  // The review noted the keyboard path was implemented but never exercised; these cover it.
+  it('a keyboard user can reach both cards and activate one with Enter', async () => {
+    const onSelect = vi.fn();
+    const user = userEvent.setup();
+    render(<RoleCards selected={null} onSelect={onSelect} />);
+
+    const cards = screen.getAllByRole('button');
+    expect(cards).toHaveLength(2);
+
+    await user.tab();
+    expect(cards[0]).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(onSelect).toHaveBeenCalledWith('legitimate');
+  });
+
+  it('Space activates a card, the way a real button does', async () => {
+    const onSelect = vi.fn();
+    const user = userEvent.setup();
+    render(<RoleCards selected={null} onSelect={onSelect} />);
+
+    const cards = screen.getAllByRole('button');
+    cards[1]!.focus();
+    await user.keyboard('[Space]');
+
+    expect(onSelect).toHaveBeenCalledWith('attacker');
+  });
+
+  it('says in words which card is chosen, never by styling alone', () => {
+    render(<RoleCards selected={'legitimate'} onSelect={vi.fn()} />);
+
+    expect(screen.getByText(/Dana Whitfield, treasury manager \(chosen\)/)).toBeInTheDocument();
+    expect(screen.getAllByRole('button')[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByRole('button')[1]).toHaveAttribute('aria-pressed', 'false');
+  });
 });
