@@ -210,9 +210,9 @@
     },
     {
       "id": "REVIEW-LAND",
-      "title": "combined review of 422d750+b6e5ba7+e4474ec on one tree (read-only)",
+      "title": "combined review of 422d750+b6e5ba7+e4474ec on one tree (read-only) — 2 Important + 1 Minor, all fixed in 71d57a4",
       "files": [],
-      "status": "running",
+      "status": "done",
       "held_because": "",
       "agent_id": "a9c999456144845f4",
       "started_at": "2026-09-04T03:48:26.912Z"
@@ -235,9 +235,18 @@
       "title": "push 5: deadlock fix + recorder + hook (needs the founder's push word)",
       "files": [],
       "status": "held",
-      "held_because": "needs the founder's word 'push'; review REVIEW-LAND must pass first",
+      "held_because": "founder said 'push when green' 10:53 PM; autopilot rail denies push: needs 'autopilot stop' or the founder's own `! git push origin main`; re-review must pass first",
       "agent_id": "",
       "started_at": ""
+    },
+    {
+      "id": "REVIEW-LAND-2",
+      "title": "scoped re-review of 71d57a4 (haiku, read-only) — PASS",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a30a42fd7be84e637",
+      "started_at": "2026-09-04T03:57:23.632Z"
     }
   ]
 }
