@@ -11,6 +11,7 @@ import {
   DEFAULT_VOICE,
   LLM_GATEWAY_BASE_URL,
   KNOWN_VOICES,
+  LIVE_SESSION_TOOLS,
   resolveVoice,
   _resetVoiceWarning,
   type AaiSessionConfig,
@@ -100,6 +101,21 @@ describe('buildInitialSessionUpdate', () => {
     expect(msg.session.llm).toEqual([
       { base_url: LLM_GATEWAY_BASE_URL, model: 'claude-sonnet-4-6', api_key: 'secret-key' },
     ]);
+  });
+});
+
+// Bug fix (2026-09-03, founder-observed live run): `index.ts` sends `LIVE_SESSION_TOOLS`
+// (never `allToolSchemas()`) as `tools` in the real connect config -- the voice model must
+// never be offered any tool schema (see fsm.ts's `allowedTools` and this constant's own doc
+// comment in aai/config.ts for the incident this closes).
+describe('LIVE_SESSION_TOOLS', () => {
+  it('is the empty array', () => {
+    expect(LIVE_SESSION_TOOLS).toEqual([]);
+  });
+
+  it('produces an initial session.update with no tool schemas at all when used as the connect config\'s tools', () => {
+    const msg = buildInitialSessionUpdate(cfg({ tools: LIVE_SESSION_TOOLS }));
+    expect(msg.session.tools).toEqual([]);
   });
 });
 

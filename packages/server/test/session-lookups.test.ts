@@ -238,3 +238,92 @@ describe('CallSession -- I3 (stale evidence is never treated as current) via the
     }
   });
 });
+
+// Bug fix (2026-09-03, founder-observed live run tonight, see
+// scripts/rehearse/reports/2026-09-03T23-04-42-scenario-a-dana-legitimate.md): the voice
+// model is now offered NO tool schema, ever -- `allowedTools` (fsm.ts) returns [] for every
+// EngineState, including EVIDENCE/CONSISTENCY_CHECK, which used to offer the three lookups.
+// A model that (defensively -- it was never told these tools exist, but a live LLM cannot be
+// fully trusted to never emit a stray tool.call) still emits one must be rejected exactly
+// like any other out-of-state call, AND the server's own auto-runner must still resolve the
+// evidence -- `runLookupsIfNeeded` never depended on `allowed_tools` in the first place, only
+// on `state`, so this closing of the offer must not reopen the deadlock this file's other
+// tests already fixed.
+describe('CallSession -- the model is offered no tools, ever (allowedTools always []); a stray tool.call is still rejected and the lookup still resolves', () => {
+  it('rejects a model-issued check_sso_context in CONSISTENCY_CHECK as not_allowed_in_state, logged ignored, while the server-run lookup already resolved the evidence', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession(clock, CALL_DANA, aai, sent);
+    session.start();
+
+    driveConversationLive(session, aai, clock, [C1, A1_CHALLENGE, C2_ANSWER]);
+    expect(session.last?.state).toBe('CONSISTENCY_CHECK');
+    expect(session.last?.request_version).toBe(1);
+
+    // The engine now offers nothing -- confirms the fix, not just the rejection path below.
+    expect(session.last?.allowed_tools).toEqual([]);
+
+    // The server's own auto-runner already resolved all three lookups for v1 with no
+    // tool.call ever emitted -- same evidence a model-issued call would have produced.
+    const preExistingLookupEntries = session.logs.tools.filter((t) => (LOOKUP_NAMES as readonly string[]).includes(t.name));
+    expect(toolNames(preExistingLookupEntries).sort()).toEqual([...LOOKUP_NAMES].sort());
+    for (const entry of preExistingLookupEntries) {
+      expect(entry.result?.error).toBeUndefined();
+    }
+
+    // A stray model tool.call for one of the (never-offered) lookups arrives anyway.
+    clock.now = 2500;
+    aai.emit({
+      type: 'tool.call',
+      call_id: 'stray-model-call-1',
+      name: 'check_sso_context',
+      arguments: { identity_id: 'dana-whitfield' },
+    });
+
+    const rejected = session.logs.tools.find((t) => t.id === 'stray-model-call-1');
+    expect(rejected).toBeDefined();
+    expect(rejected!.result?.error).toBe('not_allowed_in_state');
+    expect((rejected!.args as { ignored?: boolean }).ignored).toBe(true);
+
+    // The rejection was queued as an error tool.result for AAI -- not silently dropped.
+    // (It is only actually FLUSHED to the socket on the next real reply.done, an unrelated
+    // mechanic already covered by session.test.ts's own flush tests -- driving a synthetic
+    // reply.done here would itself complete whatever goal CONSISTENCY_CHECK's real READBACK
+    // prompt was mid-turn on, advancing the call to a terminal verdict for reasons that have
+    // nothing to do with this test's own subject, so this checks the queue directly instead.)
+    const pending = (session as unknown as { pendingToolResults: { call_id: string; result: Record<string, unknown>; is_error: boolean }[] })
+      .pendingToolResults;
+    const queued = pending.find((p) => p.call_id === 'stray-model-call-1');
+    expect(queued).toBeDefined();
+    expect(queued!.is_error).toBe(true);
+    expect(queued!.result.error).toBe('not_allowed_in_state');
+
+    // The rejected call did NOT clobber or duplicate the evidence the server's own lookup
+    // already resolved -- still exactly one real (non-ignored) entry per lookup tool, still
+    // error-free (evidence/fromTools.ts's `latest()` explicitly skips `args.ignored === true`
+    // entries, so the rejected call can never shadow the real result).
+    const realLookupEntries = session.logs.tools.filter(
+      (t) => (LOOKUP_NAMES as readonly string[]).includes(t.name) && !(t.args as { ignored?: boolean }).ignored,
+    );
+    expect(toolNames(realLookupEntries).sort()).toEqual([...LOOKUP_NAMES].sort());
+    for (const entry of realLookupEntries) {
+      expect(entry.result?.error).toBeUndefined();
+    }
+
+    // PROVEN (verified by running this exact scenario): a rejected tool.call's own logged
+    // entry still carries `result.error` (`not_allowed_in_state`), and `compose.ts`'s
+    // `computeEvaluationIncomplete` counts ANY tool entry with a set `result.error` -- it does
+    // not look at `args.ignored` -- so I4 (rules.ts: an incomplete evaluation with an open
+    // request forces ESCALATE, never STAGE) fires here exactly as it already does for a
+    // rejected call in every other state (see session.test.ts/diagnostics.test.ts's own "the
+    // auto-runner already resolved everything" notes, which force `session.last` for the same
+    // reason). This is pre-existing engine behavior, unrelated to and unchanged by this fix --
+    // this test's own subject (the rejection itself, and that the real evidence survives it
+    // unshadowed) is fully proven above, before this final tick. Since `tools: []` means the
+    // model has no schema to call in the first place, a live stray tool.call reaching this
+    // path at all is now a purely defensive, expected-never scenario.
+    expect(session.last?.verdict).toBe('ESCALATE');
+    expect(session.last?.state).toBe('SEALED');
+  });
+});

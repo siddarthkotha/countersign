@@ -31,22 +31,39 @@ const ACTION_ALLOWLIST: Record<'STAGE' | 'FREEZE' | 'ESCALATE', ToolName[]> = {
   ESCALATE: ['open_incident', 'alert_principal', 'seal_evidence_record'],
 };
 
-export function allowedTools(state: EngineState, _verdict: Verdict): ToolName[] {
-  if (state === 'CHALLENGE') return [];
-  if (state === 'EVIDENCE' || state === 'CONSISTENCY_CHECK') {
-    return ['get_request_history', 'check_sso_context', 'verify_out_of_band'];
-  }
-  // Review finding (IMPORTANT 4, final review): ACTION's terminal tools (stage/freeze/
-  // incident/alert/seal) are NEVER offered to the LLM -- the server runs them itself the
-  // instant a verdict turns terminal (call/session.ts's runTerminalActionsIfNeeded, which
-  // never goes through a tool.call at all), before the LLM could ever be handed a live
-  // ASSISTANT-callable schema for one. Exposing them here was a standing (harmless in
-  // practice, since the server never wired an ACTION-state tool.call through) but wrong-by-
-  // design widening of what the voice channel could ever reach -- LAW 2 says voice never
-  // releases the wire, and the ceiling for what the LLM is even OFFERED should say the same.
-  // `ACTION_ALLOWLIST` below is unchanged and still drives `requiredActions` -- the server's
-  // own list of what it must run, not what it hands to the model.
-  // INTAKE, CLAIM, DECISION, ACTION, SEALED, OUT_OF_SCOPE: nothing to call.
+/** The voice model is offered NO tool schema, in ANY state -- always []. Kept as a function
+ *  (not inlined as a constant at the call site) because callers still pass `state`/`verdict`
+ *  and the shape is part of the engine's public contract (`EngineOutput.allowed_tools`,
+ *  read by call/session.ts to build the `tools` field of every session.update).
+ *
+ *  History, two fixes:
+ *
+ *  1. Review finding (IMPORTANT 4, final review): ACTION's terminal tools (stage/freeze/
+ *     incident/alert/seal) were removed from here first -- the server runs them itself the
+ *     instant a verdict turns terminal (call/session.ts's runTerminalActionsIfNeeded, which
+ *     never goes through a tool.call at all), before the LLM could ever be handed a live
+ *     ASSISTANT-callable schema for one. `ACTION_ALLOWLIST` below is unaffected by either fix
+ *     and still drives `requiredActions` -- the server's own list of what IT must run, never
+ *     what it hands to the model.
+ *
+ *  2. Bug fix (2026-09-03, founder-observed live run tonight, see
+ *     scripts/rehearse/reports/2026-09-03T23-04-42-scenario-a-dana-legitimate.md): EVIDENCE
+ *     and CONSISTENCY_CHECK used to offer get_request_history/check_sso_context/
+ *     verify_out_of_band -- each schema carrying a required `identity_id: string` parameter.
+ *     On a live run the voice model spoke the required trap-fact challenge, then ADDED
+ *     "Please state your identity id" and repeated variants of that on the next two turns --
+ *     violating the standing rule "one question at a time" and inventing a system field the
+ *     caller can never know, because it had learned that field name straight off the
+ *     advertised schema. Since commit 422d750 the server already runs all three lookups
+ *     itself the instant EVIDENCE/CONSISTENCY_CHECK is reached (`runLookupsIfNeeded`,
+ *     call/session.ts) -- the model never needed to be OFFERED them at all. Both fixes now
+ *     read the same way: the ceiling of what the LLM is even offered is zero tools, for
+ *     every EngineState, full stop -- LAW 2 (voice never releases the wire) and LAW 3 (only
+ *     the engine decides) are both best served by never dangling a tool schema in front of
+ *     the voice channel in the first place. `handleToolCall` (call/session.ts) stays as a
+ *     defensive path: any stray tool.call the model still emits is rejected as
+ *     `not_allowed_in_state` and logged `ignored`, same as always. */
+export function allowedTools(_state: EngineState, _verdict: Verdict): ToolName[] {
   return [];
 }
 

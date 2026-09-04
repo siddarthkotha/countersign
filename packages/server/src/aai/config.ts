@@ -19,6 +19,25 @@
 // default voice is `anna`. COUNTERSIGN_VOICE overrides it below.
 export const DEFAULT_VOICE = 'anna';
 
+// Bug fix (2026-09-03, founder-observed live run tonight, see
+// scripts/rehearse/reports/2026-09-03T23-04-42-scenario-a-dana-legitimate.md): the live
+// server used to advertise all eight tool schemas (`aai/schemas.ts`'s `allToolSchemas()`) in
+// the FIRST session.update -- including the three EVIDENCE/CONSISTENCY_CHECK lookups, each
+// carrying a required `identity_id: string` parameter. The voice model learned that field
+// name from the schema and started asking the caller for their "identity id" on live turns,
+// violating the standing rule (one question at a time) and inventing a system field the
+// caller can never know. Since commit 422d750 the server runs get_request_history/
+// check_sso_context/verify_out_of_band itself (`runLookupsIfNeeded`, call/session.ts) the
+// instant EVIDENCE/CONSISTENCY_CHECK is reached, and every terminal action was already
+// server-run before that (`runTerminalActionsIfNeeded`) -- the model never needed to be
+// OFFERED any tool schema at all. `fsm.ts`'s `allowedTools` now returns [] for every
+// EngineState for the same reason (LAW 2/3: the ceiling of what the LLM is even offered is
+// zero tools, full stop). `LIVE_SESSION_TOOLS` is the empty array `index.ts` passes as
+// `tools` in the real (non-fake) connect config -- named and exported here, rather than
+// inlined in `index.ts`, so it stays independently testable: `index.ts` is the process
+// entrypoint and importing it for a test would execute `server.listen`.
+export const LIVE_SESSION_TOOLS: object[] = [];
+
 // AMENDMENT round 3 (controller, verified live 2026-09-02 11:49 AM CDT + docs check --
 // see docs/aai-voices-endpoint-2026-09-02.md, and the CORRECTION line in
 // docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md): `GET https://agents.assemblyai.com/v1/voices`

@@ -36,7 +36,8 @@ Pre-kickoff scaffold. Product code begins with the event build window.
   (`packages/web/src/audio/capture.worklet.ts`, `packages/web/src/audio/capture.ts`).
 - **`session.update` at connect, then again on every goal change.** The first `session.update`,
   sent the instant the socket opens, sets `system_prompt`, `input.format.encoding`,
-  `output.voice`, `output.format.encoding`, an optional one-time `greeting`, the tool list, and
+  `output.voice`, `output.format.encoding`, an optional one-time `greeting`, the tool list (now
+  always empty, since the server runs every lookup itself), and
   `keyterms` (`packages/server/src/aai/config.ts`). After that, every time the policy engine's
   goal changes mid-call, the server sends a fresh `session.update` — but that later update only
   ever touches `system_prompt`, `tools`, `input.keyterms`, and `input.turn_detection.min_silence`.
@@ -72,9 +73,9 @@ Pre-kickoff scaffold. Product code begins with the event build window.
   backend, using the engine's own claimed identity, and re-runs them whenever a critical
   fact changes the request version. These server-initiated calls carry no AssemblyAI
   `call_id`, so no `tool.result` message is ever sent for them; they appear in the evidence
-  log like any other tool entry. A model-initiated call for the same lookup in the same
-  request version is honoured once and never duplicated; a late or malformed one is logged
-  as ignored so it can never shadow resolved evidence (`runLookupsIfNeeded` in
+  log like any other tool entry. The voice model is offered no tools at all, so it never
+  issues a lookup itself; a stray or malformed tool call is logged as ignored and can never
+  shadow the evidence the server already resolved (`runLookupsIfNeeded` in
   `packages/server/src/call/session.ts`; found by the first live rehearsal on 2026-09-03,
   when a call held on "one moment" for five minutes because nobody ran the lookups).
 - **Bounded reconnect on a dropped link.** If the AssemblyAI socket drops unexpectedly, the

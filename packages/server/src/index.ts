@@ -11,8 +11,7 @@ import { attachWebSocketServer } from './ws/browser.js';
 import { FakeAaiSocket } from './aai/fake.js';
 import type { AaiEvent, AaiSocket } from './aai/types.js';
 import { connectAai, type WsLike } from './aai/session.js';
-import { loadAaiEnvDefaults, type AaiSessionConfig } from './aai/config.js';
-import { allToolSchemas } from './aai/schemas.js';
+import { loadAaiEnvDefaults, LIVE_SESSION_TOOLS, type AaiSessionConfig } from './aai/config.js';
 
 // Task D1: packages/server/src/index.ts -> packages/web/dist (siblings under packages/),
 // whether this file is running as source (tsx, packages/server/src/index.ts) or as the
@@ -155,7 +154,14 @@ function createAai(session_id: string): AaiSocket {
     session_cap_seconds: cfg.session_cap_seconds,
     voice: envDefaults.voice,
     system_prompt: DEFAULT_INITIAL_PROMPT,
-    tools: allToolSchemas(),
+    // Bug fix (2026-09-03, founder-observed live run): the voice model is offered NO tool
+    // schema, ever -- see fsm.ts's `allowedTools` and aai/config.ts's `LIVE_SESSION_TOOLS`
+    // doc comments for the incident this closes (advertising the lookup tools' schemas
+    // taught the model the `identity_id` field name, and it started asking the caller for
+    // it). The server still runs every lookup and terminal action itself
+    // (call/session.ts's runLookupsIfNeeded/runTerminalActionsIfNeeded) -- nothing here
+    // changes what the server can do, only what it ever offers the model.
+    tools: LIVE_SESSION_TOOLS,
     keyterms: [],
     // exactOptionalPropertyTypes: only set the key at all when a model was actually
     // configured -- envDefaults.llm_model is `string | undefined`, and assigning

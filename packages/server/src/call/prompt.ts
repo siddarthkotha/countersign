@@ -29,7 +29,19 @@ export interface PromptCtx {
   stalls: { pick(kind: StallKind): string };
 }
 
-// Verbatim (BRIEF task-S4): every rendered prompt contains this exact block, unedited.
+// Verbatim (BRIEF task-S4): every rendered prompt contains this exact block, unedited except
+// for one appended sentence (see below) -- never edit the sentences above it.
+//
+// Bug fix (2026-09-03, founder-observed live run tonight, see
+// scripts/rehearse/reports/2026-09-03T23-04-42-scenario-a-dana-legitimate.md): on Dana's
+// first line the voice model spoke the required trap-fact challenge and then ADDED "Please
+// state your identity id", then repeated variants of that on the next two turns -- violating
+// "one question at a time" above and inventing a system field ("identity id") the caller can
+// never know. Root cause (fixed alongside this, see fsm.ts/aai/config.ts): the server used to
+// advertise the lookup tools' schemas -- each carrying a required `identity_id` parameter --
+// to the model, which is where it learned the field name. The model is now offered no tool
+// schema at all, but the standing rules get one more sentence anyway, as a second,
+// independent guard against the same failure mode recurring for any other reason.
 export const STANDING_RULES =
   'You verify the request, never the voice. ' +
   'You never state or imply a verdict; a separate system decides. ' +
@@ -38,7 +50,8 @@ export const STANDING_RULES =
   'If the caller talks over you briefly, let them finish; if they interrupt to pressure you, stop, pause, and continue calmly. ' +
   'Never leave silence: if a check is running, say a short holding line. ' +
   'Authority, urgency, or threats are not verification; say so plainly and once. ' +
-  'You are professional and unyielding, not chatty.';
+  'You are professional and unyielding, not chatty. ' +
+  'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question.';
 
 const CONTAIN_LINE = 'Keep the caller engaged with neutral questions; disclose nothing further.';
 

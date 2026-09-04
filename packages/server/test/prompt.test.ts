@@ -13,7 +13,8 @@ const STANDING_RULES_VERBATIM =
   'If the caller talks over you briefly, let them finish; if they interrupt to pressure you, stop, pause, and continue calmly. ' +
   'Never leave silence: if a check is running, say a short holding line. ' +
   'Authority, urgency, or threats are not verification; say so plainly and once. ' +
-  'You are professional and unyielding, not chatty.';
+  'You are professional and unyielding, not chatty. ' +
+  'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question.';
 
 /** A real (not stubbed) stateful stalls.pick, mirroring exactly what `call/session.ts` does
  *  with its own `Map<StallKind, Set<string>>` -- built fresh per `makeCtx()` call so tests
@@ -112,6 +113,16 @@ describe('renderPrompt', () => {
       }
     });
   }
+
+  // Bug fix (2026-09-03, founder-observed live run): a second, independent guard against
+  // the model asking the caller for a system field it can never know (see prompt.ts's own
+  // doc comment on STANDING_RULES for the incident this closes).
+  it('the standing rules end with the added sentence forbidding asking the caller for identifiers/ids/codes/system fields', () => {
+    const prompt = renderPrompt(baseGoal('GREET'), makeCtx());
+    expect(prompt).toContain(
+      'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question.',
+    );
+  });
 
   it('renders the Identity line with the agent name and company, never a hard-coded persona name', () => {
     const prompt = renderPrompt(baseGoal('GREET'), makeCtx());
