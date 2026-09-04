@@ -402,10 +402,10 @@
     },
     {
       "id": "LIVE-VERIFY",
-      "title": "run both scenarios against the DEPLOYED url once each after FIX7",
+      "title": "run both scenarios against the DEPLOYED url once each after FIX7 - fraud path PASSES on the deployed site: FREEZE in 57.9s",
       "files": [],
-      "status": "held",
-      "held_because": "needs FIX7 landed and pushed first; ~2 minutes of credits",
+      "status": "done",
+      "held_because": "",
       "agent_id": "",
       "started_at": ""
     },
@@ -576,21 +576,21 @@
     },
     {
       "files": [],
-      "status": "running",
+      "status": "done",
       "held_because": "",
       "agent_id": "a084a0b28b8043c7c",
       "started_at": "2026-09-04T05:50:08.004Z",
       "id": "REVIEW-BATCH",
-      "title": "review of the 13 unpushed commits (read-only)"
+      "title": "review of the 13 unpushed commits (read-only) - PASS, 1 important watch-item + 3 minors; my own gap fixed"
     },
     {
       "files": [],
-      "status": "held",
-      "held_because": "waits on REVIEW-BATCH passing",
+      "status": "done",
+      "held_because": "",
       "agent_id": "",
       "started_at": "",
       "id": "PUSH-BATCH",
-      "title": "push tonight's 13 commits as one batch, then verify the deploy"
+      "title": "push tonight's 13 commits as one batch, then verify the deploy - pushed and deployed, live reports fbfc84f"
     },
     {
       "files": [
