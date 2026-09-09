@@ -1,0 +1,30 @@
+{
+  "name": "hangup-after-request",
+  "title": "A full request, then silence -- the caller never answers a single follow-up",
+  "description": "The caller states a complete, otherwise-legitimate-looking request in one breath -- identity, beneficiary, amount, account, urgency -- exactly like Scenario A's opening line, then says nothing else for the rest of the call, however many times or ways the live agent asks a follow-up. This is deliberately NOT packages/engine/corpus/hangup-mid-check.json (that fixture has no open request at all, identity only, and proves NO_ACTION -- invariant I4 downgrades an incomplete evaluation to NO_ACTION only when there is nothing at stake). Here there IS an open request on the table when the line goes dead, which is the case I4 actually names ESCALATE for: 'an incomplete evaluation... becomes ESCALATE (or NO_ACTION when there is no open request)' (packages/engine/src/rules.ts). EXPECTED VERDICT: ESCALATE, with an open_incident in the required actions (packages/engine/src/fsm.ts's ACTION_ALLOWLIST puts open_incident on every ESCALATE). RATIONALE, disclosed plainly: this depends on a server change landing TODAY (founder ruling item 16, 2026-09-09) that makes the idle reaper (packages/server/src/caps.ts's reapIdle, packages/server/src/config.ts's idle_timeout_ms, default 30 seconds) actually end the call and re-run the engine against an incomplete evaluation with an open request, rather than just freeing the concurrency slot. This scenario is written to exercise that change once it ships; it is not itself proof the change is live -- run it and check the flight-recorder record for open_incident, don't just trust the printed verdict line.",
+  "source": "docs/BRIEF.md section 4 (Scenario A's opening line, reused verbatim) + packages/engine/src/rules.ts invariant I4 + packages/server/src/caps.ts (idle reaping) + founder ruling item 16, 2026-09-09 (the incoming server change this scenario is built to exercise)",
+  "truth": {
+    "identity": "Dana Whitfield",
+    "beneficiary": "Meridian Supply",
+    "amount_usd": 84500,
+    "account_last4": "4471",
+    "counsel": null,
+    "escrow_institution": null,
+    "approver": null,
+    "deadline": "today"
+  },
+  "persona": "You are Dana Whitfield, corporate treasury at Meridian Dynamics. You state your full request once, plainly and completely -- who you are, the wire to Meridian Supply, the amount, the account, that it needs to move today -- and then the line simply goes dead. You never speak again for the rest of the call, no matter what the agent asks, how many times it asks, or how long the silence goes on. This is not you refusing to answer -- you are gone, as if the call dropped.",
+  "turns": [
+    {
+      "id": "c1",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply, $84,500, account ending 4471, moving today instead of Friday, approved in yesterday's close meeting.",
+      "pause_ms": 500
+    }
+  ],
+  "expected": {
+    "verdict": "ESCALATE",
+    "max_wall_ms": 90000
+  },
+  "demo_persona": "legitimate",
+  "max_wall_ms": 120000
+}
