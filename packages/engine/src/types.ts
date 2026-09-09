@@ -168,6 +168,9 @@ export interface SeedConfig {
     pressure_flag_min: number; // distinct pressure hits to FLAG, 2
     correction_window_ms: number; // v2: 20000
     tool_timeout_ms: number; // v2: 45000
+    approximate_jump_ratio: number; // fix-round-2: an APPROXIMATE claim's replacement value is
+    // CORRECTED only if it stays within this multiple (and its reciprocal) of the approximate
+    // value; a bigger jump is CONTRADICTED. Numeric fields only (amount_usd).
   };
   pressure_lexicon: string[]; // lower-case phrases
   out_of_scope_lexicon: string[]; // lower-case phrases
