@@ -1,6 +1,6 @@
 {
   "title": "Repeated barge-ins are pressure signal, never evidence",
-  "description": "Dana talks over the agent three separate times (every readback line gets cut off, `interrupted: true`) while the underlying request is the same fully-verified Scenario A. `talk_overs > 0` FLAGs the pressure_marker card regardless of lexicon hits, but pressure counts 0 toward the tally and decide() never reads talk_overs directly -- the verdict comes entirely from the identity/context/readback evidence underneath. Proves barge-in spam alone cannot push a call toward a worse (or, importantly, a better) verdict than its actual evidence supports. Ruling A (2026-09-09, red team item 1): the amendment carve-out now floors the knowledge-challenge requirement at 1, never 0, so this recording -- no challenge ever asked -- holds at CHALLENGE/PENDING instead of reaching STAGE; that ceiling is unrelated to (and unaffected by) the interruption spam this file is actually testing.",
+  "description": "Dana talks over the agent three separate times (every readback line gets cut off, `interrupted: true`) while the underlying request is the same fully-verified Scenario A. `talk_overs > 0` FLAGs the pressure_marker card regardless of lexicon hits, but pressure counts 0 toward the tally and decide() never reads talk_overs directly -- the verdict comes entirely from the identity/context/readback evidence underneath. Proves barge-in spam alone cannot push a call toward a worse (or, importantly, a better) verdict than its actual evidence supports. Ruling A (2026-09-09, red team item 1): the amendment carve-out now floors the knowledge-challenge requirement at 1, never 0 -- this recording was extended with the exact challenge the real engine selects at this point (a TRAP_FACT probe restating the beneficiary as \"Northgate Partners\"), answered cleanly (not interrupted) before the barge-in spam starts, so the call still reaches STAGE; that floor is unrelated to (and unaffected by) the interruption spam this file is actually testing.",
   "call": {
     "session_id": "sess-15",
     "origin_kind": "registered_device",
@@ -12,6 +12,18 @@
       "speaker": "caller",
       "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
       "t_ms": 1000
+    },
+    {
+      "id": "a1t",
+      "speaker": "agent",
+      "text": "Just to confirm back to you -- this wire is going to Northgate Partners, is that right?",
+      "t_ms": 1200
+    },
+    {
+      "id": "c1t",
+      "speaker": "caller",
+      "text": "No, that's wrong -- it's Meridian Supply, not Northgate Partners.",
+      "t_ms": 1400
     },
     {
       "id": "a1",
@@ -111,6 +123,12 @@
   ],
   "actions": [
     {
+      "id": "ch1",
+      "kind": "challenge_issued",
+      "t_ms": 1200,
+      "challenge_id": "sess-15-1"
+    },
+    {
       "id": "r1",
       "kind": "readback_issued",
       "t_ms": 2000,
@@ -133,8 +151,8 @@
     }
   ],
   "expected": {
-    "verdict": "PENDING",
-    "state": "CHALLENGE",
+    "verdict": "STAGE",
+    "state": "ACTION",
     "reasons": [],
     "failure_tally": 0,
     "request_version": 1,
@@ -146,10 +164,10 @@
       "no_contradictions": true,
       "critical_fields_confirmed": true,
       "exposure_within_limit": true,
-      "challenge_requirement_met": false,
+      "challenge_requirement_met": true,
       "no_identity_switch": true,
       "not_new_beneficiary": true,
-      "at_least_one_challenge_passed": false,
+      "at_least_one_challenge_passed": true,
       "no_injection_attempt": true
     }
   }

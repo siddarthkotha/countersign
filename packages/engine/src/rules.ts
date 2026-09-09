@@ -58,30 +58,6 @@ function findAll(evidence: Evidence[], kind: EvidenceKind): Evidence[] {
 
 const CRITICAL_TALLY_CAP = 2;
 
-/** Ruling A (2026-09-09, red team item 1): AssuranceChecklist (types.ts) is a frozen
- *  cross-package contract shared verbatim with the server and web packages -- adding a
- *  required field there would break their (out-of-scope) typed literals and Record maps.
- *  These two items are therefore carried as an engine-local extension of the runtime
- *  object rather than a new AssuranceChecklist field: `decide()`'s actual `assurance`
- *  object always has both keys (so `Object.values` in `assuranceAllTrue` sees them, and
- *  they ARE present -- and visible -- on the plain JS object that crosses evaluate.ts ->
- *  server -> the browser, e.g. in a raw state/evidence dump), but the *type* the rest of
- *  the engine/server/web sees for `assurance` stays exactly AssuranceChecklist, so nothing
- *  outside this file needs to know these two extra keys exist to keep compiling. A
- *  dedicated label in the web checklist UI is a follow-up, out of this lane's scope. */
-type AssuranceChecklistExt = AssuranceChecklist & {
-  /** Ruling A: at least one knowledge/relational challenge must have graded PASS before
-   *  STAGE, independent of (and in addition to) `challenge_requirement_met` -- so the
-   *  amendment carve-out's floor-of-1 `need` can never be the ONLY thing standing between
-   *  a zero-challenge call and STAGE. */
-  at_least_one_challenge_passed: boolean;
-  /** Ruling B: false for the rest of the call once any injection-lexicon hit has been
-   *  seen (evidenceFromTranscript never resets an injection_marker card once emitted) --
-   *  makes STAGE permanently unreachable via row 11 for a call that has shown this
-   *  behavior, regardless of how everything else in the call resolves. */
-  no_injection_attempt: boolean;
-};
-
 /** Tally: independent FAILED checks toward the freeze/escalate thresholds. AMBIGUOUS/REFUSED
  *  challenges (surfaced as FLAG knowledge cards whose facts.result isn't PASS/FAIL) count
  *  0.5; pressure and identity-switch cards count 0 (behavior, not proof; identity switch
@@ -200,7 +176,7 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
   // request; RuleContext carried such a field once and nothing ever read it -- removed).
   const exposureFail = !mutant?.ignore_exposure && exposureEv?.status === 'FAIL';
 
-  const assurance: AssuranceChecklistExt = {
+  const assurance: AssuranceChecklist = {
     identity_claimed: identityEv !== undefined,
     sso_pass_current: ssoEv?.status === 'PASS',
     oob_confirmed_current: oobEv?.status === 'PASS',

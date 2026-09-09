@@ -320,6 +320,15 @@ export interface AssuranceChecklist {
   challenge_requirement_met: boolean;
   no_identity_switch: boolean;
   not_new_beneficiary: boolean;
+  // Ruling A (2026-09-09, red team item 1): at least one knowledge/relational challenge
+  // must have graded PASS, independent of (and in addition to) challenge_requirement_met
+  // -- so the amendment carve-out's floor-of-1 `need` (rules.ts) can never be the ONLY
+  // thing standing between a zero-challenge call and STAGE.
+  at_least_one_challenge_passed: boolean;
+  // Ruling B (2026-09-09, red team item 5): false for the rest of the call once any
+  // injection-lexicon hit has been seen -- makes STAGE permanently unreachable via row 11
+  // for a call that has shown this behavior, regardless of how everything else resolves.
+  no_injection_attempt: boolean;
 }
 
 export interface EngineOutput {

@@ -8,20 +8,9 @@ import { decide, RULES_DOC } from '../src/rules';
 import type { DecideResult, RuleContext, RuleMutant } from '../src/rules';
 import { phrasingGoal, requiredActions } from '../src/fsm';
 import { MERIDIAN } from '../src/seed/meridian';
-import type { AssuranceChecklist, Evidence, EvidenceKind, EvidenceStatus } from '../src/types';
+import type { Evidence, EvidenceKind, EvidenceStatus } from '../src/types';
 
 const SEED = MERIDIAN; // high_value_usd: 50_000
-
-/** Ruling A/B (2026-09-09): `decide()`'s actual `assurance` object always carries
- *  `at_least_one_challenge_passed` and `no_injection_attempt` too, but `DecideResult`'s
- *  declared type stays exactly `AssuranceChecklist` (types.ts is a frozen cross-package
- *  contract shared verbatim with server/web -- see rules.ts's own comment on
- *  AssuranceChecklistExt). This local cast is how the tests below reach into the two
- *  extra keys without widening that shared type. */
-type AssuranceChecklistExt = AssuranceChecklist & { at_least_one_challenge_passed: boolean; no_injection_attempt: boolean };
-function assuranceExt(r: DecideResult): AssuranceChecklistExt {
-  return r.assurance as AssuranceChecklistExt;
-}
 
 function ev(id: string, kind: EvidenceKind, status: EvidenceStatus, extra?: Partial<Evidence>): Evidence {
   return {
@@ -267,7 +256,7 @@ describe('decide -- founder rulings 2026-09-09', () => {
     const r = decide(stageEvidence(), SEED, STAGE_CTX); // amendment_only true, context PASS, 0 challenges passed
     expect(r.verdict).not.toBe('STAGE');
     expect(r.rule_hit).toBe(4);
-    expect(assuranceExt(r).at_least_one_challenge_passed).toBe(false);
+    expect(r.assurance.at_least_one_challenge_passed).toBe(false);
   });
 
   it('ruling A: amendment carve-out with exactly one graded PASS reaches STAGE', () => {
@@ -275,7 +264,7 @@ describe('decide -- founder rulings 2026-09-09', () => {
     const r = decide(evidence, SEED, STAGE_CTX);
     expect(r.verdict).toBe('STAGE');
     expect(r.rule_hit).toBe(11);
-    expect(assuranceExt(r).at_least_one_challenge_passed).toBe(true);
+    expect(r.assurance.at_least_one_challenge_passed).toBe(true);
   });
 
   // Ruling B: an injection-lexicon hit adds 1.0 to the tally (same weight as a failed
@@ -289,14 +278,14 @@ describe('decide -- founder rulings 2026-09-09', () => {
     ];
     const r = decide(evidence, SEED, STAGE_CTX);
     expect(r.failure_tally).toBeGreaterThanOrEqual(1);
-    expect(assuranceExt(r).no_injection_attempt).toBe(false);
+    expect(r.assurance.no_injection_attempt).toBe(false);
     expect(r.verdict).not.toBe('STAGE');
   });
 
   it('ruling B: with no injection_marker card, no_injection_attempt reads true', () => {
     const evidence = [...stageEvidence(), ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } })];
     const r = decide(evidence, SEED, STAGE_CTX);
-    expect(assuranceExt(r).no_injection_attempt).toBe(true);
+    expect(r.assurance.no_injection_attempt).toBe(true);
   });
 
   // Ruling C: row 12's guard was `challenges_issued < max_challenges` alone, so the instant
@@ -430,6 +419,8 @@ describe('phrasingGoal (fsm.ts) -- CONSISTENCY_CHECK sub-branches', () => {
         challenge_requirement_met: true,
         no_identity_switch: true,
         not_new_beneficiary: true,
+        at_least_one_challenge_passed: true,
+        no_injection_attempt: true,
       },
       invariants_ok: true,
       rule_hit,
