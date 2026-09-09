@@ -1,8 +1,23 @@
 name: ci
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.claude/**'
+      - 'scripts/critique/reports/**'
+      - 'scripts/rehearse/reports/**'
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.claude/**'
+      - 'scripts/critique/reports/**'
+      - 'scripts/rehearse/reports/**'
 jobs:
   test:
     runs-on: ubuntu-latest
