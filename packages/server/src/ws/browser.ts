@@ -317,6 +317,18 @@ function handleCallSocket(
 
   const seed = deps.seed ?? MERIDIAN;
   const call = deps.buildCallContext ? deps.buildCallContext(session_id) : defaultCallContext(session_id, deps.caps);
+  // Fix (2026-09-09, PROVEN live-call regression): records what this call's simulated
+  // telemetry actually resolved to -- `persona` is whatever caps.ts recorded at mint time
+  // (personaFor(), the same lookup defaultCallContext itself makes), `origin_kind`/
+  // `origin_geo` are this call's own CallContext, whichever path built it. All three are
+  // synthetic demo telemetry (BRIEF: every identity/system here is synthetic), safe to log
+  // in full -- this is what lets a founder (or a rehearsal report) see, after the fact,
+  // whether a live call's telemetry actually matched the persona it was minted with.
+  recordServerEvent(deps.diagnostics, session_id, deps.now(), 'call_context', {
+    persona: personaFor(deps.caps, session_id),
+    origin_kind: call.origin_kind,
+    origin_geo: call.origin_geo,
+  });
 
   let aai: AaiSocket;
   recordServerEvent(deps.diagnostics, session_id, deps.now(), 'aai_connect_start', {});

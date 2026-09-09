@@ -32,7 +32,17 @@ function baseResult(overrides: Partial<RunResult> = {}): RunResult {
       { speaker: 'agent', text: 'confirming', t_ms: 1500 },
     ],
     state_history: [{ t_ms: 250, state: 'INTAKE', verdict: 'PENDING', agent_status: 'LISTENING' }],
-    diagnostics: { ok: true, event_kind_counts: { evaluate: 3 }, tool_events: [], evaluate_events: [], deployed_commit: null, ended_at_ms: 42000, end_reason: 'caller_ended' },
+    diagnostics: {
+      ok: true,
+      event_kind_counts: { evaluate: 3 },
+      tool_events: [],
+      evaluate_events: [],
+      deployed_commit: null,
+      ended_at_ms: 42000,
+      end_reason: 'caller_ended',
+      session_minted_event: null,
+      call_context_event: null,
+    },
     warnings: [],
     exit_code: 0,
     minutes_estimate: 0.7,
@@ -82,6 +92,49 @@ describe('report rendering', () => {
   it('renders diagnostics-unavailable gracefully', () => {
     const md = renderReport(baseResult({ diagnostics: { ok: false, error: 'not_found' } }));
     expect(md).toContain('Diagnostics unavailable: not_found');
+  });
+
+  it('shows what the server actually resolved a mint to, near the top of the flight-recorder section (PROVEN live-call regression fix, 2026-09-09)', () => {
+    const md = renderReport(
+      baseResult({
+        diagnostics: {
+          ok: true,
+          event_kind_counts: { evaluate: 3, session_minted: 1, call_context: 1 },
+          tool_events: [],
+          evaluate_events: [],
+          deployed_commit: null,
+          ended_at_ms: 42000,
+          end_reason: 'caller_ended',
+          session_minted_event: {
+            t_ms: -12,
+            kind: 'session_minted',
+            detail: { persona_resolved: 'legitimate', persona_input_present: true, body_bytes: 27 },
+          },
+          call_context_event: {
+            t_ms: 5,
+            kind: 'call_context',
+            detail: { persona: 'legitimate', origin_kind: 'registered_device', origin_geo: 'Austin, TX' },
+          },
+        },
+      }),
+    );
+    expect(md).toContain('Session minted:');
+    expect(md).toContain('"persona_resolved":"legitimate"');
+    expect(md).toContain('"persona_input_present":true');
+    expect(md).toContain('Call context:');
+    expect(md).toContain('"origin_kind":"registered_device"');
+    const flightIdx = md.indexOf('## Flight recorder bundle');
+    const mintedIdx = md.indexOf('Session minted:');
+    const countsIdx = md.indexOf('**Event kind counts**');
+    expect(flightIdx).toBeGreaterThanOrEqual(0);
+    expect(mintedIdx).toBeGreaterThan(flightIdx);
+    expect(mintedIdx).toBeLessThan(countsIdx);
+  });
+
+  it('shows "not recorded" when a bundle has no session_minted/call_context event (e.g. an older deploy)', () => {
+    const md = renderReport(baseResult());
+    expect(md).toContain('Session minted: not recorded');
+    expect(md).toContain('Call context: not recorded');
   });
 
   it('one-line summary includes pass/fail, verdicts, and the report path', () => {
