@@ -103,5 +103,6 @@ export function evaluate(input: EngineInput, overrides?: Record<string, Evidence
     challenges: { issued, results: resultsForSelect },
     assurance: decideResult.assurance,
     invariants_ok: decideResult.invariants_ok,
+    rule_hit: decideResult.rule_hit,
   };
 }

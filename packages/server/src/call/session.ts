@@ -86,6 +86,46 @@ const IDENTITY_ARG_TOOLS = new Set<ToolName>(['get_request_history', 'check_sso_
  *  not the model's whim (LAW 3). */
 const LOOKUP_TOOLS: ToolName[] = ['get_request_history', 'check_sso_context', 'verify_out_of_band'];
 
+/** Founder ruling (flight recorder, 2026-09-09): the small, non-evidence detail an
+ *  `evaluate` diagnostic event carries on a transition -- enough to answer "which
+ *  assurance item was false / which rule fired / which evidence card flagged" from the
+ *  bundle alone, without quoting any transcript text or evidence facts/quotes (LAW 4: this
+ *  stays diagnostics, never evidence). `rule_hit` is the engine's own decide() table row
+ *  (1-13; passed through EngineOutput unchanged -- see types.ts), read as 0 only for an
+ *  EngineOutput that predates that field (defensive; a real evaluate() call always sets it).
+ */
+function evaluateDiagDetail(output: EngineOutput): {
+  verdict: Verdict;
+  state: EngineOutput['state'];
+  rule_row: number;
+  assurance: EngineOutput['assurance'];
+  evidence: { id: string; kind: string; status: string }[];
+  challenges: { issued: number; passed: number; failed: number };
+  readback: Record<string, boolean>;
+} {
+  const readback: Record<string, boolean> = {};
+  for (const card of output.evidence) {
+    if (card.kind === 'readback_result' && typeof card.facts.field === 'string') {
+      readback[card.facts.field] = Boolean(card.facts.confirmed);
+    }
+  }
+  let passed = 0;
+  let failed = 0;
+  for (const result of Object.values(output.challenges.results)) {
+    if (result === 'PASS') passed++;
+    else if (result === 'FAIL') failed++;
+  }
+  return {
+    verdict: output.verdict,
+    state: output.state,
+    rule_row: output.rule_hit ?? 0,
+    assurance: output.assurance,
+    evidence: output.evidence.map((card) => ({ id: card.id, kind: card.kind, status: card.status })),
+    challenges: { issued: output.challenges.issued.length, passed, failed },
+    readback,
+  };
+}
+
 export class CallSession {
   readonly logs: { conversation: Utterance[]; tools: ToolLogEntry[]; actions: AgentAction[] } = {
     conversation: [],
@@ -754,9 +794,16 @@ export class CallSession {
     // record a fresh `evaluate` event when the verdict, state, goal code, or which rules
     // fired (`reasons`) actually changed from the last one RECORDED (the first is always
     // kept) -- this changes only whether a diag event is written, never what tick() itself
-    // computes (`output`/`this.last` are unaffected). The detail payload is unchanged
-    // (verdict + state only -- never the full EngineOutput, which would duplicate
-    // Evidence/reasons into a channel that is explicitly NOT evidence).
+    // computes (`output`/`this.last` are unaffected).
+    //
+    // Detail payload (founder ruling, 2026-09-09, PROVEN gap): a bundle that only recorded
+    // {verdict, state} on a transition couldn't say WHY -- which assurance-checklist item
+    // was false, which rule row fired, or which evidence card flagged -- and it had to be
+    // reconstructed by hand twice in one week. `evaluateDiagDetail` below adds rule_hit,
+    // the assurance checklist, evidence cards trimmed to {id, kind, status} (no quotes, no
+    // facts, no transcript text -- LAW 4: this stays diagnostics, never evidence), the
+    // challenge counters, and per-field readback confirmation. Still not the full
+    // EngineOutput (ledger, goal, ChallengeSpec detail, quotes are all left out).
     const evaluateSignature = JSON.stringify({
       verdict: output.verdict,
       state: output.state,
@@ -765,7 +812,7 @@ export class CallSession {
     });
     if (evaluateSignature !== this.lastEvaluateSignature) {
       this.lastEvaluateSignature = evaluateSignature;
-      this.diag('evaluate', { verdict: output.verdict, state: output.state });
+      this.diag('evaluate', evaluateDiagDetail(output));
     }
     const goalKey = JSON.stringify(output.goal);
     if (goalKey !== this.previousGoalKey) {
