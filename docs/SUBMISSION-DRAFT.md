@@ -50,67 +50,58 @@ request, opens an incident, and leaves a hash-chained evidence export behind.
 <!-- Judging criteria per docs/BRIEF.md §1: "1. Presentation · 2. Business value ·
      3. Application of technology · 4. Originality." -->
 
-**Presentation.** Countersign is judged live and built to be understood in under three
-minutes on a stranger's machine. The screen is a split view: the live call on one
-side, evidence building card by card on the other, so a judge watches the verdict get
-earned, not asserted. A no-microphone replay mode drives the same UI through a
-recorded call end to end, so the demo needs no mic, no permissions dialog, and no live
-credits in play. A live microphone path sits next to it for anyone who wants to talk
-past it.
+**Presentation.** Countersign is judged live, understood in under three minutes on a
+stranger's machine. The screen is a split view: the call on one side, evidence
+building card by card on the other, so a judge watches the verdict get earned, not
+asserted. A no-microphone replay mode drives the same UI through a recorded call,
+needing no mic, no permissions dialog, and no live credits. A live microphone path
+sits alongside it.
 
 **Business value.** The scenario is a corporate payment desk. A caller claiming to be
 the CEO demands an urgent $1.8 million wire to an escrow account, then raises it to
-$2.1 million mid-call with no explanation, a live inconsistency Countersign catches and
-names aloud, not scripted.
+$2.1 million mid-call, a live inconsistency Countersign catches and names aloud, not
+scripted.
 <!-- source: docs/BRIEF.md §4, "Scenario B: THE INTERROGATION" -->
-This is the failure mode behind real CEO-fraud and deepfake wire losses: a human
-alone, under pressure, with no second check. PROVEN by the FBI's Internet Crime
-Complaint Center 2025 Internet Crime Report (ic3.gov): Business Email Compromise cost
-$3,046,598,558 in 2025, and $30,256,592 of that was lost to BEC scams the report
-itself flags as AI-involved, specifically naming voice cloning as one of the tactics.
+This mirrors CEO-fraud and deepfake wire losses: a human alone under
+pressure, no second check. PROVEN by the FBI's 2025 Internet Crime Report (ic3.gov):
+Business Email Compromise cost $3,046,598,558 in 2025; $30,256,592 of that was
+AI-involved BEC, including voice cloning.
 <!-- source: FBI IC3, "2025 IC3 Annual Report," https://www.ic3.gov/AnnualReport/Reports/2025_IC3Report.pdf,
      page 26 (three-year BEC loss table) and page 40 ("AI References by Complaint Loss"
      table and surrounding text); fetched and figures independently confirmed
      2026-09-04 -->
-Countersign's rule is structural, not
-optional: "a call can request a privileged action, it can never authorize one."
+Countersign's rule is structural: "a call can
+request a privileged action, it can never authorize one."
 <!-- source: docs/BRIEF.md §16, ratified 2026-09-01 language -->
-A verified request still needs an independent second human before money moves, and a
+A verified request needs an independent second human before money moves; a
 failed one freezes the rail and opens an incident.
 
 **Application of technology.** Countersign uses the AssemblyAI Voice Agent API
-throughout: server-minted, single-use tokens, so the browser never touches the API key
-or socket directly; 24 kHz PCM16 mic audio streamed through an AudioWorklet; a
-session.update sent at connect and again on every goal change, so voice, tools, and
-keyterms shift with the conversation; keyterms that grow live with every name and
-dollar amount the caller says; real turn-detection barge-in, where an interruption is
-caught and playback flushes client-side within a frame; and tool results returned on
-AssemblyAI's exact reply.done timing, never early, never late. This is not a chatbot
-wrapped around a microphone; it is built around the realtime primitives themselves.
+throughout: server-minted, single-use tokens so the browser never touches the API
+key; 24 kHz PCM16 mic audio streamed through an AudioWorklet; a session.update sent
+at connect and on every goal change; growing keyterms per name and dollar amount
+said; real turn-detection barge-in that catches an interruption and flushes playback
+within a frame; and tool results returned on AssemblyAI's exact reply.done timing,
+never early, never late. Built around realtime primitives, not a chatbot wrapped
+around a microphone.
 
-**Originality.** Countersign is not a deepfake detector. That claim is technically
-indefensible on any voice stack, and it never makes it. Instead it verifies
-behaviorally: what the caller knows, whether their story stays consistent across
-turns, and what independent, out-of-band checks confirm, a layer that holds when a
-synthetic voice is perfect. A finite-state policy engine, not the language model, owns
-every verdict. The engine's positive ceiling is "stage for second approval," never
-"release": that verdict and that tool do not exist in the system. This pattern, a
-policy engine rather than the model owning the verdict, is published prior art, not
-our invention: PROVEN by the APort Vault CTF (a security capture-the-flag contest),
-which measured social engineering succeeding 74.6 percent of the time against
-model-only defenses versus 0 percent against a policy engine, across 879 attempts.
-What's new here is the assembled application: live conversational interrogation of an
-inbound caller, feeding a deterministic engine whose best possible outcome is staging
-for an independent second human.
+**Originality.** Countersign is not a deepfake detector, an indefensible claim it never
+makes. Instead it verifies behaviorally: what the caller knows, whether their story
+stays consistent across turns, and what independent, out-of-band checks confirm, a
+layer that holds when a synthetic voice is perfect. A finite-state policy engine, not
+the language model, owns every verdict. Its positive ceiling is "stage for second
+approval," never "release": neither exists in the system. This is published prior art,
+not ours: PROVEN by the APort Vault CTF (a security contest), where social
+engineering succeeded 74.6 percent against model-only defenses versus 0 percent
+against a policy engine, across 879 attempts. What's new is the application: live
+interrogation feeding an engine capped at staging for a second human.
 <!-- source: README.md "How a verdict is decided": STAGE ceiling, no RELEASE verdict -->
 <!-- source: docs/BRIEF.md §13 "Honesty constraint": APort Vault CTF figures cited verbatim -->
-<!-- word count, all four paragraphs combined: 524 (was 399), verified 2026-09-04 by a
-     script that strips this heading and every HTML comment before running `wc -w`;
-     see the same date's added prior-art and business-value sentences. This is over
-     this section's original 400-word target, and a founder call is needed on whether
-     the lablab.ai form enforces that as a hard limit (UNKNOWN to this session) or it
-     was self-imposed; trim before submitting if the form truncates or rejects longer
-     text -->
+<!-- word count, all four paragraphs combined: 400 (was 524), verified 2026-09-09 by a
+     script that strips this heading and every HTML comment before running `wc -w`.
+     Trimmed to meet this section's 400-word target per founder ruling 2026-09-09:
+     hedging, repetition, and adjectives cut first; every PROVEN claim (FBI IC3 figures,
+     APort Vault CTF figures) kept intact with its exact numbers. -->
 
 ---
 

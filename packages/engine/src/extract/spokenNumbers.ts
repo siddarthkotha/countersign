@@ -31,12 +31,19 @@ function tokenize(text: string): Token[] {
 
 /** Walks a run of consecutive number-words starting at token index `i` using a standard
  *  total/current accumulator: ones and tens add into `current`; "hundred" scales `current`;
- *  "thousand"/"million" fold `current` (or 1, if bare) into `total` at that scale. */
-function parseIntegerRun(words: string[], i: number): { value: number; end: number; hasScale: boolean } | null {
+ *  "thousand"/"million" fold `current` (or 1, if bare) into `total` at that scale.
+ *  `bareLeadingScale` flags a run that is nothing but a single scale word (e.g. the
+ *  "million" in "thanks a million") with no numeral or number word feeding it -- the
+ *  caller decides whether that alone is enough to count as an amount. */
+function parseIntegerRun(
+  words: string[],
+  i: number,
+): { value: number; end: number; hasScale: boolean; bareLeadingScale: boolean } | null {
   let total = 0;
   let current = 0;
   let count = 0;
   let hasScale = false;
+  let bareLeadingScale = false;
   let j = i;
   while (j < words.length) {
     const w = words[j]!;
@@ -53,12 +60,14 @@ function parseIntegerRun(words: string[], i: number): { value: number; end: numb
       continue;
     }
     if (w === 'hundred') {
+      if (count === 0 && current === 0) bareLeadingScale = true;
       current = (current === 0 ? 1 : current) * 100;
       j++;
       count++;
       continue;
     }
     if (w === 'thousand' || w === 'million') {
+      if (count === 0 && current === 0) bareLeadingScale = true;
       total += (current === 0 ? 1 : current) * SCALES[w]!;
       current = 0;
       hasScale = true;
@@ -69,7 +78,9 @@ function parseIntegerRun(words: string[], i: number): { value: number; end: numb
     break;
   }
   if (count === 0) return null;
-  return { value: total + current, end: j, hasScale };
+  // Only a run that is the scale word ALONE (nothing else consumed) is "bare" in the
+  // sense that matters: "thousand five hundred" still has real numerals feeding it.
+  return { value: total + current, end: j, hasScale, bareLeadingScale: bareLeadingScale && count === 1 };
 }
 
 export interface SpokenAmountHit {
@@ -80,7 +91,9 @@ export interface SpokenAmountHit {
 
 /** Scans `text` word-by-word for spoken money amounts. A run is accepted only when it
  *  contains a scale word (thousand/million) — including one introduced by a "point"
- *  fraction, e.g. "two point one million" — or is immediately followed by "dollars". */
+ *  fraction, e.g. "two point one million" — or is immediately followed by "dollars".
+ *  A bare scale word with no numeral before it ("thanks a million") is rejected unless
+ *  a "dollars"/"dollar" cue immediately follows it (e.g. "a million dollars"). */
 export function extractSpokenAmounts(text: string): SpokenAmountHit[] {
   const tokens = tokenize(text);
   const words = tokens.map((t) => t.word);
@@ -92,6 +105,14 @@ export function extractSpokenAmounts(text: string): SpokenAmountHit[] {
       i++;
       continue;
     }
+    // A bare scale word with nothing before it ("thanks a million") is not an amount --
+    // only accept it when a "dollars"/"dollar" cue immediately follows, e.g. "a million
+    // dollars". An explicit numeral before the scale word ("one million") is unaffected.
+    if (run.bareLeadingScale && words[run.end] !== 'dollars' && words[run.end] !== 'dollar') {
+      i++;
+      continue;
+    }
+
     let value = run.value;
     let hasScale = run.hasScale;
     let end = run.end;

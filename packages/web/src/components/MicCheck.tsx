@@ -35,10 +35,10 @@ type Line = { kind: 'checking' | 'passed' | 'failed'; text: string };
 export const MIC_CHECK_TIMEOUT_MS = 8000;
 
 const FAILURE_SENTENCES: Record<Exclude<MicCheckReason, 'passed' | 'timeout'>, string> = {
-  'not-allowed': "FAILED — Microphone blocked. Allow it in the browser's address bar, then check again.",
-  'not-found': 'FAILED — No microphone found. The recorded attack works without one.',
-  'not-readable': 'FAILED — Microphone is in use by another app. Close it, then check again.',
-  error: 'FAILED — Could not access the microphone. Use "Watch a recorded attack" instead.',
+  'not-allowed': "FAILED: Microphone blocked. Allow it in the browser's address bar, then check again.",
+  'not-found': 'FAILED: No microphone found. The recorded attack works without one.',
+  'not-readable': 'FAILED: Microphone is in use by another app. Close it, then check again.',
+  error: 'FAILED: Could not access the microphone. Use "Watch a recorded attack" instead.',
 };
 
 /** Task W6, fix round 1: the wording is derived from the actual timeout duration in effect
@@ -46,7 +46,7 @@ const FAILURE_SENTENCES: Record<Exclude<MicCheckReason, 'passed' | 'timeout'>, s
  *  hand-typed "8 seconds" -- the two can never drift apart. */
 function timeoutSentence(effectiveTimeoutMs: number): string {
   const seconds = Math.round(effectiveTimeoutMs / 1000);
-  return `FAILED — The browser did not respond within ${seconds} seconds. Check again, or use "Watch a recorded attack".`;
+  return `FAILED: The browser did not respond within ${seconds} seconds. Check again, or use "Watch a recorded attack".`;
 }
 
 class MicCheckTimeoutError extends Error {
@@ -104,7 +104,7 @@ export default function MicCheck({ onResult, timeoutMs }: MicCheckProps) {
   const effectiveTimeoutMs = timeoutMs ?? MIC_CHECK_TIMEOUT_MS;
 
   async function check() {
-    setLine({ kind: 'checking', text: 'CHECKING — asking your browser for the microphone.' });
+    setLine({ kind: 'checking', text: 'CHECKING: asking your browser for the microphone.' });
 
     await peekPermissionState();
 
@@ -121,7 +121,7 @@ export default function MicCheck({ onResult, timeoutMs }: MicCheckProps) {
       tracks.forEach((track) => track.stop());
       setLine({
         kind: 'passed',
-        text: deviceLabel ? `PASSED — Microphone ready (${deviceLabel}).` : 'PASSED — Microphone ready.'
+        text: deviceLabel ? `PASSED: Microphone ready (${deviceLabel}).` : 'PASSED: Microphone ready.'
       });
       // Task W9 (flight recorder): mic check result + device label, if the browser gave one --
       // recorded here (not left to Landing.tsx) so it captures every MicCheck use, on any

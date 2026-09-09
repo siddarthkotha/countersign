@@ -52,6 +52,10 @@ export default function Replay() {
   const [speed, setSpeed] = useState<Speed>(1);
   const [screenState, setScreenState] = useState<ScreenState | null>(null);
   const [ended, setEnded] = useState<string | null>(null);
+  // Founder ruling 10 (2026-09-09): whether a replay stream is actively being consumed right
+  // now. Drives the Play/Pause control below -- always a plain word, never a colour, per the
+  // founder's colour-blind accessibility rule.
+  const [isPlaying, setIsPlaying] = useState(false);
   const clientRef = useRef<CallClient | null>(null);
 
   useEffect(() => {
@@ -84,11 +88,50 @@ export default function Replay() {
     clientRef.current?.close();
     setScreenState(null);
     setEnded(null);
-    const client = connectSocketOnly(`/ws/replay/${encodeURIComponent(file)}?speed=${atSpeed}`);
-    client.onState((s) => setScreenState(s));
-    client.onEnded((reason) => setEnded(reason));
-    clientRef.current = client;
-    setSelected(file);
+    try {
+      const client = connectSocketOnly(`/ws/replay/${encodeURIComponent(file)}?speed=${atSpeed}`);
+      client.onState((s) => setScreenState(s));
+      client.onEnded((reason) => {
+        setEnded(reason);
+        setIsPlaying(false);
+      });
+      clientRef.current = client;
+      setSelected(file);
+      setIsPlaying(true);
+    } catch {
+      // Founder ruling 10 (2026-09-09): if the browser refuses the automatic start (or the
+      // connection itself fails), the recording still ends up selected -- so the judge sees
+      // what's queued up -- and the Play control below lets them start it with one click.
+      // Never surfaced as an error, same graceful-fallback rule as the mic check.
+      clientRef.current = null;
+      setSelected(file);
+      setIsPlaying(false);
+    }
+  }
+
+  // Founder ruling 10 (2026-09-09): a judge with three minutes should never have to hunt for
+  // a play button. The instant the recording list is ready, with nothing chosen yet, the
+  // flagship attack scenario (the corpus's own `recommended` flag, falling back to the first
+  // recording if the server ever omits it) auto-selects and starts playing.
+  useEffect(() => {
+    if (listState !== 'ready' || selected !== null || recordings.length === 0) return;
+    const flagship = recordings.find((r) => r.recommended) ?? recordings[0]!;
+    startReplay(flagship.file, speed);
+    // `selected` is in the dependency list below so this effect re-checks its own guard
+    // whenever a recording gets chosen (auto or manual) -- but the guard above means it only
+    // ever actually starts a replay once, the moment the list first becomes ready with
+    // nothing chosen yet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listState, recordings, selected]);
+
+  function pausePlayback() {
+    clientRef.current?.close();
+    clientRef.current = null;
+    setIsPlaying(false);
+  }
+
+  function resumePlayback() {
+    if (selected) startReplay(selected, speed);
   }
 
   return (
@@ -129,7 +172,7 @@ export default function Replay() {
             {listState === 'loading'
               ? 'Loading recordings…'
               : listState === 'error'
-                ? 'Could not load recordings — reload the page to try again'
+                ? 'Could not load recordings. Reload the page to try again'
                 : 'Choose a recording'}
           </option>
           {/* Judge review finding (2026-09-04), defect 2: option text is now the recording's
@@ -160,6 +203,16 @@ export default function Replay() {
             </label>
           ))}
         </fieldset>
+
+        {/* Founder ruling 10 (2026-09-09): one obvious, plain-worded control -- never a
+            colour-only state (the founder is colour blind) -- for the auto-started playback.
+            Only shown once a recording is selected (auto or manual); "Play" also covers the
+            fallback case where the automatic start was blocked by the browser. */}
+        {selected && (
+          <button type="button" onClick={isPlaying ? pausePlayback : resumePlayback} aria-pressed={isPlaying}>
+            {isPlaying ? 'Pause' : 'Play'}
+          </button>
+        )}
 
         {ended && (
           <p role="status" className="replay-status">

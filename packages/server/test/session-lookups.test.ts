@@ -121,7 +121,10 @@ describe('CallSession -- server-initiated lookup runner (deadlock bug fix)', () 
 // below. It's built (and verified against the real engine, see the session's own
 // diagnostics while developing this file) to land in a NON-terminal state -- CONSISTENCY_CHECK,
 // rule_hit 5, "a critical field is claimed but not yet confirmed" -- after the identity is
-// claimed and the counsel-of-record challenge is answered correctly, at request_version 1.
+// claimed and her own dana_payment_purpose knowledge challenge is answered correctly (2026-
+// 09-09 founder ruling: Hartwell facts are scoped to robert-miller only, so the real engine
+// never asks Dana about counsel of record -- it asks about her own Meridian Supply
+// payment instead), at request_version 1.
 // CONSISTENCY_CHECK offers the same three lookup tools EVIDENCE does (fsm.ts's own
 // `allowedTools`), so the auto-runner fires there too, and -- unlike every corpus scenario
 // on file, which all resolve to a terminal verdict (and permanently SEAL) the instant their
@@ -144,13 +147,22 @@ const C1 = {
   text: 'This is Dana Whitfield, corporate treasury. I need to wire $84,500 to Meridian Supply, account ending 4471.',
   t_ms: 1000,
 };
+// Founder ruling 2026-09-09 (docs/PARKED-CHALLENGE-SCOPING.md, Option A): every Hartwell
+// knowledge fact (counsel of record included) is now scoped to robert-miller and
+// selectSeedFact refuses to hand one to any other caller, failing safe. So the real engine
+// no longer asks Dana Whitfield about Hartwell's counsel of record at all -- it asks one of
+// her OWN seeded facts instead (verified live via CallSession: for this exact session id
+// and conversation prefix, selectChallenge deterministically picks `dana_payment_purpose`).
+// The agent's line and the caller's answer below were updated to match that real,
+// in-scope question; the old hardcoded pair encoded the very false-positive bug this
+// scoping fix exists to close (an unrelated caller being quizzed on someone else's deal).
 const A1_CHALLENGE = {
   id: 'a1',
   speaker: 'agent' as const,
-  text: 'Which law firm is our counsel of record on the Hartwell deal?',
+  text: 'What is this payment to Meridian Supply for?',
   t_ms: 1500,
 };
-const C2_ANSWER = { id: 'c2', speaker: 'caller' as const, text: 'Calder and Finch.', t_ms: 2000 };
+const C2_ANSWER = { id: 'c2', speaker: 'caller' as const, text: "It's a quarterly parts restock.", t_ms: 2000 };
 const C3_AMOUNT_CHANGE = { id: 'c3', speaker: 'caller' as const, text: 'Make it $91,000 instead.', t_ms: 3000 };
 
 describe('CallSession -- I3 (stale evidence is never treated as current) via the lookup runner', () => {
@@ -161,10 +173,12 @@ describe('CallSession -- I3 (stale evidence is never treated as current) via the
     const session = newSession(clock, CALL_DANA, aai, sent);
     session.start();
 
-    // Identity + request claimed, then the counsel-of-record challenge is issued and
-    // answered CORRECTLY -- this is what clears row 4 (challenge required) and lands the
-    // call on row 5 (CONSISTENCY_CHECK: critical fields not yet read back/confirmed), still
-    // at request_version 1.
+    // Identity + request claimed, then Dana's own dana_payment_purpose challenge is issued
+    // and answered CORRECTLY (founder ruling 2026-09-09: Hartwell facts are scoped to
+    // robert-miller only, so this is the real, in-scope question the engine now asks her)
+    // -- this is what clears row 4 (challenge required) and lands the call on row 5
+    // (CONSISTENCY_CHECK: critical fields not yet read back/confirmed), still at
+    // request_version 1.
     driveConversationLive(session, aai, clock, [C1, A1_CHALLENGE, C2_ANSWER]);
     expect(session.last?.state).toBe('CONSISTENCY_CHECK');
     expect(session.last?.request_version).toBe(1);

@@ -1,0 +1,97 @@
+{
+  "name": "structuring-two-wires",
+  "title": "Two under-threshold wires, same call, same vendor -- anti-structuring",
+  "description": "Dana asks for two separate wires to Meridian Supply in the same call, $42,250 and $42,300 -- each individually under the $50,000 high-value threshold, together $84,550 over it. Both get confirmed by ordinary readback (this is not about an unresolved contradiction -- the SECOND amount is affirmed just like the first) and the vendor is already known, not a new-beneficiary case. Caller-only lines verbatim from packages/engine/corpus/structuring-two-wires.json (its c1, c3, c5, c7, c8, c10, c11), turn c8 (harness-added buffer) giving room for one further live-agent follow-up before a verdict. EXPECTED VERDICT: ESCALATE, at minimum. THE ENGINE ALREADY HAS THIS RULE -- this is not a documented gap. packages/engine/src/rules.ts row 9 (exposure_check_result, built by compose.ts's buildExposureEvidence) sums every DISTINCT amount stated across the call and FAILs once the running total clears the high-value threshold even though the CURRENT single request reads under it -- exactly the anti-structuring guard this scenario exercises, and packages/engine/corpus/structuring-two-wires.json already proves it fires (verdict ESCALATE) against a hand-fed replay. This live scenario runs the same shape against the real stack instead of a replay. One caveat, disclosed here rather than assumed: the corpus fixture's own expected reasons also carry CONTEXT_FAILURE (its hand-authored tool results deliberately fail the context check too), which is an artifact of that specific fixture, not a second live finding -- a live call minted with demo_persona 'legitimate' (registered_device, Austin, TX, matching Dana's real seed record) should pass SSO/out-of-band/context cleanly, so EXPOSURE_LIMIT is expected to be the live run's sole reason.",
+  "source": "packages/engine/corpus/structuring-two-wires.json (caller turns c1, c3, c5, c7, c8, c10, c11, read-only source, verbatim) + packages/engine/src/rules.ts row 9 (the already-implemented anti-structuring rule)",
+  "truth": {
+    "identity": "Dana Whitfield",
+    "beneficiary": "Meridian Supply",
+    "amount_usd": null,
+    "account_last4": "4471",
+    "counsel": null,
+    "escrow_institution": null,
+    "approver": null,
+    "deadline": null
+  },
+  "persona": "You are Dana Whitfield, corporate treasury at Meridian Dynamics. You have TWO separate wires to send in this one call, both to Meridian Supply, account ending 4471: $42,250 first (approved in yesterday's close meeting), then, once that one is confirmed, a second one for $42,300 to the same account and vendor. You are not trying to hide anything -- if asked, you say plainly there are two wires this call, not one. Confirm any readback that matches what you actually said for each wire; firmly correct anything that doesn't. If asked for something you were never given (an id, a code, a PIN), say plainly you do not have that and repeat your name. Keep each line under 30 words.",
+  "turns": [
+    {
+      "id": "c1",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $42,250, account ending 4471 — approved in yesterday's close meeting.",
+      "pause_ms": 500
+    },
+    {
+      "id": "c2",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": []
+      }
+    },
+    {
+      "id": "c3",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": []
+      }
+    },
+    {
+      "id": "c4",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c5",
+      "text": "Actually, there's a second one too — $42,300 to the same account, same vendor.",
+      "pause_ms": 400
+    },
+    {
+      "id": "c6",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": []
+      }
+    },
+    {
+      "id": "c7",
+      "text": "Meridian Supply, that's right.",
+      "pause_ms": 400
+    },
+    {
+      "id": "c8",
+      "text": "Yes, that's right. Dana Whitfield.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
+    }
+  ],
+  "expected": {
+    "verdict": "ESCALATE",
+    "max_wall_ms": 200000
+  },
+  "demo_persona": "legitimate",
+  "max_wall_ms": 260000
+}

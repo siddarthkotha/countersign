@@ -120,8 +120,14 @@ describe('reconstructIssued -- recorded spec, founder-morning item 4', () => {
   });
 
   it('absent spec keeps the existing recomputation behavior (unchanged)', () => {
+    // Identity claim added (founder ruling 2026-09-09, scoping fix): every Hartwell
+    // SEED_FACT entry is now scoped to robert-miller, so recomputation needs a claimed
+    // identity to find anything at all -- otherwise every entry is correctly out of scope
+    // and selectChallenge legitimately returns null, which would turn this into a drift
+    // placeholder instead of exercising "recomputation picked a real SEED_FACT".
+    const identityClaim = claim('c-id', 'identity', 'robert-miller', 0, 'Robert Miller');
     const actions: AgentAction[] = [{ id: 'act1', kind: 'challenge_issued', t_ms: 1000, challenge_id: 'sess-v-1' }];
-    const issued = reconstructIssued([], actions, SEED, 'sess-v', []);
+    const issued = reconstructIssued([identityClaim], actions, SEED, 'sess-v', []);
     expect(issued).toHaveLength(1);
     expect(issued[0]!.kind).toBe('SEED_FACT');
     expect(issued[0]!.ask).not.toBe('');

@@ -152,6 +152,14 @@ export interface KnowledgeFact {
   // among themselves by the existing per-session fnv1a hash (selectSeedFact in
   // src/challenges.ts). Not a security property -- purely a demo-pacing knob.
   priority?: number;
+  // Fix (judge review, 2026-09-03; founder ruling 2026-09-09): which claimed identities
+  // this fact is fair to ask. A caller whose currently claimed identity is not in this list
+  // must never be asked this fact -- e.g. the six Hartwell-acquisition facts are somebody
+  // else's business to anyone who isn't Robert Miller, and asking them of an unrelated
+  // caller (a false-positive machine) is exactly the failure a judge review found. Unset or
+  // empty ⇒ askable of any caller, including one with no claimed identity yet (backwards
+  // compatible). Enforced by selectSeedFact in src/challenges.ts.
+  identity_ids?: string[];
 }
 
 export interface SeedConfig {
@@ -173,6 +181,9 @@ export interface SeedConfig {
     // rules.ts row 12 from falling through to row 13 the instant the last allowed
     // challenge is asked, before the caller has had a chance to reply.
     challenge_answer_window_ms: number;
+    approximate_jump_ratio: number; // fix-round-2: an APPROXIMATE claim's replacement value is
+    // CORRECTED only if it stays within this multiple (and its reciprocal) of the approximate
+    // value; a bigger jump is CONTRADICTED. Numeric fields only (amount_usd).
   };
   pressure_lexicon: string[]; // lower-case phrases
   out_of_scope_lexicon: string[]; // lower-case phrases

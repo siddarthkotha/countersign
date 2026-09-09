@@ -23,6 +23,13 @@ export function reportFileName(scenarioName: string, at: Date = new Date()): str
   return `${timestampForFilename(at)}-${scenarioName}.md`;
 }
 
+/** Same basename as `reportFileName` for the same `(scenarioName, at)` pair -- pass the SAME
+ *  `at` to both so a run's report and its raw diagnostics bundle land side by side under one
+ *  timestamp, per artifacts.ts's `writeRunArtifacts`. */
+export function diagnosticsFileName(scenarioName: string, at: Date = new Date()): string {
+  return `${timestampForFilename(at)}-${scenarioName}.diagnostics.json`;
+}
+
 export function oneLineSummary(r: RunResult, reportPath: string): string {
   const status = r.pass ? 'PASS' : 'FAIL';
   const wall = (r.timings.total_wall_ms / 1000).toFixed(1);

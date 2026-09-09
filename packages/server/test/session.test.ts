@@ -156,6 +156,47 @@ describe('CallSession — Scenario B (Robert Miller, fraudulent) replayed as liv
 });
 
 // ---------------------------------------------------------------------------------------
+// RT-8-export-race: a fast hang-up while `buildEvidenceExport`'s async crypto.subtle.digest
+// work is still pending. Before this fix, `runTerminalActionsIfNeeded`'s `.then` checked
+// `this.ended` and returned BEFORE storing `exp.root_hash`/emitting state -- so a caller who
+// hangs up right after the terminal tick (but before the hash finishes computing) meant the
+// root hash was silently never recorded anywhere: no `exportHash` getter exists, and no
+// diagnostics event carried it either. Containment itself (freeze/incident) is unaffected --
+// those tool results log synchronously earlier in `runTerminalActionsIfNeeded`, well before
+// `buildEvidenceExport` is even called.
+describe('CallSession — export race (RT-8-export-race)', () => {
+  it('records the computed root_hash on the diagnostics stream even when the caller hangs up while the export is still pending', async () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = new CallSession({
+      session_id: CALL_B.session_id,
+      seed: MERIDIAN,
+      call: CALL_B,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+    });
+
+    session.start();
+    driveScenarioBThroughA4(session, aai, clock);
+    expect(session.last?.verdict).toBe('FREEZE');
+
+    // Fast hang-up: the export promise (kicked off synchronously inside the terminal tick
+    // above) is still pending when `end()` runs -- exactly the race this test targets.
+    session.end('caller_ended');
+
+    await session.whenIdle();
+
+    const exportComputed = diagEvents.find((e) => e.kind === 'export_computed');
+    expect(exportComputed?.detail).toMatchObject({ root_hash: expect.any(String) });
+  });
+});
+
+// ---------------------------------------------------------------------------------------
 // Regression: 2026-09-03 later that night. THE BUG (founder-observed live call + three
 // harness runs, scripts/rehearse/reports/2026-09-03T23-04-42-, T23-32-42- and T23-39-25-
 // scenario-a-dana-legitimate.md): the legitimate-caller scenario never reached STAGE -- it

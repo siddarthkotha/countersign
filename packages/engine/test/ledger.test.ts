@@ -61,6 +61,40 @@ describe('buildLedger', () => {
     expect(request_version).toBe(2);
   });
 
+  it('4b. approximate then more than double the value -> CONTRADICTED (red team item 2)', () => {
+    const conversation = [
+      u('u1', "It's about fifty thousand-ish.", 0),
+      u('u2', 'The wire will be two hundred forty thousand.', 30_000),
+    ];
+    const { claims, request_version } = buildLedger(conversation, [], MERIDIAN);
+    const amountClaims = claims.filter((c) => c.field === 'amount_usd');
+    expect(amountClaims).toHaveLength(2);
+    expect(amountClaims[0]).toMatchObject({ kind: 'APPROXIMATE', value: 50_000 });
+    expect(amountClaims[1]).toMatchObject({
+      kind: 'CONTRADICTED',
+      value: 240_000,
+      supersedes: amountClaims[0]!.id,
+    });
+    expect(request_version).toBe(2);
+  });
+
+  it('4c. approximate then a value within the jump ratio -> stays CORRECTED', () => {
+    const conversation = [
+      u('u1', 'It is about fifty thousand.', 0),
+      u('u2', 'The wire will be fifty two thousand four hundred.', 30_000),
+    ];
+    const { claims, request_version } = buildLedger(conversation, [], MERIDIAN);
+    const amountClaims = claims.filter((c) => c.field === 'amount_usd');
+    expect(amountClaims).toHaveLength(2);
+    expect(amountClaims[0]).toMatchObject({ kind: 'APPROXIMATE', value: 50_000 });
+    expect(amountClaims[1]).toMatchObject({
+      kind: 'CORRECTED',
+      value: 52_400,
+      supersedes: amountClaims[0]!.id,
+    });
+    expect(request_version).toBe(2);
+  });
+
   it('5. readback + affirm -> CONFIRMED; readback + negate -> UNKNOWN', () => {
     const readback: AgentAction = { id: 'a1', kind: 'readback_issued', t_ms: 5000, field: 'amount_usd', value: '84500' };
 

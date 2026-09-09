@@ -49,14 +49,30 @@ describe('seed', () => {
     expect(k.truth).toBe('8830');
   });
 
-  it('counsel_of_record and escrow_institution carry the ratified demo-script priorities (counsel first, escrow second); every other knowledge entry is unprioritized', () => {
+  it('counsel_of_record, escrow_institution, and escrow_account_last4 carry the ratified demo-script priorities in that order (founder ruling 2026-09-09 added the third); every other knowledge entry is unprioritized', () => {
     const counsel = MERIDIAN.knowledge.find((k) => k.id === 'counsel_of_record')!;
     const escrow = MERIDIAN.knowledge.find((k) => k.id === 'escrow_institution')!;
+    const escrowDigits = MERIDIAN.knowledge.find((k) => k.id === 'escrow_account_last4')!;
     expect(counsel.priority).toBe(1);
     expect(escrow.priority).toBe(2);
+    expect(escrowDigits.priority).toBe(3);
     for (const k of MERIDIAN.knowledge) {
-      if (k.id === 'counsel_of_record' || k.id === 'escrow_institution') continue;
+      if (['counsel_of_record', 'escrow_institution', 'escrow_account_last4'].includes(k.id)) continue;
       expect(k.priority).toBeUndefined();
+    }
+  });
+
+  it('founder ruling 2026-09-09: every Hartwell fact is scoped to robert-miller only; Dana Whitfield has her own facts scoped to dana-whitfield only, and the two scopes never overlap', () => {
+    const hartwellIds = ['counsel_of_record', 'escrow_institution', 'hartwell_target_ceo', 'deal_signing_city', 'escrow_account_last4', 'board_approval_date'];
+    for (const id of hartwellIds) {
+      const k = MERIDIAN.knowledge.find((x) => x.id === id)!;
+      expect(k.identity_ids).toEqual(['robert-miller']);
+    }
+    const danaIds = MERIDIAN.knowledge.filter((k) => k.identity_ids?.includes('dana-whitfield')).map((k) => k.id);
+    expect(danaIds.length).toBeGreaterThanOrEqual(2);
+    for (const id of danaIds) expect(hartwellIds).not.toContain(id);
+    for (const k of MERIDIAN.knowledge) {
+      if (danaIds.includes(k.id)) expect(k.identity_ids).toEqual(['dana-whitfield']);
     }
   });
 

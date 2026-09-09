@@ -5,8 +5,8 @@
   "request_timeout_ms": 30000,
   "models": [
     { "id": "openai/gpt-4o", "label": "ChatGPT (gpt-4o via OpenRouter)" },
-    { "id": "x-ai/grok-2", "label": "Grok 2 (via OpenRouter)" },
+    { "id": "x-ai/grok-4.6", "label": "Grok 4.6 (via OpenRouter; id checked against the live model list 2026-09-09)" },
     { "id": "perplexity/sonar-pro", "label": "Perplexity Sonar Pro (via OpenRouter)" },
-    { "id": "google/gemini-pro", "label": "Gemini Pro (via OpenRouter)" }
+    { "id": "google/gemini-2.5-pro", "label": "Gemini 2.5 Pro (via OpenRouter; id checked against the live model list 2026-09-09)" }
   ]
 }
