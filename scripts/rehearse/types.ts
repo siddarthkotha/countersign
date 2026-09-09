@@ -197,6 +197,11 @@ export interface RunResult {
   transcript: TranscriptRecord[];
   state_history: StateHistoryRecord[];
   diagnostics: DiagnosticsSummary | DiagnosticsFailure;
+  /** The exact bundle GET /api/session/<id>/diagnostics returned for this call (null if the
+   *  call never connected far enough to fetch one, or the fetch itself failed) -- kept
+   *  verbatim, separate from the summarized `diagnostics` above, so artifacts.ts can write it
+   *  to disk unmodified for offline replay/investigation (see docs/REHEARSAL-HARNESS.md). */
+  raw_diagnostics: RehearseDiagnosticBundle | null;
   warnings: string[];
   exit_code: 0 | 1 | 2;
   minutes_estimate: number;
