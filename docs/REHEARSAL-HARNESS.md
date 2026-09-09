@@ -242,6 +242,17 @@ warning in the report, and speaks the next line anyway rather than hanging forev
   `else_say` / the generic truth engine / the LLM caller - and what agent line, if any, it was
   reacting to), and a summary of the flight-recorder record fetched from the server afterward
   (`GET /api/session/<id>/diagnostics`).
+- Next to that report, same basename, one raw diagnostics file: `<timestamp>-<scenario>.diagnostics.json`
+  - the exact bundle `GET /api/session/<id>/diagnostics` returned for that call (`server_events`,
+  `client_events`, `deployed_commit`, `end_reason`, every timestamp), written verbatim, not the
+  report's summarized table. This is what makes a failed live run replayable offline instead of
+  reconstructed by hand from the report: open the file (or `cat ... | jq`) to see every
+  `tool_call` / `server_lookup` / `terminal_action` / `evaluate` event with its exact `t_ms`.
+  It is not itself the input `npm run replay` (`packages/engine/scripts/replay.ts`) expects -
+  that CLI wants a corpus-shaped `{conversation, tools, actions, call, expected}` file - so
+  reproducing a run through the real engine still means hand-building a corpus file from this
+  bundle's events, but this file now gives you the exact source data to build one from, instead
+  of the report's rounded-off summary. Written by `writeRunArtifacts` in `scripts/rehearse/artifacts.ts`.
 - One line printed to the terminal per run, e.g.:
   `[PASS] scenario-a-dana-legitimate verdict=STAGE (expected STAGE) wall=41.2s exit=0 report=...`
 - An exit code: `0` if every run passed, `1` if a run's verdict didn't match what was
@@ -303,9 +314,11 @@ scripts/rehearse/reports/
   fields), the reactive rule engine and its generic truth-driven fallback (the trap-correction
   fix itself), the LLM caller's request building and response parsing against a MOCKED HTTP
   client (never the real network), the audio frame math (frame size, padding, cadence), one
-  real `say` + `ffmpeg` conversion of a short line (no network), report rendering, and roll-up
-  rendering - all with no server and no AssemblyAI connection, so this suite costs nothing to
-  run as often as needed.
+  real `say` + `ffmpeg` conversion of a short line (no network), report rendering, roll-up
+  rendering, and writing a run's on-disk artifacts (the markdown report plus the raw
+  diagnostics JSON, same basename, built from a FAKE in-memory bundle -
+  `test/artifacts.test.ts`) - all with no server and no AssemblyAI connection, so this suite
+  costs nothing to run as often as needed.
 - Real local runs against a real server and a real AssemblyAI connection are recorded in
   `scripts/rehearse/reports/` from the days this was built and extended; see those reports for
   what actually happened, including anywhere a run stalled or the live agent asked for
