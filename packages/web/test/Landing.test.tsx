@@ -139,11 +139,11 @@ describe('Landing', () => {
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
     expect(
-      await screen.findByText('No microphone found — the recorded attack works without one')
+      await screen.findByText('No microphone found. The recorded attack works without one')
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try to break it' })).toHaveAttribute(
       'title',
-      'No microphone found — the recorded attack works without one'
+      'No microphone found. The recorded attack works without one'
     );
   });
 
@@ -168,7 +168,7 @@ describe('Landing', () => {
 
     await user.click(screen.getByRole('button', { name: 'Try to break it' }));
 
-    const COLD_START_TEXT = 'Waking the server — this can take up to a minute on the free plan';
+    const COLD_START_TEXT = 'Waking the server. This can take up to a minute on the free plan';
     expect(await screen.findByText(COLD_START_TEXT)).toHaveAttribute('id', 'try-break-helper');
     const tryButton = screen.getByRole('button', { name: 'Try to break it' });
     expect(tryButton).toHaveAttribute('title', COLD_START_TEXT);

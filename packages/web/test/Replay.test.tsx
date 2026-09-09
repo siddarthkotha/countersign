@@ -108,14 +108,100 @@ afterEach(() => {
 });
 
 describe('Replay', () => {
-  // Task W5, fix round 2, requirement 1: before a recording is chosen there is no session id
-  // anywhere in client state, so the masthead's meta line is omitted entirely (not padded).
-  it('omits the masthead meta line before a recording is chosen', async () => {
+  // Task W5, fix round 2, requirement 1: before any recording exists in client state there is
+  // no session id anywhere, so the masthead's meta line is omitted entirely (not padded).
+  // Founder ruling 10 (2026-09-09): the flagship recording now auto-selects and starts the
+  // instant the list is ready, so "no recording chosen" only ever exists while the list is
+  // still loading -- this test now checks that window directly instead of the (now
+  // momentary) instant right after the list resolves.
+  it('omits the masthead meta line while the recording list is still loading', async () => {
+    let resolveFetch: (value: { json: () => Promise<unknown> }) => void = () => {};
+    const pending = new Promise<{ json: () => Promise<unknown> }>((resolve) => {
+      resolveFetch = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(pending));
     render(<Replay />);
-    // Judge review finding (2026-09-04), defect 2: waits for the option's plain-English
-    // label, not the raw filename -- that's what the dropdown actually shows now.
-    await screen.findByRole('option', { name: RECORDING_LABEL });
+
     expect(screen.queryByText(/Treasury desk/)).not.toBeInTheDocument();
+
+    resolveFetch({
+      json: () =>
+        Promise.resolve({
+          files: [RECORDING],
+          recordings: [{ file: RECORDING, label: RECORDING_LABEL, recommended: true }],
+        }),
+    });
+  });
+
+  // Founder ruling 10 (2026-09-09): a judge with three minutes should never have to hunt for
+  // a play button -- the flagship attack scenario (the corpus's own `recommended` flag) is
+  // auto-selected and its replay starts the instant the recording list is ready, with no
+  // click at all.
+  it('auto-selects and starts playing the flagship recording as soon as the list loads, with no click needed', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connectSocketOnly).mockReturnValue(fake.client as never);
+    render(<Replay />);
+
+    await screen.findByRole('option', { name: RECORDING_LABEL });
+    expect(connectSocketOnly).toHaveBeenCalledWith(
+      expect.stringContaining(`/ws/replay/${encodeURIComponent(RECORDING)}?speed=1`),
+    );
+    expect(await screen.findByLabelText('Recording')).toHaveValue(RECORDING);
+    // Accessibility (founder is colour blind): the playing/paused state is carried by the
+    // control's own word, never colour alone.
+    expect(await screen.findByRole('button', { name: 'Pause' })).toBeInTheDocument();
+  });
+
+  // Founder ruling 10 (2026-09-09): a real browser can refuse an automatic start (autoplay
+  // restrictions, a blocked socket, etc). When that happens the recording still ends up
+  // selected -- so the judge sees exactly what's queued up -- and gets a single obvious
+  // "Play" button instead of a silent failure or an error banner.
+  it('falls back to a Play button with the recording selected if the automatic start is blocked', async () => {
+    vi.mocked(connectSocketOnly).mockImplementationOnce(() => {
+      throw new Error('autoplay blocked');
+    });
+    render(<Replay />);
+
+    expect(await screen.findByLabelText('Recording')).toHaveValue(RECORDING);
+    expect(await screen.findByRole('button', { name: 'Play' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  // Founder ruling 10 (2026-09-09): the fallback "Play" button must actually work -- one
+  // click starts the same replay the automatic attempt failed to start.
+  it('starts the replay when the judge clicks Play after the automatic start was blocked', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connectSocketOnly)
+      .mockImplementationOnce(() => {
+        throw new Error('autoplay blocked');
+      })
+      .mockReturnValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Replay />);
+
+    const playButton = await screen.findByRole('button', { name: 'Play' });
+    await user.click(playButton);
+
+    expect(await screen.findByRole('button', { name: 'Pause' })).toBeInTheDocument();
+    fake.emitState(scenarioBFinalState());
+    expect(await screen.findByText(/Claimed identity:/)).toBeInTheDocument();
+  });
+
+  // Founder ruling 10 (2026-09-09): "keep an obvious pause control" -- a judge who wants to
+  // read the transcript at their own pace can stop the stream, then start it again, both via
+  // plain-worded buttons (never colour-only).
+  it('lets the judge pause the auto-started playback, then resume it', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connectSocketOnly).mockReturnValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Replay />);
+
+    const pauseButton = await screen.findByRole('button', { name: 'Pause' });
+    await user.click(pauseButton);
+
+    expect(fake.client.close).toHaveBeenCalled();
+    expect(await screen.findByRole('button', { name: 'Play' })).toBeInTheDocument();
   });
 
   // Task W5, fix round 2, requirement 1: once a recording is chosen (before any ScreenState
@@ -273,7 +359,7 @@ describe('Replay', () => {
     render(<Replay />);
 
     expect(
-      await screen.findByRole('option', { name: 'Could not load recordings — reload the page to try again' }),
+      await screen.findByRole('option', { name: 'Could not load recordings. Reload the page to try again' }),
     ).toBeInTheDocument();
   });
 

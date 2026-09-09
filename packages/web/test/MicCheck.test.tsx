@@ -39,7 +39,7 @@ describe('MicCheck', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    expect(await screen.findByText('PASSED — Microphone ready (USB Microphone).')).toBeInTheDocument();
+    expect(await screen.findByText('PASSED: Microphone ready (USB Microphone).')).toBeInTheDocument();
     expect(getUserMedia).toHaveBeenCalledWith({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
     });
@@ -55,7 +55,7 @@ describe('MicCheck', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    expect(await screen.findByText('PASSED — Microphone ready.')).toBeInTheDocument();
+    expect(await screen.findByText('PASSED: Microphone ready.')).toBeInTheDocument();
     expect(onResult).toHaveBeenCalledWith({ ok: true, reason: 'passed', deviceLabel: null });
   });
 
@@ -67,7 +67,7 @@ describe('MicCheck', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    const line = await screen.findByText(/^FAILED — Microphone blocked\./);
+    const line = await screen.findByText(/^FAILED: Microphone blocked\./);
     expect(line).toHaveAttribute('role', 'status');
     expect(line).toHaveAttribute('aria-live', 'polite');
     expect(onResult).toHaveBeenCalledWith({ ok: false, reason: 'not-allowed', deviceLabel: null });
@@ -81,7 +81,7 @@ describe('MicCheck', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    const line = await screen.findByText(/^FAILED — No microphone found\./);
+    const line = await screen.findByText(/^FAILED: No microphone found\./);
     expect(line).toHaveAttribute('role', 'status');
     expect(line).toHaveAttribute('aria-live', 'polite');
     expect(onResult).toHaveBeenCalledWith({ ok: false, reason: 'not-found', deviceLabel: null });
@@ -95,7 +95,7 @@ describe('MicCheck', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    const line = await screen.findByText(/^FAILED — Microphone is in use by another app\./);
+    const line = await screen.findByText(/^FAILED: Microphone is in use by another app\./);
     expect(line).toHaveAttribute('role', 'status');
     expect(line).toHaveAttribute('aria-live', 'polite');
     expect(onResult).toHaveBeenCalledWith({ ok: false, reason: 'not-readable', deviceLabel: null });
@@ -109,7 +109,7 @@ describe('MicCheck', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    const line = await screen.findByText(/^FAILED — Could not access the microphone\./);
+    const line = await screen.findByText(/^FAILED: Could not access the microphone\./);
     expect(line).toHaveAttribute('role', 'status');
     expect(line).toHaveAttribute('aria-live', 'polite');
     expect(onResult).toHaveBeenCalledWith({ ok: false, reason: 'error', deviceLabel: null });
@@ -135,7 +135,7 @@ describe('MicCheck', () => {
 
     const expectedSeconds = Math.round(testTimeoutMs / 1000);
     const line = await screen.findByText(
-      new RegExp(`^FAILED — The browser did not respond within ${expectedSeconds} seconds\\.`)
+      new RegExp(`^FAILED: The browser did not respond within ${expectedSeconds} seconds\\.`)
     );
     expect(line).toHaveAttribute('role', 'status');
     expect(line).toHaveAttribute('aria-live', 'polite');
@@ -155,7 +155,7 @@ describe('MicCheck', () => {
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
     const line = await screen.findByText(
-      /^FAILED — The browser did not respond within 2 seconds\./,
+      /^FAILED: The browser did not respond within 2 seconds\./,
       {},
       { timeout: 3000 }
     );
@@ -170,14 +170,14 @@ describe('MicCheck', () => {
     render(<MicCheck onResult={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-    const checkingLine = screen.getByText('CHECKING — asking your browser for the microphone.');
+    const checkingLine = screen.getByText('CHECKING: asking your browser for the microphone.');
     expect(checkingLine).toBeInTheDocument();
     // Task W6, fix round 1: role="status"/aria-live="polite" on every state, not only FAILED.
     expect(checkingLine).toHaveAttribute('role', 'status');
     expect(checkingLine).toHaveAttribute('aria-live', 'polite');
 
     resolveStream(fakeStream().stream);
-    const passedLine = await screen.findByText(/^PASSED —/);
+    const passedLine = await screen.findByText(/^PASSED:/);
     expect(passedLine).toBeInTheDocument();
     expect(passedLine).toHaveAttribute('role', 'status');
     expect(passedLine).toHaveAttribute('aria-live', 'polite');
@@ -195,7 +195,7 @@ describe('MicCheck', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    expect(await screen.findByText('PASSED — Microphone ready.')).toBeInTheDocument();
+    expect(await screen.findByText('PASSED: Microphone ready.')).toBeInTheDocument();
     expect(onResult).toHaveBeenCalledWith({ ok: true, reason: 'passed', deviceLabel: null });
   });
 
@@ -211,7 +211,7 @@ describe('MicCheck', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    expect(await screen.findByText('PASSED — Microphone ready.')).toBeInTheDocument();
+    expect(await screen.findByText('PASSED: Microphone ready.')).toBeInTheDocument();
     expect(onResult).toHaveBeenCalledWith({ ok: true, reason: 'passed', deviceLabel: null });
   });
 
@@ -227,7 +227,7 @@ describe('MicCheck', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    expect(await screen.findByText('PASSED — Microphone ready.')).toBeInTheDocument();
+    expect(await screen.findByText('PASSED: Microphone ready.')).toBeInTheDocument();
     expect(onResult).toHaveBeenCalledWith({ ok: true, reason: 'passed', deviceLabel: null });
   });
 });

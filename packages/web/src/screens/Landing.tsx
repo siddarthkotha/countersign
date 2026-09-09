@@ -19,11 +19,11 @@ export type LandingProps = {
 const MIC_HELPER_DEFAULT = 'Try to break it unlocks after Check microphone passes';
 const MIC_HELPER_PASSED = 'Microphone ready';
 const MIC_HELPER_BY_REASON: Record<Exclude<MicCheckReason, 'passed'>, string> = {
-  'not-allowed': "Microphone blocked — allow it in the browser's address bar, then check again",
-  'not-found': 'No microphone found — the recorded attack works without one',
-  'not-readable': 'Microphone is in use by another app — close it, then check again',
-  timeout: 'Microphone check timed out — try again, or use "Watch a recorded attack" instead',
-  error: 'Microphone check failed — use "Watch a recorded attack" instead'
+  'not-allowed': "Microphone blocked. Allow it in the browser's address bar, then check again",
+  'not-found': 'No microphone found. The recorded attack works without one',
+  'not-readable': 'Microphone is in use by another app. Close it, then check again',
+  timeout: 'Microphone check timed out. Try again, or use "Watch a recorded attack" instead',
+  error: 'Microphone check failed. Use "Watch a recorded attack" instead'
 };
 
 function micHelperText(result: MicCheckResultInfo | null): string {
@@ -38,7 +38,7 @@ function micHelperText(result: MicCheckResultInfo | null): string {
 // (below) for exactly as long as `starting` is true, through the SAME helper element and
 // button `title` that finding 1 (above) already wired up -- one sentence, both places, same
 // as before.
-const STARTING_HELPER = 'Waking the server — this can take up to a minute on the free plan';
+const STARTING_HELPER = 'Waking the server. This can take up to a minute on the free plan';
 
 function tryButtonHelperText(result: MicCheckResultInfo | null, starting: boolean): string {
   if (starting) return STARTING_HELPER;
