@@ -37,39 +37,78 @@ export const MERIDIAN: SeedConfig = {
       due: '2026-09-04', approved_in: 'quarterly close meeting',
     },
   ],
+  // Fix (judge review, 2026-09-03; founder ruling 2026-09-09): every Hartwell entry below
+  // is Robert Miller's own acquisition business -- counsel of record, escrow institution,
+  // the target's CEO, the signing city, the escrow account, the board approval date. Scoped
+  // identity_ids: ['robert-miller'] so a different caller (e.g. Dana Whitfield, on an
+  // unrelated Meridian Supply payment) can never be handed one of these as a knowledge
+  // check -- see selectSeedFact/factInScope in src/challenges.ts, which enforces the scope
+  // and fails safe (returns nothing) rather than reaching for someone else's business.
   knowledge: [
     {
       id: 'counsel_of_record', topic: 'Hartwell acquisition',
       ask: 'Ask which law firm is our counsel of record on the Hartwell deal.',
       truth: 'Calder & Finch', accept_tokens: ['calder', 'finch'],
       priority: 1, // ratified demo script opens with this question (controller ruling 2026-09-01 11:25 AM CDT)
+      identity_ids: ['robert-miller'],
     },
     {
       id: 'escrow_institution', topic: 'Hartwell acquisition',
       ask: 'Ask which institution holds the Hartwell escrow.',
       truth: 'First Meridian Trust', accept_tokens: ['first', 'meridian', 'trust'],
       priority: 2, // ratified demo script asks this second (controller ruling 2026-09-01 11:25 AM CDT)
+      identity_ids: ['robert-miller'],
     },
     // v2 (amendment §A): grow to >=6 SEED_FACT entries.
     {
       id: 'hartwell_target_ceo', topic: 'Hartwell acquisition',
       ask: "Ask who the target company's CEO is on the Hartwell deal.",
       truth: 'Lena Voss', accept_tokens: ['lena', 'voss'],
+      identity_ids: ['robert-miller'],
     },
     {
       id: 'deal_signing_city', topic: 'Hartwell acquisition',
       ask: 'Ask which city the deal will be signed in.',
       truth: 'Zurich', accept_tokens: ['zurich'],
+      identity_ids: ['robert-miller'],
     },
     {
       id: 'escrow_account_last4', topic: 'Hartwell acquisition',
       ask: 'Ask for the last four digits of the escrow account.',
       truth: '8830', accept_tokens: ['8830'],
+      priority: 3, // founder ruling 2026-09-09: the demo script's third question, right
+      // after counsel-of-record and escrow-institution (in that order) for Robert Miller.
+      identity_ids: ['robert-miller'],
     },
     {
       id: 'board_approval_date', topic: 'Hartwell acquisition',
       ask: 'Ask when the board approved the deal.',
       truth: 'August 19', accept_tokens: ['august', '19'],
+      identity_ids: ['robert-miller'],
+    },
+    // Founder ruling 2026-09-09 (Option A of docs/PARKED-CHALLENGE-SCOPING.md): Dana
+    // Whitfield's own knowledge facts, scoped to her identity and drawn from her own world
+    // (her vendor's invoice reference, the internal approver who signed off, the payment's
+    // stated purpose) -- all synthetic, all consistent with her existing Meridian Supply
+    // payment (pay-4471). Without these, the scoping fix above leaves an honest caller with
+    // nothing answerable at all once every Hartwell fact is correctly out of her scope.
+    {
+      id: 'dana_invoice_reference', topic: 'Meridian Supply payment',
+      ask: 'Ask for the invoice reference number on this Meridian Supply payment.',
+      truth: 'INV-7734', accept_tokens: ['inv', '7734'],
+      identity_ids: ['dana-whitfield'],
+    },
+    {
+      id: 'dana_internal_approver', topic: 'Meridian Supply payment',
+      ask: 'Ask which internal approver signed off on this payment.',
+      truth: 'Marcus Obi', accept_tokens: ['marcus', 'obi'],
+      identity_ids: ['dana-whitfield'],
+    },
+    {
+      id: 'dana_payment_purpose', topic: 'Meridian Supply payment',
+      ask: 'Ask what this payment to Meridian Supply is for.',
+      truth: 'Quarterly parts restock', accept_tokens: ['quarterly', 'parts', 'restock'],
+      identity_ids: ['dana-whitfield'],
     },
   ],
   rails: [{ id: 'TREASURY-WIRE', label: 'Treasury wire rail' }],
