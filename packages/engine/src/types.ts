@@ -152,6 +152,14 @@ export interface KnowledgeFact {
   // among themselves by the existing per-session fnv1a hash (selectSeedFact in
   // src/challenges.ts). Not a security property -- purely a demo-pacing knob.
   priority?: number;
+  // Fix (judge review, 2026-09-03; founder ruling 2026-09-09): which claimed identities
+  // this fact is fair to ask. A caller whose currently claimed identity is not in this list
+  // must never be asked this fact -- e.g. the six Hartwell-acquisition facts are somebody
+  // else's business to anyone who isn't Robert Miller, and asking them of an unrelated
+  // caller (a false-positive machine) is exactly the failure a judge review found. Unset or
+  // empty ⇒ askable of any caller, including one with no claimed identity yet (backwards
+  // compatible). Enforced by selectSeedFact in src/challenges.ts.
+  identity_ids?: string[];
 }
 
 export interface SeedConfig {
