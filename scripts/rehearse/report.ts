@@ -72,6 +72,27 @@ function renderResolvedLines(r: RunResult): string {
   return ['| turn | source | said | reacting to (agent\'s last line) |', '| --- | --- | --- | --- |', ...rows].join('\n');
 }
 
+/** Founder ruling (flight recorder gap, 2026-09-09): the raw JSON dump of an `evaluate`
+ *  event's detail (below) is unreadable at a glance -- reconstructing "which
+ *  assurance-checklist item was false, which rule row fired" had to be done by hand twice in
+ *  one week. This renders that one-line summary ahead of the raw detail, for every recorded
+ *  transition. Defensive about shape: an older bundle's `evaluate` events (recorded before
+ *  this ruling) only ever carried {verdict, state}, so `rule_row`/`assurance` are read as
+ *  "n/a" rather than thrown on. */
+function summarizeEvaluateDetail(detail: unknown): string {
+  if (typeof detail !== 'object' || detail === null) return 'rule_row=n/a false_assurance=[n/a]';
+  const d = detail as Record<string, unknown>;
+  const ruleRow = typeof d.rule_row === 'number' ? String(d.rule_row) : 'n/a';
+  let falseAssurance = 'n/a';
+  if (typeof d.assurance === 'object' && d.assurance !== null) {
+    const items = Object.entries(d.assurance as Record<string, unknown>)
+      .filter(([, v]) => v === false)
+      .map(([k]) => k);
+    falseAssurance = items.length ? items.join(', ') : 'none';
+  }
+  return `rule_row=${ruleRow} false_assurance=[${falseAssurance}]`;
+}
+
 function renderDiagnostics(r: RunResult): string {
   const d = r.diagnostics;
   if (!d.ok) return `_Diagnostics unavailable: ${d.error}_`;
@@ -83,7 +104,7 @@ function renderDiagnostics(r: RunResult): string {
     ? d.tool_events.map((e) => `- t=${fmtMs(e.t_ms)} ${e.kind} ${JSON.stringify(e.detail)}`).join('\n')
     : '_none recorded_';
   const evals = d.evaluate_events.length
-    ? d.evaluate_events.map((e) => `- t=${fmtMs(e.t_ms)} ${JSON.stringify(e.detail)}`).join('\n')
+    ? d.evaluate_events.map((e) => `- t=${fmtMs(e.t_ms)} ${summarizeEvaluateDetail(e.detail)} ${JSON.stringify(e.detail)}`).join('\n')
     : '_none recorded_';
   return [
     `Deployed commit: ${d.deployed_commit ?? 'unknown (local dev, RENDER_GIT_COMMIT not set)'}`,

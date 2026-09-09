@@ -333,6 +333,15 @@ export interface EngineOutput {
   challenges: { issued: ChallengeSpec[]; results: Record<string, ChallengeResult> };
   assurance: AssuranceChecklist;
   invariants_ok: boolean; // VOICE_CAN_NEVER_RELEASE and friends; false = engine bug, treated as NO_ACTION
+  // Flight-recorder ruling (founder, 2026-09-09): `decide()` (rules.ts) already computes
+  // which table row produced the tentative verdict (`DecideResult.rule_hit`) but never
+  // passed it through to the caller -- session.ts's diagnostics needed it to record WHICH
+  // rule fired on a transition, without re-deriving it (re-running `decide` a second time
+  // outside `evaluate` would risk drifting from the actual decision if the pipeline ever
+  // changes). Passthrough only -- no decision logic changed. Optional so pre-existing
+  // hand-built EngineOutput fixtures elsewhere in the repo (e.g. server/test/stalls.test.ts)
+  // don't need updating; a real `evaluate()` call always sets it.
+  rule_hit?: number;
 }
 
 // ---------- Corpus (Task 6; typed here so seed/corpus files share one contract) ----------

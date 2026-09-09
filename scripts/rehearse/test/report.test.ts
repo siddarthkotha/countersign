@@ -84,6 +84,100 @@ describe('report rendering', () => {
     expect(md).toContain('Diagnostics unavailable: not_found');
   });
 
+  // Founder ruling (flight recorder gap, 2026-09-09): the raw JSON dump of an `evaluate`
+  // diagnostic event's detail is unreadable at a glance -- reconstructing "which
+  // assurance-checklist item was false, which rule row fired" had to be done by hand twice
+  // in one week. The markdown report must summarize both, per transition, on their own line.
+  it('summarizes the rule row and the false assurance items for each evaluate transition', () => {
+    const md = renderReport(
+      baseResult({
+        diagnostics: {
+          ok: true,
+          event_kind_counts: { evaluate: 1 },
+          tool_events: [],
+          evaluate_events: [
+            {
+              t_ms: 1500,
+              kind: 'evaluate',
+              detail: {
+                verdict: 'PENDING',
+                state: 'CLAIM',
+                rule_row: 4,
+                assurance: {
+                  identity_claimed: true,
+                  sso_pass_current: false,
+                  oob_confirmed_current: false,
+                  context_pass_current: true,
+                  no_contradictions: true,
+                  critical_fields_confirmed: false,
+                  exposure_within_limit: true,
+                  challenge_requirement_met: false,
+                  no_identity_switch: true,
+                  not_new_beneficiary: true,
+                },
+                evidence: [{ id: 'ev-identity-1', kind: 'identity_claim', status: 'INFO' }],
+                challenges: { issued: 1, passed: 0, failed: 0 },
+                readback: { amount_usd: false },
+              },
+            },
+          ],
+          deployed_commit: null,
+          ended_at_ms: 42000,
+          end_reason: 'caller_ended',
+        },
+      }),
+    );
+    expect(md).toContain('rule_row=4');
+    expect(md).toContain('sso_pass_current');
+    expect(md).toContain('critical_fields_confirmed');
+    expect(md).toContain('challenge_requirement_met');
+    // true assurance items must not be listed among the false ones
+    expect(md).not.toMatch(/false_assurance=\[[^\]]*\bidentity_claimed\b/);
+  });
+
+  it('summarizes a transition with every assurance item true as having none false', () => {
+    const md = renderReport(
+      baseResult({
+        diagnostics: {
+          ok: true,
+          event_kind_counts: { evaluate: 1 },
+          tool_events: [],
+          evaluate_events: [
+            {
+              t_ms: 2000,
+              kind: 'evaluate',
+              detail: {
+                verdict: 'STAGE',
+                state: 'ACTION',
+                rule_row: 11,
+                assurance: {
+                  identity_claimed: true,
+                  sso_pass_current: true,
+                  oob_confirmed_current: true,
+                  context_pass_current: true,
+                  no_contradictions: true,
+                  critical_fields_confirmed: true,
+                  exposure_within_limit: true,
+                  challenge_requirement_met: true,
+                  no_identity_switch: true,
+                  not_new_beneficiary: true,
+                },
+                evidence: [],
+                challenges: { issued: 1, passed: 1, failed: 0 },
+                readback: { amount_usd: true },
+              },
+            },
+          ],
+          deployed_commit: null,
+          ended_at_ms: 42000,
+          end_reason: 'caller_ended',
+        },
+      }),
+    );
+    expect(md).toContain('rule_row=11');
+    expect(md).toMatch(/false_assurance=\[\s*(none|)\s*\]/i);
+  });
+
   it('one-line summary includes pass/fail, verdicts, and the report path', () => {
     const line = oneLineSummary(baseResult(), '/tmp/report.md');
     expect(line).toContain('[PASS]');
