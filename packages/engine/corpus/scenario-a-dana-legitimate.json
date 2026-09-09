@@ -1,6 +1,6 @@
 {
   "title": "Dana Whitfield — the legitimate urgent request",
-  "description": "BRIEF §4 golden path. Every critical field (amount, account, beneficiary) is read back and affirmed by the caller; all three live checks pass (registered device, home geo, SSO active, out-of-band confirmed); the request matches an existing scheduled payment exactly (only the date moved, so assurance's exposure/challenge/context gates all clear cleanly). Proves the affirmative path: a fully-verified, honestly-behaved caller reaches STAGE, never anything higher.",
+  "description": "BRIEF §4 golden path. Every critical field (amount, account, beneficiary) is read back and affirmed by the caller; all three live checks pass (registered device, home geo, SSO active, out-of-band confirmed); the request matches an existing scheduled payment exactly (only the date moved, so assurance's exposure/context gates clear cleanly). Ruling A (2026-09-09, red team item 1): the amendment carve-out now floors the knowledge-challenge requirement at 1, never 0, so this exact recording -- no challenge ever asked -- holds at CHALLENGE/PENDING instead of reaching STAGE; a live call would ask one knowledge question here and then STAGE.",
   "call": {
     "session_id": "sess-a",
     "origin_kind": "registered_device",
@@ -130,8 +130,8 @@
     }
   ],
   "expected": {
-    "verdict": "STAGE",
-    "state": "ACTION",
+    "verdict": "PENDING",
+    "state": "CHALLENGE",
     "reasons": [],
     "failure_tally": 0,
     "request_version": 1,
@@ -143,9 +143,11 @@
       "no_contradictions": true,
       "critical_fields_confirmed": true,
       "exposure_within_limit": true,
-      "challenge_requirement_met": true,
+      "challenge_requirement_met": false,
       "no_identity_switch": true,
-      "not_new_beneficiary": true
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": false,
+      "no_injection_attempt": true
     }
   }
 }

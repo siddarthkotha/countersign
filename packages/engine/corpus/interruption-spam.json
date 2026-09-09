@@ -1,6 +1,6 @@
 {
   "title": "Repeated barge-ins are pressure signal, never evidence",
-  "description": "Dana talks over the agent three separate times (every readback line gets cut off, `interrupted: true`) while the underlying request is the same fully-verified Scenario A. `talk_overs > 0` FLAGs the pressure_marker card regardless of lexicon hits, but pressure counts 0 toward the tally and decide() never reads talk_overs directly -- the verdict comes entirely from the identity/context/readback evidence underneath. Proves barge-in spam alone cannot push a call toward a worse (or, importantly, a better) verdict than its actual evidence supports.",
+  "description": "Dana talks over the agent three separate times (every readback line gets cut off, `interrupted: true`) while the underlying request is the same fully-verified Scenario A. `talk_overs > 0` FLAGs the pressure_marker card regardless of lexicon hits, but pressure counts 0 toward the tally and decide() never reads talk_overs directly -- the verdict comes entirely from the identity/context/readback evidence underneath. Proves barge-in spam alone cannot push a call toward a worse (or, importantly, a better) verdict than its actual evidence supports. Ruling A (2026-09-09, red team item 1): the amendment carve-out now floors the knowledge-challenge requirement at 1, never 0, so this recording -- no challenge ever asked -- holds at CHALLENGE/PENDING instead of reaching STAGE; that ceiling is unrelated to (and unaffected by) the interruption spam this file is actually testing.",
   "call": {
     "session_id": "sess-15",
     "origin_kind": "registered_device",
@@ -133,8 +133,8 @@
     }
   ],
   "expected": {
-    "verdict": "STAGE",
-    "state": "ACTION",
+    "verdict": "PENDING",
+    "state": "CHALLENGE",
     "reasons": [],
     "failure_tally": 0,
     "request_version": 1,
@@ -146,9 +146,11 @@
       "no_contradictions": true,
       "critical_fields_confirmed": true,
       "exposure_within_limit": true,
-      "challenge_requirement_met": true,
+      "challenge_requirement_met": false,
       "no_identity_switch": true,
-      "not_new_beneficiary": true
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": false,
+      "no_injection_attempt": true
     }
   }
 }

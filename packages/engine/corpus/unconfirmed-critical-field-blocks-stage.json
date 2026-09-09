@@ -1,6 +1,6 @@
 {
   "title": "EXTRA: an unread-back critical field blocks STAGE, full stop",
-  "description": "MUTATION-COVERAGE FILE, not one of amendment §E's 16 named scenarios (see task-6-report.md for why). Dana states a fully correct, exact-match request and every live check comes back clean -- but the agent never reads amount/account/beneficiary back to her and she never affirms them. Rule 4 holds the call at PENDING for exactly this reason: a critical fact merely CLAIMED, never CONFIRMED, is not enough to stage money, no matter how clean everything else looks. This file exists so mutants.test.ts's \"skip_readback_gate\" mutant has something to break: under that mutant, this same evidence would wrongly reach STAGE with an unconfirmed amount, account, and beneficiary.",
+  "description": "MUTATION-COVERAGE FILE, not one of amendment §E's 16 named scenarios (see task-6-report.md for why). Dana states a fully correct, exact-match request, answers one knowledge challenge correctly (satisfying ruling A's 2026-09-09 floor of at least one graded PASS), and every live check comes back clean -- but the agent never reads amount/account/beneficiary back to her and she never affirms them. Rule 5 holds the call at PENDING for exactly this reason: a critical fact merely CLAIMED, never CONFIRMED, is not enough to stage money, no matter how clean everything else looks. This file exists so mutants.test.ts's \"skip_readback_gate\" mutant has something to break: under that mutant, this same evidence would wrongly reach STAGE with an unconfirmed amount, account, and beneficiary. (Updated 2026-09-09: the challenge exchange was added because ruling A now requires one before row 5 is ever reached at all -- without it, row 4 alone would intercept the call before the readback gate did anything, and this file would no longer prove skip_readback_gate matters.)",
   "call": {
     "session_id": "sess-18",
     "origin_kind": "registered_device",
@@ -12,6 +12,12 @@
       "speaker": "caller",
       "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — approved in yesterday's close meeting.",
       "t_ms": 1000
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "Calder Finch, like always.",
+      "t_ms": 1800
     }
   ],
   "tools": [
@@ -70,7 +76,22 @@
       }
     }
   ],
-  "actions": [],
+  "actions": [
+    {
+      "id": "ch1",
+      "kind": "challenge_issued",
+      "t_ms": 1500,
+      "challenge_id": "sess-18-1",
+      "spec": {
+        "challenge_id": "sess-18-1",
+        "kind": "SEED_FACT",
+        "field": "counsel",
+        "ask": "Ask which law firm is our counsel of record on the Hartwell deal.",
+        "expect": { "accept_tokens": ["calder", "finch"] },
+        "fact_id": "counsel_of_record"
+      }
+    }
+  ],
   "expected": {
     "verdict": "PENDING",
     "state": "CONSISTENCY_CHECK",
@@ -87,7 +108,9 @@
       "exposure_within_limit": true,
       "challenge_requirement_met": true,
       "no_identity_switch": true,
-      "not_new_beneficiary": true
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": true,
+      "no_injection_attempt": true
     }
   }
 }

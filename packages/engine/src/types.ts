@@ -168,6 +168,11 @@ export interface SeedConfig {
     pressure_flag_min: number; // distinct pressure hits to FLAG, 2
     correction_window_ms: number; // v2: 20000
     tool_timeout_ms: number; // v2: 45000
+    // Ruling C (2026-09-09, item 21): how long, after the most recently issued challenge,
+    // a call is still considered "waiting on the answer" rather than abandoned -- keeps
+    // rules.ts row 12 from falling through to row 13 the instant the last allowed
+    // challenge is asked, before the caller has had a chance to reply.
+    challenge_answer_window_ms: number;
   };
   pressure_lexicon: string[]; // lower-case phrases
   out_of_scope_lexicon: string[]; // lower-case phrases

@@ -1,6 +1,6 @@
 {
   "title": "Pressure signals alone do not block staging",
-  "description": "Otherwise-identical to Scenario A (exact amendment match, every critical field confirmed, every live check clean) except Dana opens with two urgency phrases (\"right now\", \"this is urgent\") drawn from the pressure lexicon. Proves rule 11's carve-out in the rulebook: a pressure FLAG counts 0 toward the tally and never blocks assuranceAllTrue -- it only changes how the agent is instructed to talk (ANNOUNCE_STAGED with no details disclosed, alert_principal already on the required-actions list) -- never whether the request stages.",
+  "description": "Otherwise-identical to Scenario A (exact amendment match, every critical field confirmed, every live check clean) except Dana opens with two urgency phrases (\"right now\", \"this is urgent\") drawn from the pressure lexicon. Proves rule 11's carve-out in the rulebook: a pressure FLAG counts 0 toward the tally and never blocks assuranceAllTrue -- it only changes how the agent is instructed to talk (ANNOUNCE_STAGED with no details disclosed, alert_principal already on the required-actions list) -- never whether the request stages. Ruling A (2026-09-09, red team item 1) NOTE: like Scenario A, this exact recording has no knowledge challenge in it, so it now holds at CHALLENGE/PENDING before ever reaching row 11 -- the pressure-vs-staging point this file demonstrates needs a recording with at least one asked-and-passed challenge to actually exercise row 11 again; flagged for the founder, not fixed here (would require adding conversation/action content, outside this lane's scope).",
   "call": {
     "session_id": "sess-6",
     "origin_kind": "registered_device",
@@ -130,8 +130,8 @@
     }
   ],
   "expected": {
-    "verdict": "STAGE",
-    "state": "ACTION",
+    "verdict": "PENDING",
+    "state": "CHALLENGE",
     "reasons": [],
     "failure_tally": 0,
     "request_version": 1,
@@ -143,9 +143,11 @@
       "no_contradictions": true,
       "critical_fields_confirmed": true,
       "exposure_within_limit": true,
-      "challenge_requirement_met": true,
+      "challenge_requirement_met": false,
       "no_identity_switch": true,
-      "not_new_beneficiary": true
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": false,
+      "no_injection_attempt": true
     }
   }
 }
