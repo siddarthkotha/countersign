@@ -892,6 +892,13 @@ export class CallSession {
     if (after) {
       this.pendingExport = buildEvidenceExport(this.opts.session_id, after, new Date(this.opts.now()).toISOString())
         .then((exp) => {
+          // RT-8-export-race fix: record the computed hash on the diagnostics stream FIRST,
+          // unconditionally -- otherwise a fast hang-up (this.ended already true by the time
+          // this resolves) meant the root hash was never recorded anywhere at all: no
+          // `exportHash` getter exists, and the end-guard below deliberately skips the state
+          // push that would otherwise have carried it. This is diagnostics only (LAW 4: not
+          // Evidence, not a verdict) -- it does not change what the browser/ws leg receives.
+          this.diag('export_computed', { root_hash: exp.root_hash });
           // End-guard (fix round 1 minor): the session may have ended (browser closed,
           // aai error/ended) while this hash was still computing -- don't resurrect a
           // closed session with a late state push.
