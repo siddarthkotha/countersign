@@ -13,14 +13,17 @@ compiled server. Twenty-one founder rulings were made and built in parallel lane
 rule-table changes, honest-caller facts, injection escalates, hedge bound, spoken-number fix,
 timeout incident as an engine rule, em-dash sweep, autoplay, submission trim, live-path
 end-to-end test, CI tuning, four new attack scenarios, external critic panel. Two pushes went
-out after the full gate. Deployed proof of STAGE (gate G2) is the open item.
+out after the full gate. Gate G2 was then MET on the deployed site at 8:05 PM (STAGE twice, zero resets) and the fraud path re-proven on the same commit.
 
 ## PROVEN (each checked against the real source tonight, not from notes)
 
 - Main 9e64bc5 pushed 8:02 PM. npm test 1049/1049 three times, typecheck clean. The suite now
   includes the rehearsal and critique harness tests (was 57 files / 888 at 6 PM, is 69 / 1049).
-- CI green on b556864 (push 6). Push 7 (9e64bc5) CI and Render deploy were being polled at the
-  time of writing; see docs/AUTOPILOT_LOG.md for the outcome line.
+- Deployed: 9e64bc5 serves on Render, /health ok, verified 8:05 PM. CI green on b556864; 9e64bc5 CI in
+  progress at last check.
+- GATE G2 MET: scenario A twice consecutively on the DEPLOYED site, STAGE 73.8 s and 91.5 s, zero
+  resets (reports 2026-09-09T20-02-51 and 20-04-50). Fraud re-check on the same commit: FREEZE,
+  57.4 s wall (report 20-06-19).
 - Honest scenario STAGE on the LOCAL compiled server: report
   scripts/rehearse/reports/2026-09-09T19-14-56-scenario-a-dana-legitimate.md, verdict STAGE at
   93.7 s, every checklist item true, persona recorded as legitimate at mint and attach.
@@ -49,12 +52,11 @@ raw diagnostics bundle saved per run; four adversarial scenarios written (not ru
 
 ## Open, in the order to take them
 
-1. Gate G2: two consecutive honest runs against the DEPLOYED site once push 7 is live. The
-   auto-mode classifier blocked `npm run rehearse -- --url <deployed>` from me twice; the
-   founder pastes the command (docs/REHEARSAL-HARNESS.md) or allows it once.
-2. README Status refresh after the deployed STAGE proof (it still names a live blocker).
-3. Two follow-up lanes in flight at time of writing: RULES_DOC row 4 wording plus dead
-   amendment_only field; transcript item_id dedupe after an AssemblyAI resume.
+1. Push 8: README Status refresh and the RULES_DOC row 4 cleanup (both in lanes at time of
+   writing), then deploy verify. Transcript item_id dedupe already landed (368c6d2).
+2. Gate G3 evidence: every rehearsal now writes a raw bundle with the checklist per transition;
+   19 recordings replay exactly. Consider a bridge from bundle to corpus file (not built).
+3. Friday Sep 12 judge simulation; build the judge-sim agent then.
 4. Founder decisions parked: on-screen banner for abandoned containment (visual); UI jargon
    copy; whether urgency should ever carry weight (recommendation: no); RT-9b escrow grading.
 5. Judge simulation Friday Sep 12 (build the judge-sim agent then, not before).
@@ -75,6 +77,8 @@ now writes a raw diagnostics bundle next to its report with the checklist per tr
 
 ## Next session
 
-"Day 5 resume: read docs/STATE.md and the tail of docs/AUTOPILOT_LOG.md. First job is G2: two
-consecutive honest runs on the deployed site (the founder runs or allows the command). Then the
-README status refresh, then the parked founder decisions, then Friday's judge simulation."
+"Day 5 resume: read docs/STATE.md and the tail of docs/AUTOPILOT_LOG.md. G2 is met and both
+paths are proven live on 9e64bc5. First job is the parked founder decisions (containment banner,
+UI jargon, urgency weight, RT-9b), then rehearsals for the latency table, then Friday's judge
+simulation (build judge-sim then). Do not spend live calls re-proving what the reports already
+prove."
