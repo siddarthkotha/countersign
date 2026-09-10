@@ -63,6 +63,23 @@ describe('scenario loading (no network)', () => {
     ).toThrow(ScenarioValidationError);
   });
 
+  it('rejects a demo_persona outside the strict allowlist (review finding 2026-09-09)', () => {
+    expect(() =>
+      validateScenario(
+        {
+          name: 'x',
+          title: 'x',
+          description: '',
+          source: '',
+          turns: [{ id: 'c1', text: 'hello' }],
+          expected: { verdict: 'STAGE', max_wall_ms: 1000 },
+          demo_persona: 'bogus',
+        },
+        'inline',
+      ),
+    ).toThrow(ScenarioValidationError);
+  });
+
   it('rejects a turn with a negative pause_ms', () => {
     expect(() =>
       validateScenario(
