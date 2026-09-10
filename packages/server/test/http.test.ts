@@ -413,7 +413,7 @@ describe('http server', () => {
     // (its own corpus file's `title`, prefixed) rather than the raw filename.
     expect(body.recordings[0]).toEqual({
       file: 'scenario-b-miller-fraud',
-      label: 'Recommended: Robert Miller — the fraudulent CEO-impersonation call',
+      label: 'Recommended: Robert Miller: the fraudulent CEO-impersonation call',
       recommended: true,
     });
     expect(body.recordings.filter((rec) => rec.recommended)).toHaveLength(1);

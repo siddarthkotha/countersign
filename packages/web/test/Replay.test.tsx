@@ -32,7 +32,7 @@ const RECORDING = 'scenario-b-miller-fraud';
 // The label the real server derives from this corpus file's own `title` field (see
 // scenario-b-miller-fraud.json), "Recommended:"-prefixed because this is the flagship BRIEF
 // §4 attack scenario -- verified against the corpus file, not invented for this test.
-const RECORDING_LABEL = 'Recommended: Robert Miller — the fraudulent CEO-impersonation call';
+const RECORDING_LABEL = 'Recommended: Robert Miller: the fraudulent CEO-impersonation call';
 
 function scenarioBFinalState(): ScreenState {
   const engineInput: EngineInput = {
@@ -369,7 +369,7 @@ describe('Replay', () => {
   // the server's job (packages/server/test/http.test.ts covers that against the real corpus).
   it('shows each recording\'s plain-English label instead of its raw filename', async () => {
     const OTHER = 'scenario-a-dana-legitimate';
-    const OTHER_LABEL = 'Dana Whitfield — the legitimate urgent request';
+    const OTHER_LABEL = 'Dana Whitfield: the legitimate urgent request';
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({

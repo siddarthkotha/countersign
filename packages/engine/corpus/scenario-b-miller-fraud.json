@@ -1,5 +1,5 @@
 {
-  "title": "Robert Miller — the fraudulent CEO-impersonation call",
+  "title": "Robert Miller: the fraudulent CEO-impersonation call",
   "description": "BRIEF §4 attack path, verbatim caller lines from docs/design/six-looks-2026-08-30/content.json. SSO reads active in Frankfurt while this call originates from an unverified VoIP gateway (identity FAIL); the out-of-band push gets no response (seed-fixed for robert-miller); the Hartwell escrow request matches no scheduled payment on file (context FAIL); the amount contradicts itself ($1.8M -> $2.1M) with no correction offered; and the counsel-of-record knowledge check fails (\"Whitmore & Bass\" is not the real counsel). Proves LAW 2/3: an overdetermined fraud attempt is FROZEN, never staged, and voice pressure (\"Release it\", \"or you're fired\", a barge-in) changes nothing about the verdict.",
   "call": {
     "session_id": "sess-b",

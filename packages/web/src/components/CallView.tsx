@@ -83,10 +83,10 @@ const ASSURANCE_LABELS: Record<keyof AssuranceChecklist, string> = {
   challenge_requirement_met: 'Challenge requirement met',
   no_identity_switch: 'No identity switch',
   not_new_beneficiary: 'Not a new beneficiary',
-  // TODO(2026-09-09 rulings A/B): placeholder wording -- a separate lane owns the final
-  // on-screen label copy for these two new checklist items.
-  at_least_one_challenge_passed: 'At least one challenge passed',
-  no_injection_attempt: 'No injection attempt',
+  // Task founder-law item 1 (2026-09-09): final on-screen copy for the two new checklist
+  // items from rulings A/B, replacing the rules lane's placeholder wording.
+  at_least_one_challenge_passed: 'At least one question answered correctly',
+  no_injection_attempt: 'No attempt to override the agent',
 };
 
 const ASSURANCE_KEYS = Object.keys(ASSURANCE_LABELS) as (keyof AssuranceChecklist)[];

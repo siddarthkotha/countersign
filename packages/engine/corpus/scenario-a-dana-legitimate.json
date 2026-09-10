@@ -1,5 +1,5 @@
 {
-  "title": "Dana Whitfield — the legitimate urgent request",
+  "title": "Dana Whitfield: the legitimate urgent request",
   "description": "BRIEF §4 golden path. Every critical field (amount, account, beneficiary) is read back and affirmed by the caller; all three live checks pass (registered device, home geo, SSO active, out-of-band confirmed); the request matches an existing scheduled payment exactly (only the date moved, so assurance's exposure/context gates clear cleanly). Ruling A (2026-09-09, red team item 1): the amendment carve-out now floors the knowledge-challenge requirement at 1, never 0 -- this recording was extended with the exact challenge the real engine selects at this point (a TRAP_FACT probe restating the beneficiary as \"Northgate Partners\"; selectChallenge picks TRAP_FACT ahead of Dana's own SEED_FACT knowledge once a beneficiary claim exists), which Dana correctly catches and corrects. Proves the affirmative path still reaches STAGE once ruling A's floor is actually satisfied.",
   "call": {
     "session_id": "sess-a",

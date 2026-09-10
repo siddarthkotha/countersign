@@ -15,6 +15,13 @@ import { dirname, extname, join, resolve } from 'node:path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCAN_DIRS = ['../src/components', '../src/screens'].map((d) => resolve(__dirname, d));
 
+// Founder-law item 2 (2026-09-09): the flagship corpus recording's title used an em-dash --
+// caught only because the founder happened to read that one file. Every corpus file's
+// `title`/`description` reaches a real screen too: `/api/replay` (packages/server/src/http.ts)
+// copies `title` verbatim into the recording label Replay.tsx renders in its dropdown, so an
+// em-dash there is exactly as user-visible as one in a .tsx file -- this guard now covers both.
+const CORPUS_DIR = resolve(__dirname, '../../engine/corpus');
+
 const EM_DASH = '—';
 
 function listSourceFiles(dir: string): string[] {
@@ -50,6 +57,37 @@ describe('no em-dashes in user-visible copy', () => {
     it(`${relative} has no em-dash (U+2014) outside a comment`, () => {
       const withoutComments = stripComments(readFileSync(file, 'utf8'));
       expect(withoutComments.includes(EM_DASH)).toBe(false);
+    });
+  }
+});
+
+// Founder-law item 2: corpus `title`/`description` fields, scanned directly (no comment
+// stripping -- JSON has no comments) since both reach the screen verbatim: `title` via the
+// Replay dropdown label (see comment above), `description` via the same corpus record if a
+// future screen ever surfaces it. Recording bodies (`conversation`/`tools`/`actions`) are
+// untouched by this scan -- verbatim caller/agent lines are LAW 4 evidence text, not the
+// founder's own copy, and the styling law does not reach into them.
+describe('no em-dashes in corpus title/description (reaches the screen via the replay list)', () => {
+  const corpusFiles = readdirSync(CORPUS_DIR)
+    .filter((name) => extname(name) === '.json')
+    .map((name) => join(CORPUS_DIR, name));
+
+  it('found corpus files to scan (this test would be a false pass otherwise)', () => {
+    expect(corpusFiles.length).toBeGreaterThan(0);
+  });
+
+  for (const file of corpusFiles) {
+    const relative = file.replace(resolve(CORPUS_DIR, '..') + '/', '');
+    it(`${relative}: title has no em-dash (U+2014)`, () => {
+      const parsed = JSON.parse(readFileSync(file, 'utf8')) as { title?: unknown };
+      expect(typeof parsed.title).toBe('string');
+      expect((parsed.title as string).includes(EM_DASH)).toBe(false);
+    });
+
+    it(`${relative}: description has no em-dash (U+2014)`, () => {
+      const parsed = JSON.parse(readFileSync(file, 'utf8')) as { description?: unknown };
+      expect(typeof parsed.description).toBe('string');
+      expect((parsed.description as string).includes(EM_DASH)).toBe(false);
     });
   }
 });
