@@ -52,6 +52,7 @@ export default function Replay() {
   const [speed, setSpeed] = useState<Speed>(1);
   const [screenState, setScreenState] = useState<ScreenState | null>(null);
   const [ended, setEnded] = useState<string | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
   const clientRef = useRef<CallClient | null>(null);
 
   useEffect(() => {
@@ -84,11 +85,23 @@ export default function Replay() {
     clientRef.current?.close();
     setScreenState(null);
     setEnded(null);
+    setIsPaused(false);
     const client = connectSocketOnly(`/ws/replay/${encodeURIComponent(file)}?speed=${atSpeed}`);
     client.onState((s) => setScreenState(s));
     client.onEnded((reason) => setEnded(reason));
     clientRef.current = client;
     setSelected(file);
+  }
+
+  function handlePause() {
+    clientRef.current?.close();
+    setIsPaused(true);
+  }
+
+  function handlePlayFromStart() {
+    if (selected) {
+      startReplay(selected, speed);
+    }
   }
 
   return (
@@ -166,7 +179,25 @@ export default function Replay() {
             Replay ended: {ended}
           </p>
         )}
+
+        {screenState && !ended && (
+          <div className="replay-playback-controls">
+            {!isPaused ? (
+              <button type="button" onClick={handlePause}>
+                Pause
+              </button>
+            ) : (
+              <button type="button" onClick={handlePlayFromStart}>
+                Play from start
+              </button>
+            )}
+          </div>
+        )}
       </div>
+
+      {screenState && isPaused && (
+        <p className="replay-resume-note">Resuming mid-call is not supported yet.</p>
+      )}
 
       <p className="replay-note">No microphone is used on this screen -- it replays a recorded call end to end.</p>
 

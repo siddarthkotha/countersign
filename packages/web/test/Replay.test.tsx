@@ -313,4 +313,55 @@ describe('Replay', () => {
     expect(optionTexts[1]).toBe(RECORDING_LABEL);
     expect(optionTexts[2]).toBe(OTHER_LABEL);
   });
+
+  // Pause button appears while replay is active, and Play button with "from start" label
+  // appears when paused (since resuming mid-call is not supported yet). Helper text is
+  // shown next to the paused state.
+  it('shows "Pause" button when a replay is active, and "Play from start" button when paused', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connectSocketOnly).mockReturnValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Replay />);
+
+    // Before any recording is selected, there are no playback controls.
+    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Play from start' })).not.toBeInTheDocument();
+
+    // Start a replay.
+    await user.selectOptions(await screen.findByLabelText('Recording'), RECORDING);
+    fake.emitState(scenarioBFinalState());
+
+    // Once state arrives and replay is active, Pause button appears.
+    expect(await screen.findByRole('button', { name: 'Pause' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Play from start' })).not.toBeInTheDocument();
+
+    // Click Pause.
+    const pauseButton = screen.getByRole('button', { name: 'Pause' });
+    await user.click(pauseButton);
+
+    // After pausing, Play button with "from start" label appears instead.
+    expect(await screen.findByRole('button', { name: 'Play from start' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+  });
+
+  // Helper text is shown when paused to clarify that resuming mid-call is not supported.
+  it('displays "Resuming mid-call is not supported yet." when paused', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connectSocketOnly).mockReturnValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Replay />);
+
+    await user.selectOptions(await screen.findByLabelText('Recording'), RECORDING);
+    fake.emitState(scenarioBFinalState());
+
+    // Helper text does not appear while replay is active.
+    expect(screen.queryByText('Resuming mid-call is not supported yet.')).not.toBeInTheDocument();
+
+    // Click Pause.
+    const pauseButton = await screen.findByRole('button', { name: 'Pause' });
+    await user.click(pauseButton);
+
+    // Helper text appears when paused.
+    expect(await screen.findByText('Resuming mid-call is not supported yet.')).toBeInTheDocument();
+  });
 });
