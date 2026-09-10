@@ -164,6 +164,97 @@ describe('selectChallenge — selection order', () => {
   });
 });
 
+// Reviewer finding (live test, 2026-09-09): selectSeedFact/factInScope already scope
+// SEED_FACT correctly, but selectTrapFact/knowledgeTruthForField did NOT go through the
+// same check -- a caller claiming an identity with no rights to a Hartwell fact could still
+// get a TRAP_FACT challenge that speaks the true Hartwell value aloud (the "caller was
+// wrong: the trap offers the truth" branch), because knowledgeTruthForField looked the
+// truth up by FIELD alone, ignoring who is on the line. Fix: gate that truth lookup through
+// factInScope using the claimed identity; out of scope -> fall back to the existing
+// decoy-only trap (fail-safe), never speak the value.
+// Only `ask` is ever SPOKEN to the caller -- `expect` is server-side grading data (e.g.
+// RELATIONAL's accept_tokens), never read aloud, so it is out of scope for a "does the
+// agent say this out loud" leak check (and, separately, out of scope for this fix: a
+// pre-existing gap where selectRelational's escrow branch always grades against Robert
+// Miller's own escrow_account_last4 regardless of who is on the line is a real bug but not
+// an audible leak, and not what this fix addresses).
+function specText(spec: ChallengeSpec): string {
+  return spec.ask.toLowerCase();
+}
+
+const TRAP_FIELDS: Array<'beneficiary' | 'counsel' | 'escrow_institution' | 'approver'> = [
+  'beneficiary',
+  'counsel',
+  'escrow_institution',
+  'approver',
+];
+
+describe('TRAP_FACT never leaks a fact scoped to a different identity', () => {
+  it('Dana claims an escrow institution: no challenge text contains the Hartwell truth (First Meridian Trust) or its counsel (Calder)', () => {
+    const claims: Claim[] = [
+      claim('c-id', 'identity', 'STATED', 'dana-whitfield', 0, 'Dana Whitfield'),
+      claim('c-escrow', 'escrow_institution', 'STATED', 'northgate bank', 1000, 'Northgate Bank'),
+    ];
+    const conversation: Utterance[] = [utt('u1', 1000, 'the escrow is with Northgate Bank')];
+    let issued: ChallengeSpec[] = [];
+    for (let i = 0; i < 10; i++) {
+      const spec = selectChallenge(claims, issued, {}, SEED, 'sess-dana-leak', conversation);
+      if (!spec) break;
+      const text = specText(spec);
+      expect(text).not.toContain('first meridian trust');
+      expect(text).not.toContain('calder');
+      issued = [...issued, spec];
+    }
+  });
+
+  it("Robert Miller's TRAP_FACT behaviour is unchanged: a wrong counsel claim still offers his own true Hartwell counsel", () => {
+    const claims: Claim[] = [
+      claim('c-id', 'identity', 'STATED', 'robert-miller', 0, 'Robert Miller'),
+      claim('c-counsel', 'counsel', 'STATED', 'whitmore and bass', 1000, 'Whitmore and Bass'),
+    ];
+    const conversation: Utterance[] = [utt('u1', 1000, 'counsel is Whitmore and Bass')];
+    const spec = selectChallenge(claims, [], {}, SEED, 'sess-rm-unchanged', conversation);
+    expect(spec?.kind).toBe('TRAP_FACT');
+    expect(spec?.field).toBe('counsel');
+    expect(spec?.expect).toEqual({ trap_value: 'Calder & Finch', true_claim_id: 'c-counsel' });
+  });
+
+  it('general: for every identity and every knowledge-backed trap field, no issued challenge ever speaks a truth scoped to a different identity', () => {
+    // Known-safe collision: TRAP_DECOYS.approver ('Marcus Obi') is a plain decoy string
+    // that happens to equal Dana's own dana_internal_approver truth -- Marcus Obi really is
+    // the org's second approver for everyone, not a secret scoped away from anyone, so his
+    // name appearing as a decoy is not the scoping leak this suite guards against.
+    const KNOWN_SAFE_DECOYS = new Set(['marcus obi']);
+
+    const identityIds = SEED.identities.map((i) => i.id);
+    for (const identityId of identityIds) {
+      const outOfScopeTruths = SEED.knowledge
+        .filter((k) => k.identity_ids && k.identity_ids.length > 0 && !k.identity_ids.includes(identityId))
+        .map((k) => k.truth.toLowerCase())
+        .filter((t) => !KNOWN_SAFE_DECOYS.has(t));
+      if (outOfScopeTruths.length === 0) continue;
+
+      for (const field of TRAP_FIELDS) {
+        const claims: Claim[] = [
+          claim('c-id', 'identity', 'STATED', identityId, 0, identityId),
+          claim(`c-${field}`, field, 'STATED', 'zzz-not-a-real-value', 1000, 'zzz-not-a-real-value'),
+        ];
+        const conversation: Utterance[] = [utt('u1', 1000, 'zzz-not-a-real-value')];
+        let issued: ChallengeSpec[] = [];
+        for (let i = 0; i < 10; i++) {
+          const spec = selectChallenge(claims, issued, {}, SEED, `sess-${identityId}-${field}`, conversation);
+          if (!spec) break;
+          const text = specText(spec);
+          for (const truth of outOfScopeTruths) {
+            expect(text.includes(truth)).toBe(false);
+          }
+          issued = [...issued, spec];
+        }
+      }
+    }
+  });
+});
+
 describe('selectChallenge — determinism', () => {
   it('same inputs twice produce an identical spec', () => {
     const claims: Claim[] = [claim('c1', 'amount_usd', 'STATED', 500, 0, '$500')];

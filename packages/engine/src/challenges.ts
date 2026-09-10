@@ -84,18 +84,33 @@ function selectLiveCommitment(
   };
 }
 
-function knowledgeTruthForField(field: TrapField, seed: SeedConfig): string | null {
-  if (field === 'counsel') return seed.knowledge.find((k) => k.id === 'counsel_of_record')?.truth ?? null;
-  if (field === 'escrow_institution') return seed.knowledge.find((k) => k.id === 'escrow_institution')?.truth ?? null;
-  return null;
+/** Fix (reviewer finding, live test, 2026-09-09): this used to look the truth up by FIELD
+ *  alone, ignoring who is on the line. `selectSeedFact` already gates its picks through
+ *  `factInScope` and the claimed identity; this must go through the exact same gate, or a
+ *  caller with no claim to a scoped fact (e.g. Dana Whitfield, on the Hartwell facts scoped
+ *  to Robert Miller) can be handed a TRAP_FACT challenge whose "caller was wrong: the trap
+ *  offers the truth" branch speaks that fact's real value ALOUD to the wrong person. Out of
+ *  scope (or no identity claimed yet) -> null, same as "no truth known here", so the caller
+ *  falls straight into the existing decoy-only branch below -- fail-safe, never a deadlock. */
+function knowledgeTruthForField(field: TrapField, seed: SeedConfig, claimed_identity_id: string | null): string | null {
+  const entry =
+    field === 'counsel'
+      ? seed.knowledge.find((k) => k.id === 'counsel_of_record')
+      : field === 'escrow_institution'
+        ? seed.knowledge.find((k) => k.id === 'escrow_institution')
+        : undefined;
+  if (!entry || !factInScope(entry, claimed_identity_id)) return null;
+  return entry.truth;
 }
 
 function selectTrapFact(claims: Claim[], seed: SeedConfig, challengeId: string): ChallengeSpec | null {
+  const claimedIdentity = currentClaim(claims, 'identity');
+  const claimed_identity_id = claimedIdentity ? String(claimedIdentity.value) : null;
   for (const field of TRAP_FIELD_ORDER) {
     const claim = currentClaim(claims, field);
     if (!claim) continue;
     const claimStr = String(claim.value);
-    const truth = knowledgeTruthForField(field, seed);
+    const truth = knowledgeTruthForField(field, seed, claimed_identity_id);
     let trapValue: string;
     if (truth !== null && normalizeText(claimStr) !== normalizeText(truth)) {
       // The caller was wrong: the trap offers the truth.
