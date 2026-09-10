@@ -123,6 +123,17 @@ export function validateScenario(raw: unknown, sourcePath: string): Scenario {
     assert(typeof s.persona === 'string' && s.persona.trim().length > 0, `${sourcePath}: "persona" must be a non-empty string when present`);
     scenario.persona = s.persona as string;
   }
+  // demo_persona is the ONLY thing the harness tells the server about who is calling (the
+  // server maps it to simulated telemetry; see packages/server/src/personas.ts). It was added to
+  // the JSON and the type on 2026-09-04 but never copied here, so every honest-caller live run
+  // for five days was silently minted as the attacker. Strict allowlist, same as the server's.
+  if (s.demo_persona !== undefined) {
+    assert(
+      s.demo_persona === 'legitimate' || s.demo_persona === 'attacker',
+      `${sourcePath}: "demo_persona" must be exactly "legitimate" or "attacker" when present`,
+    );
+    scenario.demo_persona = s.demo_persona;
+  }
   return scenario;
 }
 

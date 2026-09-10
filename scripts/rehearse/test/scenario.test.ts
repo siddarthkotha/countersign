@@ -250,6 +250,21 @@ describe('the four shipped scenarios carry truth + persona (post-fix)', () => {
     }
   });
 
+  // ROOT CAUSE of every failed honest-caller live run 2026-09-04 to 2026-09-09 (PROVEN by the
+  // 7:10 PM flight recorder: session_minted {persona_resolved:"attacker", persona_input_present:false,
+  // body_bytes:0}): c2fc4bd added demo_persona to the JSON and to the Scenario type, but the
+  // validator rebuilt the object field by field and never copied it, so mintSession always
+  // posted an empty body and the server fell back to the attacker persona. This test pins it.
+  it('carries demo_persona through validation so mintSession can send it (regression, 2026-09-09)', async () => {
+    const a = await loadScenario('scenario-a-dana-legitimate');
+    expect(a.demo_persona).toBe('legitimate');
+    const b = await loadScenario('scenario-b-miller-fraud');
+    expect(b.demo_persona).toBe('attacker');
+    for (const s of await loadAllScenarios()) {
+      expect(['legitimate', 'attacker', undefined], `${s.name}: demo_persona must be a known persona or absent`).toContain(s.demo_persona);
+    }
+  });
+
   it('scenario-a\'s reactive turns can correct the beneficiary trap using its own truth block', async () => {
     const s = await loadScenario('scenario-a-dana-legitimate');
     const reactiveTurn = s.turns.find((t) => t.respond);
