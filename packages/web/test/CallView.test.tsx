@@ -96,6 +96,35 @@ describe('CallView', () => {
     expect(within(forensic).getByText(/abc123def456/)).toBeInTheDocument();
   });
 
+  // Founder-law item 1 (2026-09-09): the two checklist items rulings A/B added
+  // (at_least_one_challenge_passed, no_injection_attempt) get final plain-English labels,
+  // replacing the rules lane's placeholder wording. Scenario B's real terminal state
+  // (unmodified fixture) already carries at_least_one_challenge_passed: false and
+  // no_injection_attempt: true, so this exercises both the false and the true glyph without
+  // hand-building a state. The glyph (checkmark/cross), not colour, carries the true/false
+  // signal -- matching every other AssuranceChecklist row in this same list.
+  it('renders plain-English labels for the two rulings A/B checklist items, with glyph -- not colour -- carrying true/false', async () => {
+    const state = scenarioBFinalState();
+    expect(state.forensic.assurance.at_least_one_challenge_passed).toBe(false);
+    expect(state.forensic.assurance.no_injection_attempt).toBe(true);
+
+    const user = userEvent.setup();
+    render(<CallView screen={state} />);
+    await user.click(screen.getByRole('button', { name: 'Why?' }));
+
+    const forensic = screen.getByLabelText('forensic');
+    // The glyph and the label are separate text nodes (`{glyph} {label}` in CallView.tsx), so
+    // a single `getByText` can't match the label alone against the <li>'s full text content --
+    // find each row by its full rendered text instead.
+    const assuranceItems = within(forensic).getAllByRole('listitem');
+    const failedItem = assuranceItems.find((li) => (li.textContent ?? '').includes('At least one question answered correctly'));
+    const passedItem = assuranceItems.find((li) => (li.textContent ?? '').includes('No attempt to override the agent'));
+    expect(failedItem).not.toBeUndefined();
+    expect(passedItem).not.toBeUndefined();
+    expect(failedItem!.textContent).toMatch(/^✗/);
+    expect(passedItem!.textContent).toMatch(/^✓/);
+  });
+
   it('renders "awaiting answer" -- never an invented status word -- for an issued-but-ungraded challenge', async () => {
     const state = scenarioBFinalState();
     // The real engine always grades every issued challenge (at worst UNANSWERED), so this
