@@ -479,7 +479,6 @@ export function deriveRuleContext(
     challenges_issued: issuedCount,
     max_challenges: seed.thresholds.max_challenges,
     new_beneficiary: computeNewBeneficiary(claims, contextEv),
-    amendment_only: contextEv?.facts.amendment_only === true,
     evaluation_incomplete: computeEvaluationIncomplete(tools, conversation, actions, seed),
     critical_confirmed: computeCriticalConfirmed(claims),
     identity_switch_stale: identitySwitchEv?.status === 'FLAG',

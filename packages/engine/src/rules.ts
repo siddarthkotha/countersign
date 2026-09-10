@@ -14,7 +14,6 @@ export interface RuleContext {
   challenges_issued: number;
   max_challenges: number;
   new_beneficiary: boolean;
-  amendment_only: boolean;
   evaluation_incomplete: boolean;
   critical_confirmed: boolean;
   identity_switch_stale: boolean;
@@ -164,11 +163,13 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
   // ---- assurance (needed for row 11's gate and the I2 invariant) ----
   // Ruling A (2026-09-09, red team item 1): the amendment carve-out (a caller matching an
   // existing scheduled payment exactly) used to drop `need` to 0, letting such a call reach
-  // STAGE with zero knowledge challenges. It may now only reduce `need` to 1, never 0 -- so
-  // it no longer differs from the ordinary case below. `at_least_one_challenge_passed`
-  // (assurance, below) enforces the same "at least one genuinely graded PASS" floor a
-  // second, independent way, so this is never the only thing standing between a
-  // zero-challenge amendment-only call and STAGE.
+  // STAGE with zero knowledge challenges. It now floors at 1 regardless of the match, so an
+  // exact amendment match no longer changes `need` at all -- it is the same 1 (2 for a new
+  // beneficiary) as every other call. RuleContext.amendment_only, which used to carry the
+  // match into this function, was removed as dead code once nothing read it here anymore.
+  // `at_least_one_challenge_passed` (assurance, below) enforces the same "at least one
+  // genuinely graded PASS" floor a second, independent way -- see its declaration for why
+  // that duplication is deliberate.
   const need = ctx.new_beneficiary ? 2 : 1;
   const passedChallenges = knowledgeCards.filter((e) => e.status === 'PASS').length;
   const challengesRemaining = ctx.challenges_issued < ctx.max_challenges;
@@ -191,7 +192,12 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
     challenge_requirement_met: passedChallenges >= need,
     no_identity_switch: !ctx.identity_switch_stale,
     not_new_beneficiary: !ctx.new_beneficiary,
-    at_least_one_challenge_passed: passedChallenges >= 1, // ruling A (2026-09-09)
+    // Mathematically identical to challenge_requirement_met whenever need is 1 (the common
+    // case), but written as its own explicit item on purpose: it is a floor stated in terms
+    // a reader can verify without knowing what `need` currently computes to, so it keeps
+    // guarding "at least one graded PASS, always" even if a future change raises or
+    // lowers `need` for some case that isn't new-beneficiary. Ruling A (2026-09-09).
+    at_least_one_challenge_passed: passedChallenges >= 1,
     no_injection_attempt: injectionCount === 0, // ruling B (2026-09-09)
   };
 
@@ -363,7 +369,7 @@ Rule table (evidence-first, first match wins):
 1. An out-of-scope marker with no open request -> NO_ACTION; explain this is a demo checkpoint, nothing moves.
 2. An out-of-scope marker with an open request -> NO_ACTION; the request stays open and unstaged, for a human to route.
 3. No identity claim, or no request -> hold; ask for whichever is missing.
-4. A required challenge is asked before the amount is read back: not enough passed challenges yet for the risk level, challenges remain to ask, and there is no in-progress identity switch to resolve first -> hold; ask the next challenge. A caller matching an existing scheduled payment exactly (the amendment carve-out) may lower how many are required, but never below one (ruling 2026-09-09): at least one genuinely graded knowledge or relational PASS is always required before STAGE.
+4. A required challenge is asked before the amount is read back: not enough passed challenges yet for the risk level, challenges remain to ask, and there is no in-progress identity switch to resolve first -> hold; ask the next challenge. At least one genuinely graded knowledge or relational PASS is always required before STAGE, and two when the beneficiary is new; a caller matching an existing scheduled payment exactly no longer lowers this requirement (ruling 2026-09-09 floors it at one, closing the carve-out that used to let it drop to zero).
 5. A readback is still required before anything can be staged: any critical field (amount, account, beneficiary) that has been claimed but not yet confirmed -> hold; read it back and ask the caller to confirm. Reached once any challenge required by row 4 has already been asked (or none is required for this risk level).
 6. An identity switch this version, with now-stale evidence -> hold; re-establish who is calling from scratch (this always takes priority over asking a fresh challenge or a readback, since both would otherwise address someone whose claimed identity has already been abandoned).
 7. Any identity, out-of-band, or context check still pending, absent, or stale -> hold; keep the floor with one short neutral line.
@@ -376,7 +382,7 @@ Rule table (evidence-first, first match wins):
    Reasons are always ordered: identity, out-of-band, context, story consistency, knowledge check, urgency pressure, exposure limit, new beneficiary. Freeze keeps strict priority over rows 4 and 5: it can fire on raw, unconfirmed evidence rather than waiting on a challenge or a readback that may never come.
 9. Distinct amounts stated across the call add up past the high-value threshold while the current amount alone reads under it -> escalate for a human callback (this guards against splitting one large request into smaller-looking pieces).
 10. A first-time beneficiary not on record -> escalate for a human callback, regardless of amount.
-11. Every AssuranceChecklist item reads true -> STAGE for second approval. A pressure flag never blocks this step, but it keeps the details off the call and adds the principal alert to the required actions. At least one knowledge or relational challenge must have graded PASS (ruling 2026-09-09) -- an explicit, independent floor, so the amendment carve-out's reduced requirement is never by itself enough to reach STAGE with zero challenges asked. An explicit instruction-injection attempt anywhere in the call (ruling 2026-09-09) makes STAGE unreachable for the rest of the call, regardless of how everything else resolves.
+11. Every AssuranceChecklist item reads true -> STAGE for second approval. A pressure flag never blocks this step, but it keeps the details off the call and adds the principal alert to the required actions. At least one knowledge or relational challenge must have graded PASS (ruling 2026-09-09) -- stated as its own explicit assurance item (at_least_one_challenge_passed), separate from and mathematically redundant with the general per-risk-level requirement (challenge_requirement_met) whenever that requirement is 1, so the "never zero challenges" floor stays visible and enforced on its own even if the general requirement's arithmetic changes later. An explicit instruction-injection attempt anywhere in the call (ruling 2026-09-09) makes STAGE unreachable for the rest of the call, regardless of how everything else resolves.
 12. Some checks have failed, fewer than three, and either challenges remain to ask, or the challenge just asked has not been answered yet and the call is still live -> hold; ask another challenge, or wait the few seconds a reply is still due (ruling 2026-09-09): the instant the last allowed challenge is asked must not by itself fall through to row 13 before the caller has had a chance to answer it.
 13. Otherwise -> escalate for a human callback; nothing moves by voice alone.
 14. The call itself ends (idle timeout, session cap, a hangup, or a dropped socket) while the table above still leaves the outcome on hold (rows 3-7 or 12) -> escalate for a human callback if a request was ever stated (the same containment an organic escalation gets, with no rule-failure reason to name -- only that the call ended before the checks finished); with no request ever stated, there is nothing to route, so this closes as no action instead. Every terminal row above (freeze included) keeps strict priority: this row is only reached when nothing else already decided.

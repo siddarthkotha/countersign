@@ -35,7 +35,6 @@ function ctx(overrides?: Partial<RuleContext>): RuleContext {
     challenges_issued: 0,
     max_challenges: 3,
     new_beneficiary: false,
-    amendment_only: false,
     evaluation_incomplete: false,
     critical_confirmed: true,
     identity_switch_stale: false,
@@ -49,11 +48,13 @@ const IDENTITY = ev('ev-identity', 'identity_claim', 'INFO');
 const REQUEST = ev('ev-request', 'request_params', 'INFO');
 
 /** A fully-clean, "everything checks out" evidence set: identity + request known, all
- *  three live checks PASS, no contradictions, no failed challenges. With
- *  ctx({ amendment_only: true }) (need = 1, since ruling A 2026-09-09 floors the amendment
- *  carve-out at 1, never 0) this only reaches row 11 and STAGEs once at least one graded
- *  knowledge/relational PASS card is added -- the baseline every other row-test perturbs
- *  one thing away from. */
+ *  three live checks PASS, no contradictions, no failed challenges. The context card's
+ *  facts.amendment_only marks an exact match against a scheduled payment -- a real,
+ *  independently-tested fact recorded on the evidence (see evidence.test.ts), but ruling A
+ *  (2026-09-09) means it no longer feeds `need`: with ctx() (need = 1, floored the same
+ *  whether or not this exact-match fact is present) this only reaches row 11 and STAGEs
+ *  once at least one graded knowledge/relational PASS card is added -- the baseline every
+ *  other row-test perturbs one thing away from. */
 function stageEvidence(overrides?: Partial<Record<'sso' | 'oob' | 'context', EvidenceStatus>>): Evidence[] {
   return [
     IDENTITY,
@@ -65,8 +66,8 @@ function stageEvidence(overrides?: Partial<Record<'sso' | 'oob' | 'context', Evi
   ];
 }
 
-const STAGE_CTX = ctx({ amendment_only: true });
-const STAGE_CTX_WITH_CALL_ENDED = ctx({ amendment_only: true, call_ended: true });
+const STAGE_CTX = ctx();
+const STAGE_CTX_WITH_CALL_ENDED = ctx({ call_ended: true });
 
 describe('decide -- rule table (first match wins)', () => {
   it('row 1: out-of-scope marker, no request -> NO_ACTION, rule_hit 1', () => {
@@ -90,7 +91,7 @@ describe('decide -- rule table (first match wins)', () => {
   });
 
   it('row 4: a challenge is still required for the risk level, and one can still be asked -> PENDING, rule_hit 4', () => {
-    const r = decide(stageEvidence(), SEED, ctx({ amendment_only: false })); // need = 1, zero passed
+    const r = decide(stageEvidence(), SEED, ctx()); // need = 1, zero passed
     expect(r.verdict).toBe('PENDING');
     expect(r.rule_hit).toBe(4);
   });
@@ -99,7 +100,7 @@ describe('decide -- rule table (first match wins)', () => {
     // Same "challenge still owed" shape as the row-4 test above, but with a stale identity
     // switch layered on: the switch must be re-established from scratch before any challenge
     // is put to "whoever is on the line now" (row 6), not row 4.
-    const r = decide(stageEvidence(), SEED, ctx({ amendment_only: false, identity_switch_stale: true }));
+    const r = decide(stageEvidence(), SEED, ctx({ identity_switch_stale: true }));
     expect(r.verdict).toBe('PENDING');
     expect(r.rule_hit).toBe(6);
   });
@@ -192,7 +193,7 @@ describe('decide -- rule table (first match wins)', () => {
       ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
       ev('ev-exposure', 'exposure_check_result', 'FAIL', { facts: { exposure_usd: 60_000, current_usd: 21_000 } }),
     ];
-    const r = decide(evidence, SEED, ctx({ amendment_only: true }));
+    const r = decide(evidence, SEED, ctx());
     expect(r.verdict).toBe('ESCALATE');
     expect(r.rule_hit).toBe(9);
     expect(r.reasons).toContain('EXPOSURE_LIMIT');
@@ -200,7 +201,7 @@ describe('decide -- rule table (first match wins)', () => {
 
   it('row 10: a first-time beneficiary -> ESCALATE regardless of amount, reasons contain NEW_BENEFICIARY', () => {
     // challenges exhausted so row 4's "need=2, 0 passed" doesn't intercept it first.
-    const r = decide(stageEvidence(), SEED, ctx({ amendment_only: true, new_beneficiary: true, challenges_issued: 3 }));
+    const r = decide(stageEvidence(), SEED, ctx({ new_beneficiary: true, challenges_issued: 3 }));
     expect(r.verdict).toBe('ESCALATE');
     expect(r.rule_hit).toBe(10);
     expect(r.reasons).toContain('NEW_BENEFICIARY');
@@ -221,7 +222,7 @@ describe('decide -- rule table (first match wins)', () => {
       ...stageEvidence({ context: 'FAIL' }),
       ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
     ];
-    const r = decide(evidence, SEED, ctx({ amendment_only: false })); // need=1, 1 passed -> row 4 satisfied
+    const r = decide(evidence, SEED, ctx()); // need=1, 1 passed -> row 4 satisfied
     expect(r.verdict).toBe('PENDING');
     expect(r.rule_hit).toBe(12);
     expect(r.failure_tally).toBeGreaterThan(0);
@@ -233,7 +234,7 @@ describe('decide -- rule table (first match wins)', () => {
       ...stageEvidence({ context: 'FAIL' }),
       ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
     ];
-    const r = decide(evidence, SEED, ctx({ amendment_only: false, challenges_issued: 3 }));
+    const r = decide(evidence, SEED, ctx({ challenges_issued: 3 }));
     expect(r.verdict).toBe('ESCALATE');
     expect(r.rule_hit).toBe(13);
   });
@@ -267,7 +268,7 @@ describe('decide -- rule table (first match wins)', () => {
   it('row 14 never overrides an already-terminal STAGE/ESCALATE/NO_ACTION verdict', () => {
     // row 11 (STAGE) unaffected by call_ended.
     const stageEv = [...stageEvidence(), ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } })];
-    const staged = decide(stageEv, SEED, ctx({ amendment_only: true, call_ended: true }));
+    const staged = decide(stageEv, SEED, ctx({ call_ended: true }));
     expect(staged.verdict).toBe('STAGE');
     expect(staged.rule_hit).toBe(11);
 
@@ -291,17 +292,18 @@ describe('decide -- rule table (first match wins)', () => {
 });
 
 describe('decide -- founder rulings 2026-09-09', () => {
-  // Ruling A: the amendment carve-out (need 0 when amendment_only+context PASS) may now
-  // reduce `need` to 1, never 0 -- at least one genuinely graded knowledge/relational PASS
-  // is required before STAGE, regardless of the carve-out.
-  it('ruling A: amendment carve-out with zero passed challenges cannot reach row 11 -- held at row 4 instead', () => {
-    const r = decide(stageEvidence(), SEED, STAGE_CTX); // amendment_only true, context PASS, 0 challenges passed
+  // Ruling A: `need` used to drop to 0 for a caller matching an existing scheduled payment
+  // exactly (the amendment carve-out), letting such a call reach STAGE with zero knowledge
+  // challenges. It now floors at 1 (2 for a new beneficiary) regardless of that match -- at
+  // least one genuinely graded knowledge/relational PASS is always required before STAGE.
+  it('ruling A: zero passed challenges cannot reach row 11, even for an exact scheduled-payment match -- held at row 4 instead', () => {
+    const r = decide(stageEvidence(), SEED, STAGE_CTX); // context PASS (exact match), 0 challenges passed
     expect(r.verdict).not.toBe('STAGE');
     expect(r.rule_hit).toBe(4);
     expect(r.assurance.at_least_one_challenge_passed).toBe(false);
   });
 
-  it('ruling A: amendment carve-out with exactly one graded PASS reaches STAGE', () => {
+  it('ruling A: exactly one graded PASS reaches STAGE, even for an exact scheduled-payment match', () => {
     const evidence = [...stageEvidence(), ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } })];
     const r = decide(evidence, SEED, STAGE_CTX);
     expect(r.verdict).toBe('STAGE');
@@ -339,7 +341,7 @@ describe('decide -- founder rulings 2026-09-09', () => {
       ...stageEvidence({ context: 'FAIL' }), // one failed sign-in -> tally 1
       ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
     ];
-    const r = decide(evidence, SEED, ctx({ amendment_only: false, challenges_issued: 3, challenge_awaiting_answer: true }));
+    const r = decide(evidence, SEED, ctx({ challenges_issued: 3, challenge_awaiting_answer: true }));
     expect(r.verdict).toBe('PENDING');
     expect(r.rule_hit).toBe(12);
     expect(r.failure_tally).toBe(1);
@@ -350,7 +352,7 @@ describe('decide -- founder rulings 2026-09-09', () => {
       ...stageEvidence({ context: 'FAIL' }),
       ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
     ];
-    const r = decide(evidence, SEED, ctx({ amendment_only: false, challenges_issued: 3, challenge_awaiting_answer: false }));
+    const r = decide(evidence, SEED, ctx({ challenges_issued: 3, challenge_awaiting_answer: false }));
     expect(r.verdict).toBe('ESCALATE');
     expect(r.rule_hit).toBe(13);
   });
@@ -377,7 +379,7 @@ describe('decide -- invariants', () => {
   });
 
   it('I4: evaluation_incomplete with otherwise-clean evidence -> ESCALATE, never STAGE', () => {
-    const r = decide(stageEvidence(), SEED, ctx({ amendment_only: true, evaluation_incomplete: true }));
+    const r = decide(stageEvidence(), SEED, ctx({ evaluation_incomplete: true }));
     expect(r.verdict).toBe('ESCALATE');
     expect(r.verdict).not.toBe('STAGE');
   });
@@ -395,9 +397,9 @@ describe('decide -- mutants (each proves a rule is load-bearing)', () => {
 
   it('ignore_contradictions turns a 7b FREEZE into a non-FREEZE verdict', () => {
     const evidence = [...stageEvidence({ context: 'FAIL' }), ev('ev-consistency-amount_usd', 'consistency_flag', 'FAIL')];
-    const straight = decide(evidence, SEED, ctx({ amendment_only: false }));
+    const straight = decide(evidence, SEED, ctx());
     expect(straight.verdict).toBe('FREEZE');
-    const mutated = withMutant(evidence, ctx({ amendment_only: false }), { ignore_contradictions: true });
+    const mutated = withMutant(evidence, ctx(), { ignore_contradictions: true });
     expect(mutated.verdict).not.toBe('FREEZE');
   });
 
@@ -413,10 +415,10 @@ describe('decide -- mutants (each proves a rule is load-bearing)', () => {
     // Ruling A (2026-09-09): need floors at 1, so a passed knowledge card is required for
     // this to reach row 5 (and, once mutated, STAGE) instead of stalling at row 4.
     const evidence = [...stageEvidence(), ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } })];
-    const straight = decide(evidence, SEED, ctx({ amendment_only: true, critical_confirmed: false }));
+    const straight = decide(evidence, SEED, ctx({ critical_confirmed: false }));
     expect(straight.verdict).toBe('PENDING');
     expect(straight.rule_hit).toBe(5);
-    const mutated = withMutant(evidence, ctx({ amendment_only: true, critical_confirmed: false }), { skip_readback_gate: true });
+    const mutated = withMutant(evidence, ctx({ critical_confirmed: false }), { skip_readback_gate: true });
     expect(mutated.verdict).toBe('STAGE');
   });
 
@@ -429,10 +431,10 @@ describe('decide -- mutants (each proves a rule is load-bearing)', () => {
       ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
       ev('ev-exposure', 'exposure_check_result', 'FAIL', { facts: { exposure_usd: 60_000, current_usd: 21_000 } }),
     ];
-    const straight = decide(evidence, SEED, ctx({ amendment_only: true }));
+    const straight = decide(evidence, SEED, ctx());
     expect(straight.verdict).toBe('ESCALATE');
     expect(straight.rule_hit).toBe(9);
-    const mutated = withMutant(evidence, ctx({ amendment_only: true }), { ignore_exposure: true });
+    const mutated = withMutant(evidence, ctx(), { ignore_exposure: true });
     expect(mutated.verdict).toBe('STAGE');
   });
 });
@@ -522,5 +524,16 @@ describe('RULES_DOC', () => {
     for (const bad of ['impostor', 'deepfake', 'synthetic voice', 'clone', 'immutable', 'sealed']) {
       expect(lower).not.toContain(bad);
     }
+  });
+
+  it('row 4 text agrees with the code: at least one challenge required, and the amendment match no longer lowers that count', () => {
+    // Guards against RULES_DOC drifting from decide()'s actual `need` calculation again --
+    // this is exactly the staleness a prior review caught (RULES_DOC still described the
+    // amendment carve-out as able to reduce `need`, after ruling A had already floored it
+    // at 1 for every call, amendment match or not).
+    const row4 = RULES_DOC.split('\n').find((line) => /^4\./.test(line));
+    expect(row4).toBeDefined();
+    expect(row4?.toLowerCase()).toContain('at least one');
+    expect(row4?.toLowerCase()).not.toContain('may lower');
   });
 });
