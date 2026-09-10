@@ -1,78 +1,80 @@
 # Countersign, session snapshot (overwritten at every close; never appended)
 
-Last close: Friday 2026-09-04, 4:58 AM CDT (Day 3 ran through the night on autopilot).
-Autopilot is OFF. Founder travelling until Sep 8; rehearsals resume Sep 9.
+Last written: Wednesday 2026-09-09, 8:04 PM CDT, on autopilot (founder said "Autopilot Start"
+at 7:41 PM). Day 4. This file is a running snapshot tonight; the close pass rewrites it.
 
 ## The one-paragraph version
 
-The 10 PM rehearsal found the demo never reached a verdict. Three separate unconditional bugs
-each made that impossible, and hundreds of green tests missed all three because the recorded
-corpus never exercises what the live server actually builds. All three are fixed, reviewed,
-deployed and proven. The fraud interrogation now runs end to end on the live site with no
-human: FREEZE in 58 seconds. The legitimate path no longer stalls but ends in ESCALATE rather
-than STAGE, and closing that is the next job.
+Five days of "the honest caller escalates instead of staging" had one cause, and it was not the
+engine: the rehearsal script's file loader dropped the persona field, so every honest-caller
+live run since Sep 4 was minted as the attacker. Found tonight only after the flight recorder
+learned to log what the server resolved. Fixed with a regression test, proven STAGE on the local
+compiled server. Twenty-one founder rulings were made and built in parallel lanes: three
+rule-table changes, honest-caller facts, injection escalates, hedge bound, spoken-number fix,
+timeout incident as an engine rule, em-dash sweep, autoplay, submission trim, live-path
+end-to-end test, CI tuning, four new attack scenarios, external critic panel. Two pushes went
+out after the full gate. Deployed proof of STAGE (gate G2) is the open item.
 
-## PROVEN (verified at 4:31 AM against the real sources, not from notes)
+## PROVEN (each checked against the real source tonight, not from notes)
 
-- Live: https://countersign-bf8q.onrender.com serves commit fbfc84f, health ok, CI green on
-  that commit. GET /version was added last night so a deploy can be confirmed, not guessed.
-- Fraud path PASSES on the DEPLOYED site with no human: scenario B, FREEZE, 57.9s.
-  Report: scripts/rehearse/reports/2026-09-04T01-07-41-scenario-b-miller-fraud.md
-- Close gate at 4:58 AM: 809 tests pass across 53 files, typecheck clean. All 18 recorded
-  calls replayed exactly through the real engine earlier in the session.
-- Spend: about 19 minutes of AssemblyAI credits overnight (ESTIMATE, harness wall clock).
-  GitHub Actions: 6 runs, about 10 billed minutes of 2000 this month. The keepalive cron
-  stays disabled; enabling it would burn thousands of runs.
+- Main 9e64bc5 pushed 8:02 PM. npm test 1049/1049 three times, typecheck clean. The suite now
+  includes the rehearsal and critique harness tests (was 57 files / 888 at 6 PM, is 69 / 1049).
+- CI green on b556864 (push 6). Push 7 (9e64bc5) CI and Render deploy were being polled at the
+  time of writing; see docs/AUTOPILOT_LOG.md for the outcome line.
+- Honest scenario STAGE on the LOCAL compiled server: report
+  scripts/rehearse/reports/2026-09-09T19-14-56-scenario-a-dana-legitimate.md, verdict STAGE at
+  93.7 s, every checklist item true, persona recorded as legitimate at mint and attach.
+- Root cause: scripts/rehearse/scenario.ts never copied demo_persona (fixed 75e31df). The
+  recorder's session_minted event showed persona_input_present=false, body_bytes=0.
+- Fraud path unchanged and still proven live from Sep 4 (FREEZE, 57.9 s).
+- 19 recorded calls replay exactly through the engine (was 18; abandoned-open-request.json added).
+- External critic panel ran (GPT-4o, Perplexity; Grok and Gemini ids fixed for next time):
+  65 findings; three verified with file:line, one refuted, rest triaged on the board.
 
-## What was wrong, and what fixed it
+## What landed tonight (all reviewed by a separate lane before push)
 
-1. Nobody ran the three background checks on a live call, so the engine held forever. The
-   server now runs them itself from the state machine (422d750).
-2. The engine re-ran on every audio frame, filling the flight recorder in 46 seconds. Fixed,
-   and the recorder gained real timing events (b6e5ba7).
-3. The model was offered tool schemas, read a field name off one, and demanded an "identity
-   id" no caller could know. It is offered no tools at all now (42d720f).
-4. The readback confirmation compared a formatted string against a raw number, so two of the
-   three critical fields could never be confirmed (571ee31).
-5. Every live call was labelled an unverified gateway, which fails the sign-in check by
-   design, so staging was unreachable. A named demo persona now maps, server-side only, to
-   the simulated telemetry (3ff88d3).
-6. My own error: I shipped a change that made the agent read its stage directions aloud to a
-   caller, after its author had warned me it would. Caught on the next live call, fixed
-   (c2fc4bd). Lesson recorded: a flagged risk in an agent's report is a blocker, not a note.
+Rules: no STAGE without one passed question (row 4 floor + checklist item); injection attempt
+adds a full point and blocks STAGE; the last question can no longer go terminal before the
+answer (challenge_answer_window_ms); call ends with open request => ESCALATE by engine row 14.
+Challenges: every fact scoped to an identity, Dana has three of her own (INV-7734, Marcus Obi,
+quarterly parts restock), trap question can no longer speak another identity's truth, spent
+facts never re-asked, relational grading uses the named beneficiary. Ledger: a hedge that
+more than doubles or halves is CONTRADICTED. Numbers: "thanks a million" is not a claim.
+Server: export hash survives a fast hang-up; recorder logs rule row, checklist, cards,
+counters, readbacks, resolved persona and call context; errored containment never reads
+SEALED. Web: em-dashes gone (guard test incl. corpus titles), flagship recording autoplays,
+honest labels for the two new checklist items and for the replay Play control. Docs:
+submission long description 400 words. CI: concurrency cancel + docs path filter. Harness:
+raw diagnostics bundle saved per run; four adversarial scenarios written (not run).
 
-## Open on the founder, in the order I would take them
+## Open, in the order to take them
 
-1. **The staging gap.** A legitimate call reaches ESCALATE, not STAGE. The terminal action
-   fires as the third challenge is asked, before the caller's answer lands. UNKNOWN whether
-   that is engine grading, the challenge budget, or the scripted caller being too slow. Use
-   the harness locally; do not spend live calls guessing.
-2. **What an honest caller is asked.** Every seeded knowledge fact belongs to the fraudster's
-   deal. The fix is built and tested but NOT committed, because alone it leaves an honest
-   caller with no question at all. Two options and a recommendation:
-   docs/PARKED-CHALLENGE-SCOPING.md
-3. **Six attack paths** needing policy rulings, not patches: docs/RED-TEAM-2026-09-03.md. The
-   one to fix first is that an abandoned call leaves no incident, a real hole in LAW 2.
-4. **Judge card, 26 of 40, "does not place as it stands":** docs/JUDGE-SIM-2026-09-03.md.
-   Most findings are already fixed; the rest are founder calls.
-5. **Small rulings:** the submission's judged section is 524 words against a 399 target;
-   em-dashes run through the shipped interface copy while the style law bans them; whether the
-   flagship recording should play automatically for a judge.
-6. **The external model panel never ran.** No OpenRouter or Gemini key exists in .env, and
-   they are not in the ShadePath files either. The runner is built and dry-run verified, so it
-   fires the moment a key lands.
+1. Gate G2: two consecutive honest runs against the DEPLOYED site once push 7 is live. The
+   auto-mode classifier blocked `npm run rehearse -- --url <deployed>` from me twice; the
+   founder pastes the command (docs/REHEARSAL-HARNESS.md) or allows it once.
+2. README Status refresh after the deployed STAGE proof (it still names a live blocker).
+3. Two follow-up lanes in flight at time of writing: RULES_DOC row 4 wording plus dead
+   amendment_only field; transcript item_id dedupe after an AssemblyAI resume.
+4. Founder decisions parked: on-screen banner for abandoned containment (visual); UI jargon
+   copy; whether urgency should ever carry weight (recommendation: no); RT-9b escrow grading.
+5. Judge simulation Friday Sep 12 (build the judge-sim agent then, not before).
+
+## Founder rulings recorded tonight
+
+Subscription tier vs OpenRouter: parked until after Sep 30. OpenRouter serves the Anthropic
+protocol (proven by a live call); its only job now is the Friday critic panel. Ponytail,
+Graphify, RTK: none during the hackathon; RTK trial after Sep 30 in a throwaway folder.
+Corpus gate yes given 7:01 PM for the five extended recordings and the injection flip.
 
 ## How to test without being the tester
 
-`npm run rehearse` plays scripted callers against the real stack in a synthesised voice and
-grades the outcome. Read docs/REHEARSAL-HARNESS.md first, including the trap that cost a live
-call: the local server loads the COMPILED engine, so run `npm run build:engine` before testing
-any engine change or you will be testing the old code.
+`npm run rehearse -- --scenario scenario-a-dana-legitimate` against a local server (build first:
+`npm run build`, then `node packages/server/dist/index.js` with .env loaded). Add
+`--url https://countersign-bf8q.onrender.com` for the deployed site (spends credits). Every run
+now writes a raw diagnostics bundle next to its report with the checklist per transition.
 
 ## Next session
 
-"Day 4 resume: read docs/STATE.md, docs/PARKED-CHALLENGE-SCOPING.md and
-docs/RED-TEAM-2026-09-03.md, then .claude/backlog.json and the tail of docs/AUTOPILOT_LOG.md.
-First job is the staging gap: find why a legitimate call ends in ESCALATE instead of STAGE,
-using the harness locally rather than live calls. Then put the challenge-scoping decision to
-the founder with its two options. The fraud path is proven live and must not regress."
+"Day 5 resume: read docs/STATE.md and the tail of docs/AUTOPILOT_LOG.md. First job is G2: two
+consecutive honest runs on the deployed site (the founder runs or allows the command). Then the
+README status refresh, then the parked founder decisions, then Friday's judge simulation."
