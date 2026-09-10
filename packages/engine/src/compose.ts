@@ -484,6 +484,10 @@ export function deriveRuleContext(
     critical_confirmed: computeCriticalConfirmed(claims),
     identity_switch_stale: identitySwitchEv?.status === 'FLAG',
     challenge_awaiting_answer: computeChallengeAwaitingAnswer(tools, conversation, actions, seed),
+    // Red team item 4 (founder ruling 2026-09-09): true once the server has recorded a
+    // `call_ended` action anywhere in the log -- see rules.ts row 14. A structured fact
+    // about the call's lifecycle, not a verdict; the engine alone decides what it means.
+    call_ended: actions.some((a) => a.kind === 'call_ended'),
   };
 }
 

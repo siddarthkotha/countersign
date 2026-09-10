@@ -41,8 +41,14 @@ export interface ToolLogEntry {
  *  completes. Never written by the LLM itself.
  *  `link_changed` (IMPORTANT 2, final review): a transport-leg link event -- server<->
  *  AssemblyAI or browser<->server -- recorded as evidence of what happened to the call's
- *  transport, distinct from a verdict-bearing action; see `detail` below. */
-export type AgentActionKind = 'challenge_issued' | 'readback_issued' | 'session_config_updated' | 'link_changed';
+ *  transport, distinct from a verdict-bearing action; see `detail` below.
+ *  `call_ended` (red team item 4, founder ruling 2026-09-09): the call itself ended --
+ *  idle timeout, session cap, a caller hangup, or a dropped socket -- recorded by the
+ *  server (call/session.ts's end()) as a structured fact about the call's lifecycle, same
+ *  spirit as `link_changed`. It carries no verdict of its own; `detail` names the end
+ *  reason (e.g. "idle_timeout"). rules.ts's row 14 is the ONLY place this fact is ever
+ *  turned into a verdict (LAW 3: the engine, never the server, decides). */
+export type AgentActionKind = 'challenge_issued' | 'readback_issued' | 'session_config_updated' | 'link_changed' | 'call_ended';
 
 export interface AgentAction {
   id: string;

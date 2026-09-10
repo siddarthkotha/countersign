@@ -239,6 +239,34 @@ export class CallSession {
   end(reason: string): void {
     if (this.ended) return;
     this.ended = true;
+    // Red team item 4 (founder ruling, 2026-09-09): before anything else about ending the
+    // call, record the structured fact that it ended -- LAW 3 forbids the SERVER from
+    // deciding what that means (a rejected first attempt at this fix, branch
+    // worktree-agent-aa25cb13b49be1675 commit a6c8559, stamped ESCALATE here directly; the
+    // founder ruled that out precisely because the engine is the only verdict owner). All
+    // this does is append one `call_ended` AgentAction (same shape `link_changed` already
+    // uses) and let a normal `tick()` -- the SAME re-evaluate/run-terminal-actions/emit-state
+    // sequence every other event in this call already goes through -- react to it. If the
+    // engine's own rules.ts row 14 turns that into ESCALATE or NO_ACTION, this is where the
+    // containment tools (open_incident, alert_principal, seal_evidence_record) actually run
+    // and the hash-chained export gets built, through the EXISTING terminal-action path
+    // (`runTerminalActionsIfNeeded`) -- nothing new here at all, just one more fact in the
+    // log before the last tick.
+    //
+    // Every ending route funnels through this one method (idle reaper and the per-call cap
+    // timer via ws/browser.ts's `endCall`, a caller hangup via `handleBrowser`'s 'end' case,
+    // a dropped AAI/browser socket, session.error/session.ended) -- wiring it here alone
+    // covers all of them.
+    //
+    // `tick()`'s own `emitState()` may push one more 'state' event here (e.g. showing the
+    // fresh ESCALATE banner) -- that happens BEFORE the `onServerEvent({type:'ended'})` call
+    // below, so 'ended' still stays the last websocket event, same as always. The async
+    // export-hash continuation inside `runTerminalActionsIfNeeded` already records
+    // `export_computed` unconditionally and checks `this.ended` (true from the line above)
+    // before ever calling `emitState()` again, so no websocket event follows 'ended' once
+    // the hash resolves.
+    this.logs.actions.push({ id: this.nextActionId(), kind: 'call_ended', t_ms: this.nowT(), detail: reason });
+    this.tick();
     // Flight recorder: whatever this AAI adapter never modeled (mapServerEvent's `default`
     // branch, aai/session.ts) surfaced once here, at the one point every ended call passes
     // through -- `stats()` is optional (FakeAaiSocket has none, since tests only ever emit

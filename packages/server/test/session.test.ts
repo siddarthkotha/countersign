@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { MERIDIAN, mockToolResult } from '@countersign/engine';
 import type { AgentAction, CallContext, ServerEvent, ToolLogEntry } from '@countersign/engine';
 import { CallSession } from '../src/call/session.js';
@@ -638,5 +639,90 @@ describe('CallSession — STALL line anti-repeat is call-scoped (fix round 1, fi
     // A different kind tracks its own independent `used` set.
     const ssoFirst = pick('sso');
     expect(seen.has(ssoFirst)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Red team item 4 (founder ruling, 2026-09-09): a call that ends by idle timeout, session
+// cap, hangup, or a dropped socket while a request has been stated and the verdict is
+// still PENDING must not leave no incident, no freeze, no export. Fixed in the ENGINE
+// (rules.ts row 14, LAW 3), not the server: end() records a `call_ended` action into the
+// logs and re-runs the real engine through the existing terminal-action path -- it never
+// stamps a verdict itself. See packages/engine/corpus/abandoned-open-request.json for the
+// engine-level proof; these tests prove the server wiring reaches it.
+describe('CallSession — end() reaches the engine\'s call-ended row (RT-4)', () => {
+  it("idle-timeout end() with a request stated escalates: incident/alert/seal run for real, an export_computed diagnostic lands, and the engine's own verdict (session.last) reads ESCALATE, not PENDING", async () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const call: CallContext = { session_id: 'sess-abandon-1', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = new CallSession({
+      session_id: call.session_id,
+      seed: MERIDIAN,
+      call,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+    });
+
+    session.start();
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: 'This is Robert Miller, I need $1.8 million wired to the escrow account.' });
+
+    // Before ending: a request is on record, no live checks/challenges have run yet, and
+    // the engine itself still reads PENDING -- the exact shape row 14 exists for.
+    expect(session.last?.verdict).toBe('PENDING');
+    expect(session.last?.evidence.some((e) => e.kind === 'request_params')).toBe(true);
+
+    clock.now = 30000;
+    session.end('idle_timeout');
+    await session.whenIdle();
+
+    // LAW 3: the engine, not the server, decided this -- `session.last` is the real
+    // `evaluate()` output computed over the logs (which now include the call_ended action).
+    expect(session.last?.verdict).toBe('ESCALATE');
+
+    const toolNames = session.logs.tools.map((t) => t.name);
+    expect(toolNames).toContain('open_incident');
+    expect(toolNames).toContain('alert_principal');
+    expect(toolNames).toContain('seal_evidence_record');
+    expect(session.logs.actions.some((a) => a.kind === 'call_ended')).toBe(true);
+
+    expect(diagEvents.some((e) => e.kind === 'export_computed')).toBe(true);
+
+    // 'ended' remains the LAST websocket event, even though ending this call forced a full
+    // terminal-action pass first.
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'idle_timeout' });
+  });
+
+  it('idle-timeout end() with NO request ever stated forces nothing: verdict stays NO_ACTION, no terminal tools run, matching corpus/hangup-mid-check.json\'s no-request shape', async () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-abandon-2', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent);
+
+    session.start(); // INTAKE -- nothing said yet
+    clock.now = 30000;
+    session.end('idle_timeout');
+    await session.whenIdle();
+
+    expect(session.last?.verdict).toBe('NO_ACTION');
+    expect(session.logs.tools).toHaveLength(0);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'idle_timeout' });
+  });
+
+  it('the idle reaper and the per-call cap timer both end a call through CallSession.end() alone (ws/browser.ts), so they inherit this fix with no separate wiring', async () => {
+    // White-box check, deliberately: ws/browser.ts's `endCall` (used by both the idle
+    // reaper and the cap timer, per its own founder-ruling comment) calls
+    // `entry.session.end(reason)` and nothing else -- there is exactly one place a call
+    // ever closes, and this test is the one place that fact is pinned down so a future
+    // refactor introducing a second ending path would need to touch this assertion too.
+    const source = readFileSync(new URL('../src/ws/browser.ts', import.meta.url), 'utf8');
+    const endCallCalls = source.match(/entry\.session\.end\(/g) ?? [];
+    expect(endCallCalls.length).toBeGreaterThanOrEqual(2); // caller hangup + endCall (reaper/cap)
   });
 });

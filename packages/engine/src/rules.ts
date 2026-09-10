@@ -25,6 +25,10 @@ export interface RuleContext {
   // allowed challenge is ASKED, before the caller's answer has had a chance to arrive.
   // Derived purely in compose.ts's deriveRuleContext -- never set from a live clock.
   challenge_awaiting_answer: boolean;
+  // Red team item 4 (founder ruling 2026-09-09): true when the call itself has ended
+  // (idle timeout, session cap, a hangup, or a dropped socket) -- see row 14 below and
+  // types.ts's `AgentActionKind.call_ended`. Server-observed, never engine-derived.
+  call_ended: boolean;
 }
 
 /** Deliberate rule-breaks used only by test/mutants.test.ts to prove each rule is
@@ -43,7 +47,7 @@ export interface DecideResult {
   failure_tally: number;
   assurance: AssuranceChecklist;
   invariants_ok: boolean;
-  rule_hit: number; // which table row (1-13) produced the tentative verdict; 0 = invariant override
+  rule_hit: number; // which table row (1-14) produced the tentative verdict; 0 = invariant override
 }
 
 function find(evidence: Evidence[], kind: EvidenceKind): Evidence | undefined {
@@ -298,6 +302,25 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
     rule_hit = 13;
   }
 
+  // Row 14 (red team item 4, founder ruling 2026-09-09): the call itself ended -- idle
+  // timeout, session cap, a hangup, or a dropped socket -- while the table above left the
+  // tentative verdict at PENDING (rows 3-7, 12: no identity/request yet, a challenge or
+  // readback still owed, an identity switch to resolve, a live check still outstanding, or
+  // some failures short of the freeze line with challenges remaining). Every terminal row
+  // above (1, 2, 8, 9, 10, 11, 13) is already final by the time this check runs and is left
+  // untouched -- FREEZE (row 8) in particular keeps its priority: a fraud call that ends
+  // mid-interrogation with a freeze already owed still FREEZEs, never downgrades. A request
+  // already on record (request_params evidence present) gets the same human-callback
+  // containment an organic ESCALATE gets, with no rule-failure reason to name (there is
+  // none -- only "the call ended before the checks finished"); no request ever stated has
+  // nothing to route, so it closes as NO_ACTION instead -- the same fail-open direction I4
+  // already uses below for an incomplete evaluation with nothing at stake.
+  if (ctx.call_ended && verdict === 'PENDING') {
+    verdict = requestEv ? 'ESCALATE' : 'NO_ACTION';
+    reasons = [];
+    rule_hit = 14;
+  }
+
   // ---- invariants (checked last, override everything) ----
   let invariants_ok = true;
 
@@ -356,6 +379,7 @@ Rule table (evidence-first, first match wins):
 11. Every AssuranceChecklist item reads true -> STAGE for second approval. A pressure flag never blocks this step, but it keeps the details off the call and adds the principal alert to the required actions. At least one knowledge or relational challenge must have graded PASS (ruling 2026-09-09) -- an explicit, independent floor, so the amendment carve-out's reduced requirement is never by itself enough to reach STAGE with zero challenges asked. An explicit instruction-injection attempt anywhere in the call (ruling 2026-09-09) makes STAGE unreachable for the rest of the call, regardless of how everything else resolves.
 12. Some checks have failed, fewer than three, and either challenges remain to ask, or the challenge just asked has not been answered yet and the call is still live -> hold; ask another challenge, or wait the few seconds a reply is still due (ruling 2026-09-09): the instant the last allowed challenge is asked must not by itself fall through to row 13 before the caller has had a chance to answer it.
 13. Otherwise -> escalate for a human callback; nothing moves by voice alone.
+14. The call itself ends (idle timeout, session cap, a hangup, or a dropped socket) while the table above still leaves the outcome on hold (rows 3-7 or 12) -> escalate for a human callback if a request was ever stated (the same containment an organic escalation gets, with no rule-failure reason to name -- only that the call ended before the checks finished); with no request ever stated, there is nothing to route, so this closes as no action instead. Every terminal row above (freeze included) keeps strict priority: this row is only reached when nothing else already decided.
 
 Tally (independent failed checks; used by rows 8c and 12): SSO/identity fail 1, out-of-band fail 1, context fail 1, each contradicted claim 1 (capped at 2), each failed challenge 1, each ambiguous/refused challenge 0.5 (evasion is not free, but not fatal either), each instruction-injection hit 1 (ruling 2026-09-09: no longer free -- it is itself behavioural evidence, weighted the same as a failed check, and separately makes STAGE unreachable for the rest of the call). Pressure and an identity switch each still count 0 toward the tally -- they are behavior, never proof, and an identity switch resets the evaluation instead of accruing against it.
 `;

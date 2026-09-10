@@ -1,0 +1,47 @@
+{
+  "title": "A stated request abandoned mid-interrogation -> ESCALATE, not silent PENDING (red team item 4)",
+  "description": "The caller states a real-shaped request and then the call itself ends (idle timeout) before any live check or challenge is completed -- no sso/oob/context lookups, no knowledge check, nothing. Before this fix, this left the engine sitting at PENDING (row 4: a challenge is still owed) with no incident, no freeze, and no evidence export, no matter how long the call had actually been over. Row 14 (rules.ts) now fires: a request was stated (request_params evidence present) and the tentative verdict was still PENDING when the call ended, so the outcome becomes ESCALATE with the same open_incident/alert_principal/seal_evidence_record containment an organic ESCALATE always requires -- reasons stay empty, since there is no rule failure to name, only that the call ended before the checks finished. This is the direct counterpart to corpus/hangup-mid-check.json, which proves the other half of row 14: no request ever stated closes as NO_ACTION instead.",
+  "call": {
+    "session_id": "sess-abandoned-1",
+    "origin_kind": "unverified_voip",
+    "origin_geo": "unknown"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Robert Miller, I need $1.8 million wired to the escrow account.",
+      "t_ms": 1000
+    }
+  ],
+  "tools": [],
+  "actions": [
+    {
+      "id": "act1",
+      "kind": "call_ended",
+      "t_ms": 30000,
+      "detail": "idle_timeout"
+    }
+  ],
+  "expected": {
+    "verdict": "ESCALATE",
+    "state": "ACTION",
+    "reasons": [],
+    "failure_tally": 0,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": false,
+      "oob_confirmed_current": false,
+      "context_pass_current": false,
+      "no_contradictions": true,
+      "critical_fields_confirmed": false,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": false,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": false,
+      "no_injection_attempt": true
+    }
+  }
+}

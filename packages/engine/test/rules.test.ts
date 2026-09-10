@@ -40,6 +40,7 @@ function ctx(overrides?: Partial<RuleContext>): RuleContext {
     critical_confirmed: true,
     identity_switch_stale: false,
     challenge_awaiting_answer: false,
+    call_ended: false,
     ...overrides,
   };
 }
@@ -65,6 +66,7 @@ function stageEvidence(overrides?: Partial<Record<'sso' | 'oob' | 'context', Evi
 }
 
 const STAGE_CTX = ctx({ amendment_only: true });
+const STAGE_CTX_WITH_CALL_ENDED = ctx({ amendment_only: true, call_ended: true });
 
 describe('decide -- rule table (first match wins)', () => {
   it('row 1: out-of-scope marker, no request -> NO_ACTION, rule_hit 1', () => {
@@ -234,6 +236,46 @@ describe('decide -- rule table (first match wins)', () => {
     const r = decide(evidence, SEED, ctx({ amendment_only: false, challenges_issued: 3 }));
     expect(r.verdict).toBe('ESCALATE');
     expect(r.rule_hit).toBe(13);
+  });
+
+  it('row 14 (red team item 4, founder ruling 2026-09-09): call ended with a request stated and no terminal verdict yet -> ESCALATE, empty reasons', () => {
+    // Identity + request present but no live checks/challenges done yet -> tentative
+    // verdict is PENDING (row 4, a challenge is still owed). Ending the call while a
+    // request is on record must not leave this open forever.
+    const r = decide([IDENTITY, REQUEST], SEED, ctx({ call_ended: true }));
+    expect(r.verdict).toBe('ESCALATE');
+    expect(r.rule_hit).toBe(14);
+    expect(r.reasons).toEqual([]);
+  });
+
+  it('row 14: call ended with NO request ever stated -> NO_ACTION, not ESCALATE', () => {
+    const withoutIdentity = decide([], SEED, ctx({ call_ended: true }));
+    expect(withoutIdentity.verdict).toBe('NO_ACTION');
+    expect(withoutIdentity.rule_hit).toBe(14);
+
+    const withIdentityOnly = decide([IDENTITY], SEED, ctx({ call_ended: true }));
+    expect(withIdentityOnly.verdict).toBe('NO_ACTION');
+    expect(withIdentityOnly.rule_hit).toBe(14);
+  });
+
+  it('row 14 never overrides a FREEZE already owed -- a fraud call that ends mid-interrogation still FREEZEs', () => {
+    const r = decide(stageEvidence({ sso: 'FAIL', oob: 'FAIL' }), SEED, STAGE_CTX_WITH_CALL_ENDED);
+    expect(r.verdict).toBe('FREEZE');
+    expect(r.rule_hit).toBe(8);
+  });
+
+  it('row 14 never overrides an already-terminal STAGE/ESCALATE/NO_ACTION verdict', () => {
+    // row 11 (STAGE) unaffected by call_ended.
+    const stageEv = [...stageEvidence(), ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } })];
+    const staged = decide(stageEv, SEED, ctx({ amendment_only: true, call_ended: true }));
+    expect(staged.verdict).toBe('STAGE');
+    expect(staged.rule_hit).toBe(11);
+
+    // row 1 (NO_ACTION, out of scope, no request) unaffected by call_ended.
+    const outOfScope = ev('ev-oos', 'out_of_scope_marker', 'FLAG');
+    const oos = decide([outOfScope], SEED, ctx({ call_ended: true }));
+    expect(oos.verdict).toBe('NO_ACTION');
+    expect(oos.rule_hit).toBe(1);
   });
 
   it('pressure FLAG alone still STAGEs; alert_principal is part of a terminal verdict\'s required actions', () => {
@@ -465,8 +507,9 @@ describe('phrasingGoal (fsm.ts) -- CONSISTENCY_CHECK sub-branches', () => {
 });
 
 describe('RULES_DOC', () => {
-  it('publishes all 13 rows and the VOICE_CAN_NEVER_RELEASE invariant', () => {
+  it('publishes all 14 rows and the VOICE_CAN_NEVER_RELEASE invariant', () => {
     expect(RULES_DOC).toContain('13.');
+    expect(RULES_DOC).toContain('14.');
     expect(RULES_DOC).toContain('VOICE_CAN_NEVER_RELEASE');
   });
 
