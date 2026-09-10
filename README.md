@@ -17,13 +17,19 @@ Hackathon (lablab.ai, September 1–30, 2026).
 
 ## Status
 
-Countersign is built and deployed. PROVEN just now by `GET /version` and `GET /health` on the
-live demo at https://countersign-bf8q.onrender.com (the `-bf8q` suffix matters; the plain
-address belongs to an unrelated product): the live site serves commit `de6c796` and reports
-healthy. PROVEN by running the test suite just now: 761 tests pass across 50 files, and all 18
-recorded call transcripts replay correctly through the real policy engine. An adversarial review
-on the night of 2026-09-03 found two bugs that currently stop a legitimate caller's request from
-completing on the live site; the fixes are written and being tested but not yet deployed.
+Countersign is built and deployed. PROVEN by `GET /health` on the live demo at
+https://countersign-bf8q.onrender.com (curl at 8:05 PM CDT, 2026-09-09): the live site serves
+commit `9e64bc5` and reports healthy. PROVEN by two consecutive runs of the honest-caller path
+(Scenario A) on the deployed site with zero resets, reaching STAGE at 73.8 s and 91.5 s
+(rehearsal reports `scripts/rehearse/reports/2026-09-09T20-02-51` and `2026-09-09T20-04-50`,
+gitignored, named here as the source). The fraud path (Scenario B, FREEZE) was proven live tonight against this same deployed
+commit at 57.4 s (report
+`scripts/rehearse/reports/2026-09-09T20-06-19-scenario-b-miller-fraud.md`). Both paths are
+now proven live on one commit. PROVEN by `npm test` on
+commit `6e6d5c1`: 1,050 tests pass across 70 files, typecheck is clean, and all 19 recorded call
+transcripts replay exactly through the real policy engine. The five-day honest-caller failure
+was a harness bug: the scenario loader dropped the persona field, fixed 2026-09-09 at commit
+`75e31df`. The policy engine itself was never wrong.
 
 ## How Countersign uses the AssemblyAI Voice Agent API
 
