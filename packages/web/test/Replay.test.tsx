@@ -165,8 +165,10 @@ describe('Replay', () => {
     });
     render(<Replay />);
 
-    expect(await screen.findByLabelText('Recording')).toHaveValue(RECORDING);
-    expect(await screen.findByRole('button', { name: 'Play' })).toBeInTheDocument();
+    // De-flake (2026-09-09): under full-suite load the blocked-start effect can land after
+    // findBy's default 1 s window; the wait is a "let it settle" wait, not a timing claim.
+    expect(await screen.findByLabelText('Recording', {}, { timeout: 4000 })).toHaveValue(RECORDING);
+    expect(await screen.findByRole('button', { name: 'Play' }, { timeout: 4000 })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
