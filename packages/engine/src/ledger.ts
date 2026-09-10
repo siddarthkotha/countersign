@@ -7,12 +7,16 @@
 // CORRECTED vs CONTRADICTED (fix-round-1 ruling — time alone is not evidence of honesty): a
 // later different value for a field is CORRECTED iff (a) the utterance has a
 // correction-lexicon hit ("sorry", "actually", ...), OR (b) the current claim for that
-// field is APPROXIMATE, OR (c) the utterance has a negate-lexicon hit AND it also names the
-// PREVIOUS value inline (e.g. "not 1.8, it's 1.9" — the caller explicitly disowns the old
-// figure while restating), OR (d) it arrives within `correction_window_ms` after a
-// `readback_issued` for that field that the caller NEGATED (the readback-repair path).
-// Otherwise CONTRADICTED. A plain time gap with none of the above is CONTRADICTED, full
-// stop — "it happened soon after" is not, by itself, evidence the caller was being honest.
+// field is APPROXIMATE and (for numeric fields) the new value stays within
+// `approximate_jump_ratio` of it — fix-round-2 ruling: a wildly bigger/smaller exact figure
+// after an approximate one (e.g. "about fifty thousand-ish" then "two hundred forty
+// thousand") is CONTRADICTED, not a free pass, because there's no bound on how far off an
+// "approximation" can honestly be — OR (c) the utterance has a negate-lexicon hit AND it
+// also names the PREVIOUS value inline (e.g. "not 1.8, it's 1.9" — the caller explicitly
+// disowns the old figure while restating), OR (d) it arrives within `correction_window_ms`
+// after a `readback_issued` for that field that the caller NEGATED (the readback-repair
+// path). Otherwise CONTRADICTED. A plain time gap with none of the above is CONTRADICTED,
+// full stop — "it happened soon after" is not, by itself, evidence the caller was honest.
 import { extractAccountLast4, extractCuedNames, extractDeadline } from './extract/claims.js';
 import { extractAmounts } from './extract/amounts.js';
 import { extractIdentityClaim } from './extract/identity.js';
@@ -123,9 +127,21 @@ export function buildLedger(
     claims = [...claims, claim];
   }
 
-  function classifyDifferentValue(field: ClaimField, u: Utterance, current: Claim): ClaimKind {
+  // fix-round-2 (red team item 2): an APPROXIMATE claim followed by a wildly different exact
+  // value isn't a correction, it's a contradiction dressed up as one — "about fifty
+  // thousand-ish" then "two hundred forty thousand" should count against the caller. Only
+  // numeric fields (amount_usd) get this bound; non-numeric fields keep the old behavior.
+  function isImplausibleJumpFromApproximate(field: ClaimField, oldValue: string | number, newValue: string | number): boolean {
+    if (field !== 'amount_usd') return false;
+    if (typeof oldValue !== 'number' || typeof newValue !== 'number' || oldValue === 0) return false;
+    const ratio = newValue / oldValue;
+    const bound = seed.thresholds.approximate_jump_ratio;
+    return ratio > bound || ratio < 1 / bound;
+  }
+
+  function classifyDifferentValue(field: ClaimField, u: Utterance, current: Claim, value: string | number): ClaimKind {
     if (hasLexiconHit(u.text, seed.correction_lexicon)) return 'CORRECTED'; // (a)
-    if (current.kind === 'APPROXIMATE') return 'CORRECTED'; // (b)
+    if (current.kind === 'APPROXIMATE' && !isImplausibleJumpFromApproximate(field, current.value, value)) return 'CORRECTED'; // (b)
     if (hasLexiconHit(u.text, seed.negate_lexicon) && referencesPreviousValue(u.text, current)) return 'CORRECTED'; // (c)
     const repairSince = repairWindowSince[field];
     if (repairSince !== undefined && u.t_ms - repairSince <= seed.thresholds.correction_window_ms) {
@@ -146,7 +162,7 @@ export function buildLedger(
       return;
     }
     if (current.value === value) return;
-    const kind = classifyDifferentValue(field, u, current);
+    const kind = classifyDifferentValue(field, u, current, value);
     if (VERSIONED_FIELDS.has(field)) request_version += 1;
     addClaim(field, kind, value, u.id, quote, u.t_ms, current.id);
   }

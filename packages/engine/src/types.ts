@@ -152,6 +152,14 @@ export interface KnowledgeFact {
   // among themselves by the existing per-session fnv1a hash (selectSeedFact in
   // src/challenges.ts). Not a security property -- purely a demo-pacing knob.
   priority?: number;
+  // Fix (judge review, 2026-09-03; founder ruling 2026-09-09): which claimed identities
+  // this fact is fair to ask. A caller whose currently claimed identity is not in this list
+  // must never be asked this fact -- e.g. the six Hartwell-acquisition facts are somebody
+  // else's business to anyone who isn't Robert Miller, and asking them of an unrelated
+  // caller (a false-positive machine) is exactly the failure a judge review found. Unset or
+  // empty ⇒ askable of any caller, including one with no claimed identity yet (backwards
+  // compatible). Enforced by selectSeedFact in src/challenges.ts.
+  identity_ids?: string[];
 }
 
 export interface SeedConfig {
@@ -168,6 +176,14 @@ export interface SeedConfig {
     pressure_flag_min: number; // distinct pressure hits to FLAG, 2
     correction_window_ms: number; // v2: 20000
     tool_timeout_ms: number; // v2: 45000
+    // Ruling C (2026-09-09, item 21): how long, after the most recently issued challenge,
+    // a call is still considered "waiting on the answer" rather than abandoned -- keeps
+    // rules.ts row 12 from falling through to row 13 the instant the last allowed
+    // challenge is asked, before the caller has had a chance to reply.
+    challenge_answer_window_ms: number;
+    approximate_jump_ratio: number; // fix-round-2: an APPROXIMATE claim's replacement value is
+    // CORRECTED only if it stays within this multiple (and its reciprocal) of the approximate
+    // value; a bigger jump is CONTRADICTED. Numeric fields only (amount_usd).
   };
   pressure_lexicon: string[]; // lower-case phrases
   out_of_scope_lexicon: string[]; // lower-case phrases
@@ -304,6 +320,15 @@ export interface AssuranceChecklist {
   challenge_requirement_met: boolean;
   no_identity_switch: boolean;
   not_new_beneficiary: boolean;
+  // Ruling A (2026-09-09, red team item 1): at least one knowledge/relational challenge
+  // must have graded PASS, independent of (and in addition to) challenge_requirement_met
+  // -- so the amendment carve-out's floor-of-1 `need` (rules.ts) can never be the ONLY
+  // thing standing between a zero-challenge call and STAGE.
+  at_least_one_challenge_passed: boolean;
+  // Ruling B (2026-09-09, red team item 5): false for the rest of the call once any
+  // injection-lexicon hit has been seen -- makes STAGE permanently unreachable via row 11
+  // for a call that has shown this behavior, regardless of how everything else resolves.
+  no_injection_attempt: boolean;
 }
 
 export interface EngineOutput {
@@ -322,6 +347,15 @@ export interface EngineOutput {
   challenges: { issued: ChallengeSpec[]; results: Record<string, ChallengeResult> };
   assurance: AssuranceChecklist;
   invariants_ok: boolean; // VOICE_CAN_NEVER_RELEASE and friends; false = engine bug, treated as NO_ACTION
+  // Flight-recorder ruling (founder, 2026-09-09): `decide()` (rules.ts) already computes
+  // which table row produced the tentative verdict (`DecideResult.rule_hit`) but never
+  // passed it through to the caller -- session.ts's diagnostics needed it to record WHICH
+  // rule fired on a transition, without re-deriving it (re-running `decide` a second time
+  // outside `evaluate` would risk drifting from the actual decision if the pipeline ever
+  // changes). Passthrough only -- no decision logic changed. Optional so pre-existing
+  // hand-built EngineOutput fixtures elsewhere in the repo (e.g. server/test/stalls.test.ts)
+  // don't need updating; a real `evaluate()` call always sets it.
+  rule_hit?: number;
 }
 
 // ---------- Corpus (Task 6; typed here so seed/corpus files share one contract) ----------

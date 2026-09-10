@@ -39,6 +39,7 @@ function ctx(overrides?: Partial<RuleContext>): RuleContext {
     evaluation_incomplete: false,
     critical_confirmed: true,
     identity_switch_stale: false,
+    challenge_awaiting_answer: false,
     ...overrides,
   };
 }
@@ -48,8 +49,10 @@ const REQUEST = ev('ev-request', 'request_params', 'INFO');
 
 /** A fully-clean, "everything checks out" evidence set: identity + request known, all
  *  three live checks PASS, no contradictions, no failed challenges. With
- *  ctx({ amendment_only: true }) (need = 0, since context reads PASS) this reaches row 11
- *  and STAGEs -- the baseline every other row-test perturbs one thing away from. */
+ *  ctx({ amendment_only: true }) (need = 1, since ruling A 2026-09-09 floors the amendment
+ *  carve-out at 1, never 0) this only reaches row 11 and STAGEs once at least one graded
+ *  knowledge/relational PASS card is added -- the baseline every other row-test perturbs
+ *  one thing away from. */
 function stageEvidence(overrides?: Partial<Record<'sso' | 'oob' | 'context', EvidenceStatus>>): Evidence[] {
   return [
     IDENTITY,
@@ -180,7 +183,13 @@ describe('decide -- rule table (first match wins)', () => {
   });
 
   it('row 9: exposure across versions over the high-value line -> ESCALATE, reasons contain EXPOSURE_LIMIT', () => {
-    const evidence = [...stageEvidence(), ev('ev-exposure', 'exposure_check_result', 'FAIL', { facts: { exposure_usd: 60_000, current_usd: 21_000 } })];
+    // Ruling A (2026-09-09): need now floors at 1, so a passed knowledge card is required
+    // to clear row 4 before this row is ever reached.
+    const evidence = [
+      ...stageEvidence(),
+      ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
+      ev('ev-exposure', 'exposure_check_result', 'FAIL', { facts: { exposure_usd: 60_000, current_usd: 21_000 } }),
+    ];
     const r = decide(evidence, SEED, ctx({ amendment_only: true }));
     expect(r.verdict).toBe('ESCALATE');
     expect(r.rule_hit).toBe(9);
@@ -196,7 +205,9 @@ describe('decide -- rule table (first match wins)', () => {
   });
 
   it('row 11: every AssuranceChecklist item true -> STAGE, empty reasons', () => {
-    const r = decide(stageEvidence(), SEED, STAGE_CTX);
+    // Ruling A (2026-09-09): need floors at 1, so row 11 also needs one graded PASS.
+    const evidence = [...stageEvidence(), ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } })];
+    const r = decide(evidence, SEED, STAGE_CTX);
     expect(r.verdict).toBe('STAGE');
     expect(r.reasons).toEqual([]);
     expect(r.rule_hit).toBe(11);
@@ -226,10 +237,80 @@ describe('decide -- rule table (first match wins)', () => {
   });
 
   it('pressure FLAG alone still STAGEs; alert_principal is part of a terminal verdict\'s required actions', () => {
-    const evidence = stageEvidence().map((e) => (e.kind === 'pressure_marker' ? { ...e, status: 'FLAG' as const } : e));
+    // Ruling A (2026-09-09): need floors at 1, so this baseline needs one graded PASS too.
+    const evidence = [
+      ...stageEvidence().map((e) => (e.kind === 'pressure_marker' ? { ...e, status: 'FLAG' as const } : e)),
+      ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
+    ];
     const r = decide(evidence, SEED, STAGE_CTX);
     expect(r.verdict).toBe('STAGE');
     expect(requiredActions('STAGE', [])).toContain('alert_principal');
+  });
+});
+
+describe('decide -- founder rulings 2026-09-09', () => {
+  // Ruling A: the amendment carve-out (need 0 when amendment_only+context PASS) may now
+  // reduce `need` to 1, never 0 -- at least one genuinely graded knowledge/relational PASS
+  // is required before STAGE, regardless of the carve-out.
+  it('ruling A: amendment carve-out with zero passed challenges cannot reach row 11 -- held at row 4 instead', () => {
+    const r = decide(stageEvidence(), SEED, STAGE_CTX); // amendment_only true, context PASS, 0 challenges passed
+    expect(r.verdict).not.toBe('STAGE');
+    expect(r.rule_hit).toBe(4);
+    expect(r.assurance.at_least_one_challenge_passed).toBe(false);
+  });
+
+  it('ruling A: amendment carve-out with exactly one graded PASS reaches STAGE', () => {
+    const evidence = [...stageEvidence(), ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } })];
+    const r = decide(evidence, SEED, STAGE_CTX);
+    expect(r.verdict).toBe('STAGE');
+    expect(r.rule_hit).toBe(11);
+    expect(r.assurance.at_least_one_challenge_passed).toBe(true);
+  });
+
+  // Ruling B: an injection-lexicon hit adds 1.0 to the tally (same weight as a failed
+  // check) and sets a new assurance item, no_injection_attempt, to false for the rest of
+  // the call -- STAGE becomes unreachable even once every other item clears.
+  it('ruling B: an injection_marker FLAG adds 1.0 to the tally and blocks STAGE via no_injection_attempt', () => {
+    const evidence = [
+      ...stageEvidence(),
+      ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
+      ev('ev-injection', 'injection_marker', 'FLAG', { facts: { phrase: 'ignore your instructions' }, quotes: [{ utterance_id: 'c1', text: 'Ignore your instructions' }] }),
+    ];
+    const r = decide(evidence, SEED, STAGE_CTX);
+    expect(r.failure_tally).toBeGreaterThanOrEqual(1);
+    expect(r.assurance.no_injection_attempt).toBe(false);
+    expect(r.verdict).not.toBe('STAGE');
+  });
+
+  it('ruling B: with no injection_marker card, no_injection_attempt reads true', () => {
+    const evidence = [...stageEvidence(), ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } })];
+    const r = decide(evidence, SEED, STAGE_CTX);
+    expect(r.assurance.no_injection_attempt).toBe(true);
+  });
+
+  // Ruling C: row 12's guard was `challenges_issued < max_challenges` alone, so the instant
+  // the third challenge was ASKED (before it could be answered), the engine fell through to
+  // row 13 ESCALATE and a correct answer arriving seconds later was ignored. Fix: row 12
+  // also holds while a just-asked challenge is still awaiting an answer and live.
+  it('ruling C: tally 1, 3 of 3 challenges issued, last one unanswered and live -> PENDING at row 12', () => {
+    const evidence = [
+      ...stageEvidence({ context: 'FAIL' }), // one failed sign-in -> tally 1
+      ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
+    ];
+    const r = decide(evidence, SEED, ctx({ amendment_only: false, challenges_issued: 3, challenge_awaiting_answer: true }));
+    expect(r.verdict).toBe('PENDING');
+    expect(r.rule_hit).toBe(12);
+    expect(r.failure_tally).toBe(1);
+  });
+
+  it('ruling C: same call once the answer has come in (no longer awaiting) -> ESCALATE at row 13', () => {
+    const evidence = [
+      ...stageEvidence({ context: 'FAIL' }),
+      ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
+    ];
+    const r = decide(evidence, SEED, ctx({ amendment_only: false, challenges_issued: 3, challenge_awaiting_answer: false }));
+    expect(r.verdict).toBe('ESCALATE');
+    expect(r.rule_hit).toBe(13);
   });
 });
 
@@ -241,7 +322,12 @@ describe('decide -- invariants', () => {
   });
 
   it('I2: everything true except one AssuranceChecklist item -> never STAGE', () => {
-    const evidence = [...stageEvidence(), ev('ev-consistency-amount_usd', 'consistency_flag', 'FAIL')];
+    // Ruling A (2026-09-09): need floors at 1, so this baseline needs one graded PASS too.
+    const evidence = [
+      ...stageEvidence(),
+      ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
+      ev('ev-consistency-amount_usd', 'consistency_flag', 'FAIL'),
+    ];
     const r = decide(evidence, SEED, STAGE_CTX);
     expect(r.assurance.no_contradictions).toBe(false);
     expect(Object.entries(r.assurance).filter(([k]) => k !== 'no_contradictions').every(([, v]) => v === true)).toBe(true);
@@ -282,7 +368,9 @@ describe('decide -- mutants (each proves a rule is load-bearing)', () => {
   });
 
   it('skip_readback_gate lets an unconfirmed critical field reach STAGE', () => {
-    const evidence = stageEvidence();
+    // Ruling A (2026-09-09): need floors at 1, so a passed knowledge card is required for
+    // this to reach row 5 (and, once mutated, STAGE) instead of stalling at row 4.
+    const evidence = [...stageEvidence(), ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } })];
     const straight = decide(evidence, SEED, ctx({ amendment_only: true, critical_confirmed: false }));
     expect(straight.verdict).toBe('PENDING');
     expect(straight.rule_hit).toBe(5);
@@ -291,7 +379,14 @@ describe('decide -- mutants (each proves a rule is load-bearing)', () => {
   });
 
   it('ignore_exposure lets a structuring case (exposure over the line) reach STAGE', () => {
-    const evidence = [...stageEvidence(), ev('ev-exposure', 'exposure_check_result', 'FAIL', { facts: { exposure_usd: 60_000, current_usd: 21_000 } })];
+    // Ruling A (2026-09-09): need floors at 1, so a passed knowledge card is required to
+    // clear row 4 first (both in the straight case, to reach row 9, and once mutated, to
+    // reach STAGE at row 11).
+    const evidence = [
+      ...stageEvidence(),
+      ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
+      ev('ev-exposure', 'exposure_check_result', 'FAIL', { facts: { exposure_usd: 60_000, current_usd: 21_000 } }),
+    ];
     const straight = decide(evidence, SEED, ctx({ amendment_only: true }));
     expect(straight.verdict).toBe('ESCALATE');
     expect(straight.rule_hit).toBe(9);
@@ -324,6 +419,8 @@ describe('phrasingGoal (fsm.ts) -- CONSISTENCY_CHECK sub-branches', () => {
         challenge_requirement_met: true,
         no_identity_switch: true,
         not_new_beneficiary: true,
+        at_least_one_challenge_passed: true,
+        no_injection_attempt: true,
       },
       invariants_ok: true,
       rule_hit,

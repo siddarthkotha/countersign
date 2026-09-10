@@ -402,23 +402,54 @@ export function computeNewBeneficiary(claims: Claim[], contextEv: Evidence | und
   return !known.some((v) => normalizeCompare(v, String(beneficiary.value)));
 }
 
+/** Clock-free "how recent is this" anchor: the latest timestamp across every log the
+ *  engine is given (conversation, tools, actions) -- used instead of Date.now() so the
+ *  engine stays a pure function of its inputs (LAW 3). Shared by computeEvaluationIncomplete
+ *  and computeChallengeAwaitingAnswer (ruling C, 2026-09-09) so both "is this still live"
+ *  checks use the same notion of "now". */
+function latestEventT(tools: ToolLogEntry[], conversation: Utterance[], actions: AgentAction[]): number {
+  const allT = [
+    ...conversation.map((u) => u.t_ms),
+    ...tools.map((t) => t.t_ms),
+    ...actions.map((a) => a.t_ms),
+  ];
+  return allT.length > 0 ? Math.max(...allT) : 0;
+}
+
 export function computeEvaluationIncomplete(
   tools: ToolLogEntry[],
   conversation: Utterance[],
   actions: AgentAction[],
   seed: SeedConfig,
 ): boolean {
-  const allT = [
-    ...conversation.map((u) => u.t_ms),
-    ...tools.map((t) => t.t_ms),
-    ...actions.map((a) => a.t_ms),
-  ];
-  const lastEventT = allT.length > 0 ? Math.max(...allT) : 0;
+  const lastEventT = latestEventT(tools, conversation, actions);
   return tools.some((t) => {
     if (t.result && t.result.error !== undefined && t.result.error !== null) return true;
     if (!t.result && lastEventT - t.t_ms > seed.thresholds.tool_timeout_ms) return true;
     return false;
   });
+}
+
+/** Ruling C (2026-09-09, item 21): true when the most recently issued challenge has no
+ *  caller utterance after it yet (nobody has answered it in the transcript) AND the call
+ *  is still live -- the latest event anywhere in the logs is within
+ *  seed.thresholds.challenge_answer_window_ms of when that challenge was asked. Purely a
+ *  function of the recorded logs (no clock read), so a silent/abandoned caller eventually
+ *  ages out of "awaiting" once the window elapses, rather than holding the engine open
+ *  forever on a caller who never answers. */
+export function computeChallengeAwaitingAnswer(
+  tools: ToolLogEntry[],
+  conversation: Utterance[],
+  actions: AgentAction[],
+  seed: SeedConfig,
+): boolean {
+  const issuedActions = actions.filter((a) => a.kind === 'challenge_issued');
+  if (issuedActions.length === 0) return false;
+  const lastIssued = issuedActions.reduce((latest, a) => (a.t_ms > latest.t_ms ? a : latest));
+  const answered = conversation.some((u) => u.speaker === 'caller' && u.t_ms > lastIssued.t_ms);
+  if (answered) return false;
+  const lastEventT = latestEventT(tools, conversation, actions);
+  return lastEventT - lastIssued.t_ms <= seed.thresholds.challenge_answer_window_ms;
 }
 
 export function computeCriticalConfirmed(claims: Claim[]): boolean {
@@ -452,6 +483,7 @@ export function deriveRuleContext(
     evaluation_incomplete: computeEvaluationIncomplete(tools, conversation, actions, seed),
     critical_confirmed: computeCriticalConfirmed(claims),
     identity_switch_stale: identitySwitchEv?.status === 'FLAG',
+    challenge_awaiting_answer: computeChallengeAwaitingAnswer(tools, conversation, actions, seed),
   };
 }
 

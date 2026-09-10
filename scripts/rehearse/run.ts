@@ -26,7 +26,8 @@ import { mintSession, connectCall, fetchDiagnostics } from './wsClient.js';
 import { loadScenario, loadAllScenarios, ScenarioValidationError } from './scenario.js';
 import { runTurns, runLlmTurns, computeTurnGaps, waitForVerdict, waitForCountersignSettle } from './turnController.js';
 import { summarizeDiagnostics } from './diagnosticsSummary.js';
-import { renderReport, renderRollup, oneLineSummary, reportFileName, rollupFileName } from './report.js';
+import { renderRollup, oneLineSummary, rollupFileName } from './report.js';
+import { writeRunArtifacts } from './artifacts.js';
 import { resolveLlmConfig, getApiKey, apiKeyEnvVarFor, nodeFetchHttpClient } from './llmCaller.js';
 import type { LlmProvider, ResolvedLineRecord, RollupResult, RollupRow, RunResult, Scenario, StateHistoryRecord, TranscriptRecord } from './types.js';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -241,6 +242,7 @@ async function runOne(
     transcript,
     state_history: stateHistory,
     diagnostics,
+    raw_diagnostics: bundle,
     warnings,
     exit_code: pass ? 0 : 1,
     minutes_estimate: minutesEstimate,
@@ -270,6 +272,7 @@ function protocolErrorResult(
     transcript: [],
     state_history: [],
     diagnostics: { ok: false, error: 'no diagnostics: the call never connected' },
+    raw_diagnostics: null,
     warnings: [message],
     exit_code: 2,
     minutes_estimate: 0,
@@ -348,10 +351,9 @@ async function main(): Promise<void> {
       totalMinutes += result.minutes_estimate;
       worstExit = Math.max(worstExit, result.exit_code) as 0 | 1 | 2;
 
-      const fileName = reportFileName(scenario.name);
-      const filePath = join(REPORTS_DIR, fileName);
-      await writeFile(filePath, renderReport(result), 'utf-8');
-      console.log(oneLineSummary(result, filePath));
+      const { reportPath, diagnosticsPath } = await writeRunArtifacts(result, REPORTS_DIR);
+      console.log(oneLineSummary(result, reportPath));
+      console.log(`  raw diagnostics bundle: ${diagnosticsPath}`);
       if (result.warnings.length > 0) {
         for (const w of result.warnings) console.log(`  warning: ${w}`);
       }
@@ -364,7 +366,7 @@ async function main(): Promise<void> {
         actual_verdict: result.actual_verdict,
         total_wall_ms: result.timings.total_wall_ms,
         minutes_estimate: result.minutes_estimate,
-        report_path: filePath,
+        report_path: reportPath,
       });
     }
   }

@@ -25,11 +25,17 @@ export function summarizeDiagnostics(bundle: RehearseDiagnosticBundle | null): D
   const counts: Record<string, number> = {};
   const toolEvents: RehearseDiagnosticEvent[] = [];
   const evaluateEvents: RehearseDiagnosticEvent[] = [];
+  let sessionMintedEvent: RehearseDiagnosticEvent | null = null;
+  let callContextEvent: RehearseDiagnosticEvent | null = null;
 
   for (const e of bundle.server_events) {
     counts[e.kind] = (counts[e.kind] ?? 0) + 1;
     if (TOOL_KINDS.has(e.kind)) toolEvents.push(e);
     if (e.kind === 'evaluate') evaluateEvents.push(e);
+    // Fix (2026-09-09, PROVEN live-call regression): the first of each -- there's only ever
+    // one 'session_minted' (mint time) and one 'call_context' (first WS attach) per bundle.
+    if (e.kind === 'session_minted' && sessionMintedEvent === null) sessionMintedEvent = e;
+    if (e.kind === 'call_context' && callContextEvent === null) callContextEvent = e;
   }
 
   return {
@@ -40,5 +46,7 @@ export function summarizeDiagnostics(bundle: RehearseDiagnosticBundle | null): D
     deployed_commit: bundle.deployed_commit,
     ended_at_ms: bundle.ended_at,
     end_reason: bundle.end_reason,
+    session_minted_event: sessionMintedEvent,
+    call_context_event: callContextEvent,
   };
 }

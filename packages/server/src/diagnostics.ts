@@ -75,10 +75,51 @@ export interface DiagnosticsState {
    *  stays exactly as readable as a live one (GET works after end); the ring only bounds
    *  total memory (last 50 sessions, ended or not), never readability of one still tracked. */
   order: string[];
+  /** Fix (2026-09-09, PROVEN live-call regression): events recorded before a bundle exists
+   *  for a session -- specifically, http.ts's /api/session/start handler records
+   *  'session_minted' the moment a session is minted, but `createBundle` doesn't run until
+   *  the FIRST `/ws/call/:id` attach (ws/browser.ts), which can be seconds later or never
+   *  (a minted session that's never attached). Buffered here, keyed by session_id, and
+   *  drained into the bundle's own server_events (t_ms rebased to the bundle's started_at,
+   *  so a pre-attach event correctly shows a negative t_ms) the moment `createBundle` runs.
+   *  Bounded the same way `order`/`bundles` are (oldest evicted first) so a flood of mints
+   *  that never attach can't grow this unboundedly. */
+  pending: Map<string, { at: number; kind: string; detail: unknown }[]>;
 }
 
 export function newDiagnosticsState(): DiagnosticsState {
-  return { bundles: new Map(), order: [] };
+  return { bundles: new Map(), order: [], pending: new Map() };
+}
+
+/** How many sessions' worth of pre-bundle events `pending` holds at once -- same ring
+ *  eviction spirit as `MAX_BUNDLES`, oldest session evicted first. */
+const MAX_PENDING_SESSIONS = 50;
+/** How many events one session can buffer before its bundle exists -- generous headroom
+ *  over the one event (`session_minted`) the current callers actually record pre-attach. */
+const MAX_PENDING_EVENTS_PER_SESSION = 20;
+
+/** Records a server_event for a session that may not have a bundle yet. If a bundle already
+ *  exists, this is exactly `recordServerEvent`. If not, the event is buffered in `pending`
+ *  and replayed (t_ms rebased to the new bundle's `started_at`) the next time `createBundle`
+ *  runs for this `session_id` -- see that function's own draining logic below. Silently caps
+ *  at `MAX_PENDING_EVENTS_PER_SESSION`/`MAX_PENDING_SESSIONS`, same "never throw" contract as
+ *  `recordServerEvent`. */
+export function recordPendingServerEvent(state: DiagnosticsState, session_id: string, now: number, kind: string, detail: unknown): void {
+  if (state.bundles.has(session_id)) {
+    recordServerEvent(state, session_id, now, kind, detail);
+    return;
+  }
+  let list = state.pending.get(session_id);
+  if (!list) {
+    if (state.pending.size >= MAX_PENDING_SESSIONS) {
+      const oldestKey = state.pending.keys().next().value;
+      if (oldestKey !== undefined) state.pending.delete(oldestKey);
+    }
+    list = [];
+    state.pending.set(session_id, list);
+  }
+  if (list.length >= MAX_PENDING_EVENTS_PER_SESSION) return;
+  list.push({ at: now, kind, detail });
 }
 
 /** Starts a fresh bundle for `session_id`, evicting the oldest tracked bundle if this push
@@ -105,6 +146,18 @@ export function createBundle(state: DiagnosticsState, session_id: string, now: n
   while (state.order.length > MAX_BUNDLES) {
     const evictId = state.order.shift();
     if (evictId !== undefined) state.bundles.delete(evictId);
+  }
+  // Drain any events recorded before this bundle existed (e.g. http.ts's 'session_minted'
+  // at mint time, before the WS attach that runs this function) -- rebased onto the new
+  // bundle's own clock, in the order they were recorded, ahead of anything this attach
+  // itself is about to record.
+  const pending = state.pending.get(session_id);
+  if (pending) {
+    for (const p of pending) {
+      if (bundle.server_events.length >= MAX_SERVER_EVENTS_PER_BUNDLE) break;
+      bundle.server_events.push({ t_ms: p.at - bundle.started_at, kind: p.kind, detail: p.detail });
+    }
+    state.pending.delete(session_id);
   }
   return bundle;
 }

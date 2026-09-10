@@ -17,6 +17,7 @@ import type {
   ClaimField,
   ChallengeResult,
   ChallengeSpec,
+  KnowledgeFact,
   Quote,
   SeedConfig,
   Utterance,
@@ -135,15 +136,61 @@ export function seedFieldForEntry(id: string): ClaimField {
   return 'purpose';
 }
 
+/** Fix (judge review, 2026-09-03): `fact` is fair game for `claimed_identity_id` iff it
+ *  carries no scope at all (unset/empty `identity_ids` ⇒ askable of anyone, backwards
+ *  compatible), or the caller's currently claimed identity appears in that list. A caller
+ *  with no claimed identity yet (`null`) can never satisfy a scope -- fail-safe: a SCOPED
+ *  fact requires a KNOWN matching identity, never an absence of one. This is what stops a
+ *  caller from ever being interrogated about a deal that is somebody else's business (e.g.
+ *  the six Hartwell-acquisition facts, scoped to Robert Miller, must never reach Dana
+ *  Whitfield on an unrelated Meridian Supply payment). */
+function factInScope(fact: KnowledgeFact, claimed_identity_id: string | null): boolean {
+  if (!fact.identity_ids || fact.identity_ids.length === 0) return true;
+  return claimed_identity_id !== null && fact.identity_ids.includes(claimed_identity_id);
+}
+
+/** Founder ruling (2026-09-09, "spent facts"): once a challenge kind has spoken a real
+ *  seeded fact's TRUE value aloud in this call, that fact is spent for the rest of the
+ *  call -- no challenge kind may ask it again, because the caller could simply repeat what
+ *  the agent itself just said rather than demonstrate they already knew it. The only place
+ *  a true value is currently spoken by the agent (rather than asked-for) is
+ *  `selectTrapFact`'s "caller was wrong: the trap offers the truth" branch below -- LIVE_
+ *  COMMITMENT is explicitly told never to say the value, and SEED_FACT/RELATIONAL only ever
+ *  ask, never state, the fact. Returns the set of already-spoken truths, normalized. */
+function spokenTruths(issued: ChallengeSpec[], seed: SeedConfig): Set<string> {
+  const spoken = new Set<string>();
+  for (const s of issued) {
+    if (s.kind === 'TRAP_FACT' && 'trap_value' in s.expect) {
+      const norm = normalizeText(s.expect.trap_value);
+      if (seed.knowledge.some((k) => normalizeText(k.truth) === norm)) spoken.add(norm);
+    }
+  }
+  return spoken;
+}
+
 function selectSeedFact(
+  claims: Claim[],
   issued: ChallengeSpec[],
   seed: SeedConfig,
   session_id: string,
   challengeId: string,
 ): ChallengeSpec | null {
+  const claimedIdentity = currentClaim(claims, 'identity');
+  const claimed_identity_id = claimedIdentity ? String(claimedIdentity.value) : null;
+  const spoken = spokenTruths(issued, seed);
   const unused = seed.knowledge.filter(
-    (k) => !issued.some((s) => 'accept_tokens' in s.expect && arraysEqual(s.expect.accept_tokens, k.accept_tokens)),
+    (k) =>
+      !issued.some((s) => 'accept_tokens' in s.expect && arraysEqual(s.expect.accept_tokens, k.accept_tokens)) &&
+      factInScope(k, claimed_identity_id) &&
+      !spoken.has(normalizeText(k.truth)),
   );
+  // Fail-safe (judge review, 2026-09-03): when every remaining fact is out of scope (or
+  // already spent) for this caller, return no seed-fact challenge at all rather than
+  // falling back to an unscoped one -- there isn't one to fall back to, by construction, but
+  // the point stands: null here is the correct, safe answer, not a bug to work around.
+  // `selectChallenge` already treats a null SEED_FACT pick as "nothing more to ask" (it's
+  // the last kind checked), and fsm.ts's phrasingGoal already has a generic ASK_CHALLENGE
+  // fallback for a null nextChallenge -- so this never deadlocks the CHALLENGE state.
   if (unused.length === 0) return null;
   // Controller ruling 2026-09-01 11:25 AM CDT: prioritized facts (e.g. the ratified demo
   // script's counsel-of-record/escrow-institution opener) ask first, in ascending priority
@@ -170,11 +217,29 @@ function selectRelational(claims: Claim[], issued: ChallengeSpec[], seed: SeedCo
   const escrow = currentClaim(claims, 'escrow_institution');
   const beneficiary = currentClaim(claims, 'beneficiary');
   let humanField: string | null = null;
-  if (escrow) humanField = 'escrow institution';
-  else if (beneficiary) humanField = 'beneficiary';
-  if (!humanField) return null;
-  const entry = seed.knowledge.find((k) => k.id === 'escrow_account_last4');
-  const acceptTokens = entry ? entry.accept_tokens : [];
+  let acceptTokens: string[] | null = null;
+  if (escrow) {
+    humanField = 'escrow institution';
+    const entry = seed.knowledge.find((k) => k.id === 'escrow_account_last4');
+    acceptTokens = entry ? entry.accept_tokens : [];
+  } else if (beneficiary) {
+    humanField = 'beneficiary';
+    // Founder ruling (2026-09-09, sibling bug): grade against the NAMED beneficiary's OWN
+    // seeded account, never the Hartwell escrow account by default -- the old code asked
+    // "the account attached to the beneficiary they named" but always graded against
+    // seed.knowledge's escrow_account_last4 regardless of who that beneficiary was, so an
+    // honest caller naming her own real vendor would be failed against someone else's
+    // account digits. If the named beneficiary has no seeded payment on file, there is
+    // nothing correct to ask -- return no relational challenge at all (same fail-safe shape
+    // as selectSeedFact's out-of-scope null) rather than grading against the wrong account.
+    const named = normalizeText(String(beneficiary.value));
+    const payment = seed.payments.find(
+      (p) => normalizeText(p.vendor) === named || p.vendor_aliases.some((alias) => normalizeText(alias) === named),
+    );
+    if (!payment) return null;
+    acceptTokens = [payment.account_last4];
+  }
+  if (!humanField || acceptTokens === null) return null;
   // Same fact must never be asked twice under two kinds (e.g. already surfaced as a
   // SEED_FACT challenge) — dedup the same way selectSeedFact does.
   if (issued.some((s) => 'accept_tokens' in s.expect && arraysEqual(s.expect.accept_tokens, acceptTokens))) {
@@ -225,7 +290,7 @@ export function selectChallenge(
     if (relational) return relational;
   }
 
-  const seedFact = selectSeedFact(issued, seed, session_id, challengeId);
+  const seedFact = selectSeedFact(claims, issued, seed, session_id, challengeId);
   if (seedFact) return seedFact;
 
   return null;

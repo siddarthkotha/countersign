@@ -5,9 +5,9 @@
 // protected oracle (only test/corpus.test.ts, test/mutants.test.ts, corpus/*.json and the
 // CI workflow are) -- it is a new, freely-appendable unit test file.
 import { describe, expect, it } from 'vitest';
-import { reconstructIssued } from '../src/compose';
+import { deriveRuleContext, reconstructIssued } from '../src/compose';
 import { MERIDIAN } from '../src/seed/meridian';
-import type { AgentAction, Claim, ChallengeSpec } from '../src/types';
+import type { AgentAction, Claim, ChallengeSpec, Utterance } from '../src/types';
 
 const SEED = MERIDIAN;
 
@@ -120,8 +120,14 @@ describe('reconstructIssued -- recorded spec, founder-morning item 4', () => {
   });
 
   it('absent spec keeps the existing recomputation behavior (unchanged)', () => {
+    // Identity claim added (founder ruling 2026-09-09, scoping fix): every Hartwell
+    // SEED_FACT entry is now scoped to robert-miller, so recomputation needs a claimed
+    // identity to find anything at all -- otherwise every entry is correctly out of scope
+    // and selectChallenge legitimately returns null, which would turn this into a drift
+    // placeholder instead of exercising "recomputation picked a real SEED_FACT".
+    const identityClaim = claim('c-id', 'identity', 'robert-miller', 0, 'Robert Miller');
     const actions: AgentAction[] = [{ id: 'act1', kind: 'challenge_issued', t_ms: 1000, challenge_id: 'sess-v-1' }];
-    const issued = reconstructIssued([], actions, SEED, 'sess-v', []);
+    const issued = reconstructIssued([identityClaim], actions, SEED, 'sess-v', []);
     expect(issued).toHaveLength(1);
     expect(issued[0]!.kind).toBe('SEED_FACT');
     expect(issued[0]!.ask).not.toBe('');
@@ -215,5 +221,44 @@ describe('reconstructIssued -- recorded spec, founder-morning item 4', () => {
     const issued = reconstructIssued([escrowClaim], actions, SEED, 'sess-rel2', []);
     expect(issued[0]).toEqual(firstSpec);
     expect(issued[1]!.ask).toBe('');
+  });
+});
+
+function u(id: string, speaker: Utterance['speaker'], text: string, t_ms: number): Utterance {
+  return { id, speaker, text, t_ms };
+}
+
+describe('deriveRuleContext -- challenge_awaiting_answer (ruling C, 2026-09-09, item 21)', () => {
+  const WINDOW = SEED.thresholds.challenge_answer_window_ms;
+
+  it('false when no challenge has ever been issued', () => {
+    const ctx = deriveRuleContext([], 1, [], [], [], [], 0, SEED);
+    expect(ctx.challenge_awaiting_answer).toBe(false);
+  });
+
+  it('true when the most recent challenge_issued action has no caller utterance after it and the call is still live', () => {
+    const actions: AgentAction[] = [{ id: 'ch1', kind: 'challenge_issued', t_ms: 10_000, challenge_id: 'sess-1' }];
+    const conversation: Utterance[] = [u('c1', 'caller', 'This is Robert Miller.', 1_000)];
+    // Latest event (the action itself) is 0ms after the challenge was issued -- well within window.
+    const ctx = deriveRuleContext([], 1, [], [], conversation, actions, 1, SEED);
+    expect(ctx.challenge_awaiting_answer).toBe(true);
+  });
+
+  it('false once a caller utterance follows the most recent challenge_issued action (answered)', () => {
+    const actions: AgentAction[] = [{ id: 'ch1', kind: 'challenge_issued', t_ms: 10_000, challenge_id: 'sess-1' }];
+    const conversation: Utterance[] = [
+      u('c1', 'caller', 'This is Robert Miller.', 1_000),
+      u('c2', 'caller', 'Zurich.', 10_500), // reply after the challenge was issued
+    ];
+    const ctx = deriveRuleContext([], 1, [], [], conversation, actions, 1, SEED);
+    expect(ctx.challenge_awaiting_answer).toBe(false);
+  });
+
+  it('false once the answer window has elapsed with no reply (a silent/abandoned caller)', () => {
+    const actions: AgentAction[] = [{ id: 'ch1', kind: 'challenge_issued', t_ms: 10_000, challenge_id: 'sess-1' }];
+    // No caller reply, but a later tool event proves the call is still "live" past the window.
+    const tools = [{ id: 't1', name: 'check_sso_context' as const, t_ms: 10_000 + WINDOW + 1, args: {} }];
+    const ctx = deriveRuleContext([], 1, [], tools, [], actions, 1, SEED);
+    expect(ctx.challenge_awaiting_answer).toBe(false);
   });
 });

@@ -83,6 +83,10 @@ const ASSURANCE_LABELS: Record<keyof AssuranceChecklist, string> = {
   challenge_requirement_met: 'Challenge requirement met',
   no_identity_switch: 'No identity switch',
   not_new_beneficiary: 'Not a new beneficiary',
+  // TODO(2026-09-09 rulings A/B): placeholder wording -- a separate lane owns the final
+  // on-screen label copy for these two new checklist items.
+  at_least_one_challenge_passed: 'At least one challenge passed',
+  no_injection_attempt: 'No injection attempt',
 };
 
 const ASSURANCE_KEYS = Object.keys(ASSURANCE_LABELS) as (keyof AssuranceChecklist)[];
@@ -102,7 +106,7 @@ function EvidenceCard({ evidence }: { evidence: Evidence }) {
   return (
     <article className="evidence-card">
       <h4>
-        {evidence.label} — {evidence.status}
+        {evidence.label}: {evidence.status}
       </h4>
       <p>{evidence.detail}</p>
       <p className="provenance">Provenance: {evidence.provenance}</p>
@@ -260,11 +264,11 @@ function withHashEllipsis(subline: string, exportHash: string | null) {
   );
 }
 
-/** Task W8: `null`/`undefined` (not yet measured this call) renders as an em dash, never a
- *  fabricated number -- truth discipline (CLAUDE.md): no ms value on screen that was not
- *  actually measured in this browser. */
+/** Task W8: `null`/`undefined` (not yet measured this call) renders as the plain words "not
+ *  measured", never a fabricated number -- truth discipline (CLAUDE.md): no ms value on
+ *  screen that was not actually measured in this browser. */
 function formatMs(ms: number | null | undefined): string {
-  return ms === null || ms === undefined ? '—' : `${Math.round(ms)}ms`;
+  return ms === null || ms === undefined ? 'not measured' : `${Math.round(ms)}ms`;
 }
 
 export default function CallView({ screen, defaultForensicOpen, timings }: CallViewProps) {
@@ -556,7 +560,7 @@ export default function CallView({ screen, defaultForensicOpen, timings }: CallV
                 <h3>Timings (measured in this browser)</h3>
                 <p className="timings-line">
                   start→ready {formatMs(timings.startReadyMs)} · ready→first audio {formatMs(timings.readyFirstAudioMs)} · turns{' '}
-                  {timings.turnGapsMs.length > 0 ? timings.turnGapsMs.map((g) => formatMs(g)).join(', ') : '—'}
+                  {timings.turnGapsMs.length > 0 ? timings.turnGapsMs.map((g) => formatMs(g)).join(', ') : 'not measured'}
                 </p>
                 {/* W8 review, Minor: the per-turn gap above is measured from a `state` event
                     reaching this browser, which sits behind both the client-side and the

@@ -5,7 +5,14 @@ import { defaultCorpusDir, listCorpusFiles, loadCorpusFile } from './replay.js';
 import type { StaticServer } from './static.js';
 import { isAllowedOrigin } from './origin.js';
 import { resolvePersona } from './personas.js';
-import { addClientEvents, checkClientPostRate, getBundle, MAX_CLIENT_BODY_BYTES, type DiagnosticsState } from './diagnostics.js';
+import {
+  addClientEvents,
+  checkClientPostRate,
+  getBundle,
+  recordPendingServerEvent,
+  MAX_CLIENT_BODY_BYTES,
+  type DiagnosticsState,
+} from './diagnostics.js';
 
 export interface HttpDeps {
   fetchImpl: typeof fetch;
@@ -224,6 +231,7 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
         return;
       }
       let personaInput: unknown;
+      let personaInputPresent = false;
       const trimmedBody = bodyResult.body.trim();
       if (trimmedBody.length > 0) {
         let parsed: unknown;
@@ -234,6 +242,7 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
           return;
         }
         if (parsed !== null && typeof parsed === 'object') {
+          personaInputPresent = 'persona' in (parsed as Record<string, unknown>);
           personaInput = (parsed as Record<string, unknown>).persona;
         }
       }
@@ -241,6 +250,20 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
 
       const id = deps.randomId();
       startSession(state, now, id, persona);
+      // Fix (2026-09-09, PROVEN live-call regression): a live legitimate-scenario call
+      // behaved as if minted with the attacker persona even though the harness sent
+      // {"persona":"legitimate"} -- every code path read correctly in review, so the only
+      // way to find out what the DEPLOYED server actually resolved was to record it. This
+      // is that record: what persona was resolved, whether the body named one at all, and
+      // how many bytes the body was -- never the raw body itself (LAW-adjacent hygiene, same
+      // as every other diagnostics event in this file). The bundle for `id` may not exist
+      // yet (it's created on first WS attach, ws/browser.ts) -- `recordPendingServerEvent`
+      // buffers it either way.
+      recordPendingServerEvent(deps.diagnostics, id, now, 'session_minted', {
+        persona_resolved: persona,
+        persona_input_present: personaInputPresent,
+        body_bytes: Buffer.byteLength(bodyResult.body, 'utf-8'),
+      });
       sendJson(res, 200, { session_id: id, ws_path: `/ws/call/${id}`, cap_seconds: cfg.session_cap_seconds });
       return;
     }

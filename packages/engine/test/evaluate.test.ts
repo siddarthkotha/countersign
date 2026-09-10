@@ -90,6 +90,11 @@ const scenarioBInput: EngineInput = {
 // checks pass; the request matches an existing scheduled payment exactly (only the date
 // moved) -- ends STAGE.
 // ---------------------------------------------------------------------------------------
+// Ruling A (2026-09-09, red team item 1): the amendment carve-out that let this exact
+// request (matches a scheduled payment) reach STAGE with zero challenges now floors the
+// requirement at 1, never 0 -- so a knowledge challenge (issued, then answered correctly)
+// was added right after the caller's opening claim, before any readback. Without it this
+// fixture would only ever reach row 4 (CHALLENGE/PENDING), never STAGE.
 const danaConversation: Utterance[] = [
   {
     id: 'c1',
@@ -97,6 +102,7 @@ const danaConversation: Utterance[] = [
     text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
     t_ms: 1000,
   },
+  { id: 'c1a', speaker: 'caller', text: 'Calder Finch, like always.', t_ms: 1500 },
   { id: 'a1', speaker: 'agent', text: 'To confirm: $84,500 to Meridian Supply, account ending 4471. Is that right?', t_ms: 2000 },
   { id: 'c2', speaker: 'caller', text: "Yes, that's right.", t_ms: 2500 },
   { id: 'a2', speaker: 'agent', text: 'And the account ending 4471, correct?', t_ms: 3000 },
@@ -106,6 +112,20 @@ const danaConversation: Utterance[] = [
 ];
 
 const danaActions: AgentAction[] = [
+  {
+    id: 'ch1',
+    kind: 'challenge_issued',
+    t_ms: 1200,
+    challenge_id: 'sess-a-1',
+    spec: {
+      challenge_id: 'sess-a-1',
+      kind: 'SEED_FACT',
+      field: 'counsel',
+      ask: 'Ask which law firm is our counsel of record on the Hartwell deal.',
+      expect: { accept_tokens: ['calder', 'finch'] },
+      fact_id: 'counsel_of_record',
+    },
+  },
   { id: 'r1', kind: 'readback_issued', t_ms: 2000, field: 'amount_usd', value: '84500' },
   { id: 'r2', kind: 'readback_issued', t_ms: 3000, field: 'account_last4', value: '4471' },
   { id: 'r3', kind: 'readback_issued', t_ms: 4000, field: 'beneficiary', value: 'Meridian Supply' },
@@ -418,10 +438,13 @@ describe('evaluate -- challenge-first ordering (ruling 2026-09-02)', () => {
     expect(out.goal.code).toBe('ASK_CHALLENGE');
   });
 
-  it("Dana's first goal, once the challenge requirement already reads need 0 (context PASS, amendment-only), is READBACK", () => {
+  it("Dana's first goal, even with an exact amendment-only context match, is still ASK_CHALLENGE (ruling A, 2026-09-09)", () => {
     // The live checks have already run and context PASSes as an exact vendor+amount match
-    // (amendment_only -> need 0), but nothing has been read back yet -- row 4 is trivially
-    // satisfied (0 needed), so row 5 (readback) is the very next thing the engine asks for.
+    // (amendment_only), and nothing has been read back yet either -- but ruling A
+    // (2026-09-09, red team item 1) floors the amendment carve-out's challenge requirement
+    // at 1, never 0, so row 4 is NOT trivially satisfied here. The engine still asks its
+    // challenge before ever reaching row 5's readback, exactly as it would without the
+    // carve-out at all.
     const call: CallContext = { session_id: 'sess-dana-need0', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
     const out = evaluate({
       conversation: [danaConversation[0]!],
@@ -430,8 +453,8 @@ describe('evaluate -- challenge-first ordering (ruling 2026-09-02)', () => {
       call,
       seed: MERIDIAN,
     });
-    expect(out.state).toBe('CONSISTENCY_CHECK');
-    expect(out.goal.code).toBe('READBACK');
+    expect(out.state).toBe('CHALLENGE');
+    expect(out.goal.code).toBe('ASK_CHALLENGE');
   });
 
   it('a mid-call identity switch still yields RE_ELICIT_AFTER_SWITCH, never a challenge addressed to the abandoned claim', () => {

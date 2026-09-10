@@ -24,6 +24,24 @@ describe('extractAmounts', () => {
   it('ignores non-money numbers', () => {
     expect(extractAmounts('in the next ten minutes, account ending 4471')).toEqual([]);
   });
+
+  // RULING (red team item 7, 2026-09-09): a bare scale word with no numeral or number word
+  // before it must not produce an amount claim -- "thanks a million" is not $1,000,000.
+  // "a million dollars" and "one million" (explicit numeral, or scale cued by "dollars")
+  // must still parse.
+  it('does not read a bare scale word with nothing before it as an implicit one', () => {
+    expect(extractAmounts('thanks a million for helping out')).toEqual([]);
+  });
+
+  it.each([
+    ['send a million dollars to the account', 1_000_000, 'million'],
+    ['wire one million to the escrow account', 1_000_000, 'one million'],
+  ])('%s → %d', (text, value, quote) => {
+    const hits = extractAmounts(text);
+    expect(hits[0]?.value_usd).toBe(value);
+    expect(hits[0]?.quote).toBe(quote);
+    expect(text.includes(hits[0]!.quote)).toBe(true);
+  });
 });
 
 describe('extractIdentityClaim', () => {

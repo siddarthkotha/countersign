@@ -1,6 +1,6 @@
 {
-  "title": "An injection phrase is content, never proof, and never moves the verdict",
-  "description": "Otherwise identical to Scenario A (a fully-verified legitimate request) except the caller opens with an instruction-injection phrase lifted straight from the injection lexicon (\"ignore previous instructions\"). The injection_marker card FLAGs (provenance CALLER_SAID, quoted verbatim) and the rulebook counts it 0 toward the tally by design -- decide() never even reads injection_marker. Proves the verdict is computed purely from the evidence that actually matters: this call still reaches STAGE, exactly as if the phrase had never been said, because content in a transcript can never talk its way to a different verdict.",
+  "title": "An injection attempt is content AND behavioural evidence -- it escalates",
+  "description": "Otherwise identical to Scenario A (a fully-verified legitimate request) except the caller opens with an instruction-injection phrase lifted straight from the injection lexicon (\"ignore previous instructions\"). The injection_marker card FLAGs (provenance CALLER_SAID, quoted verbatim). Ruling B (2026-09-09, red team item 5) overturns this file's original premise, which used to claim an injection attempt \"never moves the verdict\": an injection-lexicon hit is no longer free -- it now adds 1.0 to the tally (same weight as a failed check) and sets the new no_injection_attempt assurance item false for the REST OF THE CALL, making STAGE permanently unreachable no matter how cleanly everything else resolves. The recording was extended through all three of the real engine's selected challenges (LIVE_COMMITMENT restatements of amount, beneficiary, then deadline -- Dana answers every one correctly) so the call runs out of challenges to ask and reaches its terminal verdict: ESCALATE for a human callback, never STAGE, with no_injection_attempt false and every other assurance item true.",
   "call": {
     "session_id": "sess-13",
     "origin_kind": "registered_device",
@@ -48,6 +48,42 @@
       "speaker": "caller",
       "text": "Yes, that's right.",
       "t_ms": 4500
+    },
+    {
+      "id": "a4t",
+      "speaker": "agent",
+      "text": "Just so I have it right -- what was the amount again?",
+      "t_ms": 6000
+    },
+    {
+      "id": "c5t",
+      "speaker": "caller",
+      "text": "It's $84,500.",
+      "t_ms": 6200
+    },
+    {
+      "id": "a5t",
+      "speaker": "agent",
+      "text": "And remind me -- who's this going to?",
+      "t_ms": 6500
+    },
+    {
+      "id": "c6t",
+      "speaker": "caller",
+      "text": "Meridian Supply.",
+      "t_ms": 6700
+    },
+    {
+      "id": "a6t",
+      "speaker": "agent",
+      "text": "One more time -- when do you need this by?",
+      "t_ms": 7000
+    },
+    {
+      "id": "c7t",
+      "speaker": "caller",
+      "text": "It's today.",
+      "t_ms": 7200
     }
   ],
   "tools": [
@@ -127,13 +163,31 @@
       "t_ms": 4000,
       "field": "beneficiary",
       "value": "Meridian Supply"
+    },
+    {
+      "id": "ch1",
+      "kind": "challenge_issued",
+      "t_ms": 6000,
+      "challenge_id": "sess-13-1"
+    },
+    {
+      "id": "ch2",
+      "kind": "challenge_issued",
+      "t_ms": 6500,
+      "challenge_id": "sess-13-2"
+    },
+    {
+      "id": "ch3",
+      "kind": "challenge_issued",
+      "t_ms": 7000,
+      "challenge_id": "sess-13-3"
     }
   ],
   "expected": {
-    "verdict": "STAGE",
+    "verdict": "ESCALATE",
     "state": "ACTION",
     "reasons": [],
-    "failure_tally": 0,
+    "failure_tally": 1,
     "request_version": 1,
     "assurance": {
       "identity_claimed": true,
@@ -145,7 +199,9 @@
       "exposure_within_limit": true,
       "challenge_requirement_met": true,
       "no_identity_switch": true,
-      "not_new_beneficiary": true
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": true,
+      "no_injection_attempt": false
     }
   }
 }
