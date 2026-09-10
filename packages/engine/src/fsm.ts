@@ -76,7 +76,7 @@ export function allowedTools(_state: EngineState, _verdict: Verdict): ToolName[]
  *  not add a NEW action, it just changes how the agent talks about it (see phrasingGoal). */
 export function requiredActions(verdict: Verdict, tools: ToolLogEntry[]): ToolName[] {
   if (verdict !== 'STAGE' && verdict !== 'FREEZE' && verdict !== 'ESCALATE') return [];
-  const done = new Set(tools.filter((t) => t.result !== undefined).map((t) => t.name));
+  const done = new Set(tools.filter((t) => t.result !== undefined && t.result.error === undefined).map((t) => t.name));
   return ACTION_ALLOWLIST[verdict].filter((name) => !done.has(name));
 }
 
@@ -94,7 +94,7 @@ export function deriveState(decideResult: DecideResult, evidence: Evidence[], to
   // doesn't literally describe a dropped line. phrasingGoal's OUT_OF_SCOPE branch already
   // handles both shapes (EXPLAIN_OUT_OF_SCOPE vs EXPLAIN_OPEN_REQUEST) via hasRequest.
   if (decideResult.verdict === 'NO_ACTION') return 'OUT_OF_SCOPE';
-  if (tools.some((t) => t.name === 'seal_evidence_record' && t.result !== undefined)) return 'SEALED';
+  if (tools.some((t) => t.name === 'seal_evidence_record' && t.result !== undefined && t.result.error === undefined)) return 'SEALED';
   if (decideResult.verdict === 'STAGE' || decideResult.verdict === 'FREEZE' || decideResult.verdict === 'ESCALATE') {
     return requiredActions(decideResult.verdict, tools).length > 0 ? 'ACTION' : 'DECISION';
   }

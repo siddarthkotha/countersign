@@ -11,11 +11,11 @@
 // `allowedTools` returns [] for every EngineState -- the voice model is offered NO tools,
 // ever, ceiling zero, not just for the states that used to already return [].
 import { describe, it, expect } from 'vitest';
-import { allowedTools, phrasingGoal } from '../src/fsm';
+import { allowedTools, deriveState, phrasingGoal, requiredActions } from '../src/fsm';
 import { buildLedger, currentClaim } from '../src/ledger';
 import { MERIDIAN } from '../src/seed/meridian';
 import type { DecideResult } from '../src/rules';
-import type { AssuranceChecklist, Claim, ClaimField, EngineState, Utterance, Verdict } from '../src/types';
+import type { AssuranceChecklist, Claim, ClaimField, EngineState, ToolLogEntry, Utterance, Verdict } from '../src/types';
 
 const ALL_STATES: EngineState[] = [
   'INTAKE',
@@ -224,4 +224,64 @@ describe('READBACK closes the loop: readback + affirm actually confirms the fiel
       expect(currentClaim(afterAffirm, field)?.kind).toBe('CONFIRMED');
     });
   }
+});
+
+// ---------------------------------------------------------------------------------------
+// Bug fix (2026-09-09, read-only review lane finding): requiredActions (line 79) and
+// deriveState's SEALED check (line 97) used to treat ANY logged tool result for a terminal
+// action -- including a FAILED result carrying {error, message} -- as "done"
+// (`t.result !== undefined` never checked `.error`). packages/server/src/call/session.ts's
+// runTerminalActionsIfNeeded retries a failed terminal action up to
+// CallSession.MAX_TERMINAL_ACTION_ATTEMPTS times, logging EACH failed attempt as its own
+// ToolLogEntry with `result: { error: 'internal_error', message }` (session.ts ~857-908).
+// So after the FIRST failed attempt, the engine's own required_actions/deriveState wrongly
+// reported the action complete and could advance the state toward DECISION or even SEALED
+// (if the failed action happened to be seal_evidence_record) -- contradicting the server's
+// own correct bookkeeping (terminalActionSucceeded/terminalActionsAbandoned), which never
+// treats an errored attempt as success. Ruling: a terminal action counts as done only when
+// a logged ToolLogEntry exists for it with a result that has NO `.error` field.
+function erroredToolEntry(name: ToolLogEntry['name'], t_ms: number): ToolLogEntry {
+  return { id: `tl-err-${name}-${t_ms}`, name, t_ms, args: {}, result: { error: 'internal_error', message: 'timeout' } };
+}
+
+function succeededToolEntry(name: ToolLogEntry['name'], t_ms: number): ToolLogEntry {
+  return { id: `tl-ok-${name}-${t_ms}`, name, t_ms, args: {}, result: { ok: true } };
+}
+
+const FREEZE_DECISION: DecideResult = { ...stubDecideResult(0), verdict: 'FREEZE' };
+
+describe('requiredActions -- an errored terminal-action result never counts as done', () => {
+  it('a logged failure (result.error set) for freeze_transaction_rail still lists it as owed', () => {
+    const tools: ToolLogEntry[] = [erroredToolEntry('freeze_transaction_rail', 1000)];
+    expect(requiredActions('FREEZE', tools)).toContain('freeze_transaction_rail');
+  });
+
+  it('a later SUCCESSFUL entry for the same action, after an earlier failure, retires it', () => {
+    const tools: ToolLogEntry[] = [erroredToolEntry('freeze_transaction_rail', 1000), succeededToolEntry('freeze_transaction_rail', 2000)];
+    expect(requiredActions('FREEZE', tools)).not.toContain('freeze_transaction_rail');
+  });
+});
+
+describe('deriveState -- an errored seal_evidence_record result never seals the call', () => {
+  it('state stays ACTION (not SEALED) while every owed action, including seal, has only failed results', () => {
+    const tools: ToolLogEntry[] = [
+      erroredToolEntry('freeze_transaction_rail', 1000),
+      erroredToolEntry('open_incident', 1000),
+      erroredToolEntry('alert_principal', 1000),
+      erroredToolEntry('seal_evidence_record', 1000),
+    ];
+    expect(deriveState(FREEZE_DECISION, [], tools)).toBe('ACTION');
+  });
+
+  it('state becomes SEALED once seal_evidence_record has a later successful entry (all other actions also done)', () => {
+    const tools: ToolLogEntry[] = [
+      erroredToolEntry('freeze_transaction_rail', 1000),
+      succeededToolEntry('freeze_transaction_rail', 1500),
+      succeededToolEntry('open_incident', 1500),
+      succeededToolEntry('alert_principal', 1500),
+      erroredToolEntry('seal_evidence_record', 1000),
+      succeededToolEntry('seal_evidence_record', 2000),
+    ];
+    expect(deriveState(FREEZE_DECISION, [], tools)).toBe('SEALED');
+  });
 });
