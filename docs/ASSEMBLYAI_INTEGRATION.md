@@ -84,3 +84,12 @@ additions, all PROVEN in that file with URLs:
   once the session starts (the character's voice pick is a session-start decision).
 - UNKNOWN still: idle timeout on their side; CORS on the token endpoint (irrelevant — minted
   server-side); whether the server stops `reply.audio` on interrupt (client flushes regardless).
+
+## VERIFY-AT-BUILD note added 2026-09-09 (transcript dedupe)
+
+The server now ignores a final `transcript.user` / `transcript.agent` event whose `item_id` was
+already recorded for the session (insurance against redelivery after a `session.resume`), and
+records `transcript_duplicate_ignored` on the flight recorder when it does. That relies on
+AssemblyAI issuing a distinct `item_id` per final turn. UNKNOWN as of this note: whether the
+live docs state that guarantee. Check before relying on it for anything beyond redelivery
+insurance; a per-turn collision would silently drop a genuine new utterance.
