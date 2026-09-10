@@ -1,6 +1,6 @@
 {
   "title": "Pressure signals alone do not block staging",
-  "description": "Otherwise-identical to Scenario A (exact amendment match, every critical field confirmed, every live check clean) except Dana opens with two urgency phrases (\"right now\", \"this is urgent\") drawn from the pressure lexicon. Proves rule 11's carve-out in the rulebook: a pressure FLAG counts 0 toward the tally and never blocks assuranceAllTrue -- it only changes how the agent is instructed to talk (ANNOUNCE_STAGED with no details disclosed, alert_principal already on the required-actions list) -- never whether the request stages.",
+  "description": "Otherwise-identical to Scenario A (exact amendment match, every critical field confirmed, every live check clean) except Dana opens with two urgency phrases (\"right now\", \"this is urgent\") drawn from the pressure lexicon. Proves rule 11's carve-out in the rulebook: a pressure FLAG counts 0 toward the tally and never blocks assuranceAllTrue -- it only changes how the agent is instructed to talk (ANNOUNCE_STAGED with no details disclosed, alert_principal already on the required-actions list) -- never whether the request stages. Ruling A (2026-09-09, red team item 1): the amendment carve-out now floors the knowledge-challenge requirement at 1, never 0 -- this recording was extended with the exact challenge the real engine selects at this point (a TRAP_FACT probe restating the beneficiary as \"Northgate Partners\"), which Dana correctly catches and corrects despite the pressure, so the call still reaches STAGE and this file again exercises row 11's pressure-never-blocks-staging point.",
   "call": {
     "session_id": "sess-6",
     "origin_kind": "registered_device",
@@ -12,6 +12,18 @@
       "speaker": "caller",
       "text": "This is Dana Whitfield, corporate treasury — right now, this is urgent — I need to wire it to Meridian Supply, $84,500, account ending 4471, approved in yesterday's close meeting.",
       "t_ms": 1000
+    },
+    {
+      "id": "a1t",
+      "speaker": "agent",
+      "text": "Just to confirm back to you -- this wire is going to Northgate Partners, is that right?",
+      "t_ms": 1200
+    },
+    {
+      "id": "c1t",
+      "speaker": "caller",
+      "text": "No, that's wrong -- it's Meridian Supply, not Northgate Partners.",
+      "t_ms": 1400
     },
     {
       "id": "a1",
@@ -108,6 +120,12 @@
   ],
   "actions": [
     {
+      "id": "ch1",
+      "kind": "challenge_issued",
+      "t_ms": 1200,
+      "challenge_id": "sess-6-1"
+    },
+    {
       "id": "r1",
       "kind": "readback_issued",
       "t_ms": 2000,
@@ -145,7 +163,9 @@
       "exposure_within_limit": true,
       "challenge_requirement_met": true,
       "no_identity_switch": true,
-      "not_new_beneficiary": true
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": true,
+      "no_injection_attempt": true
     }
   }
 }

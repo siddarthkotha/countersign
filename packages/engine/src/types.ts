@@ -176,6 +176,11 @@ export interface SeedConfig {
     pressure_flag_min: number; // distinct pressure hits to FLAG, 2
     correction_window_ms: number; // v2: 20000
     tool_timeout_ms: number; // v2: 45000
+    // Ruling C (2026-09-09, item 21): how long, after the most recently issued challenge,
+    // a call is still considered "waiting on the answer" rather than abandoned -- keeps
+    // rules.ts row 12 from falling through to row 13 the instant the last allowed
+    // challenge is asked, before the caller has had a chance to reply.
+    challenge_answer_window_ms: number;
     approximate_jump_ratio: number; // fix-round-2: an APPROXIMATE claim's replacement value is
     // CORRECTED only if it stays within this multiple (and its reciprocal) of the approximate
     // value; a bigger jump is CONTRADICTED. Numeric fields only (amount_usd).
@@ -315,6 +320,15 @@ export interface AssuranceChecklist {
   challenge_requirement_met: boolean;
   no_identity_switch: boolean;
   not_new_beneficiary: boolean;
+  // Ruling A (2026-09-09, red team item 1): at least one knowledge/relational challenge
+  // must have graded PASS, independent of (and in addition to) challenge_requirement_met
+  // -- so the amendment carve-out's floor-of-1 `need` (rules.ts) can never be the ONLY
+  // thing standing between a zero-challenge call and STAGE.
+  at_least_one_challenge_passed: boolean;
+  // Ruling B (2026-09-09, red team item 5): false for the rest of the call once any
+  // injection-lexicon hit has been seen -- makes STAGE permanently unreachable via row 11
+  // for a call that has shown this behavior, regardless of how everything else resolves.
+  no_injection_attempt: boolean;
 }
 
 export interface EngineOutput {

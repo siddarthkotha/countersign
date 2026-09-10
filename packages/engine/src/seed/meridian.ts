@@ -120,6 +120,7 @@ export const MERIDIAN: SeedConfig = {
     pressure_flag_min: 2,
     correction_window_ms: 20_000, // v2
     tool_timeout_ms: 45_000, // v2
+    challenge_answer_window_ms: 15_000, // ruling 2026-09-09 (item 21)
     approximate_jump_ratio: 2, // fix-round-2: red team item 2
   },
   pressure_lexicon: [

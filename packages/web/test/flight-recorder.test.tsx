@@ -57,6 +57,8 @@ function baseState(transcript: ScreenState['transcript']): ScreenState {
         challenge_requirement_met: false,
         no_identity_switch: true,
         not_new_beneficiary: true,
+        at_least_one_challenge_passed: false,
+        no_injection_attempt: true,
       },
       counterfactuals: [],
       export_hash: null,

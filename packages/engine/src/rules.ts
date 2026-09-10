@@ -18,6 +18,13 @@ export interface RuleContext {
   evaluation_incomplete: boolean;
   critical_confirmed: boolean;
   identity_switch_stale: boolean;
+  // Ruling C (2026-09-09, item 21): true when the most recently issued challenge has no
+  // caller utterance after it yet AND the call is still live (the latest event timestamp
+  // is within seed.thresholds.challenge_answer_window_ms of when it was asked). Lets row
+  // 12 hold one more beat instead of falling through to row 13 the instant the last
+  // allowed challenge is ASKED, before the caller's answer has had a chance to arrive.
+  // Derived purely in compose.ts's deriveRuleContext -- never set from a live clock.
+  challenge_awaiting_answer: boolean;
 }
 
 /** Deliberate rule-breaks used only by test/mutants.test.ts to prove each rule is
@@ -53,12 +60,22 @@ const CRITICAL_TALLY_CAP = 2;
 
 /** Tally: independent FAILED checks toward the freeze/escalate thresholds. AMBIGUOUS/REFUSED
  *  challenges (surfaced as FLAG knowledge cards whose facts.result isn't PASS/FAIL) count
- *  0.5; pressure, injection and identity-switch cards count 0 (behavior, not proof; identity
- *  switch resets state instead of accruing tally). */
+ *  0.5; pressure and identity-switch cards count 0 (behavior, not proof; identity switch
+ *  resets state instead of accruing tally). Ruling B (2026-09-09, red team item 5): an
+ *  injection-lexicon hit is no longer free -- each one now counts 1, the same weight as a
+ *  failed check (it used to count 0). */
 function computeTally(
   evidence: Evidence[],
   mutant: RuleMutant | undefined,
-): { tally: number; ssoFail: boolean; oobFail: boolean; contextFail: boolean; hasContradiction: boolean; contradictionCount: number } {
+): {
+  tally: number;
+  ssoFail: boolean;
+  oobFail: boolean;
+  contextFail: boolean;
+  hasContradiction: boolean;
+  contradictionCount: number;
+  injectionCount: number;
+} {
   const ssoEv = find(evidence, 'sso_context_result');
   const oobEv = find(evidence, 'oob_verification_result');
   const contextEv = find(evidence, 'context_check_result');
@@ -77,6 +94,8 @@ function computeTally(
   // an unreconstructable log entry are each "not a pass" without being fatal on their own.
   const knowledgeAmbiguousTally = knowledgeCards.filter((e) => e.status === 'FLAG').length * 0.5;
 
+  const injectionCount = findAll(evidence, 'injection_marker').filter((e) => e.status === 'FLAG').length;
+
   let tally = 0;
   if (ssoFail) tally += 1;
   if (oobFail) tally += 1;
@@ -84,8 +103,9 @@ function computeTally(
   tally += contradictionTally;
   tally += knowledgeFailTally;
   tally += knowledgeAmbiguousTally;
+  tally += injectionCount; // ruling B (2026-09-09): each injection-lexicon hit now counts 1, same as a failed check
 
-  return { tally, ssoFail, oobFail, contextFail, hasContradiction, contradictionCount: consistencyFails.length };
+  return { tally, ssoFail, oobFail, contextFail, hasContradiction, contradictionCount: consistencyFails.length, injectionCount };
 }
 
 function orderedFreezeReasons(
@@ -129,7 +149,7 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
   const exposureEv = find(evidence, 'exposure_check_result');
   const pressureFlag = find(evidence, 'pressure_marker')?.status === 'FLAG';
 
-  const { tally, ssoFail, oobFail, contextFail, hasContradiction } = computeTally(evidence, mutant);
+  const { tally, ssoFail, oobFail, contextFail, hasContradiction, injectionCount } = computeTally(evidence, mutant);
 
   const knowledgeCards = findAll(evidence, 'knowledge_check_result');
   const relationalFail = knowledgeCards.some((e) => e.status === 'FAIL' && e.facts.kind === 'RELATIONAL');
@@ -138,7 +158,14 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
   const anyCheckFail = ssoFail || oobFail || contextFail;
 
   // ---- assurance (needed for row 11's gate and the I2 invariant) ----
-  const need = ctx.new_beneficiary ? 2 : ctx.amendment_only && contextEv?.status === 'PASS' ? 0 : 1;
+  // Ruling A (2026-09-09, red team item 1): the amendment carve-out (a caller matching an
+  // existing scheduled payment exactly) used to drop `need` to 0, letting such a call reach
+  // STAGE with zero knowledge challenges. It may now only reduce `need` to 1, never 0 -- so
+  // it no longer differs from the ordinary case below. `at_least_one_challenge_passed`
+  // (assurance, below) enforces the same "at least one genuinely graded PASS" floor a
+  // second, independent way, so this is never the only thing standing between a
+  // zero-challenge amendment-only call and STAGE.
+  const need = ctx.new_beneficiary ? 2 : 1;
   const passedChallenges = knowledgeCards.filter((e) => e.status === 'PASS').length;
   const challengesRemaining = ctx.challenges_issued < ctx.max_challenges;
   // The exposure_check_result card (built by compose.ts's buildExposureEvidence) already
@@ -160,6 +187,8 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
     challenge_requirement_met: passedChallenges >= need,
     no_identity_switch: !ctx.identity_switch_stale,
     not_new_beneficiary: !ctx.new_beneficiary,
+    at_least_one_challenge_passed: passedChallenges >= 1, // ruling A (2026-09-09)
+    no_injection_attempt: injectionCount === 0, // ruling B (2026-09-09)
   };
 
   // §B (amendment-v2-brief.md): "FREEZE rules may use unconfirmed values (fail-safe
@@ -253,8 +282,12 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
     reasons = [];
     rule_hit = 11;
   }
-  // Row 12: some failures, but under the freeze line, and challenges remain.
-  else if (tally > 0 && tally < 3 && challengesRemaining) {
+  // Row 12: some failures, but under the freeze line, and either challenges remain, or the
+  // last-asked challenge hasn't been answered yet and is still live (ruling C, 2026-09-09,
+  // item 21: without this, the instant the third challenge was ASKED the counter alone
+  // pushed this row's guard false and the engine fell straight to row 13, discarding a
+  // correct answer that arrived moments later).
+  else if (tally > 0 && tally < 3 && (challengesRemaining || ctx.challenge_awaiting_answer)) {
     verdict = 'PENDING';
     rule_hit = 12;
   }
@@ -307,7 +340,7 @@ Rule table (evidence-first, first match wins):
 1. An out-of-scope marker with no open request -> NO_ACTION; explain this is a demo checkpoint, nothing moves.
 2. An out-of-scope marker with an open request -> NO_ACTION; the request stays open and unstaged, for a human to route.
 3. No identity claim, or no request -> hold; ask for whichever is missing.
-4. A required challenge is asked before the amount is read back: not enough passed challenges yet for the risk level, challenges remain to ask, and there is no in-progress identity switch to resolve first -> hold; ask the next challenge.
+4. A required challenge is asked before the amount is read back: not enough passed challenges yet for the risk level, challenges remain to ask, and there is no in-progress identity switch to resolve first -> hold; ask the next challenge. A caller matching an existing scheduled payment exactly (the amendment carve-out) may lower how many are required, but never below one (ruling 2026-09-09): at least one genuinely graded knowledge or relational PASS is always required before STAGE.
 5. A readback is still required before anything can be staged: any critical field (amount, account, beneficiary) that has been claimed but not yet confirmed -> hold; read it back and ask the caller to confirm. Reached once any challenge required by row 4 has already been asked (or none is required for this risk level).
 6. An identity switch this version, with now-stale evidence -> hold; re-establish who is calling from scratch (this always takes priority over asking a fresh challenge or a readback, since both would otherwise address someone whose claimed identity has already been abandoned).
 7. Any identity, out-of-band, or context check still pending, absent, or stale -> hold; keep the floor with one short neutral line.
@@ -320,9 +353,9 @@ Rule table (evidence-first, first match wins):
    Reasons are always ordered: identity, out-of-band, context, story consistency, knowledge check, urgency pressure, exposure limit, new beneficiary. Freeze keeps strict priority over rows 4 and 5: it can fire on raw, unconfirmed evidence rather than waiting on a challenge or a readback that may never come.
 9. Distinct amounts stated across the call add up past the high-value threshold while the current amount alone reads under it -> escalate for a human callback (this guards against splitting one large request into smaller-looking pieces).
 10. A first-time beneficiary not on record -> escalate for a human callback, regardless of amount.
-11. Every AssuranceChecklist item reads true -> STAGE for second approval. A pressure flag never blocks this step, but it keeps the details off the call and adds the principal alert to the required actions.
-12. Some checks have failed, fewer than three, and challenges remain -> hold; ask another challenge.
+11. Every AssuranceChecklist item reads true -> STAGE for second approval. A pressure flag never blocks this step, but it keeps the details off the call and adds the principal alert to the required actions. At least one knowledge or relational challenge must have graded PASS (ruling 2026-09-09) -- an explicit, independent floor, so the amendment carve-out's reduced requirement is never by itself enough to reach STAGE with zero challenges asked. An explicit instruction-injection attempt anywhere in the call (ruling 2026-09-09) makes STAGE unreachable for the rest of the call, regardless of how everything else resolves.
+12. Some checks have failed, fewer than three, and either challenges remain to ask, or the challenge just asked has not been answered yet and the call is still live -> hold; ask another challenge, or wait the few seconds a reply is still due (ruling 2026-09-09): the instant the last allowed challenge is asked must not by itself fall through to row 13 before the caller has had a chance to answer it.
 13. Otherwise -> escalate for a human callback; nothing moves by voice alone.
 
-Tally (independent failed checks; used by rows 8c and 12): SSO/identity fail 1, out-of-band fail 1, context fail 1, each contradicted claim 1 (capped at 2), each failed challenge 1, each ambiguous/refused challenge 0.5 (evasion is not free, but not fatal either). Pressure, an injection-lexicon hit, and an identity switch each count 0 toward the tally -- they are behavior, never proof, and an identity switch resets the evaluation instead of accruing against it.
+Tally (independent failed checks; used by rows 8c and 12): SSO/identity fail 1, out-of-band fail 1, context fail 1, each contradicted claim 1 (capped at 2), each failed challenge 1, each ambiguous/refused challenge 0.5 (evasion is not free, but not fatal either), each instruction-injection hit 1 (ruling 2026-09-09: no longer free -- it is itself behavioural evidence, weighted the same as a failed check, and separately makes STAGE unreachable for the rest of the call). Pressure and an identity switch each still count 0 toward the tally -- they are behavior, never proof, and an identity switch resets the evaluation instead of accruing against it.
 `;
