@@ -56,6 +56,9 @@ export default function Replay() {
   // now. Drives the Play/Pause control below -- always a plain word, never a colour, per the
   // founder's colour-blind accessibility rule.
   const [isPlaying, setIsPlaying] = useState(false);
+  // Track if playback has ever been started so we can label the button "Play from start"
+  // when paused, clarifying that resuming mid-call is not supported.
+  const [hasPlayedBefore, setHasPlayedBefore] = useState(false);
   const clientRef = useRef<CallClient | null>(null);
 
   useEffect(() => {
@@ -98,6 +101,7 @@ export default function Replay() {
       clientRef.current = client;
       setSelected(file);
       setIsPlaying(true);
+      setHasPlayedBefore(true);
     } catch {
       // Founder ruling 10 (2026-09-09): if the browser refuses the automatic start (or the
       // connection itself fails), the recording still ends up selected -- so the judge sees
@@ -207,10 +211,11 @@ export default function Replay() {
         {/* Founder ruling 10 (2026-09-09): one obvious, plain-worded control -- never a
             colour-only state (the founder is colour blind) -- for the auto-started playback.
             Only shown once a recording is selected (auto or manual); "Play" also covers the
-            fallback case where the automatic start was blocked by the browser. */}
+            fallback case where the automatic start was blocked by the browser. When paused after
+            having played before, label clarifies that resuming mid-call is not supported. */}
         {selected && (
           <button type="button" onClick={isPlaying ? pausePlayback : resumePlayback} aria-pressed={isPlaying}>
-            {isPlaying ? 'Pause' : 'Play'}
+            {isPlaying ? 'Pause' : (hasPlayedBefore ? 'Play from start' : 'Play')}
           </button>
         )}
 
@@ -220,6 +225,10 @@ export default function Replay() {
           </p>
         )}
       </div>
+
+      {selected && !isPlaying && hasPlayedBefore && (
+        <p className="replay-resume-note">Resuming mid-call is not supported yet.</p>
+      )}
 
       <p className="replay-note">No microphone is used on this screen -- it replays a recorded call end to end.</p>
 
