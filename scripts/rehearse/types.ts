@@ -160,6 +160,15 @@ export interface DiagnosticsSummary {
   deployed_commit: string | null;
   ended_at_ms: number | null;
   end_reason: string | null;
+  /** Fix (2026-09-09, PROVEN live-call regression): what the server actually resolved this
+   *  call's persona to, recorded at mint time (http.ts's /api/session/start handler, PROVEN:
+   *  packages/server/src/diagnostics.ts's `recordPendingServerEvent`) -- `null` for a bundle
+   *  that predates this fix, or a session that was never minted through this route. */
+  session_minted_event: RehearseDiagnosticEvent | null;
+  /** Fix (2026-09-09, same regression): the simulated telemetry (origin_kind/origin_geo)
+   *  this call's persona actually resolved to at WS attach (PROVEN: ws/browser.ts, where
+   *  defaultCallContext is built) -- `null` for a bundle that predates this fix. */
+  call_context_event: RehearseDiagnosticEvent | null;
 }
 
 export interface DiagnosticsFailure {

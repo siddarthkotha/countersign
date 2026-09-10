@@ -109,6 +109,13 @@ function renderDiagnostics(r: RunResult): string {
   return [
     `Deployed commit: ${d.deployed_commit ?? 'unknown (local dev, RENDER_GIT_COMMIT not set)'}`,
     `Server-side end reason: ${d.end_reason ?? 'not ended per the bundle'}`,
+    // Fix (2026-09-09, PROVEN live-call regression): what the server actually resolved this
+    // call's persona/telemetry to, printed near the top so a founder debugging a live call
+    // (or reading a rehearsal report) sees it before anything else in this section --
+    // exactly the fact that was missing when a legitimate-scenario call behaved as if minted
+    // with the attacker persona and nothing in the bundle could say why.
+    `Session minted: ${d.session_minted_event ? JSON.stringify(d.session_minted_event.detail) : 'not recorded'}`,
+    `Call context: ${d.call_context_event ? JSON.stringify(d.call_context_event.detail) : 'not recorded'}`,
     '',
     '**Event kind counts**',
     counts || '_none_',
