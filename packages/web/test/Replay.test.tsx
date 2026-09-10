@@ -143,13 +143,16 @@ describe('Replay', () => {
     render(<Replay />);
 
     await screen.findByRole('option', { name: RECORDING_LABEL });
-    expect(connectSocketOnly).toHaveBeenCalledWith(
-      expect.stringContaining(`/ws/replay/${encodeURIComponent(RECORDING)}?speed=1`),
-    );
-    expect(await screen.findByLabelText('Recording')).toHaveValue(RECORDING);
+    // De-flake (2026-09-09, PROVEN once in five full-suite runs): the option rendering does not
+    // guarantee the autoplay effect has run yet. The Pause control only renders once the effect
+    // has connected and set isPlaying, so await it FIRST, then assert the connection call.
     // Accessibility (founder is colour blind): the playing/paused state is carried by the
     // control's own word, never colour alone.
     expect(await screen.findByRole('button', { name: 'Pause' })).toBeInTheDocument();
+    expect(connectSocketOnly).toHaveBeenCalledWith(
+      expect.stringContaining(`/ws/replay/${encodeURIComponent(RECORDING)}?speed=1`),
+    );
+    expect(screen.getByLabelText('Recording')).toHaveValue(RECORDING);
   });
 
   // Founder ruling 10 (2026-09-09): a real browser can refuse an automatic start (autoplay
