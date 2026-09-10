@@ -1,7 +1,7 @@
 # Countersign, session snapshot (overwritten at every close; never appended)
 
-Last written: Wednesday 2026-09-09, 8:04 PM CDT, on autopilot (founder said "Autopilot Start"
-at 7:41 PM). Day 4. This file is a running snapshot tonight; the close pass rewrites it.
+Last written: Wednesday 2026-09-09, 8:30 PM CDT, on autopilot (founder said "Autopilot Start"
+at 7:41 PM; queue drained 8:30 PM). Day 4.
 
 ## The one-paragraph version
 
@@ -17,10 +17,10 @@ out after the full gate. Gate G2 was then MET on the deployed site at 8:05 PM (S
 
 ## PROVEN (each checked against the real source tonight, not from notes)
 
-- Main 9e64bc5 pushed 8:02 PM. npm test 1049/1049 three times, typecheck clean. The suite now
-  includes the rehearsal and critique harness tests (was 57 files / 888 at 6 PM, is 69 / 1049).
-- Deployed: 9e64bc5 serves on Render, /health ok, verified 8:05 PM. CI green on b556864; 9e64bc5 CI in
-  progress at last check.
+- Main f1a765e (push 9) is LIVE: /version matches, /health ok, verified 8:30 PM. CI green on all
+  three pushes tonight (9e64bc5, 1d596c0, f1a765e). npm test 1051/1051 three times before the
+  last push, typecheck clean. The suite now includes the rehearsal and critique harness tests
+  (was 57 files / 888 at 6 PM, is 70 / 1051).
 - GATE G2 MET: scenario A twice consecutively on the DEPLOYED site, STAGE 73.8 s and 91.5 s, zero
   resets (reports 2026-09-09T20-02-51 and 20-04-50). Fraud re-check on the same commit: FREEZE,
   57.4 s wall (report 20-06-19).
@@ -52,14 +52,15 @@ raw diagnostics bundle saved per run; four adversarial scenarios written (not ru
 
 ## Open, in the order to take them
 
-1. Push 8: README Status refresh and the RULES_DOC row 4 cleanup (both in lanes at time of
-   writing), then deploy verify. Transcript item_id dedupe already landed (368c6d2).
+1. Nothing is in flight. Pushes 8 and 9 landed and are verified live (README refresh, transcript
+   dedupe, RULES_DOC cleanup).
 2. Gate G3 evidence: every rehearsal now writes a raw bundle with the checklist per transition;
    19 recordings replay exactly. Consider a bridge from bundle to corpus file (not built).
 3. Friday Sep 12 judge simulation; build the judge-sim agent then.
 4. Founder decisions parked: on-screen banner for abandoned containment (visual); UI jargon
    copy; whether urgency should ever carry weight (recommendation: no); RT-9b escrow grading.
-5. Judge simulation Friday Sep 12 (build the judge-sim agent then, not before).
+5. Housekeeping parked: 29 worktrees / 28 lane branches to remove (a delete, so founder's call);
+   README still has em-dashes outside Status (pre-flip sweep).
 
 ## Founder rulings recorded tonight
 
