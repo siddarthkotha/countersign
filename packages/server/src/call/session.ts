@@ -463,7 +463,25 @@ export class CallSession {
         return;
 
       case 'transcript.user':
-      case 'transcript.agent':
+      case 'transcript.agent': {
+        // Insurance (2026-09-09 flight-recorder finding): the AAI leg has a bounded
+        // resume-on-drop path (aai/session.ts, three attempts in 30s, session.resume with
+        // the prior session id). UNKNOWN whether AssemblyAI ever redelivers a transcript
+        // after a resume, but if it redelivers an item_id already recorded here, a plain
+        // repeat of the CURRENT value is a harmless ledger no-op -- while a redelivered
+        // STALE value (an earlier statement re-sent after a later correction) would land
+        // with a fresh server timestamp, sort AFTER the correction, and could be
+        // misclassified CONTRADICTED with a spurious request_version bump. Only FINAL
+        // transcripts carry an item_id that matters here; this event type has no
+        // partial/interim variant to preserve (AaiEvent's own `transcript.*.delta` is
+        // deliberately unmodeled -- see aai/types.ts).
+        if (this.logs.conversation.some((u) => u.id === evt.item_id)) {
+          this.diag('transcript_duplicate_ignored', {
+            item_id: evt.item_id,
+            speaker: evt.type === 'transcript.user' ? 'caller' : 'agent',
+          });
+          return;
+        }
         // Changes `conversation`, part of EngineInput -- must tick.
         this.logs.conversation.push(utteranceFromTranscript(evt, this.nowT()));
         this.opts.onActivity?.();
@@ -471,6 +489,7 @@ export class CallSession {
         // (that stays evidence-only, LAW 4; diagnostics is not evidence).
         this.diag('transcript', { role: evt.type === 'transcript.user' ? 'user' : 'agent', length: evt.text.length });
         break;
+      }
 
       case 'reply.started':
         // Doesn't touch EngineInput, but flips `this.speaking`, which `emitState()` (called
