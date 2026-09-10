@@ -1,619 +1,1032 @@
 {
-  "items": [
-    {
-      "id": "S5",
-      "title": "S5 flight recorder server (fix round 2 landed 4e23a6c; re-review pending)",
-      "files": [
-        "packages/server/**"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a27b1f3997b54ec86",
-      "started_at": "2026-09-03T00:52:55Z"
-    },
-    {
-      "id": "W9",
-      "title": "W9 flight recorder browser",
-      "files": [
-        "packages/web/**"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "",
-      "started_at": "2026-09-03T00:52:55Z"
-    },
-    {
-      "id": "H1",
-      "title": "H1 orchestration tooling",
-      "files": [
-        ".claude/**"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "",
-      "started_at": "2026-09-03T00:52:55Z"
-    },
-    {
-      "id": "judge-sim-preload",
-      "title": "judge-sim persona preload (build Sep 12, not before)",
-      "files": [],
-      "status": "held",
-      "held_because": "founder ruling: build-on-first-use Sep 12",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "latency-table",
-      "title": "latency table n=2 + rehearsals",
-      "files": [],
-      "status": "held",
-      "held_because": "needs the founder's microphone (Sep 9)",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "commit-8afaf2a-reword",
-      "title": "commit 8afaf2a message reword",
-      "files": [],
-      "status": "held",
-      "held_because": "founder-run history rewrite at the flip",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "S5-rereview-2",
-      "title": "S5 re-review round 2",
-      "files": [],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "af38da1a3485dafc1",
-      "started_at": "2026-09-03T01:46:00Z"
-    },
-    {
-      "id": "throttle-flake-2",
-      "title": "browser-ws real-socket throttle test flaked once under full-suite load (post-de-flake)",
-      "files": [
-        "packages/server/test/browser-ws.test.ts"
-      ],
-      "status": "held",
-      "held_because": "needs observation: reproduce under load 10× before changing; not blocking",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "push-4",
-      "title": "push 4: flight recorder (S5+W9), hook tooling (H1), docs",
-      "files": [],
-      "status": "done",
-      "held_because": "needs the founder's word 'push'",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "SUB1",
-      "title": "lablab submission text draft (docs/SUBMISSION-DRAFT.md)",
-      "files": [
-        "docs/SUBMISSION-DRAFT.md"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "aa4e312de73d8f8b8",
-      "started_at": "2026-09-03T01:52:00Z"
-    },
-    {
-      "id": "V1",
-      "title": "V1 video shot list from BRIEF section 8 (docs/VIDEO-SHOT-LIST.md)",
-      "files": [
-        "docs/VIDEO-SHOT-LIST.md"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a718bca2cf3653f4b",
-      "started_at": "2026-09-04T02:50:40.140Z"
-    },
-    {
-      "id": "REH1",
-      "title": "rehearsal 1 report (founder ran Scenario B live 2026-09-03 ~10 PM CDT; deadlock found) — docs/REHEARSAL-REPORT-2026-09-03.md",
-      "files": [
-        "docs/REHEARSAL-*.md"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "main",
-      "started_at": "2026-09-04T03:07:46.571Z"
-    },
-    {
-      "id": "FIX1",
-      "title": "FIX1 live-call deadlock: server runs the three lookups itself (row 7 stall forever) — landed 422d750",
-      "files": [
-        "packages/server/src/call/session.ts",
-        "packages/server/test/**"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a0a57a75a3e38fb55",
-      "started_at": "2026-09-04T03:07:46.571Z"
-    },
-    {
-      "id": "FIX2",
-      "title": "FIX2 evaluate storm: no engine tick on reply.audio frames (worktree lane) — patch saved; merge after FIX1 lands — landed b6e5ba7",
-      "files": [
-        "packages/server/src/call/session.ts",
-        "packages/server/test/**"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a7ee1ba61adfc55b3",
-      "started_at": "2026-09-04T03:19:29.591Z"
-    },
-    {
-      "id": "LAT1",
-      "title": "LAT1 explain 15 s ready-to-first-audio + 89 underruns (read-only) (answer: cause UNKNOWN from data; recorder lacks timing events)",
-      "files": [],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a44a8736e0e6e6777",
-      "started_at": "2026-09-04T03:19:29.591Z"
-    },
-    {
-      "id": "FIX3",
-      "title": "FIX3 recorder timing events (AAI ready, reply start/first audio/done, transcripts) + evaluate dedupe (worktree lane) — patch saved; merge after FIX1+FIX2 — landed b6e5ba7",
-      "files": [
-        "packages/server/src/call/session.ts",
-        "packages/server/src/diagnostics.ts",
-        "packages/server/test/**"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "aa567db9be21305cc",
-      "started_at": "2026-09-04T03:22:36.215Z"
-    },
-    {
-      "id": "FIX2-review",
-      "title": "FIX2 patch review (read-only) — PASS, 1 minor (lookup delay during a reply; accepted)",
-      "files": [],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a972e3557b4387d2b",
-      "started_at": "2026-09-04T03:24:45.723Z"
-    },
-    {
-      "id": "FIX3-review",
-      "title": "FIX3 patch review (read-only) — PASS w/ findings (dedupe scope accepted; merge conflict with FIX2 confirmed)",
-      "files": [],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a4cfedee3d6bbabc2",
-      "started_at": "2026-09-04T03:30:48.877Z"
-    },
-    {
-      "id": "MERGE23",
-      "title": "MERGE23 combine FIX2+FIX3 into one patch on base, hand-resolved, green (worktree) — fix23.patch 519 lines, 691/691, typecheck clean",
-      "files": [],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a79be5bf96532eeb3",
-      "started_at": "2026-09-04T03:35:51.701Z"
-    },
-    {
-      "id": "H2",
-      "title": "H2 worktree-gate hook: same file = worktree lane, never serialize (founder ruling 10:38 PM) — landed e4474ec, 18/18 hook tests",
-      "files": [
-        ".claude/hooks/**",
-        ".claude/settings.json",
-        "docs/ORCHESTRATION.md"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a27ba045eefac5d4b",
-      "started_at": "2026-09-04T03:39:07.724Z"
-    },
-    {
-      "id": "REVIEW-LAND",
-      "title": "combined review of 422d750+b6e5ba7+e4474ec on one tree (read-only) — 2 Important + 1 Minor, all fixed in 71d57a4",
-      "files": [],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a9c999456144845f4",
-      "started_at": "2026-09-04T03:48:26.912Z"
-    },
-    {
-      "id": "R2",
-      "title": "R2 synthetic-caller rehearsal harness (scripts/rehearse, macOS say → live stack) — landed uncommitted; first real run: harness works, Dana FAIL is a scripted-caller limitation (trap question)",
-      "files": [
-        "scripts/rehearse/**",
-        "docs/REHEARSAL-HARNESS.md",
-        "package.json"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "ada5f3b601d9c6d75",
-      "started_at": "2026-09-04T03:43:00Z"
-    },
-    {
-      "id": "PUSH5",
-      "title": "push 5: deadlock fix + recorder + hook (needs the founder's push word) — pushed 10:59 PM (9466de6..e62a39e)",
-      "files": [],
-      "status": "done",
-      "held_because": "founder said 'push when green' 10:53 PM; autopilot rail denies push: needs 'autopilot stop' or the founder's own `! git push origin main`; re-review must pass first",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "REVIEW-LAND-2",
-      "title": "scoped re-review of 71d57a4 (haiku, read-only) — PASS",
-      "files": [],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a30a42fd7be84e637",
-      "started_at": "2026-09-04T03:57:23.632Z"
-    },
-    {
-      "id": "FIX4",
-      "title": "FIX4 voice model offered no tools; standing rule: never ask for ids — committed 42d720f",
-      "files": [
-        "packages/server/src/index.ts",
-        "packages/server/src/call/prompt.ts",
-        "packages/server/src/call/session.ts",
-        "packages/engine/src/fsm.ts",
-        "packages/server/test/**",
-        "packages/engine/test/**"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a77fcf6c8e9566298",
-      "started_at": "2026-09-04T04:09:47.731Z"
-    },
-    {
-      "id": "C1",
-      "title": "C1 multi-model critique runner (scripts/critique, dry-run verified)",
-      "files": [
-        "scripts/critique/**"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a32c97f78bf3fe8c8",
-      "started_at": ""
-    },
-    {
-      "id": "FIX5",
-      "title": "FIX5 GET /version deploy-verification endpoint (committed de6c796)",
-      "files": [
-        "packages/server/src/http.ts"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "FIX4-review",
-      "title": "FIX4 review (read-only) — PASS, no critical/important",
-      "files": [],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a4c464b9a0366b6d6",
-      "started_at": "2026-09-04T04:36:27.917Z"
-    },
-    {
-      "id": "DEPLOY-VERIFY",
-      "title": "verify Render auto-deploy via GET /version after next push — PROVEN live at de6c796, auto-deploy healthy (~5 min)",
-      "files": [],
-      "status": "done",
-      "held_because": "needs /version pushed and live first",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "gitignore-critique",
-      "title": "add scripts/critique/reports and scripts/rehearse output dirs to .gitignore — d757568",
-      "files": [
-        ".gitignore"
-      ],
-      "status": "done",
-      "held_because": "folding into the next docs/config commit",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "CRIT-SE",
-      "title": "internal critic: social engineer attacking LAW 2/3 (read-only) - 4 critical, 3 important, 2 minor; two blockers verified by me",
-      "files": [],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a2c2a8c0203d0fd0a",
-      "started_at": "2026-09-04T04:41:24.974Z"
-    },
-    {
-      "id": "CRIT-JUDGE",
-      "title": "internal critic: hackathon judge scoring the rubric (read-only) - 26/40, does not place as it stands",
-      "files": [],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "ab6e9a70bab5c5504",
-      "started_at": "2026-09-04T04:41:24.975Z"
-    },
-    {
-      "id": "FIX6-parked",
-      "title": "compose.ts computeEvaluationIncomplete ignores the ignored tag (invariant I4)",
-      "files": [
-        "packages/engine/src/compose.ts"
-      ],
-      "status": "held",
-      "held_because": "fail-safe and unreachable now that the model holds no tools; touching invariant I4 unattended is the wrong risk, founder decides",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "CI-TUNE",
-      "title": "CI workflow tuning to save Actions minutes (concurrency cancel, path filters)",
-      "files": [
-        ".github/workflows/ci.yml"
-      ],
-      "status": "held",
-      "held_because": "protected oracle file, autopilot is blocked from editing it; founder-run",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "SCEN-MORE",
-      "title": "more adversarial live scenarios (injection, identity switch, structuring, hangup)",
-      "files": [
-        "scripts/rehearse/scenarios/**"
-      ],
-      "status": "held",
-      "held_because": "must use the truth/respond schema R3 is still writing",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "EXT-CRITIQUE",
-      "title": "external four-model critique round (ChatGPT, Perplexity, Grok, Gemini)",
-      "files": [],
-      "status": "held",
-      "held_because": "OPENROUTER_API_KEY / GEMINI_API_KEY are not in .env; founder must add them",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "R3",
-      "title": "R3 reactive + model-driven caller (committed 9cf20f6; scenario B PASSES, A fails)",
-      "files": [
-        "scripts/rehearse/**"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "aa5523b935713fb50",
-      "started_at": ""
-    },
-    {
-      "id": "FIX7",
-      "title": "FIX7 engine composes the exact readback sentence; model speaks it verbatim - landed 571ee31, proven live",
-      "files": [
-        "packages/server/src/call/prompt.ts",
-        "packages/engine/src/fsm.ts",
-        "packages/server/test/**",
-        "packages/engine/test/**"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "adf78ac4403e273c9",
-      "started_at": "2026-09-04T04:44:57.216Z"
-    },
-    {
-      "id": "LIVE-VERIFY",
-      "title": "run both scenarios against the DEPLOYED url once each after FIX7 - fraud path PASSES on the deployed site: FREEZE in 57.9s",
-      "files": [],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "files": [
-        "packages/server/src/http.ts",
-        "packages/server/src/ws/browser.ts",
-        "packages/web/src/api.ts",
-        "packages/web/src/screens/Landing.tsx"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "ada6703b1fa798d53",
-      "started_at": "2026-09-04T05:06:07.531Z",
-      "id": "FIX9",
-      "title": "FIX9 demo role drives the server-side call context (STAGE was unreachable live) - landed 3ff88d3, plus an accessibility correction by me"
-    },
-    {
-      "files": [
-        "packages/web/src/**",
-        "packages/server/src/http.ts"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a82eacf4c7645905a",
-      "started_at": "2026-09-04T05:06:07.531Z",
-      "id": "W10",
-      "title": "W10 cold-start copy + replay recording labels - committed d88478b"
-    },
-    {
-      "files": [
-        "README.md",
-        "docs/SUBMISSION-DRAFT.md",
-        "docs/VIDEO-SHOT-LIST.md"
-      ],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a43e9850b17cc1288",
-      "started_at": "2026-09-04T05:06:07.531Z",
-      "id": "D2",
-      "title": "D2 judge-facing honesty: prior art, tools trade-off, video year, business figure - committed dac8f9a"
-    },
-    {
-      "files": [],
-      "status": "held",
-      "held_because": "design ruling: require at least one graded PASS before STAGE regardless of the carve-out; founder decides",
-      "agent_id": "",
-      "started_at": "",
-      "id": "RT-1-amendment",
-      "title": "red team 1: amendment carve-out asks zero challenges (need=0)"
-    },
-    {
-      "files": [],
-      "status": "held",
-      "held_because": "design ruling: bound the forgiving correction, for example flag above about 2x; founder decides",
-      "agent_id": "",
-      "started_at": "",
-      "id": "RT-2-approximate",
-      "title": "red team 2: an APPROXIMATE hedge buys one unbounded unflagged jump"
-    },
-    {
-      "files": [],
-      "status": "held",
-      "held_because": "needs a spent-fact rule across challenge kinds; founder decides the policy",
-      "agent_id": "",
-      "started_at": "",
-      "id": "RT-3-trap-oracle",
-      "title": "red team 3: trap question speaks the seed truth, the same fact can be asked again"
-    },
-    {
-      "files": [],
-      "status": "held",
-      "held_because": "orchestrator recommends fixing: force ESCALATE plus incident when a call ends with a pending verdict; awaiting founder go",
-      "agent_id": "",
-      "started_at": "",
-      "id": "RT-4-timeout-no-incident",
-      "title": "red team 4: idle timeout or cap ends a call with no incident, freeze or export (LAW 2 hole)"
-    },
-    {
-      "files": [],
-      "status": "held",
-      "held_because": "zero weight is deliberate; the single-state phrasing gap probably is not. Founder decides",
-      "agent_id": "",
-      "started_at": "",
-      "id": "RT-5-injection-weight",
-      "title": "red team 5: injection marker weighs zero and only shifts phrasing in one state"
-    },
-    {
-      "files": [],
-      "status": "held",
-      "held_because": "small and safe; queued behind the blocking fixes",
-      "agent_id": "",
-      "started_at": "",
-      "id": "RT-7-spoken-million",
-      "title": "red team 7: a bare scale word turns a common idiom into a million dollar claim"
-    },
-    {
-      "files": [],
-      "status": "held",
-      "held_because": "cosmetic, containment already ran; queued",
-      "agent_id": "",
-      "started_at": "",
-      "id": "RT-8-export-race",
-      "title": "red team 8: hanging up fast can suppress the on-screen export hash"
-    },
-    {
-      "files": [],
-      "status": "held",
-      "held_because": "changing how the oracle works is a founder decision, not an autopilot one",
-      "agent_id": "",
-      "started_at": "",
-      "id": "ORACLE-GAP",
-      "title": "the replay corpus cannot catch live-path bugs by construction"
-    },
-    {
-      "id": "RT-9-relational-scope",
-      "title": "red team 9: selectRelational always grades against the Hartwell escrow digits regardless of the named beneficiary",
-      "files": [],
-      "status": "held",
-      "held_because": "same decision as FIX8; currently unreachable because other challenge kinds win the slots",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "EM-DASH-UI",
-      "title": "em-dashes throughout the shipped UI copy vs the founder style law",
-      "files": [
-        "packages/web/src/**"
-      ],
-      "status": "held",
-      "held_because": "pre-existing inside the approved look; one founder ruling settles the whole file set",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "id": "REPLAY-AUTOPLAY",
-      "title": "auto-select or auto-play the flagship recording on mount",
-      "files": [
-        "packages/web/src/screens/Replay.tsx"
-      ],
-      "status": "held",
-      "held_because": "changes what the screen shows before any judge click; founder behaviour decision",
-      "agent_id": "",
-      "started_at": ""
-    },
-    {
-      "files": [
-        "docs/SUBMISSION-DRAFT.md"
-      ],
-      "status": "held",
-      "held_because": "UNKNOWN whether lablab enforces 400 as a hard cap; founder decides whether and what to trim",
-      "agent_id": "",
-      "started_at": "",
-      "id": "SUB-WORDCOUNT",
-      "title": "submission long description is 524 words, was 399"
-    },
-    {
-      "files": [
-        "README.md",
-        "docs/PREFLIP_CHECKLIST.md"
-      ],
-      "status": "held",
-      "held_because": "goes stale the moment the pending fixes deploy; refresh at the flip",
-      "agent_id": "",
-      "started_at": "",
-      "id": "README-STATUS-REFRESH",
-      "title": "README Status names a live blocker and a specific commit; refresh before the public flip"
-    },
-    {
-      "files": [],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "a084a0b28b8043c7c",
-      "started_at": "2026-09-04T05:50:08.004Z",
-      "id": "REVIEW-BATCH",
-      "title": "review of the 13 unpushed commits (read-only) - PASS, 1 important watch-item + 3 minors; my own gap fixed"
-    },
-    {
-      "files": [],
-      "status": "done",
-      "held_because": "",
-      "agent_id": "",
-      "started_at": "",
-      "id": "PUSH-BATCH",
-      "title": "push tonight's 13 commits as one batch, then verify the deploy - pushed and deployed, live reports fbfc84f"
-    },
-    {
-      "files": [
-        "packages/engine/src/rules.ts",
-        "packages/engine/src/challenges.ts"
-      ],
-      "status": "held",
-      "held_because": "needs a real investigation, not more live calls at 1 AM; UNKNOWN whether it is engine grading, the challenge budget, or the scripted caller answering too slowly",
-      "agent_id": "",
-      "started_at": "",
-      "id": "STAGE-GAP",
-      "title": "the legitimate call reaches ESCALATE, not STAGE: terminal fires as the third challenge is asked"
-    },
-    {
-      "files": [
-        "packages/engine/src/challenges.ts"
-      ],
-      "status": "held",
-      "held_because": "proper follow-up to tonight's patch, which relays challenges as directions instead",
-      "agent_id": "",
-      "started_at": "",
-      "id": "CHALLENGE-SPEAKABLE",
-      "title": "have the engine compose speakable challenge questions so exact-words can return"
-    }
-  ]
+ "items": [
+  {
+   "id": "S5",
+   "title": "S5 flight recorder server (fix round 2 landed 4e23a6c; re-review pending)",
+   "files": [
+    "packages/server/**"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a27b1f3997b54ec86",
+   "started_at": "2026-09-03T00:52:55Z"
+  },
+  {
+   "id": "W9",
+   "title": "W9 flight recorder browser",
+   "files": [
+    "packages/web/**"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-03T00:52:55Z"
+  },
+  {
+   "id": "H1",
+   "title": "H1 orchestration tooling",
+   "files": [
+    ".claude/**"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-03T00:52:55Z"
+  },
+  {
+   "id": "judge-sim-preload",
+   "title": "judge-sim persona preload (build Sep 12, not before)",
+   "files": [],
+   "status": "held",
+   "held_because": "founder 2026-09-09: not sure we are ready; build-on-first-use Sep 12 stands",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "latency-table",
+   "title": "latency table n=2 + rehearsals",
+   "files": [],
+   "status": "held",
+   "held_because": "founder will run it himself (2026-09-09)",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "commit-8afaf2a-reword",
+   "title": "commit 8afaf2a message reword",
+   "files": [],
+   "status": "held",
+   "held_because": "recommend dropping; founder decides at the flip",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "S5-rereview-2",
+   "title": "S5 re-review round 2",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "af38da1a3485dafc1",
+   "started_at": "2026-09-03T01:46:00Z"
+  },
+  {
+   "id": "throttle-flake-2",
+   "title": "browser-ws real-socket throttle test flaked once under full-suite load (post-de-flake) - closed 2026-09-09: 10 of 10 full-suite runs green, assertion already load-insensitive; small pollUntil diff kept in log if CI ever recurs",
+   "files": [
+    "packages/server/test/browser-ws.test.ts"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T17:43-05:00"
+  },
+  {
+   "id": "push-4",
+   "title": "push 4: flight recorder (S5+W9), hook tooling (H1), docs",
+   "files": [],
+   "status": "done",
+   "held_because": "needs the founder's word 'push'",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "SUB1",
+   "title": "lablab submission text draft (docs/SUBMISSION-DRAFT.md)",
+   "files": [
+    "docs/SUBMISSION-DRAFT.md"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "aa4e312de73d8f8b8",
+   "started_at": "2026-09-03T01:52:00Z"
+  },
+  {
+   "id": "V1",
+   "title": "V1 video shot list from BRIEF section 8 (docs/VIDEO-SHOT-LIST.md)",
+   "files": [
+    "docs/VIDEO-SHOT-LIST.md"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a718bca2cf3653f4b",
+   "started_at": "2026-09-04T02:50:40.140Z"
+  },
+  {
+   "id": "REH1",
+   "title": "rehearsal 1 report (founder ran Scenario B live 2026-09-03 ~10 PM CDT; deadlock found) — docs/REHEARSAL-REPORT-2026-09-03.md",
+   "files": [
+    "docs/REHEARSAL-*.md"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "main",
+   "started_at": "2026-09-04T03:07:46.571Z"
+  },
+  {
+   "id": "FIX1",
+   "title": "FIX1 live-call deadlock: server runs the three lookups itself (row 7 stall forever) — landed 422d750",
+   "files": [
+    "packages/server/src/call/session.ts",
+    "packages/server/test/**"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a0a57a75a3e38fb55",
+   "started_at": "2026-09-04T03:07:46.571Z"
+  },
+  {
+   "id": "FIX2",
+   "title": "FIX2 evaluate storm: no engine tick on reply.audio frames (worktree lane) — patch saved; merge after FIX1 lands — landed b6e5ba7",
+   "files": [
+    "packages/server/src/call/session.ts",
+    "packages/server/test/**"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a7ee1ba61adfc55b3",
+   "started_at": "2026-09-04T03:19:29.591Z"
+  },
+  {
+   "id": "LAT1",
+   "title": "LAT1 explain 15 s ready-to-first-audio + 89 underruns (read-only) (answer: cause UNKNOWN from data; recorder lacks timing events)",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a44a8736e0e6e6777",
+   "started_at": "2026-09-04T03:19:29.591Z"
+  },
+  {
+   "id": "FIX3",
+   "title": "FIX3 recorder timing events (AAI ready, reply start/first audio/done, transcripts) + evaluate dedupe (worktree lane) — patch saved; merge after FIX1+FIX2 — landed b6e5ba7",
+   "files": [
+    "packages/server/src/call/session.ts",
+    "packages/server/src/diagnostics.ts",
+    "packages/server/test/**"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "aa567db9be21305cc",
+   "started_at": "2026-09-04T03:22:36.215Z"
+  },
+  {
+   "id": "FIX2-review",
+   "title": "FIX2 patch review (read-only) — PASS, 1 minor (lookup delay during a reply; accepted)",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a972e3557b4387d2b",
+   "started_at": "2026-09-04T03:24:45.723Z"
+  },
+  {
+   "id": "FIX3-review",
+   "title": "FIX3 patch review (read-only) — PASS w/ findings (dedupe scope accepted; merge conflict with FIX2 confirmed)",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a4cfedee3d6bbabc2",
+   "started_at": "2026-09-04T03:30:48.877Z"
+  },
+  {
+   "id": "MERGE23",
+   "title": "MERGE23 combine FIX2+FIX3 into one patch on base, hand-resolved, green (worktree) — fix23.patch 519 lines, 691/691, typecheck clean",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a79be5bf96532eeb3",
+   "started_at": "2026-09-04T03:35:51.701Z"
+  },
+  {
+   "id": "H2",
+   "title": "H2 worktree-gate hook: same file = worktree lane, never serialize (founder ruling 10:38 PM) — landed e4474ec, 18/18 hook tests",
+   "files": [
+    ".claude/hooks/**",
+    ".claude/settings.json",
+    "docs/ORCHESTRATION.md"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a27ba045eefac5d4b",
+   "started_at": "2026-09-04T03:39:07.724Z"
+  },
+  {
+   "id": "REVIEW-LAND",
+   "title": "combined review of 422d750+b6e5ba7+e4474ec on one tree (read-only) — 2 Important + 1 Minor, all fixed in 71d57a4",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a9c999456144845f4",
+   "started_at": "2026-09-04T03:48:26.912Z"
+  },
+  {
+   "id": "R2",
+   "title": "R2 synthetic-caller rehearsal harness (scripts/rehearse, macOS say → live stack) — landed uncommitted; first real run: harness works, Dana FAIL is a scripted-caller limitation (trap question)",
+   "files": [
+    "scripts/rehearse/**",
+    "docs/REHEARSAL-HARNESS.md",
+    "package.json"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "ada5f3b601d9c6d75",
+   "started_at": "2026-09-04T03:43:00Z"
+  },
+  {
+   "id": "PUSH5",
+   "title": "push 5: deadlock fix + recorder + hook (needs the founder's push word) — pushed 10:59 PM (9466de6..e62a39e)",
+   "files": [],
+   "status": "done",
+   "held_because": "founder said 'push when green' 10:53 PM; autopilot rail denies push: needs 'autopilot stop' or the founder's own `! git push origin main`; re-review must pass first",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "REVIEW-LAND-2",
+   "title": "scoped re-review of 71d57a4 (haiku, read-only) — PASS",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a30a42fd7be84e637",
+   "started_at": "2026-09-04T03:57:23.632Z"
+  },
+  {
+   "id": "FIX4",
+   "title": "FIX4 voice model offered no tools; standing rule: never ask for ids — committed 42d720f",
+   "files": [
+    "packages/server/src/index.ts",
+    "packages/server/src/call/prompt.ts",
+    "packages/server/src/call/session.ts",
+    "packages/engine/src/fsm.ts",
+    "packages/server/test/**",
+    "packages/engine/test/**"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a77fcf6c8e9566298",
+   "started_at": "2026-09-04T04:09:47.731Z"
+  },
+  {
+   "id": "C1",
+   "title": "C1 multi-model critique runner (scripts/critique, dry-run verified)",
+   "files": [
+    "scripts/critique/**"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a32c97f78bf3fe8c8",
+   "started_at": ""
+  },
+  {
+   "id": "FIX5",
+   "title": "FIX5 GET /version deploy-verification endpoint (committed de6c796)",
+   "files": [
+    "packages/server/src/http.ts"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "FIX4-review",
+   "title": "FIX4 review (read-only) — PASS, no critical/important",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a4c464b9a0366b6d6",
+   "started_at": "2026-09-04T04:36:27.917Z"
+  },
+  {
+   "id": "DEPLOY-VERIFY",
+   "title": "verify Render auto-deploy via GET /version after next push — PROVEN live at de6c796, auto-deploy healthy (~5 min)",
+   "files": [],
+   "status": "done",
+   "held_because": "needs /version pushed and live first",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "gitignore-critique",
+   "title": "add scripts/critique/reports and scripts/rehearse output dirs to .gitignore — d757568",
+   "files": [
+    ".gitignore"
+   ],
+   "status": "done",
+   "held_because": "folding into the next docs/config commit",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "CRIT-SE",
+   "title": "internal critic: social engineer attacking LAW 2/3 (read-only) - 4 critical, 3 important, 2 minor; two blockers verified by me",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a2c2a8c0203d0fd0a",
+   "started_at": "2026-09-04T04:41:24.974Z"
+  },
+  {
+   "id": "CRIT-JUDGE",
+   "title": "internal critic: hackathon judge scoring the rubric (read-only) - 26/40, does not place as it stands",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "ab6e9a70bab5c5504",
+   "started_at": "2026-09-04T04:41:24.975Z"
+  },
+  {
+   "id": "FIX6-parked",
+   "title": "compose.ts computeEvaluationIncomplete ignores the ignored tag (invariant I4)",
+   "files": [
+    "packages/engine/src/compose.ts"
+   ],
+   "status": "held",
+   "held_because": "founder ruling 2026-09-09: leave it",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "CI-TUNE",
+   "title": "CI workflow tuning to save Actions minutes (concurrency cancel, path filters) - landed c54f09c (founder ruled fix it, 2026-09-09)",
+   "files": [
+    ".github/workflows/ci.yml"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00"
+  },
+  {
+   "id": "SCEN-MORE",
+   "title": "more adversarial live scenarios (injection, identity switch, structuring, hangup) - landed eae64bb: 4 scenarios written and schema-tested, NOT run (credits are the founder call)",
+   "files": [
+    "scripts/rehearse/scenarios/**"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00"
+  },
+  {
+   "id": "EXT-CRITIQUE",
+   "title": "external four-model critique round (ChatGPT, Perplexity, Grok, Gemini) - superseded by EXT-CRITIQUE-RUN",
+   "files": [],
+   "status": "done",
+   "held_because": "OPENROUTER_API_KEY / GEMINI_API_KEY are not in .env; founder must add them",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "R3",
+   "title": "R3 reactive + model-driven caller (committed 9cf20f6; scenario B PASSES, A fails)",
+   "files": [
+    "scripts/rehearse/**"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "aa5523b935713fb50",
+   "started_at": ""
+  },
+  {
+   "id": "FIX7",
+   "title": "FIX7 engine composes the exact readback sentence; model speaks it verbatim - landed 571ee31, proven live",
+   "files": [
+    "packages/server/src/call/prompt.ts",
+    "packages/engine/src/fsm.ts",
+    "packages/server/test/**",
+    "packages/engine/test/**"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "adf78ac4403e273c9",
+   "started_at": "2026-09-04T04:44:57.216Z"
+  },
+  {
+   "id": "LIVE-VERIFY",
+   "title": "run both scenarios against the DEPLOYED url once each after FIX7 - fraud path PASSES on the deployed site: FREEZE in 57.9s",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "files": [
+    "packages/server/src/http.ts",
+    "packages/server/src/ws/browser.ts",
+    "packages/web/src/api.ts",
+    "packages/web/src/screens/Landing.tsx"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "ada6703b1fa798d53",
+   "started_at": "2026-09-04T05:06:07.531Z",
+   "id": "FIX9",
+   "title": "FIX9 demo role drives the server-side call context (STAGE was unreachable live) - landed 3ff88d3, plus an accessibility correction by me"
+  },
+  {
+   "files": [
+    "packages/web/src/**",
+    "packages/server/src/http.ts"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a82eacf4c7645905a",
+   "started_at": "2026-09-04T05:06:07.531Z",
+   "id": "W10",
+   "title": "W10 cold-start copy + replay recording labels - committed d88478b"
+  },
+  {
+   "files": [
+    "README.md",
+    "docs/SUBMISSION-DRAFT.md",
+    "docs/VIDEO-SHOT-LIST.md"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a43e9850b17cc1288",
+   "started_at": "2026-09-04T05:06:07.531Z",
+   "id": "D2",
+   "title": "D2 judge-facing honesty: prior art, tools trade-off, video year, business figure - committed dac8f9a"
+  },
+  {
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00",
+   "id": "RT-1-amendment",
+   "title": "red team 1: amendment carve-out asks zero challenges (need=0) - landed 22f31be, merged 385060d with the founder's gate yes (7:01 PM)"
+  },
+  {
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00",
+   "id": "RT-2-approximate",
+   "title": "red team 2: an APPROXIMATE hedge buys one unbounded unflagged jump - landed 98d0b4c: >2x or <half jump from an approximate = CONTRADICTED; small refinements stay CORRECTED"
+  },
+  {
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00",
+   "id": "RT-3-trap-oracle",
+   "title": "red team 3: trap question speaks the seed truth, the same fact can be asked again - landed 23c2cd9 (merged f93c033)"
+  },
+  {
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:03-05:00",
+   "id": "RT-4-timeout-no-incident",
+   "title": "red team 4: idle timeout or cap ends a call with no incident, freeze or export (LAW 2 hole) (killed by me in error at 7:35 while it had 7 files staged; resumed to finish in its worktree) - built 03e4153 (row 14, call_ended action, 19/19 corpus); conflicts with main, lane re-basing by patch - LANDED as engine row 14 (call_ended action), cherry-picked 41f41e1; review lane running before push 7"
+  },
+  {
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00",
+   "id": "RT-5-injection-weight",
+   "title": "red team 5: injection marker weighs zero and only shifts phrasing in one state - landed 22f31be, merged 385060d with the founder's gate yes (7:01 PM)"
+  },
+  {
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00",
+   "id": "RT-7-spoken-million",
+   "title": "red team 7: a bare scale word turns a common idiom into a million dollar claim - landed bf59630"
+  },
+  {
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T17:45-05:00",
+   "id": "RT-8-export-race",
+   "title": "red team 8: fast hang-up lost the export hash entirely (not cosmetic) - fixed e2a61d5 on main, 810 tests"
+  },
+  {
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00",
+   "id": "ORACLE-GAP",
+   "title": "the replay corpus cannot catch live-path bugs by construction - landed 13c9446: e2e test drives the real HTTP+WS server with only the AssemblyAI socket faked; STAGE and FREEZE both proven on main"
+  },
+  {
+   "id": "RT-9-relational-scope",
+   "title": "red team 9: selectRelational always grades against the Hartwell escrow digits regardless of the named beneficiary - landed 23c2cd9 (merged f93c033)",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00"
+  },
+  {
+   "id": "EM-DASH-UI",
+   "title": "em-dashes throughout the shipped UI copy vs the founder style law - landed 183ffa1",
+   "files": [
+    "packages/web/src/**"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00"
+  },
+  {
+   "id": "REPLAY-AUTOPLAY",
+   "title": "auto-select or auto-play the flagship recording on mount - landed 183ffa1",
+   "files": [
+    "packages/web/src/screens/Replay.tsx"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00"
+  },
+  {
+   "files": [
+    "docs/SUBMISSION-DRAFT.md"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00",
+   "id": "SUB-WORDCOUNT",
+   "title": "submission long description is 524 words, was 399 - landed ee72f84: 524 -> 400 words, claims intact"
+  },
+  {
+   "files": [
+    "README.md",
+    "docs/PREFLIP_CHECKLIST.md"
+   ],
+   "status": "done",
+   "held_because": "after the deployed-site STAGE proof (push + two live runs)",
+   "agent_id": "",
+   "started_at": "",
+   "id": "README-STATUS-REFRESH",
+   "title": "README Status names a live blocker and a specific commit; refresh before the public flip - superseded by README-STATUS-REFRESH-RUN"
+  },
+  {
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "a084a0b28b8043c7c",
+   "started_at": "2026-09-04T05:50:08.004Z",
+   "id": "REVIEW-BATCH",
+   "title": "review of the 13 unpushed commits (read-only) - PASS, 1 important watch-item + 3 minors; my own gap fixed"
+  },
+  {
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "",
+   "id": "PUSH-BATCH",
+   "title": "push tonight's 13 commits as one batch, then verify the deploy - pushed and deployed, live reports fbfc84f"
+  },
+  {
+   "files": [
+    "packages/engine/src/rules.ts",
+    "packages/engine/src/challenges.ts"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T17:43-05:00",
+   "id": "STAGE-GAP",
+   "title": "STAGE-GAP root cause PROVEN 2026-09-09: engine was right; the four failing runs predate harness commit c2fc4bd (no demo_persona sent, server defaulted to attacker). Live rerun = REH-A-RERUN"
+  },
+  {
+   "files": [
+    "packages/engine/src/challenges.ts"
+   ],
+   "status": "held",
+   "held_because": "follow-up after the challenges lane lands; not a founder decision",
+   "agent_id": "",
+   "started_at": "",
+   "id": "CHALLENGE-SPEAKABLE",
+   "title": "have the engine compose speakable challenge questions so exact-words can return"
+  },
+  {
+   "id": "REH-A-RERUN",
+   "title": "rerun scenario A once against the deployed URL to prove STAGE (expected: STAGE at readback) - RAN 6:20 PM by the founder: ESCALATE again at 99.1s (my model was wrong: persona alone did not fix it); report 2026-09-09T18-20-23",
+   "files": [],
+   "status": "done",
+   "held_because": "auto-mode classifier blocks the live-credit command from me and from lanes; founder runs it with ! prefix or adds a Bash allow rule",
+   "agent_id": "",
+   "started_at": "2026-09-09T17:54-05:00"
+  },
+  {
+   "id": "HARNESS-DIAG",
+   "title": "rehearsal harness saves the raw diagnostics bundle JSON next to each report (G3 evidence, offline replay) - landed fa7c591, merged 1760326; note: bundle is not yet corpus-shaped, no auto bridge to npm run replay",
+   "files": [
+    "scripts/rehearse/**",
+    "docs/REHEARSAL-HARNESS.md"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T17:54-05:00"
+  },
+  {
+   "id": "RT-10-last-challenge-terminal",
+   "title": "engine goes terminal the instant the last challenge is ASKED (unanswered = FLAG 0.5, row 12 gate closes) so the caller's answer is ignored; fix = row 12 guard 'or awaiting answer' in rules.ts + compose.ts (rule-table change) - landed 22f31be, merged 385060d with the founder's gate yes (7:01 PM)",
+   "files": [
+    "packages/engine/src/rules.ts",
+    "packages/engine/src/compose.ts"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00"
+  },
+  {
+   "id": "CHALLENGE-SCOPING",
+   "title": "parked challenge scoping: Option A (Dana gets her own facts + scoping fix kept) - founder ruled yes 2026-09-09 - landed 23c2cd9 (merged f93c033)",
+   "files": [
+    "packages/engine/src/challenges.ts",
+    "packages/engine/src/seed/meridian.ts"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00"
+  },
+  {
+   "id": "EXT-CRITIQUE-RUN",
+   "title": "external multi-model critique via OpenRouter (key landed in .env 2026-09-09) - ran 2026-09-09 18:08: gpt-4o + sonar-pro x 5 personas = 10 calls, 65 findings; grok-2 and gemini-pro ids rejected; report scripts/critique/reports/2026-09-09T18-08-27/",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:08-05:00"
+  },
+  {
+   "id": "CRIT-pressure-bypass",
+   "title": "critique 2026-09-09: freeze row 8 may be bypassable if the pressure score stays 0 despite urgency cues (pressure-marker extraction gap) - REFUTED 7:43 PM: pressure carries zero tally weight by design (rules.ts 64, RULES_DOC 360); freeze has five paths, none use pressure; 0/10 paraphrased urgency lines hit the lexicon, which is expected. No change. Policy question for the founder only if he wants urgency to carry weight (it never has)",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:43-05:00"
+  },
+  {
+   "id": "CRIT-one-word-stall",
+   "title": "critique 2026-09-09: brief one-word answers could hold CHALLENGE/CONSISTENCY_CHECK indefinitely with no forced terminal verdict (check against the timeout-incident lane)",
+   "files": [],
+   "status": "held",
+   "held_because": "new from the external critique; triage with the founder",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "CRIT-reconnect-dup-events",
+   "title": "critique 2026-09-09: no stated guarantee against duplicate or reordered transcript events after an AssemblyAI reconnect being treated as new evidence - PARTLY VERIFIED: resume exists (aai/session.ts 198-254, 3 tries, 30 s), no item_id dedupe on ingest (call/session.ts 465-473); same-value repeats are harmless (ledger.ts 164) but a redelivered stale value could read as a contradiction. UNKNOWN whether AAI ever redelivers - fixed 793ec9e: duplicate item_id ignored + transcript_duplicate_ignored diag; 304 server tests",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:43-05:00"
+  },
+  {
+   "id": "CRIT-partial-tool-failure",
+   "title": "critique 2026-09-09: partial containment failures (freeze ok, alert fails) not clearly surfaced or retried - VERIFIED plus a sharper bug: retries exist (3x, logged) but fsm.ts 79/97 count an errored result as done (fix lane running); abandoned containment only shows as export \"not yet available\"",
+   "files": [],
+   "status": "held",
+   "held_because": "the on-screen banner for abandoned containment is a visual decision: PARKED for the founder with a proposal",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:43-05:00"
+  },
+  {
+   "id": "CRIT-ui-jargon",
+   "title": "critique 2026-09-09: SSO, SIEM, IdP, CTF, PCM16, keyterms unexplained in judge-facing copy",
+   "files": [],
+   "status": "held",
+   "held_because": "new from the external critique; triage with the founder",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "CRIT-greeting-latency",
+   "title": "critique 2026-09-09: one rehearsal showed about 15 s silence before greeting; needs a real p50/p95 (ties to latency-table)",
+   "files": [],
+   "status": "held",
+   "held_because": "new from the external critique; triage with the founder",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "CRIT-model-ids",
+   "title": "critique config: replace x-ai/grok-2 (404) and google/gemini-pro (400) with current OpenRouter ids (errand researching) - fixed: x-ai/grok-4.6 and google/gemini-2.5-pro, both confirmed on the live list",
+   "files": [],
+   "status": "done",
+   "held_because": "new from the external critique; triage with the founder",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "EM-DASH-CORPUS-TITLE",
+   "title": "flagship recording title in packages/engine/corpus/scenario-b-miller-fraud.json still has an em-dash (out of the web lane's scope) - landed cd9d220 (both corpus titles; guard test now scans all 18 corpus titles/descriptions); checklist labels: \"At least one question answered correctly\", \"No attempt to override the agent\"",
+   "files": [
+    "packages/engine/corpus/scenario-b-miller-fraud.json"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:03-05:00"
+  },
+  {
+   "id": "STAGE-GAP-2",
+   "title": "legitimate call STILL escalates live with the persona fix (6:20 PM run): replay tonight's transcript through the real engine to find the false assurance item - RESULT: hand replay of the exact transcript STAGES on both the deployed and current engine; the live server built different evidence; which item was false is UNKNOWN because the recorder does not capture the checklist (DIAG-CHECKLIST fixes that). Also re-proven live: the last-challenge race fires at 99.09s",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:22-05:00"
+  },
+  {
+   "id": "DIAG-CHECKLIST",
+   "title": "flight recorder evaluate events carry rule row, assurance checklist, evidence card statuses, challenge counters, readback confirmations - landed c749947 (merged b8cf3ac); note: worktrees resolve @countersign/engine from main, run npm ci in a worktree before trusting server tests there",
+   "files": [
+    "packages/server/src/call/session.ts",
+    "packages/server/src/diagnostics.ts",
+    "scripts/rehearse/report.ts"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:22-05:00"
+  },
+  {
+   "id": "STAGE-GAP-3",
+   "title": "reproduce tonight's live ESCALATE with the real server path and the faked AAI seam (no credits), print the checklist at every transition - REPRODUCED: same transcript with attacker persona = tonight's live behaviour exactly (sso_pass_current false); with legitimate persona = STAGE. So the deployed server resolved the persona as attacker; why is UNKNOWN (recorder now captures it: PERSONA-DIAG lane)",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:33-05:00"
+  },
+  {
+   "id": "SUBSCRIPTION-OPENROUTER",
+   "title": "Claude subscription tier vs OpenRouter pay-per-use routing",
+   "files": [],
+   "status": "held",
+   "held_because": "founder ruling 2026-09-09 6:36 PM: parked until after Sep 30 (hackathon close); OpenRouter stays for the Friday critic panel only",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "PERSONA-DIAG",
+   "title": "record resolved persona at mint and call context at attach in the flight recorder - landed 674ee2f, merged a011065",
+   "files": [
+    "packages/server/src/http.ts",
+    "packages/server/src/ws/browser.ts"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:52-05:00"
+  },
+  {
+   "id": "LOCAL-PROD-RUN",
+   "title": "honest scenario against the LOCAL compiled server (production mode) to split build bug vs deployment bug - RESULT: ESCALATE locally too (117s); recorder shows sso_pass_current is the ONLY false item after lookups. Bug reproduces off Render. Report 2026-09-09T18-56-25",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:54-05:00"
+  },
+  {
+   "id": "STAGE-GAP-4",
+   "title": "compiled-server in-process probe: which of {compiled vs source, live vs corpus opening line, harness connect sequence} flips the sign-in card to FAIL - RESULT: no case flips; compiled==source, live wording resolves Dana, persona legitimate after mint, STAGE in all three. Untested path: the real async AssemblyAI connect gap between attach and ready",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T18:58-05:00"
+  },
+  {
+   "id": "REFUTE-0909",
+   "title": "refuter review of fc19608..HEAD (all of tonight's lanes) before any push - PASS WITH FINDINGS: 1 critical (trap fact leaks out-of-scope truth), 1 important (amendment_only dead code / RULES_DOC drift), 2 minor (replay Play restarts; leftover scratch file, removed). 848 tests, 18/18 replay",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:03-05:00"
+  },
+  {
+   "id": "TOOLS-PONYTAIL-GRAPHIFY-RTK",
+   "title": "founder asked whether Ponytail, Graphify or RTK apply to us (haiku errand blocked on web search; relaunched on sonnet with justification) - answered 7:06 PM: none during the hackathon; RTK trial after Sep 30 in a throwaway folder",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:03-05:00"
+  },
+  {
+   "id": "LOCAL-PROD-RUN-2",
+   "title": "honest scenario against the rebuilt local compiled server WITH session_minted/call_context recording, to read the resolved persona directly - ROOT CAUSE PROVEN: session_minted persona_input_present=false body_bytes=0; scripts/rehearse/scenario.ts validator dropped demo_persona since c2fc4bd; fixed with a regression test (100 harness tests)",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:08-05:00"
+  },
+  {
+   "id": "FIX-TRAP-SCOPE",
+   "title": "trap-fact challenge speaks another identity's truth (reviewer critical): scope selectTrapFact and knowledgeTruthForField like selectSeedFact (first lane killed at 7:35, no work on disk; redo running without npm ci) - landed c88ae43 (cherry-picked 054bf65): out-of-scope truth falls to the decoy-only trap; 389 engine tests, Miller unchanged",
+   "files": [
+    "packages/engine/src/challenges.ts"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:08-05:00"
+  },
+  {
+   "id": "FIX-REPLAY-PLAY-LABEL",
+   "title": "replay Play after Pause restarts from zero: label it honestly (real resume is a follow-up) - first attempt cf5bbd9 conflicted with the autoplay code; lane redoing on current main - landed 55c8a03: \"Play from start\" when paused, helper \"Resuming mid-call is not supported yet.\"",
+   "files": [
+    "packages/web/src/screens/Replay.tsx"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:08-05:00"
+  },
+  {
+   "id": "RULES-DOC-AMENDMENT-DRIFT",
+   "title": "amendment_only is now dead code and RULES_DOC row 4 still describes the carve-out; clean both (reviewer important) - built d0cc28e but conflicted with row-14 tests; re-basing by patch: dead field removed, RULES_DOC rows 4 and 11 truthful, doc/code agreement test - landed 904ceaa on main (files brought over by copy after the lane could not open a second worktree); review running before push 9",
+   "files": [
+    "packages/engine/src/rules.ts",
+    "packages/engine/src/compose.ts"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "REPLAY-TRUE-RESUME",
+   "title": "replay stream cannot resume mid-call (server stream restarts at t=0)",
+   "files": [],
+   "status": "held",
+   "held_because": "UX nicety; decide after the judge sim whether it matters",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "LOCAL-PROD-RUN-3",
+   "title": "honest scenario against the local compiled server AFTER the harness persona fix: expect STAGE - PASS: STAGE at 93.7s, checklist all true, one challenge passed, persona legitimate recorded at mint and attach. Report 2026-09-09T19-14-56",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:12-05:00"
+  },
+  {
+   "id": "FLAKE-REPLAY-AUTOPLAY",
+   "title": "Replay.test.tsx autoplay test flaked once in five full-suite runs on unmodified main (lane observation 7:20 PM) - cause PROVEN (assertion raced the effect); fixed by awaiting the Pause control first; 3/3 green",
+   "files": [
+    "packages/web/test/Replay.test.tsx"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:21-05:00"
+  },
+  {
+   "id": "RT-9b-escrow-grading",
+   "title": "selectRelational escrow branch still grades against Robert Miller's escrow_account_last4 regardless of who named the escrow institution (grading data only, never spoken; found by the trap-scope lane)",
+   "files": [
+    "packages/engine/src/challenges.ts"
+   ],
+   "status": "held",
+   "held_because": "not audible, not on the demo path; queue after tonight's push",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "FIX-FSM-ERRORED-ACTION",
+   "title": "fsm.ts counts an errored terminal-action result as done (state can read SEALED after one failed attempt) - landed bc18149 (cherry-picked); errored result never counts as done; 372 engine tests; one server test had encoded the old bug (expected SEALED after abandonment), updated",
+   "files": [
+    "packages/engine/src/fsm.ts"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:47-05:00"
+  },
+  {
+   "id": "REVIEW-SCOPED-0909",
+   "title": "scoped review 385060d..7c563f8: PASS WITH FINDINGS; rehearse+critique suites added to the workspace (1035 tests), demo_persona rejection test added",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "PUSH-6",
+   "title": "push 6: fc19608..b556864 (45 commits) after gate test x3 / typecheck / reviews; deploy verification polling",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T19:57-05:00"
+  },
+  {
+   "id": "PUSH-7",
+   "title": "push 7: b556864..9e64bc5 (RT-4 engine row 14, fsm errored-result fix, workspace widening, de-flakes) after gate test x3 / typecheck / review PASS",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T20:02-05:00"
+  },
+  {
+   "id": "DEPLOY-7",
+   "title": "deploy of 9e64bc5 verified live (/version match, /health ok) 8:05 PM",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T20:01-05:00"
+  },
+  {
+   "id": "G2-DEPLOYED",
+   "title": "gate G2: honest scenario twice consecutively against the deployed site (running, background) - MET 8:05 PM: STAGE 73.8 s and STAGE 91.5 s on 9e64bc5, zero resets (reports 20-02-51, 20-04-50)",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T20:01-05:00"
+  },
+  {
+   "id": "REVIEW-FOLLOWUPS-0909",
+   "title": "review of 9e64bc5..d1144f9 (transcript dedupe, replay wait, docs) before push 8 - PASS; item_id uniqueness noted as VERIFY-AT-BUILD in docs/ASSEMBLYAI_INTEGRATION.md",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T20:07-05:00"
+  },
+  {
+   "id": "FRAUD-RECHECK-DEPLOYED",
+   "title": "scenario B once against the deployed site after tonight's rule changes (must still FREEZE) - PASS: FREEZE at 36.8 s (wall 57.4 s) on 9e64bc5, report 20-06-19",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T20:05-05:00"
+  },
+  {
+   "id": "README-STATUS-REFRESH-RUN",
+   "title": "README Status paragraph refreshed to tonight's truth (both paths proven live on 9e64bc5) - landed 5c4417e (152 words, both paths proven live on 9e64bc5)",
+   "files": [
+    "README.md"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T20:05-05:00"
+  },
+  {
+   "id": "README-EM-DASHES",
+   "title": "README has 28 lines with em-dashes outside the Status section (style law); sweep before the public flip",
+   "files": [
+    "README.md"
+   ],
+   "status": "held",
+   "held_because": "pre-flip item; batch with docs/PREFLIP_CHECKLIST.md",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "PUSH-8",
+   "title": "push 8: 9e64bc5..(README refresh, dedupe, docs) after gate test x3 / typecheck / review PASS",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T20:16-05:00"
+  },
+  {
+   "id": "PUSH-9",
+   "title": "push 9: 1d596c0..f1a765e (RULES_DOC cleanup, logs) after gate test x3 / typecheck / review PASS; deploy poll running",
+   "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-09T20:25-05:00"
+  }
+ ]
 }

@@ -1,7 +1,6 @@
 # Countersign, session snapshot (overwritten at every close; never appended)
 
-Last written: Wednesday 2026-09-09, 8:30 PM CDT, on autopilot (founder said "Autopilot Start"
-at 7:41 PM; queue drained 8:30 PM). Day 4.
+Last close: Wednesday 2026-09-09, 8:27 PM CDT (Day 4). Autopilot ran 7:41 to 8:30 PM and is OFF.
 
 ## The one-paragraph version
 
