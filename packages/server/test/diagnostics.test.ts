@@ -693,7 +693,13 @@ describe('CallSession — onDiagnostic', () => {
     // This test's own subject is a MODEL-issued `tool.call` hitting `handleToolCall`'s own
     // throw/recovery path -- forced directly here, same technique as the "goal: undefined"
     // test earlier in this file.
-    expect(session.last?.state).toBe('SEALED');
+    //
+    // Semantics change (2026-09-09, fsm.ts fix): an errored terminal-action result no longer
+    // counts as "done", so a call whose containment was ABANDONED after three failed attempts
+    // is terminal in verdict but is NOT sealed. Before the fix this line read SEALED, which was
+    // the bug (the engine reported a seal that never happened).
+    expect(['FREEZE', 'ESCALATE']).toContain(session.last?.verdict);
+    expect(session.last?.state).toBe('ACTION');
 
     // Bug fix (2026-09-03) follow-on: with EVERY tool throwing (lookups too), I4 forced a
     // terminal verdict quickly, and the drive's own remaining events gave
