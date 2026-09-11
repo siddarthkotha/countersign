@@ -1253,9 +1253,10 @@
     "packages/server/src/call/session.ts",
     "scripts/rehearse"
    ],
-   "status": "running",
-   "agent_id": "(launched 4:43 PM)",
-   "started_at": "2026-09-11T21:42:56.473Z"
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-11T21:42:56.473Z",
+   "lane_note": "code done 20edd4e, rebased onto main as 9fa2edb 4:59 PM; review running; judgment call: no auto hang-up on OUT_OF_SCOPE (kept open by design); fix round sent back 5:06 PM (key the hang-up on a reply that started after CLOSE was sent; race test); race fix bba6243 (hang-up keyed on a reply started after CLOSE; two race tests); landed on main ae1aaf6 + 35b5a4b 5:20 PM (orchestrator checked the diff against the reviewer's prescription); push 13 after the main gate"
   },
   {
    "id": "CREDITS-rereview",
@@ -1282,7 +1283,44 @@
    "status": "done",
    "agent_id": "",
    "started_at": "2026-09-11T21:54:24.357Z",
-   "lane_note": "pushed 4:54 PM; gate 1130/1130 + typecheck clean; deploy verification pending"
+   "lane_note": "pushed 4:54 PM; gate 1130/1130 + typecheck clean; deploy verification pending; DEPLOY 12 VERIFIED 4:55 PM (/health shows live_calls available, reason null)"
+  },
+  {
+   "id": "CLOSE-review",
+   "title": "review of 9fa2edb (sentences, row 14 safety, timer hygiene, CLOSE reply matching, export ordering)",
+   "files": [],
+   "status": "done",
+   "agent_id": "(launched 5:00 PM)",
+   "started_at": "2026-09-11T22:00:30.523Z",
+   "lane_note": "PASS with one Important 5:05 PM: hang-up keyed on goal code not reply_id, an in-flight older reply's reply.done could arm the hang-up before the goodbye; sentences, row 14, timers, export ordering, OUT_OF_SCOPE all PASS; 1144/1144 in the worktree with its own node_modules"
+  },
+  {
+   "id": "WORKTREE-INSTALL",
+   "title": "lane worktrees without their own npm install resolve @countersign/* through the main checkout's node_modules (stale code); lane test counts are therefore not proof, only the gate on main is",
+   "files": [
+    ".claude/hooks/worktree-gate.sh"
+   ],
+   "status": "held",
+   "held_because": "process fix: have the worktree lane prompt or hook run npm install in the worktree first; decide after the judge sim",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "push-13",
+   "title": "push 13: a9618f2..35b5a4b (CLOSE verbatim + server hang-up + race fix, board/log)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-11T22:42:25.847Z",
+   "lane_note": "pushed 5:21 PM; gate 1146/1146 + typecheck clean; deploy poll + close proof call running in the background"
+  },
+  {
+   "id": "CLOSE-PROOF-LIVE",
+   "title": "live proof on deploy 13: one goodbye, server hang-up (agent_closed), wall time well under 125 s",
+   "files": [],
+   "status": "running",
+   "agent_id": "(background bash chain 5:21 PM)",
+   "started_at": "2026-09-11T22:42:45.708Z"
   }
  ]
 }
