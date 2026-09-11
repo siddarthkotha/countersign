@@ -11,7 +11,7 @@ import { attachWebSocketServer } from './ws/browser.js';
 import { FakeAaiSocket } from './aai/fake.js';
 import type { AaiEvent, AaiSocket } from './aai/types.js';
 import { connectAai, type WsLike } from './aai/session.js';
-import { loadAaiEnvDefaults, LIVE_SESSION_TOOLS, type AaiSessionConfig } from './aai/config.js';
+import { loadAaiEnvDefaults, LIVE_SESSION_TOOLS, DEFAULT_GREETING, type AaiSessionConfig } from './aai/config.js';
 
 // Task D1: packages/server/src/index.ts -> packages/web/dist (siblings under packages/),
 // whether this file is running as source (tsx, packages/server/src/index.ts) or as the
@@ -87,9 +87,16 @@ const { server, state } = createHttpServer(cfg, {
 // never has to know a real connect was still in flight underneath it.
 let fakeFallbackWarned = false;
 
+// Founder ruling 2026-09-11: the agent speaks FIRST on every call via AssemblyAI's
+// connect-time `greeting` field (aai/config.ts's DEFAULT_GREETING, set below in `aaiCfg`) --
+// so this initial system prompt no longer tells the model to wait silently for an opening
+// line that never comes from it; it tells the model the greeting already happened and the
+// caller is expected to speak next. This prompt is only ever live for the brief window
+// before the engine's first `evaluate()` tick replaces it with a goal-driven system_prompt
+// (call/session.ts) -- it is never what actually decides when the model speaks.
 const DEFAULT_INITIAL_PROMPT =
   'You are Countersign, a calm verification voice for the Meridian Dynamics treasury desk. ' +
-  'Wait for the caller to state their request.';
+  'You have already greeted the caller. Wait for them to state their request.';
 
 class PendingAaiSocket implements AaiSocket {
   private handlers: ((evt: AaiEvent) => void)[] = [];
@@ -162,6 +169,12 @@ function createAai(session_id: string): AaiSocket {
     // (call/session.ts's runLookupsIfNeeded/runTerminalActionsIfNeeded) -- nothing here
     // changes what the server can do, only what it ever offers the model.
     tools: LIVE_SESSION_TOOLS,
+    // Founder ruling 2026-09-11: the agent speaks first -- set once here, at the FIRST
+    // connect only. `connectAai`'s resume path (aai/session.ts's `handleUnexpectedClose`)
+    // never calls `buildInitialSessionUpdate` again on a drop -- it sends a bare
+    // `{type:'session.resume', session_id}` on the new socket, so this greeting can never
+    // be resent (and AssemblyAI would reject a resend as `immutable_field` if it were).
+    greeting: DEFAULT_GREETING,
     keyterms: [],
     // exactOptionalPropertyTypes: only set the key at all when a model was actually
     // configured -- envDefaults.llm_model is `string | undefined`, and assigning
@@ -178,7 +191,13 @@ function createAai(session_id: string): AaiSocket {
     // records "AAI connected/ready" with the elapsed ms since this connect started, the
     // fact the live-call bundle previously had no way to show at all (see aai/session.ts's
     // `onReady` doc comment).
-    onReady: (ms) => recordServerEvent(diagnostics, session_id, Date.now(), 'aai_ready', { ms_since_connect_start: ms }),
+    onReady: (ms, greeting_configured) =>
+      recordServerEvent(diagnostics, session_id, Date.now(), 'aai_ready', {
+        ms_since_connect_start: ms,
+        // Founder ruling 2026-09-11: proves in the raw bundle whether this call's connect
+        // actually asked AssemblyAI to speak first.
+        greeting_configured,
+      }),
   });
 
   return new PendingAaiSocket(connecting);

@@ -61,8 +61,12 @@ export interface AaiConnectDeps {
    *  moment `session.ready` actually arrives, with the elapsed ms since this `connectAai`
    *  call started (mint + open + handshake) -- index.ts wires this straight into the
    *  diagnostics bundle. Optional so every existing test/caller that doesn't pass it sees no
-   *  behavior change. */
-  onReady?: (ms_since_connect_start: number) => void;
+   *  behavior change.
+   *  Founder ruling 2026-09-11: also carries `greeting_configured` (whether `cfg.greeting`
+   *  was set on THIS connect's initial session.update) so the flight recorder's raw bundle
+   *  can prove, after the fact, whether a live call actually asked AssemblyAI to speak
+   *  first -- see `aai_ready`'s detail in index.ts. */
+  onReady?: (ms_since_connect_start: number, greeting_configured: boolean) => void;
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -312,7 +316,7 @@ export async function connectAai(cfg: AaiSessionConfig, deps: AaiConnectDeps): P
       if (msg.type === 'session.ready' && typeof msg.session_id === 'string') {
         settled = true;
         clearTimeout(timeout);
-        deps.onReady?.(deps.now() - connectStartedAt);
+        deps.onReady?.(deps.now() - connectStartedAt, Boolean(effectiveCfg.greeting));
         resolve(new RealAaiSocket(ws, msg.session_id, effectiveCfg, deps));
       } else if (msg.type === 'session.error') {
         settled = true;

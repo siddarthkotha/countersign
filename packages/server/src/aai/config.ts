@@ -38,6 +38,17 @@ export const DEFAULT_VOICE = 'anna';
 // entrypoint and importing it for a test would execute `server.listen`.
 export const LIVE_SESSION_TOOLS: object[] = [];
 
+// Founder ruling 2026-09-11: the agent speaks FIRST on every call, using AssemblyAI's
+// connect-time `greeting` field -- "The greeting is spoken once at session start -- cannot
+// be modified afterward" (docs/aai-verify-2026-09-02.md Q2). Payments-desk voice, plain
+// English, no ids requested, no detection language (LAW 1). `index.ts`'s real connect
+// wiring sends this by default now (previously left `greeting` unset there, "the caller
+// speaks first" -- see the AaiSessionConfig field doc below for the amendment). Defined
+// here, not in `index.ts`, so it's a single named constant a test can import directly --
+// `index.ts` has no exports and is the process entrypoint (importing it would run
+// `server.listen`, see aai/session.ts's own doc comment on why tests never do that).
+export const DEFAULT_GREETING = 'Meridian payments desk, verification line. How can I help you today?';
+
 // AMENDMENT round 3 (controller, verified live 2026-09-02 11:49 AM CDT + docs check --
 // see docs/aai-voices-endpoint-2026-09-02.md, and the CORRECTION line in
 // docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md): `GET https://agents.assemblyai.com/v1/voices`
@@ -105,8 +116,12 @@ export interface AaiSessionConfig {
   /** COUNTERSIGN_LLM_MODEL, if configured -- see the module doc comment above. */
   llm_model?: string;
   system_prompt: string;
-  /** Spoken once at session start; immutable afterward. Left unset in normal server
-   *  wiring (the caller speaks first) -- only the live smoke script sets one. */
+  /** Spoken once at session start; immutable afterward. Founder ruling 2026-09-11: the
+   *  agent now speaks FIRST on every call -- `index.ts`'s real connect wiring sets this to
+   *  `DEFAULT_GREETING` (above) by default; the live smoke script sets its own separate
+   *  greeting for that script's purpose. Still optional here (and still omitted from the
+   *  wire payload entirely when unset, see `buildInitialSessionUpdate` below) so tests that
+   *  don't care about the greeting can keep omitting it. */
   greeting?: string;
   tools: object[];
   keyterms: string[];

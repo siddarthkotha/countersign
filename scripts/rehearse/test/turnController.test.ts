@@ -1,8 +1,9 @@
 // Exercises the pure/pollable pieces of turnController.ts against a FAKE CallClient (no
 // network, no real WebSocket) -- computeTurnGaps' post-hoc math, and waitForVerdict's
 // polling loop against a client whose `latestState()` changes over time.
+import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
-import { computeTurnGaps, waitForVerdict } from '../turnController.js';
+import { computeTurnGaps, waitForGreeting, waitForVerdict } from '../turnController.js';
 import type { CallClient } from '../wsClient.js';
 import type { ScreenState } from '@countersign/engine';
 
@@ -118,4 +119,36 @@ describe('waitForVerdict', () => {
     expect(result.reached).toBe(false);
     expect(result.verdict).toBeNull();
   });
+});
+
+// Founder ruling 2026-09-11: the agent now speaks FIRST on every call (AssemblyAI's
+// connect-time `greeting` field) -- these prove the harness's opening-turn wait actually
+// waits for that greeting to finish, AND that a missing/misconfigured greeting can never
+// deadlock a run (bounded fallback to the original grace-window behavior).
+describe('waitForGreeting', () => {
+  it('resolves once greeting audio starts and the reply settles, with no warnings', async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0; // no audio yet -- greeting hasn't started
+    const warnings: string[] = [];
+
+    const result = waitForGreeting(client, warnings, 5000);
+    await sleep(20);
+    client.audioTimestamps.push(performance.now() - client.startedAt); // greeting audio starts
+    await result;
+
+    expect(warnings).toEqual([]);
+  });
+
+  it('falls back to the grace-window check and still returns (never deadlocks) when no greeting audio arrives before the timeout', async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0; // greeting never arrives
+    const warnings: string[] = [];
+
+    // A short timeoutMs stands in for the real 8s GREETING_TIMEOUT_MS so this test doesn't
+    // have to wait 8 real seconds -- the fallback path (the grace-window check) is the same
+    // code either way.
+    await waitForGreeting(client, warnings, 50);
+
+    expect(warnings.some((w) => w.includes('no greeting audio observed within 50ms'))).toBe(true);
+  }, 10_000);
 });

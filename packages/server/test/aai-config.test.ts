@@ -9,6 +9,7 @@ import {
   buildInitialSessionUpdate,
   loadAaiEnvDefaults,
   DEFAULT_VOICE,
+  DEFAULT_GREETING,
   LLM_GATEWAY_BASE_URL,
   KNOWN_VOICES,
   LIVE_SESSION_TOOLS,
@@ -122,6 +123,21 @@ describe('LIVE_SESSION_TOOLS', () => {
 describe('DEFAULT_VOICE', () => {
   it('is "anna" -- AssemblyAI\'s documented default (docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md Voices)', () => {
     expect(DEFAULT_VOICE).toBe('anna');
+  });
+});
+
+// Founder ruling 2026-09-11: the agent speaks FIRST on every call, using this exact,
+// payments-desk-voice, plain-English line -- no ids requested, no detection language
+// (LAW 1). index.ts's real connect wiring sets `greeting: DEFAULT_GREETING`; this proves
+// the constant's exact wording and that it flows into the connect payload unchanged.
+describe('DEFAULT_GREETING', () => {
+  it('is the founder-specified payments-desk greeting, with no ids requested and no detection language', () => {
+    expect(DEFAULT_GREETING).toBe('Meridian payments desk, verification line. How can I help you today?');
+  });
+
+  it('is carried onto the FIRST connect config\'s session.greeting unchanged', () => {
+    const msg = buildInitialSessionUpdate(cfg({ greeting: DEFAULT_GREETING }));
+    expect(msg.session.greeting).toBe(DEFAULT_GREETING);
   });
 });
 

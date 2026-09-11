@@ -38,13 +38,21 @@ function lastAgentTranscriptText(client: CallClient): string | null {
 
 /** No new audio frame for this long => the current reply's TTS has stopped. */
 const SILENCE_MS = 700;
-/** How long to wait, before speaking a non-barge-in turn, to see whether the agent starts
- *  speaking AT ALL (it may not -- e.g. a live agent that waits silently for the caller to
- *  open, matching this stack's own default system prompt, "Wait for the caller to state
- *  their request", packages/server/src/index.ts's DEFAULT_INITIAL_PROMPT). If nothing
- *  arrives in this window, the harness assumes the floor is open and proceeds after
- *  `pause_ms` without further waiting. */
+/** How long to wait, before speaking a non-FIRST, non-barge-in turn, to see whether the
+ *  agent starts speaking AT ALL (a mid-call goal may render a STALL/holding line, or
+ *  nothing, before the caller's next turn). If nothing arrives in this window, the harness
+ *  assumes the floor is open and proceeds after `pause_ms` without further waiting. Also
+ *  used as `waitForGreeting`'s own fallback path below once its stricter greeting-timeout
+ *  has already been given up on. */
 const GREETING_GRACE_MS = 1500;
+/** Founder ruling 2026-09-11: the agent now speaks FIRST on every call, via AssemblyAI's
+ *  connect-time `greeting` field (packages/server/src/aai/config.ts's DEFAULT_GREETING) --
+ *  so the very first caller turn actively waits for that greeting reply to finish, rather
+ *  than merely giving the agent a short grace window to decide whether to speak at all.
+ *  Bounded so a missing/misconfigured greeting (e.g. a live-mode server still wired for the
+ *  old "caller speaks first" default) can never deadlock a rehearsal run -- `waitForGreeting`
+ *  falls back to the ORIGINAL `GREETING_GRACE_MS` grace-window behavior once this expires. */
+const GREETING_TIMEOUT_MS = 8_000;
 /** Ceiling on waiting for an in-progress reply to settle before giving up and speaking
  *  anyway (a hung reply must never wedge the whole scenario run). */
 const REPLY_SETTLE_TIMEOUT_MS = 60_000;
@@ -92,13 +100,11 @@ async function waitForReplyStarted(client: CallClient, markerCount: number, time
   }
 }
 
-/** Ordinary (non-barge-in) inter-turn wait: give the agent a short grace window to start
- *  speaking at all; if it does, wait for that reply to settle; either way, then wait the
- *  turn's own `pause_ms` before speaking. Used for the very first turn too (there is no
- *  earlier reply, but the same grace-window logic naturally handles "the agent greets first"
- *  vs "the agent waits for the caller" without the harness needing to know which). */
-async function waitBeforeSpeaking(client: CallClient, pauseMs: number, warnings: string[]): Promise<void> {
-  const markerCount = client.audioTimestamps.length;
+/** Shared by `waitBeforeSpeaking` and `waitForGreeting`'s fallback: give the agent a short
+ *  grace window (from `markerCount`, not "now" -- callers may have already waited) to start
+ *  speaking at all; if it does, wait for that reply to settle. Never speaks or sleeps a
+ *  trailing pause itself -- that's each caller's own job. */
+async function graceWindowThenSettle(client: CallClient, markerCount: number, warnings: string[]): Promise<void> {
   const graceDeadline = nowT(client) + GREETING_GRACE_MS;
   while (nowT(client) < graceDeadline && client.audioTimestamps.length === markerCount) {
     await sleep(POLL_MS);
@@ -107,7 +113,38 @@ async function waitBeforeSpeaking(client: CallClient, pauseMs: number, warnings:
     const { settled } = await waitForReplySettled(client, REPLY_SETTLE_TIMEOUT_MS);
     if (!settled) warnings.push(`reply did not settle within ${REPLY_SETTLE_TIMEOUT_MS}ms; speaking the next line anyway`);
   }
+}
+
+/** Ordinary (non-FIRST, non-barge-in) inter-turn wait: give the agent a short grace window
+ *  to start speaking at all; if it does, wait for that reply to settle; either way, then
+ *  wait the turn's own `pause_ms` before speaking. */
+async function waitBeforeSpeaking(client: CallClient, pauseMs: number, warnings: string[]): Promise<void> {
+  await graceWindowThenSettle(client, client.audioTimestamps.length, warnings);
   await sleep(pauseMs);
+}
+
+/** FIRST-turn-only wait (founder ruling 2026-09-11): the agent now speaks a fixed greeting
+ *  first, so this actively waits for that greeting reply to finish -- audio starts, then
+ *  settles (the same settle signal every other turn already uses; AssemblyAI does not
+ *  surface a separate observable "greeting done" event over this transport) -- instead of
+ *  only giving the agent a grace window to decide whether to speak at all. Bounded by
+ *  `GREETING_TIMEOUT_MS` (8s) so a missing/misconfigured greeting can never deadlock the
+ *  run: on timeout this falls back to the ORIGINAL `GREETING_GRACE_MS` grace-window
+ *  behavior, unchanged, via `graceWindowThenSettle`. `timeoutMs` defaults to
+ *  `GREETING_TIMEOUT_MS`; tests override it to a small value so the fallback path can be
+ *  exercised without a real 8-second wait. */
+export async function waitForGreeting(client: CallClient, warnings: string[], timeoutMs = GREETING_TIMEOUT_MS): Promise<void> {
+  const markerCount = client.audioTimestamps.length;
+  const started = await waitForReplyStarted(client, markerCount, timeoutMs);
+  if (!started) {
+    warnings.push(
+      `no greeting audio observed within ${timeoutMs}ms; falling back to the ${GREETING_GRACE_MS}ms grace-window check before speaking the opening line`,
+    );
+    await graceWindowThenSettle(client, markerCount, warnings);
+    return;
+  }
+  const { settled } = await waitForReplySettled(client, REPLY_SETTLE_TIMEOUT_MS);
+  if (!settled) warnings.push(`greeting did not settle within ${REPLY_SETTLE_TIMEOUT_MS}ms; speaking the opening line anyway`);
 }
 
 /** Streams one line's synthesized audio in real time (one frame every FRAME_MS, matching the
@@ -141,7 +178,8 @@ export async function runTurns(client: CallClient, scenario: Scenario, voice: st
   const callerEndTimes: TurnRunOutcome['callerEndTimes'] = [];
   const resolvedLines: ResolvedLineRecord[] = [];
 
-  for (const turn of scenario.turns) {
+  for (let turnIdx = 0; turnIdx < scenario.turns.length; turnIdx++) {
+    const turn = scenario.turns[turnIdx]!;
     if (turn.barge_in_after_ms !== undefined) {
       const markerCount = client.audioTimestamps.length;
       const started = await waitForReplyStarted(client, markerCount, BARGE_IN_REPLY_START_TIMEOUT_MS);
@@ -151,6 +189,11 @@ export async function runTurns(client: CallClient, scenario: Scenario, voice: st
         );
       }
       await sleep(turn.barge_in_after_ms);
+    } else if (turnIdx === 0) {
+      // Founder ruling 2026-09-11: the agent greets first -- wait for that greeting to
+      // finish (bounded, never deadlocks) before the caller's opening line.
+      await waitForGreeting(client, warnings);
+      await sleep(turn.pause_ms ?? 400);
     } else {
       await waitBeforeSpeaking(client, turn.pause_ms ?? 400, warnings);
     }
@@ -213,13 +256,9 @@ export async function runLlmTurns(
     }
 
     if (turnIndex === 0) {
-      const markerCount = client.audioTimestamps.length;
-      const graceDeadline = nowT(client) + GREETING_GRACE_MS;
-      while (nowT(client) < graceDeadline && client.audioTimestamps.length === markerCount) await sleep(POLL_MS);
-      if (client.audioTimestamps.length > markerCount) {
-        const { settled } = await waitForReplySettled(client, REPLY_SETTLE_TIMEOUT_MS);
-        if (!settled) warnings.push(`llm caller opening turn: reply did not settle within ${REPLY_SETTLE_TIMEOUT_MS}ms; asking for the opening line anyway`);
-      }
+      // Founder ruling 2026-09-11: the agent greets first -- wait for that greeting to
+      // finish (bounded, never deadlocks) before asking the model for its opening line.
+      await waitForGreeting(client, warnings);
     } else {
       const { settled } = await waitForReplySettled(client, REPLY_SETTLE_TIMEOUT_MS);
       if (!settled) warnings.push(`llm caller turn ${turnIndex}: reply did not settle within ${REPLY_SETTLE_TIMEOUT_MS}ms; asking for the next line anyway`);

@@ -159,8 +159,8 @@ describe('connectAai', () => {
     const { deps, sockets } = makeDeps();
     let clock = 0;
     deps.now = () => clock;
-    const readyCalls: number[] = [];
-    deps.onReady = (ms) => readyCalls.push(ms);
+    const readyCalls: [number, boolean][] = [];
+    deps.onReady = (ms, greeting_configured) => readyCalls.push([ms, greeting_configured]);
 
     const connectPromise = connectAai(cfg(), deps);
     await waitFor(() => expect(sockets.length).toBe(1));
@@ -174,7 +174,59 @@ describe('connectAai', () => {
     sockets[0]!.triggerMessage({ type: 'session.ready', session_id: 'sess-1' });
     await connectPromise;
 
-    expect(readyCalls).toEqual([137]);
+    // Second element is `greeting_configured` -- false here because `cfg()` (no override)
+    // carries no greeting, same as this file's other tests. See the next test for the
+    // true case.
+    expect(readyCalls).toEqual([[137, false]]);
+  });
+
+  // Founder ruling 2026-09-11: the flight recorder's raw bundle must be able to prove
+  // whether a live call's connect actually asked AssemblyAI to speak first -- this is the
+  // `greeting_configured` half of that proof (index.ts logs it on the `aai_ready` diag
+  // event; this test proves `connectAai` computes it correctly from the connect config).
+  it('reports greeting_configured true to onReady when the connect config carries a greeting', async () => {
+    const { deps, sockets } = makeDeps();
+    const readyCalls: [number, boolean][] = [];
+    deps.onReady = (ms, greeting_configured) => readyCalls.push([ms, greeting_configured]);
+
+    const connectPromise = connectAai(cfg({ greeting: 'Meridian payments desk, verification line. How can I help you today?' }), deps);
+    await waitFor(() => expect(sockets.length).toBe(1));
+    sockets[0]!.triggerOpen();
+    await waitFor(() => expect(sockets[0]!.sent.length).toBe(1));
+    sockets[0]!.triggerMessage({ type: 'session.ready', session_id: 'sess-1' });
+    await connectPromise;
+
+    expect(readyCalls).toHaveLength(1);
+    expect(readyCalls[0]![1]).toBe(true);
+  });
+
+  // Founder ruling 2026-09-11 (agent speaks first): AssemblyAI treats `greeting` as
+  // immutable after session.ready -- "changing them returns immutable_field"
+  // (docs/aai-verify-2026-09-02.md). This proves the resume path structurally cannot
+  // violate that: on an unexpected drop, `handleUnexpectedClose` (src/aai/session.ts,
+  // the `ws.send(JSON.stringify({ type: 'session.resume', session_id: sessionId }))` line)
+  // sends session.resume alone, never `buildInitialSessionUpdate`'s greeting field, even
+  // when the connect config that started the call carried one.
+  it('never resends the greeting on session.resume after a drop, even when the connect config carries one', async () => {
+    const { deps, sockets } = makeDeps();
+    const greeting = 'Meridian payments desk, verification line. How can I help you today?';
+    const connectPromise = connectAai(cfg({ greeting }), deps);
+    await waitFor(() => expect(sockets.length).toBe(1));
+    sockets[0]!.triggerOpen();
+    await waitFor(() => expect(sockets[0]!.sent.length).toBe(1));
+    const firstMsg = JSON.parse(sockets[0]!.sent[0]!);
+    expect(firstMsg.session.greeting).toBe(greeting);
+    sockets[0]!.triggerMessage({ type: 'session.ready', session_id: 'sess-1' });
+    await connectPromise;
+
+    sockets[0]!.triggerClose(1006, 'abnormal');
+    await waitFor(() => expect(sockets.length).toBe(2));
+    sockets[1]!.triggerOpen();
+    await waitFor(() => expect(sockets[1]!.sent.length).toBe(1));
+
+    const resumeMsg = JSON.parse(sockets[1]!.sent[0]!);
+    expect(resumeMsg).toEqual({ type: 'session.resume', session_id: 'sess-1' });
+    expect(resumeMsg).not.toHaveProperty('greeting');
   });
 
   it('maps transcript, reply, tool.call and session.error events onto AaiEvent', async () => {
