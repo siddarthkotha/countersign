@@ -1149,11 +1149,11 @@
    "files": [
     "docs"
    ],
-   "status": "held",
+   "status": "running",
    "held_because": "no Chrome browser connected to the session at 4:37 PM; founder must open Chrome with the Claude extension, then 'retry sim' resumes the same agent (a65676c1cd6db5939); agent correctly refused a fabricated walk",
    "agent_id": "a65676c1cd6db5939",
    "started_at": "2026-09-11T21:36:27.615Z",
-   "lane_note": "launched 4:37 PM against deploy 11 (229b8b7)"
+   "lane_note": "retry sent 5:45 PM: runs only if a Chrome browser is connected, else stops"
   },
   {
    "id": "GREET-NO-DOUBLE",
@@ -1318,9 +1318,21 @@
    "id": "CLOSE-PROOF-LIVE",
    "title": "live proof on deploy 13: one goodbye, server hang-up (agent_closed), wall time well under 125 s",
    "files": [],
-   "status": "running",
-   "agent_id": "(background bash chain 5:21 PM)",
-   "started_at": "2026-09-11T22:42:45.708Z"
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-11T22:42:45.708Z",
+   "lane_note": "PROVEN LIVE 5:44 PM on deploy 13 (35b5a4b): STAGE, wall 99.9 s (was 125.8 s), last agent line is the exact staged sentence at 96968 ms, server end reason agent_closed; report 2026-09-11T17-44-51; ~1.7 min credits (ESTIMATE). Observation: STT heard the synthetic caller's 4471 as 4475, engine read back 4475 (exact-transcript rule), scripted caller agreed; a human would correct at the readback (BRIEF risk 4 mitigation working as designed)"
+  },
+  {
+   "id": "TTS-DIGITS",
+   "title": "synthetic caller: macOS say digits '4471' transcribed as '4475' by AAI on deploy 13 proof (once); consider spelling digits with pauses in scenario scripts",
+   "files": [
+    "scripts/rehearse"
+   ],
+   "status": "held",
+   "held_because": "harness-only nicety, n=1; watch the next runs",
+   "agent_id": "",
+   "started_at": ""
   }
  ]
 }
