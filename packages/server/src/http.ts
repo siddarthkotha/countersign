@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { ServerConfig } from './config.js';
-import { newCapsState, canStartSession, startSession, type CapsState } from './caps.js';
+import { newCapsState, canStartSession, startSession, computeLiveCallsStatus, type CapsState, type CapDecisionReason } from './caps.js';
 import { defaultCorpusDir, listCorpusFiles, loadCorpusFile } from './replay.js';
 import type { StaticServer } from './static.js';
 import { isAllowedOrigin } from './origin.js';
@@ -114,8 +114,10 @@ function readBodyLimited(
   });
 }
 
-function statusForDecisionReason(reason: 'kill_switch' | 'session_in_use' | 'daily_cap' | 'mint_rate' | 'no_api_key'): number {
-  return reason === 'kill_switch' || reason === 'no_api_key' ? 503 : 429;
+function statusForDecisionReason(reason: CapDecisionReason): number {
+  return reason === 'kill_switch' || reason === 'no_api_key' || reason === 'credits_exhausted' || reason === 'mint_error'
+    ? 503
+    : 429;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -162,6 +164,12 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
         active: state.active.size,
         killed: cfg.kill_switch || state.killed,
         has_key: cfg.assemblyai_api_key !== null,
+        // Reviewer finding (2026-09-11): the "credits-exhausted replay mode" submission
+        // requirement (CLAUDE.md abuse caps) had nothing surfacing it -- this is the single
+        // source of truth (caps.ts's `computeLiveCallsStatus`), shared with the mint
+        // endpoint below so the web landing page can show one plain-English banner from
+        // either read.
+        live_calls: computeLiveCallsStatus(state, cfg, now),
       });
       return;
     }
@@ -209,7 +217,11 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
     if (req.method === 'POST' && path === '/api/session/start') {
       const decision = canStartSession(state, cfg, now);
       if (!decision.ok) {
-        sendJson(res, statusForDecisionReason(decision.reason), { replay_only: true, reason: decision.reason });
+        sendJson(res, statusForDecisionReason(decision.reason), {
+          replay_only: true,
+          reason: decision.reason,
+          live_calls: computeLiveCallsStatus(state, cfg, now),
+        });
         return;
       }
 
@@ -264,7 +276,12 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
         persona_input_present: personaInputPresent,
         body_bytes: Buffer.byteLength(bodyResult.body, 'utf-8'),
       });
-      sendJson(res, 200, { session_id: id, ws_path: `/ws/call/${id}`, cap_seconds: cfg.session_cap_seconds });
+      sendJson(res, 200, {
+        session_id: id,
+        ws_path: `/ws/call/${id}`,
+        cap_seconds: cfg.session_cap_seconds,
+        live_calls: computeLiveCallsStatus(state, cfg, now),
+      });
       return;
     }
 

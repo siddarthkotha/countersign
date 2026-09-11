@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import MicCheck, { type MicCheckReason, type MicCheckResultInfo } from '../components/MicCheck';
 import RoleCards from '../components/RoleCards';
 import Masthead from '../components/Masthead';
-import { startSession, type DemoPersona, type StartResult } from '../api';
+import { startSession, getHealth, type DemoPersona, type StartResult, type LiveCallsReason } from '../api';
 
 type StartedSession = Extract<StartResult, { session_id: string }>;
 
@@ -50,11 +50,26 @@ const REPLAY_ONLY_REASONS: Record<string, string> = {
   daily_cap: "today's call budget is used up",
   mint_rate: 'too many starts in a minute',
   kill_switch: 'live calls are paused',
-  no_api_key: 'the voice service is not configured'
+  no_api_key: 'the voice service is not configured',
+  // Reviewer finding (2026-09-11): "credits-exhausted replay mode" is a submission
+  // requirement (CLAUDE.md abuse caps) -- these two plain-English phrases are shared
+  // between the click-time failure path above (REPLAY_ONLY_REASONS) and the health-check
+  // banner below (liveUnavailableBanner), one source of words either way.
+  credits_exhausted: 'demo credits are exhausted',
+  mint_error: 'the voice service is not responding right now'
 };
 
 function reasonToPlainWords(reason: string): string {
   return REPLAY_ONLY_REASONS[reason] ?? reason;
+}
+
+// Health-check-driven banner (GET /health's `live_calls`), shown before any click, not only
+// after a failed one -- so Start Call is disabled and replay is the visible primary action
+// from the moment the page loads. No detection language, no em-dashes, no jargon (LAW 1 /
+// CLAUDE.md founder style rules).
+function liveUnavailableBanner(reason: LiveCallsReason | null): string {
+  const plainReason = reason ? reasonToPlainWords(reason) : 'live calls are paused right now';
+  return `Live calls are paused: ${plainReason}. Replay mode below plays a real recorded call through the full interface.`;
 }
 
 export default function Landing({ onWatch, onCall }: LandingProps) {
@@ -66,7 +81,27 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
   // existing state tracking this -- added for this fix; null (no card picked) sends no
   // persona at all, and the server applies its own safe default.
   const [role, setRole] = useState<DemoPersona | null>(null);
+  // Reviewer finding (2026-09-11): "credits-exhausted replay mode" is a submission
+  // requirement (CLAUDE.md abuse caps). This reads GET /health's `live_calls` once on
+  // mount so a stranger sees the plain-English banner and the disabled Start Call button
+  // before ever clicking -- not only after a failed attempt (the `unavailableReason` path
+  // above, which still exists for reasons `live_calls` doesn't cover, like session_in_use).
+  // `null` here means either "still loading" or "the health check itself failed" -- both
+  // fail OPEN (Start Call stays enabled) so a flaky health check never hides the demo.
+  const [liveUnavailableReason, setLiveUnavailableReason] = useState<LiveCallsReason | null | undefined>(undefined);
   const micOk = micResult?.ok ?? false;
+  const liveCallsDown = liveUnavailableReason !== undefined && liveUnavailableReason !== null;
+
+  useEffect(() => {
+    let cancelled = false;
+    getHealth().then((health) => {
+      if (cancelled) return;
+      setLiveUnavailableReason(health && !health.live_calls.available ? health.live_calls.reason : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleTry() {
     setStarting(true);
@@ -98,27 +133,38 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
         release money; a verified request is only staged for a second human signature.
       </p>
 
+      {/* Reviewer finding (2026-09-11): "credits-exhausted replay mode" is a submission
+          requirement (CLAUDE.md abuse caps) -- when GET /health says live calls are down,
+          this renders BEFORE the button row, so replay reads as the primary action a
+          stranger sees first, not a fallback discovered after a broken click. */}
+      {liveCallsDown && (
+        <p className="banner" role="alert">{liveUnavailableBanner(liveUnavailableReason ?? null)}</p>
+      )}
+
       <div>
         <button type="button" className="primary" onClick={onWatch}>
           Watch a recorded attack
         </button>
-        <button
-          type="button"
-          onClick={handleTry}
-          disabled={!micOk || starting}
-          aria-describedby="try-break-helper"
-          title={tryButtonHelperText(micResult, starting)}
-        >
-          Try to break it
-        </button>
+        {!liveCallsDown && (
+          <button
+            type="button"
+            onClick={handleTry}
+            disabled={!micOk || starting}
+            aria-describedby="try-break-helper"
+            title={tryButtonHelperText(micResult, starting)}
+          >
+            Try to break it
+          </button>
+        )}
       </div>
 
       {/* Task W6, finding 1: always-visible, plain-words statement of why the button above
           is (or isn't) locked -- same words as the button's own `title`, referenced by
           `aria-describedby` so assistive tech gets it too, not just a hover tooltip.
           Judge review finding (2026-09-04), defect 1: while `starting` is true this shows the
-          cold-start sentence instead (see `tryButtonHelperText` above). */}
-      <p id="try-break-helper">{tryButtonHelperText(micResult, starting)}</p>
+          cold-start sentence instead (see `tryButtonHelperText` above). Hidden along with the
+          button itself while live calls are down -- the banner above already explains why. */}
+      {!liveCallsDown && <p id="try-break-helper">{tryButtonHelperText(micResult, starting)}</p>}
 
       {unavailableReason && (
         <p className="banner" role="alert">Live calls are unavailable right now: {unavailableReason}</p>

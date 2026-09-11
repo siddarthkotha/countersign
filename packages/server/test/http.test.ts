@@ -97,6 +97,7 @@ describe('http server', () => {
       session_id: '11111111-1111-1111-1111-111111111111',
       ws_path: '/ws/call/11111111-1111-1111-1111-111111111111',
       cap_seconds: 300,
+      live_calls: { available: true, reason: null },
     });
 
     const r2 = await fetch(`${base}/api/session/start`, { method: 'POST' });
@@ -107,7 +108,11 @@ describe('http server', () => {
     const r3 = await fetch(`${base}/api/session/start`, { method: 'POST' });
     expect(r3.status).toBe(429);
     const b3 = await r3.json();
-    expect(b3).toEqual({ replay_only: true, reason: 'session_in_use' });
+    expect(b3).toEqual({
+      replay_only: true,
+      reason: 'session_in_use',
+      live_calls: { available: true, reason: null },
+    });
 
     const rReset = await fetch(`${base}/api/session/11111111-1111-1111-1111-111111111111/reset`, {
       method: 'POST',
@@ -153,7 +158,42 @@ describe('http server', () => {
     const r = await fetch(`${base}/health`);
     expect(r.status).toBe(200);
     const body = await r.json();
-    expect(body).toEqual({ ok: true, active: 0, killed: false, has_key: true });
+    expect(body).toEqual({
+      ok: true,
+      active: 0,
+      killed: false,
+      has_key: true,
+      live_calls: { available: true, reason: null },
+    });
+  });
+
+  // Reviewer finding (2026-09-11): "credits-exhausted replay mode" is a submission
+  // requirement (CLAUDE.md abuse caps) with nothing implementing it under that name --
+  // `live_calls` is the fix, shared by /health above and /api/session/start here.
+  it('health reports credits_exhausted when COUNTERSIGN_LIVE_DISABLED=credits is forced', async () => {
+    const { base } = await start({ live_disabled: 'credits' });
+    const r = await fetch(`${base}/health`);
+    const body = (await r.json()) as { live_calls: { available: boolean; reason: string | null } };
+    expect(body.live_calls).toEqual({ available: false, reason: 'credits_exhausted' });
+  });
+
+  it('session start includes live_calls on the success response', async () => {
+    const { base } = await start();
+    const r = await fetch(`${base}/api/session/start`, { method: 'POST' });
+    const body = (await r.json()) as { live_calls: { available: boolean; reason: string | null } };
+    expect(body.live_calls).toEqual({ available: true, reason: null });
+  });
+
+  it('session start refuses with credits_exhausted (503) and includes live_calls when forced', async () => {
+    const { base } = await start({ live_disabled: 'credits' });
+    const r = await fetch(`${base}/api/session/start`, { method: 'POST' });
+    expect(r.status).toBe(503);
+    const body = (await r.json()) as { replay_only: true; reason: string; live_calls: { available: boolean } };
+    expect(body).toEqual({
+      replay_only: true,
+      reason: 'credits_exhausted',
+      live_calls: { available: false, reason: 'credits_exhausted' },
+    });
   });
 
   it('version reports the deployed commit (null in local dev)', async () => {
@@ -363,7 +403,11 @@ describe('http server', () => {
     const r = await fetch(`${base}/api/session/start`, { method: 'POST' });
     expect(r.status).toBe(503);
     const body = await r.json();
-    expect(body).toEqual({ replay_only: true, reason: 'kill_switch' });
+    expect(body).toEqual({
+      replay_only: true,
+      reason: 'kill_switch',
+      live_calls: { available: false, reason: 'kill_switch' },
+    });
   });
 
   it('no api key returns 503 replay_only', async () => {
@@ -371,7 +415,14 @@ describe('http server', () => {
     const r = await fetch(`${base}/api/session/start`, { method: 'POST' });
     expect(r.status).toBe(503);
     const body = await r.json();
-    expect(body).toEqual({ replay_only: true, reason: 'no_api_key' });
+    // no_api_key is a transient/config condition, not one of live_calls's four reasons --
+    // live_calls itself still reports available (see caps.ts's `computeLiveCallsStatus`
+    // doc comment for why session_in_use/mint_rate/no_api_key are deliberately excluded).
+    expect(body).toEqual({
+      replay_only: true,
+      reason: 'no_api_key',
+      live_calls: { available: true, reason: null },
+    });
   });
 
   it('end frees a concurrency slot', async () => {

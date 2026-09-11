@@ -7,6 +7,8 @@ import {
   endSession,
   reapIdle,
   personaFor,
+  markLiveCallsUnavailable,
+  computeLiveCallsStatus,
 } from '../src/caps.js';
 import type { ServerConfig } from '../src/config.js';
 
@@ -130,6 +132,74 @@ describe('caps', () => {
     it('personaFor falls back to the attacker persona for a session id it never recorded', () => {
       const state = newCapsState();
       expect(personaFor(state, 'never-started')).toBe('attacker');
+    });
+  });
+
+  // Reviewer finding (2026-09-11): "credits-exhausted replay mode" is a submission
+  // requirement (CLAUDE.md abuse caps) with nothing implementing it under that name.
+  describe('live calls availability', () => {
+    it('is available by default', () => {
+      const state = newCapsState();
+      expect(computeLiveCallsStatus(state, cfg(), 1000)).toEqual({ available: true, reason: null });
+    });
+
+    it('COUNTERSIGN_LIVE_DISABLED=credits (cfg.live_disabled) forces credits_exhausted', () => {
+      const state = newCapsState();
+      expect(computeLiveCallsStatus(state, cfg({ live_disabled: 'credits' }), 1000)).toEqual({
+        available: false,
+        reason: 'credits_exhausted',
+      });
+      // and it blocks canStartSession the same way, before the no_api_key/session_in_use/
+      // daily_cap/mint_rate checks below it
+      expect(canStartSession(state, cfg({ live_disabled: 'credits' }), 1000)).toEqual({
+        ok: false,
+        reason: 'credits_exhausted',
+      });
+    });
+
+    it('a real mint/connect failure classified as credits-exhausted latches via markLiveCallsUnavailable', () => {
+      const state = newCapsState();
+      markLiveCallsUnavailable(state, 'credits_exhausted');
+      expect(computeLiveCallsStatus(state, cfg(), 1000)).toEqual({ available: false, reason: 'credits_exhausted' });
+      expect(canStartSession(state, cfg(), 1000)).toEqual({ ok: false, reason: 'credits_exhausted' });
+    });
+
+    it('a generic mint/connect failure latches as mint_error', () => {
+      const state = newCapsState();
+      markLiveCallsUnavailable(state, 'mint_error');
+      expect(computeLiveCallsStatus(state, cfg(), 1000)).toEqual({ available: false, reason: 'mint_error' });
+      expect(canStartSession(state, cfg(), 1000)).toEqual({ ok: false, reason: 'mint_error' });
+    });
+
+    it('credits_exhausted sticks even if a later failure is only a generic mint_error', () => {
+      const state = newCapsState();
+      markLiveCallsUnavailable(state, 'credits_exhausted');
+      markLiveCallsUnavailable(state, 'mint_error');
+      expect(computeLiveCallsStatus(state, cfg(), 1000)).toEqual({ available: false, reason: 'credits_exhausted' });
+    });
+
+    it('kill switch and daily cap route through the same field, unchanged behaviour', () => {
+      const state = newCapsState();
+      expect(computeLiveCallsStatus(state, cfg({ kill_switch: true }), 1000)).toEqual({
+        available: false,
+        reason: 'kill_switch',
+      });
+
+      const state2 = newCapsState();
+      const c = cfg({ max_concurrent: 1000, mint_rate_per_minute: 1000 });
+      const dayStart = Date.UTC(2026, 8, 2, 0, 0, 0);
+      for (let i = 0; i < 40; i++) {
+        startSession(state2, dayStart + i, `s${i}`);
+        endSession(state2, `s${i}`);
+      }
+      expect(computeLiveCallsStatus(state2, c, dayStart + 100)).toEqual({ available: false, reason: 'daily_cap' });
+    });
+
+    it('does not report session_in_use, mint_rate or no_api_key -- those stay transient/per-request', () => {
+      const state = newCapsState();
+      startSession(state, 1000, 'a');
+      const c = cfg({ max_concurrent: 1, assemblyai_api_key: null });
+      expect(computeLiveCallsStatus(state, c, 1000)).toEqual({ available: true, reason: null });
     });
   });
 });

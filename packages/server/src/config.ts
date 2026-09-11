@@ -21,6 +21,12 @@ export interface ServerConfig {
    *  session id to reattach before the call is actually ended (`browser_gone`) and the caps
    *  slot freed. */
   browser_grace_ms: number;
+  /** Founder override (COUNTERSIGN_LIVE_DISABLED=credits): forces `live_calls.reason` to
+   *  `credits_exhausted` on /health and /api/session/start without waiting for a real
+   *  AssemblyAI mint failure -- lets the founder rehearse the credits-exhausted replay
+   *  path on demand. Optional so existing hand-built `ServerConfig` test fixtures that
+   *  predate this field keep compiling unchanged; `loadConfig` always sets it. */
+  live_disabled?: 'credits' | null;
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -62,5 +68,6 @@ export function loadConfig(env: Record<string, string | undefined>): ServerConfi
     allowed_origins,
     trust_proxy: env.COUNTERSIGN_TRUST_PROXY === '1',
     browser_grace_ms: intFromEnv(env.COUNTERSIGN_BROWSER_GRACE_MS, 20000),
+    live_disabled: env.COUNTERSIGN_LIVE_DISABLED === 'credits' ? 'credits' : null,
   };
 }

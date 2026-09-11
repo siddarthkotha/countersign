@@ -5,13 +5,14 @@ import { WebSocket } from 'ws';
 import { loadConfig } from './config.js';
 import { createHttpServer } from './http.js';
 import { createStaticServer } from './static.js';
-import { reapIdle } from './caps.js';
+import { reapIdle, markLiveCallsUnavailable } from './caps.js';
 import { newDiagnosticsState, recordServerEvent } from './diagnostics.js';
 import { attachWebSocketServer } from './ws/browser.js';
 import { FakeAaiSocket } from './aai/fake.js';
 import type { AaiEvent, AaiSocket } from './aai/types.js';
 import { connectAai, type WsLike } from './aai/session.js';
 import { loadAaiEnvDefaults, LIVE_SESSION_TOOLS, DEFAULT_GREETING, type AaiSessionConfig } from './aai/config.js';
+import { classifyMintFailure, isCreditsExhaustedError } from './live_calls.js';
 
 // Task D1: packages/server/src/index.ts -> packages/web/dist (siblings under packages/),
 // whether this file is running as source (tsx, packages/server/src/index.ts) or as the
@@ -118,6 +119,16 @@ class PendingAaiSocket implements AaiSocket {
       })
       .catch((err: unknown) => {
         console.error('countersign: AssemblyAI connect failed:', err);
+        // Reviewer finding (2026-09-11, abuse-caps "credits-exhausted replay mode"): this
+        // catch is the one place a real token-mint/connect failure is observed -- classify
+        // it (live_calls.ts) and latch the result into caps state (caps.ts) so /health and
+        // /api/session/start start reporting `live_calls.available: false` on the NEXT
+        // request, instead of every future caller silently hitting this same failure one
+        // at a time with no on-page explanation.
+        markLiveCallsUnavailable(
+          state,
+          isCreditsExhaustedError(classifyMintFailure(err)) ? 'credits_exhausted' : 'mint_error'
+        );
         this.emit({ type: 'session.error', code: 'connect_failed', message: String(err) });
       });
   }

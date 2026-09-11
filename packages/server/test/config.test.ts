@@ -59,3 +59,20 @@ describe('loadConfig — trust_proxy', () => {
     expect(loadConfig({ COUNTERSIGN_TRUST_PROXY: '' }).trust_proxy).toBe(false);
   });
 });
+
+// Reviewer finding (2026-09-11): "credits-exhausted replay mode" is a submission
+// requirement (CLAUDE.md abuse caps) with nothing implementing it under that name.
+// COUNTERSIGN_LIVE_DISABLED=credits is the founder's manual override, letting a rehearsal
+// force the credits-exhausted state without waiting for a real AssemblyAI failure.
+describe('loadConfig — live_disabled', () => {
+  it('defaults to null when COUNTERSIGN_LIVE_DISABLED is unset', () => {
+    expect(loadConfig({}).live_disabled).toBe(null);
+  });
+
+  it('is "credits" only for the exact value "credits"', () => {
+    expect(loadConfig({ COUNTERSIGN_LIVE_DISABLED: 'credits' }).live_disabled).toBe('credits');
+    expect(loadConfig({ COUNTERSIGN_LIVE_DISABLED: 'Credits' }).live_disabled).toBe(null);
+    expect(loadConfig({ COUNTERSIGN_LIVE_DISABLED: '1' }).live_disabled).toBe(null);
+    expect(loadConfig({ COUNTERSIGN_LIVE_DISABLED: '' }).live_disabled).toBe(null);
+  });
+});

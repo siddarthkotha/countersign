@@ -2,10 +2,11 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Landing from '../src/screens/Landing';
-import { startSession } from '../src/api';
+import { startSession, getHealth } from '../src/api';
 
 vi.mock('../src/api', () => ({
-  startSession: vi.fn()
+  startSession: vi.fn(),
+  getHealth: vi.fn()
 }));
 
 const HIDDEN_FACTS = ['Calder', 'Finch', 'First Meridian Trust', '8830', 'Zurich', 'Lena Voss', 'August 19', 'Whitmore'];
@@ -25,6 +26,13 @@ function mockGetUserMedia(outcome: 'resolve' | 'reject', errorName = 'NotAllowed
 
 beforeEach(() => {
   vi.mocked(startSession).mockReset();
+  // Reviewer finding (2026-09-11): every existing test in this file predates the
+  // credits-exhausted health check and expects Start Call available by default --
+  // resolving null here (the same "health check failed/unknown" case `getHealth` itself
+  // returns on a network error) is the fail-OPEN default, so none of those tests need to
+  // know this call exists at all.
+  vi.mocked(getHealth).mockReset();
+  vi.mocked(getHealth).mockResolvedValue(null);
   // Task W6: MicCheck reads navigator.permissions best-effort before getUserMedia -- absent
   // by default in jsdom, which is also the realistic "unsupported" case these tests exercise.
   Object.defineProperty(navigator, 'permissions', { configurable: true, value: undefined });
@@ -98,6 +106,59 @@ describe('Landing', () => {
     // MINOR (final review): announced to assistive tech, not just visible on screen.
     expect(banner).toHaveAttribute('role', 'alert');
     expect(screen.getByRole('button', { name: 'Watch a recorded attack' })).toBeEnabled();
+  });
+
+  // Reviewer finding (2026-09-11): "credits-exhausted replay mode" is a submission
+  // requirement (CLAUDE.md abuse caps) with nothing implementing it under that name.
+  // GET /health's `live_calls` (packages/server/src/caps.ts's `computeLiveCallsStatus`)
+  // drives this from the moment the page loads, before any click.
+  describe('live calls unavailable (health check)', () => {
+    it('shows the credits-exhausted banner and hides Try to break it, leaving Watch as the only, primary action', async () => {
+      vi.mocked(getHealth).mockResolvedValue({
+        ok: true,
+        live_calls: { available: false, reason: 'credits_exhausted' }
+      });
+      render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+      const banner = await screen.findByText(
+        'Live calls are paused: demo credits are exhausted. Replay mode below plays a real recorded call through the full interface.'
+      );
+      expect(banner).toHaveAttribute('role', 'alert');
+
+      expect(screen.queryByRole('button', { name: 'Try to break it' })).not.toBeInTheDocument();
+      const watchButton = screen.getByRole('button', { name: 'Watch a recorded attack' });
+      expect(watchButton).toBeEnabled();
+      expect(watchButton).toHaveClass('primary');
+    });
+
+    it('shows a plain-words reason for a non-credits live_calls reason too', async () => {
+      vi.mocked(getHealth).mockResolvedValue({
+        ok: true,
+        live_calls: { available: false, reason: 'kill_switch' }
+      });
+      render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+      expect(
+        await screen.findByText('Live calls are paused: live calls are paused. Replay mode below plays a real recorded call through the full interface.')
+      ).toBeInTheDocument();
+    });
+
+    it('keeps Try to break it visible when live_calls says available', async () => {
+      vi.mocked(getHealth).mockResolvedValue({ ok: true, live_calls: { available: true, reason: null } });
+      render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+      expect(await screen.findByRole('button', { name: 'Try to break it' })).toBeInTheDocument();
+    });
+
+    it('fails open (keeps Try to break it visible, no banner) when the health check itself fails', async () => {
+      vi.mocked(getHealth).mockResolvedValue(null);
+      render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+      // give the pending getHealth() promise a tick to resolve
+      await Promise.resolve();
+      expect(screen.getByRole('button', { name: 'Try to break it' })).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
   });
 
   // Task W6 (QA walk 2026-09-02, finding 1): "Try to break it" used to be disabled with zero
