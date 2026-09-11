@@ -40,7 +40,7 @@ Countersign never claims to detect a fake or cloned voice. It proves things
 behaviorally: what the caller knows, whether their story stays consistent, and what
 independent checks confirm. A fully verified call never releases money. It only stages
 the request for a second, independent human to approve. A failed call freezes the
-request, opens an incident, and leaves a hash-chained evidence export behind.
+request, opens an incident, and leaves a hash-chained evidence export (each record carries a fingerprint of the one before it, so any edit shows) behind.
 <!-- word count: 150; verified via `wc -w` before commit -->
 
 ---
@@ -77,21 +77,21 @@ A verified request needs an independent second human before money moves; a
 failed one freezes the rail and opens an incident.
 
 **Application of technology.** Countersign uses the AssemblyAI Voice Agent API
-throughout: server-minted, single-use tokens so the browser never touches the API
-key; 24 kHz PCM16 mic audio streamed through an AudioWorklet; a session.update sent
-at connect and on every goal change; growing keyterms per name and dollar amount
-said; real turn-detection barge-in that catches an interruption and flushes playback
+throughout: server-created single-use temporary authentication tokens so the browser never touches the API
+key; 24 kHz PCM16 (16-bit mono audio at 24,000 samples per second) mic audio streamed through an AudioWorklet; a session.update sent
+at connect and on every goal change; growing key phrases the speech recognizer learns from (names, dollar amounts, and domain terms mentioned during the call);
+real turn-detection barge-in (detects when the caller interrupts and stops the agent mid-sentence) that catches an interruption and flushes playback
 within a frame; and tool results returned on AssemblyAI's exact reply.done timing,
 never early, never late. Built around realtime primitives, not a chatbot wrapped
 around a microphone.
 
 **Originality.** Countersign is not a deepfake detector, an indefensible claim it never
 makes. Instead it verifies behaviorally: what the caller knows, whether their story
-stays consistent across turns, and what independent, out-of-band checks confirm, a
+stays consistent across turns, and what independent verification checks outside this call confirm, a
 layer that holds when a synthetic voice is perfect. A finite-state policy engine, not
 the language model, owns every verdict. Its positive ceiling is "stage for second
 approval," never "release": neither exists in the system. This is published prior art,
-not ours: PROVEN by the APort Vault CTF (a security contest), where social
+not ours: PROVEN by the APort Vault CTF (a security capture-the-flag contest where attackers try to social-engineer a system), where social
 engineering succeeded 74.6 percent against model-only defenses versus 0 percent
 against a policy engine, across 879 attempts. What's new is the application: live
 interrogation feeding an engine capped at staging for a second human.
@@ -108,9 +108,9 @@ interrogation feeding an engine capped at staging for a second human.
 ## 4. Technologies used
 
 - **AssemblyAI Voice Agent API**: realtime speech-to-text, text-to-speech, and tool
-  calling, used for server-minted single-use ephemeral tokens; 24 kHz PCM16 mic audio
+  calling, used for server-created single-use temporary authentication tokens; 24 kHz PCM16 (16-bit mono audio at 24,000 samples per second) mic audio
   via an AudioWorklet; `session.update` at connect and on every goal change; growing
-  `keyterms` boosted per call; turn detection and barge-in (`input.speech.started`,
+  `keyterms` boosted per call; turn detection and barge-in (detects when the caller interrupts and stops the agent mid-sentence) (`input.speech.started`,
   `reply.done` with `status: 'interrupted'`); `tool.result` returned on `reply.done`
   timing; bounded reconnect with `session.resume` inside the documented resumable
   window.

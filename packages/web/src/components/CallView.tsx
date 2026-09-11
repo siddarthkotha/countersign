@@ -68,13 +68,13 @@ const AGENT_STATUS_LABELS: Record<AgentStatus, string> = {
   LISTENING: 'Listening',
   SPEAKING: 'Speaking',
   VERIFYING: 'Verifying',
-  AWAITING_OUT_OF_BAND: 'Awaiting out-of-band',
+  AWAITING_OUT_OF_BAND: 'Awaiting independent verification',
   VERDICT: 'Verdict',
 };
 
 const ASSURANCE_LABELS: Record<keyof AssuranceChecklist, string> = {
   identity_claimed: 'Identity claimed',
-  sso_pass_current: 'SSO context current',
+  sso_pass_current: 'Sign-on session current',
   oob_confirmed_current: 'Out-of-band confirmed',
   context_pass_current: 'Request matches known context',
   no_contradictions: 'No contradictions',

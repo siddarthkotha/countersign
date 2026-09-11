@@ -212,7 +212,7 @@ describe('Call', () => {
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
     fake.emitState(scenarioBFinalState());
 
-    const footerHash = await screen.findByText('hash-chained evidence export · abc123def456');
+    const footerHash = await screen.findByText('hash-chained evidence export (each record fingerprinted to detect edits) · abc123def456');
     expect(footerHash).toBeInTheDocument();
     expect(footerHash).toHaveAttribute('title', 'abc123def456');
   });

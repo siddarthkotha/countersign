@@ -7,8 +7,8 @@
 When a high-risk request arrives by voice (an urgent wire transfer demanded of a corporate
 payment desk, a privileged credential reset, or a "grandchild needs bail money" call), Countersign
 answers first. It conducts a calm, adaptive spoken interrogation (challenge questions,
-cross-turn consistency probes, out-of-band checks) while a deterministic policy engine (never
-the LLM) computes the verdict from structured evidence. Verified requests are only ever
+cross-turn consistency probes, independent verification checks outside the current call) while a
+deterministic policy engine (never the LLM) computes the verdict from structured evidence. Verified requests are only ever
 **staged** for independent human second approval. Failed requests are frozen, an incident is
 opened, and a tamper-evident evidence record seals every claim, check, and decision.
 
@@ -156,8 +156,7 @@ Four invariants are checked last and override every rule (`rules.ts` lines 300�
 
 Before STAGE can fire, twelve checklist items must each read **true**: affirmative checks, never
 "zero failures" (`AssuranceChecklist` in `packages/engine/src/types.ts`, gated in `rules.ts` row
-11): identity claimed; the SSO/identity check currently passing; the out-of-band check currently
-confirmed; the context check currently passing; no unresolved contradiction in what the caller
+11): identity claimed; the single sign-on (SSO) / identity verification check passing; the independent verification check outside this call confirmed; the context check currently passing; no unresolved contradiction in what the caller
 said; every critical field read back and confirmed; the running total under the exposure limit;
 enough challenges passed for the risk level; no unresolved identity switch; and no first-time
 beneficiary.
@@ -206,7 +205,7 @@ Prints the verdict, every evidence card, and the "what would flip this" counterf
 
 Countersign makes **no acoustic deepfake-detection claims** and uses **no voice biometrics** by
 design. The mechanism is exclusively behavioral verification: what the caller knows, how
-their story holds together across turns, and what independent out-of-band checks say. That's a
+their story holds together across turns, and what independent verification checks outside this call confirm. That's a
 feature: it's the layer that still works when synthetic voices are perfect.
 
 Every quote in the evidence record is AssemblyAI's own transcribed text, verbatim, never a
@@ -215,7 +214,7 @@ card ever depends on how the agent chose to phrase anything mid-call.
 
 **On prior art.** The core architecture pattern here, a deterministic policy engine rather than
 the language model owning every verdict, is published prior art, not our invention. That the
-pattern works is PROVEN by the APort Vault CTF (a security capture-the-flag contest), which
+pattern works is PROVEN by the APort Vault CTF (a security contest where attackers attempt social engineering), which
 measured social engineering succeeding 74.6 percent of the time against model-only defenses and
 0 percent against a policy engine, across 879 attempts. Separately, a US Bancorp patent
 (US12562169B1, priority 2025-09-16) covers the same two mechanics, adaptive challenge generation
@@ -240,7 +239,7 @@ format, adversarial corpus, measured latency, setup) fills in as the build progr
 
 | Date (CDT) | Runs | Connect → session.ready | session.ready → first reply audio | Notes |
 |---|---|---|---|---|
-| 2026-09-02 11:13 AM | 1 | 995 ms | 221 ms | `npm run smoke:live` from the founder's Mac in Austin; single run, no percentiles yet. p50/p95 over 50+ rehearsals land in week 3 (gate G5). |
+| 2026-09-02 11:13 AM | 1 | 995 ms | 221 ms | `npm run smoke:live` from the founder's Mac in Austin; single run, no percentiles yet. median and 95th percentile response times over 50+ rehearsals land in week 3 (gate G5). |
 | 2026-09-02 11:49 AM | 1 | 1740 ms | 76 ms | Same script, second run; voices endpoint returned 426 (fallback to `anna` worked). |
 
 Method: `packages/server/scripts/smoke-live.ts` mints a token, opens the socket, sends `session.update`, times `session.ready`, then times the first `reply.audio` after the greeting. Opt-in only (`--live` + `ASSEMBLYAI_API_KEY`); never runs in CI.

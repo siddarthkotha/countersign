@@ -23,7 +23,7 @@ export default function Footer({ exportHash }: FooterProps) {
       <p className="bottom-line">{BOTTOM_LINE}</p>
       {exportHash && (
         <p className="footer-hash" title={exportHash}>
-          hash-chained evidence export · {exportHash}
+          hash-chained evidence export (each record fingerprinted to detect edits) · {exportHash}
         </p>
       )}
     </footer>

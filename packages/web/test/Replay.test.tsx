@@ -280,7 +280,7 @@ describe('Replay', () => {
     await user.selectOptions(await screen.findByLabelText('Recording'), RECORDING);
     fake.emitState(scenarioBFinalState());
 
-    const footerHash = await screen.findByText('hash-chained evidence export · abc123def456', {
+    const footerHash = await screen.findByText('hash-chained evidence export (each record fingerprinted to detect edits) · abc123def456', {
       selector: '.footer-hash'
     });
     expect(footerHash).toBeInTheDocument();
