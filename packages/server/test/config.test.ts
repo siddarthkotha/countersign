@@ -76,3 +76,17 @@ describe('loadConfig — live_disabled', () => {
     expect(loadConfig({ COUNTERSIGN_LIVE_DISABLED: '' }).live_disabled).toBe(null);
   });
 });
+
+// Review fix (2026-09-11, part c): the founder needs a runtime way to clear a latched
+// live_override -- COUNTERSIGN_ADMIN_TOKEN gates POST /api/admin/live-calls/reset (http.ts)
+// the same way the kill switch is gated: nothing happens unless this is explicitly set.
+describe('loadConfig — admin_token', () => {
+  it('defaults to null when COUNTERSIGN_ADMIN_TOKEN is unset or empty', () => {
+    expect(loadConfig({}).admin_token).toBe(null);
+    expect(loadConfig({ COUNTERSIGN_ADMIN_TOKEN: '' }).admin_token).toBe(null);
+  });
+
+  it('passes a non-empty COUNTERSIGN_ADMIN_TOKEN through verbatim', () => {
+    expect(loadConfig({ COUNTERSIGN_ADMIN_TOKEN: 'secret-admin-token' }).admin_token).toBe('secret-admin-token');
+  });
+});

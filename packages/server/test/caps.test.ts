@@ -9,6 +9,8 @@ import {
   personaFor,
   markLiveCallsUnavailable,
   computeLiveCallsStatus,
+  recordMintSuccess,
+  resetLiveCallsOverride,
 } from '../src/caps.js';
 import type { ServerConfig } from '../src/config.js';
 
@@ -157,25 +159,83 @@ describe('caps', () => {
       });
     });
 
-    it('a real mint/connect failure classified as credits-exhausted latches via markLiveCallsUnavailable', () => {
+    it('a real mint/connect failure classified as credits-exhausted latches IMMEDIATELY via markLiveCallsUnavailable', () => {
       const state = newCapsState();
-      markLiveCallsUnavailable(state, 'credits_exhausted');
+      markLiveCallsUnavailable(state, 'credits_exhausted', 1000);
       expect(computeLiveCallsStatus(state, cfg(), 1000)).toEqual({ available: false, reason: 'credits_exhausted' });
       expect(canStartSession(state, cfg(), 1000)).toEqual({ ok: false, reason: 'credits_exhausted' });
     });
 
-    it('a generic mint/connect failure latches as mint_error', () => {
-      const state = newCapsState();
-      markLiveCallsUnavailable(state, 'mint_error');
-      expect(computeLiveCallsStatus(state, cfg(), 1000)).toEqual({ available: false, reason: 'mint_error' });
-      expect(canStartSession(state, cfg(), 1000)).toEqual({ ok: false, reason: 'mint_error' });
+    // Review fix (2026-09-11, CRITICAL finding): a single generic mint failure (a
+    // transient 429 during a Render cold start, a network blip, anything not an
+    // unambiguous credit/quota signal) must NEVER permanently kill live calls for every
+    // later judge. mint_error only latches after MINT_FAILURE_LATCH_THRESHOLD (3)
+    // classified failures within the MINT_FAILURE_WINDOW_MS (10 minute) cool-down, and a
+    // successful connect (recordMintSuccess) resets the streak to zero.
+    describe('mint_error requires a streak, not a single failure', () => {
+      it('does not latch on the first or second failure within the window', () => {
+        const state = newCapsState();
+        markLiveCallsUnavailable(state, 'mint_error', 0);
+        expect(computeLiveCallsStatus(state, cfg(), 0)).toEqual({ available: true, reason: null });
+        markLiveCallsUnavailable(state, 'mint_error', 1000);
+        expect(computeLiveCallsStatus(state, cfg(), 1000)).toEqual({ available: true, reason: null });
+      });
+
+      it('latches on the 3rd consecutive classified failure within 10 minutes', () => {
+        const state = newCapsState();
+        markLiveCallsUnavailable(state, 'mint_error', 0);
+        markLiveCallsUnavailable(state, 'mint_error', 1000);
+        markLiveCallsUnavailable(state, 'mint_error', 2000);
+        expect(computeLiveCallsStatus(state, cfg(), 2000)).toEqual({ available: false, reason: 'mint_error' });
+        expect(canStartSession(state, cfg(), 2000)).toEqual({ ok: false, reason: 'mint_error' });
+      });
+
+      it('recordMintSuccess resets the streak so 2 failures + a success + 2 more failures never latches', () => {
+        const state = newCapsState();
+        markLiveCallsUnavailable(state, 'mint_error', 0);
+        markLiveCallsUnavailable(state, 'mint_error', 1000);
+        recordMintSuccess(state);
+        markLiveCallsUnavailable(state, 'mint_error', 2000);
+        markLiveCallsUnavailable(state, 'mint_error', 3000);
+        expect(computeLiveCallsStatus(state, cfg(), 3000)).toEqual({ available: true, reason: null });
+      });
+
+      it('a failure outside the 10-minute window does not count toward the streak', () => {
+        const state = newCapsState();
+        const TEN_MIN_MS = 10 * 60 * 1000;
+        markLiveCallsUnavailable(state, 'mint_error', 0);
+        markLiveCallsUnavailable(state, 'mint_error', 1000);
+        // this 3rd failure arrives outside the window measured from the first two --
+        // pruning drops them, so only this one failure remains, not a latching streak of 3
+        markLiveCallsUnavailable(state, 'mint_error', TEN_MIN_MS + 2000);
+        expect(computeLiveCallsStatus(state, cfg(), TEN_MIN_MS + 2000)).toEqual({ available: true, reason: null });
+      });
     });
 
     it('credits_exhausted sticks even if a later failure is only a generic mint_error', () => {
       const state = newCapsState();
-      markLiveCallsUnavailable(state, 'credits_exhausted');
-      markLiveCallsUnavailable(state, 'mint_error');
-      expect(computeLiveCallsStatus(state, cfg(), 1000)).toEqual({ available: false, reason: 'credits_exhausted' });
+      markLiveCallsUnavailable(state, 'credits_exhausted', 1000);
+      markLiveCallsUnavailable(state, 'mint_error', 2000);
+      markLiveCallsUnavailable(state, 'mint_error', 3000);
+      markLiveCallsUnavailable(state, 'mint_error', 4000);
+      expect(computeLiveCallsStatus(state, cfg(), 4000)).toEqual({ available: false, reason: 'credits_exhausted' });
+    });
+
+    // Review fix (2026-09-11, part c): the founder needs a way to manually clear a latched
+    // live_override -- there was no runtime admin path at all (state.killed is only ever
+    // read, never set by any route; COUNTERSIGN_KILL_SWITCH is a redeploy-only env var).
+    // resetLiveCallsOverride is what POST /api/admin/live-calls/reset (http.ts) calls.
+    it('resetLiveCallsOverride clears a latched reason and the failure streak', () => {
+      const state = newCapsState();
+      markLiveCallsUnavailable(state, 'credits_exhausted', 1000);
+      resetLiveCallsOverride(state);
+      expect(computeLiveCallsStatus(state, cfg(), 1000)).toEqual({ available: true, reason: null });
+
+      // and the streak is really cleared, not just the reported reason -- 2 more failures
+      // right after a reset still should not re-latch
+      markLiveCallsUnavailable(state, 'mint_error', 2000);
+      markLiveCallsUnavailable(state, 'mint_error', 3000);
+      expect(computeLiveCallsStatus(state, cfg(), 3000)).toEqual({ available: true, reason: null });
     });
 
     it('kill switch and daily cap route through the same field, unchanged behaviour', () => {

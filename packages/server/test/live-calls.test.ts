@@ -2,11 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { isCreditsExhaustedError, classifyMintFailure } from '../src/live_calls.js';
 
 describe('isCreditsExhaustedError', () => {
-  it('matches on a credit-style status code alone', () => {
+  // Review fix (2026-09-11, CRITICAL finding): 402 is the only status code that
+  // unambiguously means "payment/credits" -- 401/403 are just as likely to mean "wrong or
+  // rotated API key" (a judge would then wrongly be told "demo credits are exhausted"),
+  // and 429 is an ordinary rate limit that happens routinely on a Render cold start. Only
+  // a real credit/quota keyword or the 402 status counts as credits_exhausted; everything
+  // else is classified as a generic mint_error by the caller (see caps.ts).
+  it('matches on the 402 status code alone', () => {
     expect(isCreditsExhaustedError({ status: 402 })).toBe(true);
-    expect(isCreditsExhaustedError({ status: 401 })).toBe(true);
-    expect(isCreditsExhaustedError({ status: 403 })).toBe(true);
-    expect(isCreditsExhaustedError({ status: 429 })).toBe(true);
+  });
+
+  it('does NOT match on 401, 403 or 429 alone -- those are mint_error, not credits', () => {
+    expect(isCreditsExhaustedError({ status: 401 })).toBe(false);
+    expect(isCreditsExhaustedError({ status: 403 })).toBe(false);
+    expect(isCreditsExhaustedError({ status: 429 })).toBe(false);
   });
 
   it('matches on a credit/quota/insufficient/billing keyword in the message alone, case-insensitively', () => {
@@ -14,6 +23,11 @@ describe('isCreditsExhaustedError', () => {
     expect(isCreditsExhaustedError({ message: 'account QUOTA exceeded' })).toBe(true);
     expect(isCreditsExhaustedError({ message: 'insufficient balance' })).toBe(true);
     expect(isCreditsExhaustedError({ message: 'billing issue on this account' })).toBe(true);
+  });
+
+  it('a keyword still matches even paired with a non-402 status (401/403/429)', () => {
+    expect(isCreditsExhaustedError({ status: 401, message: 'insufficient credits' })).toBe(true);
+    expect(isCreditsExhaustedError({ status: 429, message: 'quota exceeded' })).toBe(true);
   });
 
   it('does not match an unrelated status with an unrelated message', () => {

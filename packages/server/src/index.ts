@@ -5,7 +5,7 @@ import { WebSocket } from 'ws';
 import { loadConfig } from './config.js';
 import { createHttpServer } from './http.js';
 import { createStaticServer } from './static.js';
-import { reapIdle, markLiveCallsUnavailable } from './caps.js';
+import { reapIdle, markLiveCallsUnavailable, recordMintSuccess } from './caps.js';
 import { newDiagnosticsState, recordServerEvent } from './diagnostics.js';
 import { attachWebSocketServer } from './ws/browser.js';
 import { FakeAaiSocket } from './aai/fake.js';
@@ -112,6 +112,10 @@ class PendingAaiSocket implements AaiSocket {
           real.close();
           return;
         }
+        // Review fix (2026-09-11, CRITICAL finding): a successful connect breaks the
+        // mint_error failure streak (caps.ts) -- otherwise sporadic failures separated by
+        // real successes could still eventually accumulate toward the latch threshold.
+        recordMintSuccess(state);
         this.real = real;
         real.on((evt) => this.emit(evt));
         for (const msg of this.queued) real.send(msg);
@@ -124,10 +128,13 @@ class PendingAaiSocket implements AaiSocket {
         // it (live_calls.ts) and latch the result into caps state (caps.ts) so /health and
         // /api/session/start start reporting `live_calls.available: false` on the NEXT
         // request, instead of every future caller silently hitting this same failure one
-        // at a time with no on-page explanation.
+        // at a time with no on-page explanation. `markLiveCallsUnavailable` itself decides
+        // whether a `mint_error` classification actually latches yet (a streak+cool-down
+        // gate, review fix 2026-09-11) -- `credits_exhausted` still latches immediately.
         markLiveCallsUnavailable(
           state,
-          isCreditsExhaustedError(classifyMintFailure(err)) ? 'credits_exhausted' : 'mint_error'
+          isCreditsExhaustedError(classifyMintFailure(err)) ? 'credits_exhausted' : 'mint_error',
+          Date.now()
         );
         this.emit({ type: 'session.error', code: 'connect_failed', message: String(err) });
       });

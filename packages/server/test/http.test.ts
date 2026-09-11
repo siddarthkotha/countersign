@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { createHttpServer } from '../src/http.js';
 import { createStaticServer } from '../src/static.js';
 import { newDiagnosticsState, type DiagnosticsState } from '../src/diagnostics.js';
-import type { CapsState } from '../src/caps.js';
+import { markLiveCallsUnavailable, type CapsState } from '../src/caps.js';
 import type { ServerConfig } from '../src/config.js';
 
 interface StartResponseBody {
@@ -563,6 +563,48 @@ describe('http server', () => {
       });
       const body = (await r.json()) as Record<string, unknown>;
       expect(body).not.toHaveProperty('persona');
+    });
+  });
+
+  // Review fix (2026-09-11, part c): there was no runtime path at all to clear a latched
+  // live_override (state.killed is likewise never set by any existing route, only read --
+  // the kill switch is a redeploy-only env var). Guarded the same way: nothing happens
+  // unless an operator has explicitly set COUNTERSIGN_ADMIN_TOKEN.
+  describe('POST /api/admin/live-calls/reset', () => {
+    it('404s when no admin token is configured (disabled by default, same as the kill switch needing its own env var)', async () => {
+      const { base } = await start();
+      const r = await fetch(`${base}/api/admin/live-calls/reset`, { method: 'POST' });
+      expect(r.status).toBe(404);
+    });
+
+    it('401s with a configured token but a missing or wrong Authorization header', async () => {
+      const { base } = await start({ admin_token: 'secret-admin-token' });
+      const rMissing = await fetch(`${base}/api/admin/live-calls/reset`, { method: 'POST' });
+      expect(rMissing.status).toBe(401);
+
+      const rWrong = await fetch(`${base}/api/admin/live-calls/reset`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer wrong-token' },
+      });
+      expect(rWrong.status).toBe(401);
+    });
+
+    it('clears a latched live_override and returns 204 with the correct bearer token', async () => {
+      const { base, state } = await start({ admin_token: 'secret-admin-token' });
+      markLiveCallsUnavailable(state, 'credits_exhausted', 1000);
+
+      const before = await fetch(`${base}/health`);
+      expect(((await before.json()) as { live_calls: { available: boolean } }).live_calls.available).toBe(false);
+
+      const r = await fetch(`${base}/api/admin/live-calls/reset`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer secret-admin-token' },
+      });
+      expect(r.status).toBe(204);
+
+      const after = await fetch(`${base}/health`);
+      const afterBody = (await after.json()) as { live_calls: { available: boolean; reason: string | null } };
+      expect(afterBody.live_calls).toEqual({ available: true, reason: null });
     });
   });
 });

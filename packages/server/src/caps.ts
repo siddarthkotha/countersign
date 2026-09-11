@@ -11,17 +11,34 @@ export interface CapsState {
   daily: { day: string; count: number };
   mints: number[];
   killed: boolean;
-  /** Sticky, process-lifetime latch set by a real AssemblyAI mint/connect failure (see
+  /** Sticky latch set by a real AssemblyAI mint/connect failure (see
    *  `markLiveCallsUnavailable` below, called from index.ts's `PendingAaiSocket` catch
    *  handler). `credits_exhausted` always wins over a later `mint_error` -- a transient
    *  network blip after the real cause is already known shouldn't downgrade the reported
-   *  reason. Never auto-clears (same "operator/founder resets by restarting" model as
-   *  `killed`) -- there is no live signal that credits came back. */
+   *  reason. Does not auto-clear on its own (review fix 2026-09-11: there is no live
+   *  signal that credits came back, or that a rotated API key is now correct) -- cleared
+   *  only by `resetLiveCallsOverride` (the founder's POST /api/admin/live-calls/reset,
+   *  http.ts) or a process restart. */
   live_override: 'credits_exhausted' | 'mint_error' | null;
+  /** Review fix (2026-09-11, CRITICAL finding): timestamps of classified-but-not-yet-
+   *  latched generic mint/connect failures, pruned to `MINT_FAILURE_WINDOW_MS`. A single
+   *  transient failure (a 429 during a Render cold start, a network blip) must never
+   *  permanently kill live calls for every later judge -- `mint_error` only latches into
+   *  `live_override` once this reaches `MINT_FAILURE_LATCH_THRESHOLD`, and any successful
+   *  connect (`recordMintSuccess`) clears it back to empty. Not used for
+   *  `credits_exhausted`, which is an unambiguous signal and still latches immediately. */
+  mint_failures: number[];
 }
 
 export function newCapsState(): CapsState {
-  return { active: new Map(), daily: { day: '', count: 0 }, mints: [], killed: false, live_override: null };
+  return {
+    active: new Map(),
+    daily: { day: '', count: 0 },
+    mints: [],
+    killed: false,
+    live_override: null,
+    mint_failures: [],
+  };
 }
 
 export type CapDecisionReason =
@@ -65,13 +82,68 @@ export function canStartSession(state: CapsState, cfg: ServerConfig, now: number
   return { ok: true };
 }
 
+/** How long a run of generic mint/connect failures stays "live" for the streak below
+ *  before pruning -- review fix (2026-09-11): "3 consecutive classified failures inside
+ *  10 minutes" per the reviewer's own wording. */
+const MINT_FAILURE_WINDOW_MS = 10 * 60 * 1000;
+
+/** How many classified generic failures inside the window above are required before
+ *  `mint_error` actually latches into `state.live_override`. Below this, a failure is
+ *  recorded (so it still counts toward a later one reaching the threshold) but reported
+ *  availability is unaffected -- a single blip, or even two, must never take live calls
+ *  down for a stranger-judge. */
+const MINT_FAILURE_LATCH_THRESHOLD = 3;
+
 /** Latches a real AssemblyAI failure into `state.live_override` -- called from index.ts's
  *  `PendingAaiSocket` catch handler with whatever `classifyMintFailure` +
- *  `isCreditsExhaustedError` (live_calls.ts) decided. `credits_exhausted` is sticky against
- *  a later `mint_error` (see `CapsState.live_override` doc comment). */
-export function markLiveCallsUnavailable(state: CapsState, reason: 'credits_exhausted' | 'mint_error'): void {
-  if (state.live_override === 'credits_exhausted') return;
-  state.live_override = reason;
+ *  `isCreditsExhaustedError` (live_calls.ts) decided, and the time of the failure (so the
+ *  streak below can be windowed).
+ *
+ *  `credits_exhausted` is an unambiguous signal (a real 402 or a credit/quota/insufficient/
+ *  billing keyword) -- it latches IMMEDIATELY, on the first occurrence, same as before, and
+ *  stays sticky against a later `mint_error` (see `CapsState.live_override` doc comment).
+ *
+ *  `mint_error` is NOT immediate (review fix, CRITICAL finding 2026-09-11): it only
+ *  latches once `MINT_FAILURE_LATCH_THRESHOLD` classified failures land inside
+ *  `MINT_FAILURE_WINDOW_MS` of each other, with no successful connect in between
+ *  (`recordMintSuccess` clears the streak). This is what stops a single transient 429
+ *  (a Render cold start, a network blip) from permanently killing live calls for every
+ *  judge until a redeploy. */
+export function markLiveCallsUnavailable(state: CapsState, reason: 'credits_exhausted' | 'mint_error', now: number): void {
+  if (reason === 'credits_exhausted') {
+    state.live_override = 'credits_exhausted';
+    return;
+  }
+  if (state.live_override === 'credits_exhausted') return; // sticky, see doc comment above
+  const windowStart = now - MINT_FAILURE_WINDOW_MS;
+  state.mint_failures = state.mint_failures.filter((t) => t > windowStart);
+  state.mint_failures.push(now);
+  if (state.mint_failures.length >= MINT_FAILURE_LATCH_THRESHOLD) {
+    state.live_override = 'mint_error';
+  }
+}
+
+/** Called from index.ts's `PendingAaiSocket` on a successful connect -- breaks the
+ *  `mint_error` failure streak above so an intermittent failure that keeps getting
+ *  interrupted by real successes never accumulates toward the latch threshold. Does NOT
+ *  clear an already-latched `live_override` -- once `mint_error` (or `credits_exhausted`)
+ *  has actually latched, only `resetLiveCallsOverride` (the founder's admin action) or a
+ *  restart clears it; a later lucky connect is not proof the underlying account issue
+ *  is resolved. */
+export function recordMintSuccess(state: CapsState): void {
+  state.mint_failures = [];
+}
+
+/** The founder's manual reset (review fix 2026-09-11, part c): there was no runtime path
+ *  at all that could un-latch `live_override` -- `state.killed` (the kill switch's own
+ *  runtime flag) is likewise never set by any existing route either, only read; the kill
+ *  switch itself is a redeploy-only env var (`cfg.kill_switch`). This is called by
+ *  POST /api/admin/live-calls/reset (http.ts), guarded by `cfg.admin_token` the same way
+ *  the kill switch is guarded by its own env var: nothing happens unless an operator
+ *  explicitly set one. */
+export function resetLiveCallsOverride(state: CapsState): void {
+  state.live_override = null;
+  state.mint_failures = [];
 }
 
 /** The one place /health and /api/session/start both read to build their `live_calls`

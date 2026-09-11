@@ -27,6 +27,14 @@ export interface ServerConfig {
    *  path on demand. Optional so existing hand-built `ServerConfig` test fixtures that
    *  predate this field keep compiling unchanged; `loadConfig` always sets it. */
   live_disabled?: 'credits' | null;
+  /** Review fix (2026-09-11, part c of the credits-exhausted review): gates
+   *  POST /api/admin/live-calls/reset (http.ts), the founder's manual way to clear a
+   *  latched `live_override` (caps.ts). `null` (unset/empty, the default) disables the
+   *  route entirely -- same "opt-in only" shape as `kill_switch`'s own env var: nothing
+   *  happens unless an operator explicitly sets one. Optional so existing hand-built
+   *  `ServerConfig` test fixtures that predate this field keep compiling unchanged;
+   *  `loadConfig` always sets it. */
+  admin_token?: string | null;
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -69,5 +77,6 @@ export function loadConfig(env: Record<string, string | undefined>): ServerConfi
     trust_proxy: env.COUNTERSIGN_TRUST_PROXY === '1',
     browser_grace_ms: intFromEnv(env.COUNTERSIGN_BROWSER_GRACE_MS, 20000),
     live_disabled: env.COUNTERSIGN_LIVE_DISABLED === 'credits' ? 'credits' : null,
+    admin_token: env.COUNTERSIGN_ADMIN_TOKEN && env.COUNTERSIGN_ADMIN_TOKEN.length > 0 ? env.COUNTERSIGN_ADMIN_TOKEN : null,
   };
 }

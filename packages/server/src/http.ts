@@ -1,6 +1,14 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { ServerConfig } from './config.js';
-import { newCapsState, canStartSession, startSession, computeLiveCallsStatus, type CapsState, type CapDecisionReason } from './caps.js';
+import {
+  newCapsState,
+  canStartSession,
+  startSession,
+  computeLiveCallsStatus,
+  resetLiveCallsOverride,
+  type CapsState,
+  type CapDecisionReason,
+} from './caps.js';
 import { defaultCorpusDir, listCorpusFiles, loadCorpusFile } from './replay.js';
 import type { StaticServer } from './static.js';
 import { isAllowedOrigin } from './origin.js';
@@ -374,6 +382,30 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
         return;
       }
       sendJson(res, 200, { ok: true, accepted: result.accepted });
+      return;
+    }
+
+    // Review fix (2026-09-11, part c of the credits-exhausted review): the founder needs a
+    // runtime way to clear a latched `live_override` (caps.ts) -- there was none at all
+    // (state.killed is likewise never set by any existing route, only read; the kill
+    // switch itself is a redeploy-only env var). Guarded the same way: the route is
+    // completely absent (404, not just unauthorized -- doesn't even reveal it exists)
+    // unless an operator has explicitly set COUNTERSIGN_ADMIN_TOKEN, and even then requires
+    // that exact token as a bearer credential. Never scoped to a session id like
+    // /reset above -- this clears a PROCESS-WIDE latch, not one call.
+    if (req.method === 'POST' && path === '/api/admin/live-calls/reset') {
+      if (!cfg.admin_token) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      const authHeader = req.headers.authorization;
+      if (authHeader !== `Bearer ${cfg.admin_token}`) {
+        sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
+      resetLiveCallsOverride(state);
+      res.writeHead(204);
+      res.end();
       return;
     }
 
