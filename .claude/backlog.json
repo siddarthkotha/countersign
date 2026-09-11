@@ -37,10 +37,11 @@
    "id": "judge-sim-preload",
    "title": "judge-sim persona preload (build Sep 12, not before)",
    "files": [],
-   "status": "held",
-   "held_because": "founder 2026-09-09: not sure we are ready; build-on-first-use Sep 12 stands",
+   "status": "done",
+   "held_because": "",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "2026-09-11T20:59:44.965Z",
+   "lane_note": "~/.claude/agents/judge-sim.md written 4:01 PM (156 lines, sonnet, memory: user, rubric anchors checked; Friday dates corrected to the clock)"
   },
   {
    "id": "latency-table",
@@ -711,11 +712,11 @@
    "id": "CRIT-ui-jargon",
    "title": "critique 2026-09-09: SSO, SIEM, IdP, CTF, PCM16, keyterms unexplained in judge-facing copy",
    "files": [],
-   "status": "held",
-   "held_because": "proposal ready 2026-09-11 3:29 PM at scratchpad/ui-jargon-proposal.md (16 must-change, 7 borderline, 27 leave); founder reacts to the top ten; note: rewrite #2 would drop the LAW 4 phrase hash-chained evidence export, keep the phrase and define it instead",
+   "status": "done",
+   "held_because": "",
    "agent_id": "",
-   "started_at": "2026-09-11T20:28:20.572Z",
-   "lane_note": "launched 2026-09-11 3:30 PM CDT; worktree for code/docs lanes, read-only for CRIT triage"
+   "started_at": "2026-09-11T20:59:44.965Z",
+   "lane_note": "landed on main 1dbdf2e 4:03 PM (16 Group A rewrites; orchestrator rebased, resolved 3 README conflicts keeping the keyterms list literal, self-reviewed the 3 UI strings); NOT pushed"
   },
   {
    "id": "CRIT-greeting-latency",
@@ -1081,10 +1082,11 @@
     "packages/server/src/index.ts",
     "packages/web/src/components/CallView.tsx"
    ],
-   "status": "held",
-   "held_because": "founder product decision 2026-09-11; recommendation: greet first, one line, then one live run to prove it (about 1 minute of credits)",
+   "status": "done",
+   "held_because": "",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "2026-09-11T20:59:44.965Z",
+   "lane_note": "PROVEN LIVE 4:37 PM on deploy 11: honest scenario STAGE, wall 125.8 s, agent's first line is the exact greeting at 5977 ms; report scripts/rehearse/reports/2026-09-11T16-35-23-scenario-a-dana-legitimate.md; ~2.1 min credits (ESTIMATE, harness meter)"
   },
   {
    "id": "CHALLENGE-SPEAKABLE-review",
@@ -1102,7 +1104,7 @@
     "packages/server/src/call/prompt.ts"
    ],
    "status": "held",
-   "held_because": "founder decision after CHALLENGE-SPEAKABLE lands: the live voice path is the one that failed three times on Sep 3; a flip needs credits for rehearsal proof",
+   "held_because": "orchestrator recommendation 3:58 PM: NOT now; revisit only if the judge sim flags question phrasing. Founder asked to simplify; this is the simplified call",
    "agent_id": "",
    "started_at": ""
   },
@@ -1123,10 +1125,11 @@
    "files": [
     "packages/engine/corpus"
    ],
-   "status": "held",
-   "held_because": "corpus additions take the founder corpus gate (precedent 2026-09-09 7:01 PM); it is a hand-built fixture, not a live recording, and the file must say so",
+   "status": "done",
+   "held_because": "",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "",
+   "lane_note": "founder yes 4:05 PM; landed 8fb492c labeled hand-built; in push 10"
   },
   {
    "id": "SEED-THIN-IDENTITIES",
@@ -1134,10 +1137,152 @@
    "files": [
     "packages/engine/src/seed/meridian.ts"
    ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-11T20:59:44.965Z",
+   "lane_note": "landed on main 7a2a95c 4:22 PM after review PASS; gate 1094/1094, typecheck clean; NOT pushed"
+  },
+  {
+   "id": "JUDGE-SIM-RUN-1",
+   "title": "first weekly judge simulation against the deployed site (report docs/JUDGE-SIM-2026-09-11.md)",
+   "files": [
+    "docs"
+   ],
    "status": "held",
-   "held_because": "not reachable today (a request without a beneficiary never reaches CHALLENGE); founder decides whether to add two facts each before the judge sim asks off-script",
+   "held_because": "no Chrome browser connected to the session at 4:37 PM; founder must open Chrome with the Claude extension, then 'retry sim' resumes the same agent (a65676c1cd6db5939); agent correctly refused a fabricated walk",
+   "agent_id": "a65676c1cd6db5939",
+   "started_at": "2026-09-11T21:36:27.615Z",
+   "lane_note": "launched 4:37 PM against deploy 11 (229b8b7)"
+  },
+  {
+   "id": "GREET-NO-DOUBLE",
+   "title": "engine GREET goal must not re-greet after the fixed audio greeting (fsm.ts ~259, prompt.ts GREET case)",
+   "files": [
+    "packages/engine/src/fsm.ts",
+    "packages/server/src/call/prompt.ts"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-11T21:19:46.712Z",
+   "lane_note": "landed on main 229b8b7 4:23 PM (orchestrator self-reviewed the text diff); in push 11"
+  },
+  {
+   "id": "GREETING-review",
+   "title": "review of e200f20",
+   "files": [],
+   "status": "done",
+   "agent_id": "(launched 4:19 PM)",
+   "started_at": "2026-09-11T21:19:46.712Z",
+   "lane_note": "PASS 4:20 PM; resume never resends greeting; no later session.update carries greeting; live proof call judged safe"
+  },
+  {
+   "id": "SEED-review",
+   "title": "review of e2e0434",
+   "files": [],
+   "status": "done",
+   "agent_id": "(launched 4:19 PM)",
+   "started_at": "2026-09-11T21:19:46.712Z",
+   "lane_note": "PASS 4:21 PM; all tokens required for a match; scope gate holds"
+  },
+  {
+   "id": "push-10",
+   "title": "push 10: 8c3f6f2..8fb492c (9 commits: em-dashes, RT-9b, README numbers, speakable, guard test, jargon, corpus)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-11T21:19:46.712Z",
+   "lane_note": "pushed 4:06 PM on the founder word 'push'; gate 1084/1084, typecheck clean; deploy verification pending"
+  },
+  {
+   "id": "CREDITS-EXHAUSTED-MODE",
+   "title": "credits-exhausted replay mode (CLAUDE.md submission requirement); reviewer found no implementation 4:20 PM; lane investigates then builds",
+   "files": [
+    "packages/server/src",
+    "packages/web/src"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-11T21:21:39.215Z",
+   "lane_note": "confirmed missing, built ce6baa5 (live_calls.ts, caps, /health live_calls field, Landing banner + replay-first); 1107/1107 in lane; review running 4:34 PM; UNKNOWN: AssemblyAI's real error shape on exhausted credits; review FAIL, fix round sent back to the build lane 4:36 PM (402 only + keyword, 3-strike cool-down, admin reset, 401/403 -> mint_error); fix round bd22f38 4:50 PM (402/keyword only, 3-in-10-min counter for mint_error, admin reset behind COUNTERSIGN_ADMIN_TOKEN); 1118/1118 in lane; re-review running; landed on main 9e4bf28 + a9618f2 4:53 PM (orchestrator resolved one import conflict with the greeting commit); gate 1130/1130, typecheck clean; push 12"
+  },
+  {
+   "id": "push-11",
+   "title": "push 11: 8fb492c..229b8b7 (greeting, seed facts, GREET no-double)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-11T21:32:43.640Z",
+   "lane_note": "pushed 4:23 PM; gate 1096/1096, typecheck clean; deploy verification in the background chain; DEPLOY 11 VERIFIED 4:33 PM (/version 229b8b7, health ok)"
+  },
+  {
+   "id": "CREDITS-review",
+   "title": "review of ce6baa5 (misclassification of 401, latch semantics, cold start)",
+   "files": [],
+   "status": "done",
+   "agent_id": "ac5e726474c8a9a4c",
+   "started_at": "2026-09-11T21:33:49.948Z",
+   "lane_note": "FAIL 4:35 PM: Critical permanent latch on a transient 429 (no reset path); Important 401/403 shown as credits exhausted; cold start, caps, replay, hygiene PASS; 1107/1107"
+  },
+  {
+   "id": "HARNESS-REPORT-GREETING",
+   "title": "rehearsal report prints 'Ready to first agent audio: n/a' now that the agent speaks first; teach the report generator the greeting-first ordering",
+   "files": [
+    "scripts/rehearse"
+   ],
+   "status": "held",
+   "held_because": "cosmetic; batch with the next harness lane",
    "agent_id": "",
    "started_at": ""
+  },
+  {
+   "id": "POST-VERDICT-TAIL",
+   "title": "live proof call 4:35 PM: STAGE at 75 s, then 47 s of the agent asking for an 'authorization code' (forbidden) and 'Authority is not verification' before goodbye; wall 125.8 s vs 74-92 s Wednesday",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-11T21:37:15.948Z",
+   "lane_note": "4:42 PM: not a regression (SEALED/CLOSE path byte-identical 8c3f6f2..229b8b7); recurrence of the Sep 3 'authorization code' model failure; CLOSE rendered through the unconstrained default branch; server never hangs up on SEALED; Wednesday also had a 35-45 s goodbye tail"
+  },
+  {
+   "id": "CLOSE-VERBATIM-HANGUP",
+   "title": "engine composes the exact close sentence per outcome, prompt renders CLOSE verbatim like READBACK, server ends the call after the close line's reply.done (+grace) or 15 s after SEALED",
+   "files": [
+    "packages/engine/src/fsm.ts",
+    "packages/server/src/call/prompt.ts",
+    "packages/server/src/call/session.ts",
+    "scripts/rehearse"
+   ],
+   "status": "running",
+   "agent_id": "(launched 4:43 PM)",
+   "started_at": "2026-09-11T21:42:56.473Z"
+  },
+  {
+   "id": "CREDITS-rereview",
+   "title": "scoped re-review of bd22f38 (findings closed, admin route closed without token, no secret in diff)",
+   "files": [],
+   "status": "done",
+   "agent_id": "(launched 4:51 PM)",
+   "started_at": "2026-09-11T21:50:47.653Z",
+   "lane_note": "PASS 4:52 PM; admin route 404s without token; deterministic counter tests; 1118/1118"
+  },
+  {
+   "id": "RENDER-ADMIN-TOKEN",
+   "title": "set COUNTERSIGN_ADMIN_TOKEN in Render's secret store so the live-calls reset route works in production",
+   "files": [],
+   "status": "held",
+   "held_because": "deploy secret store is the founder's (or needs his Render access); the route is disabled without it, which is safe",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "push-12",
+   "title": "push 12: 229b8b7..a9618f2 (credits-exhausted replay mode + fix round)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-11T21:54:24.357Z",
+   "lane_note": "pushed 4:54 PM; gate 1130/1130 + typecheck clean; deploy verification pending"
   }
  ]
 }
