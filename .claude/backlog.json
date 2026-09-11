@@ -608,12 +608,13 @@
    "files": [
     "packages/engine/src/challenges.ts"
    ],
-   "status": "held",
+   "status": "done",
    "held_because": "follow-up after the challenges lane lands; not a founder decision",
    "agent_id": "",
-   "started_at": "",
+   "started_at": "2026-09-11T20:28:20.572Z",
    "id": "CHALLENGE-SPEAKABLE",
-   "title": "have the engine compose speakable challenge questions so exact-words can return"
+   "title": "have the engine compose speakable challenge questions so exact-words can return",
+   "lane_note": "landed on main 0d40bde 3:42 PM after review PASS (live path inert, confirmed at prompt.ts:104); gate 1064/1064, typecheck clean; NOT pushed"
   },
   {
    "id": "REH-A-RERUN",
@@ -682,10 +683,11 @@
    "id": "CRIT-one-word-stall",
    "title": "critique 2026-09-09: brief one-word answers could hold CHALLENGE/CONSISTENCY_CHECK indefinitely with no forced terminal verdict (check against the timeout-incident lane)",
    "files": [],
-   "status": "held",
+   "status": "done",
    "held_because": "new from the external critique; triage with the founder",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "2026-09-11T20:28:20.572Z",
+   "lane_note": "CLOSED 2026-09-11 3:32 PM by read-only investigation: max_challenges=3 (meridian.ts:119) + rules rows 4/12/13 force ESCALATE without any cap or row 14 (scratch replay: ESCALATE, tally 1.5; rules.test.ts:232). Latent gap: a seed too thin to exhaust the budget would loop on the filler goal; guard test lane SEED-BUDGET-GUARD launched"
   },
   {
    "id": "CRIT-reconnect-dup-events",
@@ -710,18 +712,20 @@
    "title": "critique 2026-09-09: SSO, SIEM, IdP, CTF, PCM16, keyterms unexplained in judge-facing copy",
    "files": [],
    "status": "held",
-   "held_because": "new from the external critique; triage with the founder",
+   "held_because": "proposal ready 2026-09-11 3:29 PM at scratchpad/ui-jargon-proposal.md (16 must-change, 7 borderline, 27 leave); founder reacts to the top ten; note: rewrite #2 would drop the LAW 4 phrase hash-chained evidence export, keep the phrase and define it instead",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "2026-09-11T20:28:20.572Z",
+   "lane_note": "launched 2026-09-11 3:30 PM CDT; worktree for code/docs lanes, read-only for CRIT triage"
   },
   {
    "id": "CRIT-greeting-latency",
    "title": "critique 2026-09-09: one rehearsal showed about 15 s silence before greeting; needs a real p50/p95 (ties to latency-table)",
    "files": [],
-   "status": "held",
-   "held_because": "new from the external critique; triage with the founder",
+   "status": "done",
+   "held_because": "",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "2026-09-11T20:28:20.572Z",
+   "lane_note": "CLOSED as a harness artifact 2026-09-11 3:34 PM; the real question became GREETING-FIRST"
   },
   {
    "id": "CRIT-model-ids",
@@ -909,10 +913,11 @@
    "files": [
     "packages/engine/src/challenges.ts"
    ],
-   "status": "held",
+   "status": "done",
    "held_because": "not audible, not on the demo path; queue after tonight's push",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "2026-09-11T20:28:20.572Z",
+   "lane_note": "landed on main 49ec21d 3:35 PM after review PASS; gate on main 1053/1053, typecheck clean; NOT pushed"
   },
   {
    "id": "FIX-FSM-ERRORED-ACTION",
@@ -1005,10 +1010,11 @@
    "files": [
     "README.md"
    ],
-   "status": "held",
+   "status": "done",
    "held_because": "pre-flip item; batch with docs/PREFLIP_CHECKLIST.md",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "2026-09-11T20:28:20.572Z",
+   "lane_note": "landed on main 6d2f7a3 (cherry-pick of 43711d8) 2026-09-11 3:31 PM; zero em-dashes; 1051/1051 in lane; orchestrator self-reviewed the word diff; NOT pushed"
   },
   {
    "id": "PUSH-8",
@@ -1027,6 +1033,111 @@
    "held_because": "",
    "agent_id": "",
    "started_at": "2026-09-09T20:25-05:00"
+  },
+  {
+   "id": "LAT-SPLIT",
+   "title": "split the 17 s ready-to-first-audio wait into caller/model/TTS segments from the Sep 9 bundles (read-only)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-11T20:31:29.056Z",
+   "lane_note": "3:34 PM: 95-99% of the 17 s is the harness caller pacing+speaking (caller speaks first by design); agent reply-start to first audio 1-150 ms across 3 runs; scratchpad/greeting-latency-split.md"
+  },
+  {
+   "id": "README-NUMBERS",
+   "title": "README stale numbers vs repo (18-transcript corpus is 19, test totals, row counts)",
+   "files": [
+    "README.md"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-11T20:31:29.057Z",
+   "lane_note": "landed b7e79d9 3:37 PM (4 numbers: tests, twelve checklist items PROVEN in types.ts, corpus 19 x2); orchestrator resolved one conflict and set the test count to 1053 for main 49ec21d; lane saw one Replay.test.tsx flake, not reproduced in 3 web-package runs (201/201 each)"
+  },
+  {
+   "id": "RT-9b-review",
+   "title": "review of 4933abb (RT-9b escrow grading) before cherry-pick to main",
+   "files": [],
+   "status": "done",
+   "agent_id": "(launched 3:32 PM)",
+   "started_at": "2026-09-11T20:31:55.026Z",
+   "lane_note": "PASS 3:34 PM; minor pre-existing: escrow and beneficiary branches fail-safe by two different mechanisms, institution name itself never graded"
+  },
+  {
+   "id": "SEED-BUDGET-GUARD",
+   "title": "seed invariant test: every claimable identity has >= max_challenges distinct challenges; corpus file for three one-word answers -> ESCALATE",
+   "files": [
+    "packages/engine/test"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-11T20:33:00.850Z",
+   "lane_note": "test file landed on main 1c47e13 3:43 PM (13 tests; all 4 identities x 3 shapes hold); corpus file held"
+  },
+  {
+   "id": "GREETING-FIRST",
+   "title": "agent never speaks first (greeting unset by design); a judge hears silence after Start Call. Decide: agent greets first, or on-screen speak-now cue, or both",
+   "files": [
+    "packages/server/src/index.ts",
+    "packages/web/src/components/CallView.tsx"
+   ],
+   "status": "held",
+   "held_because": "founder product decision 2026-09-11; recommendation: greet first, one line, then one live run to prove it (about 1 minute of credits)",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "CHALLENGE-SPEAKABLE-review",
+   "title": "review of 7415dc3 before cherry-pick",
+   "files": [],
+   "status": "done",
+   "agent_id": "(launched 3:38 PM)",
+   "started_at": "2026-09-11T20:39:03.576Z",
+   "lane_note": "PASS; trap narrowing judged low risk, moot until the verbatim flip"
+  },
+  {
+   "id": "CHALLENGE-VERBATIM-FLIP",
+   "title": "server prompt.ts ASK_CHALLENGE: say the engine-composed question verbatim (activates exact-words); needs one live rehearsal per scenario",
+   "files": [
+    "packages/server/src/call/prompt.ts"
+   ],
+   "status": "held",
+   "held_because": "founder decision after CHALLENGE-SPEAKABLE lands: the live voice path is the one that failed three times on Sep 3; a flip needs credits for rehearsal proof",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "FLAKE-REPLAY-TEST",
+   "title": "Replay.test.tsx flaked once in a docs lane run 3:36 PM; 3 clean web-package runs since",
+   "files": [
+    "packages/web"
+   ],
+   "status": "held",
+   "held_because": "UNKNOWN cause, not reproduced; reopen if CI or any lane sees it again",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "CORPUS-ONE-WORD",
+   "title": "add corpus recording one-word-answers-exhaust-budget.json (ESCALATE, row 13) from lane commit 91de72a on branch worktree-agent-a85ebc34c26f1ae45",
+   "files": [
+    "packages/engine/corpus"
+   ],
+   "status": "held",
+   "held_because": "corpus additions take the founder corpus gate (precedent 2026-09-09 7:01 PM); it is a hand-built fixture, not a live recording, and the file must say so",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "SEED-THIN-IDENTITIES",
+   "title": "marcus-obi and elena-park have zero scoped seed facts; an identity claim with only an amount and no beneficiary would stall them at round 2 (not reachable in any demo flow)",
+   "files": [
+    "packages/engine/src/seed/meridian.ts"
+   ],
+   "status": "held",
+   "held_because": "not reachable today (a request without a beneficiary never reaches CHALLENGE); founder decides whether to add two facts each before the judge sim asks off-script",
+   "agent_id": "",
+   "started_at": ""
   }
  ]
 }

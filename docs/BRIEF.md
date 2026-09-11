@@ -389,6 +389,13 @@ the repo goes public IF any auth/token handling exists.
 4. Alphanumeric/name transcription failure mid-demo → keyterms + echo-confirm pattern +
    fuzzy-matching mock endpoints + never hinging a verdict on one utterance.
 5. Latency dead-air → stalling library + async workers + measured tails + G5.
+   ADDED 2026-09-11 (Day 5 finding, PROVEN from the Sep 9 diagnostics bundles): the agent never
+   speaks first; the connect config leaves `greeting` unset by design (server aai/config.ts). A
+   human who clicks Start Call hears nothing until they talk. The 15 to 17 s "silence before the
+   greeting" in the rehearsal reports was the synthetic caller's own pacing and speech, not agent
+   think-time (agent reply-start to first audio measured 1 to 150 ms, n=3). Open founder decision:
+   let the agent greet first (one line, realistic for a payments desk) or add an on-screen
+   "speak now" cue. Either is a cheap live test.
 6. Solo over-scope → LAW 5 + the weekly plan's one-vertical-slice discipline.
 7. Evidence hallucination → LAW 4 (verbatim substrings only), engine-side consistency
    probes attaching both quotes.
