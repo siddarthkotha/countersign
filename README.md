@@ -26,7 +26,7 @@ gitignored, named here as the source). The fraud path (Scenario B, FREEZE) was p
 commit at 57.4 s (report
 `scripts/rehearse/reports/2026-09-09T20-06-19-scenario-b-miller-fraud.md`). Both paths are
 now proven live on one commit. PROVEN by `npm test` on
-commit `49ec21d`: 1,053 tests pass across 70 files, typecheck is clean, and all 19 recorded call
+commit `1c47e13`: 1,077 tests pass across 71 files, typecheck is clean, and all 19 recorded call
 transcripts replay exactly through the real policy engine. The five-day honest-caller failure
 was a harness bug: the scenario loader dropped the persona field, fixed 2026-09-09 at commit
 `75e31df`. The policy engine itself was never wrong.
