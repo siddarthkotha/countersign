@@ -110,6 +110,42 @@ export const MERIDIAN: SeedConfig = {
       truth: 'Quarterly parts restock', accept_tokens: ['quarterly', 'parts', 'restock'],
       identity_ids: ['dana-whitfield'],
     },
+    // Founder ruling 2026-09-11 (backlog SEED-THIN-IDENTITIES, found by the seed-budget
+    // guard lane -- see packages/engine/test/seed-budget.test.ts): Marcus Obi and Elena
+    // Park had zero scoped seed.knowledge entries, so a bare request naming only an amount
+    // (no beneficiary, no counsel, no escrow) left `selectChallenge` with nothing left to
+    // ask once their one LIVE_COMMITMENT round was spent -- the pool ran dry two challenges
+    // short of the budget. Fix, same shape as Dana's own facts above: two ALL-SYNTHETIC
+    // facts each, scoped to their own identity only, drawn from their own world (Marcus is
+    // Controller/second approver -- vendor onboarding and cost-centre approval are his
+    // job; Elena is the payment desk operator -- purchase orders are her daily work). The
+    // "colleague who covers the desk" fact names Dana Whitfield rather than inventing a new
+    // person: the roster law (2026-09-09, AUTOPILOT_LOG) allows only the four fictional
+    // Meridian Dynamics people as named humans anywhere in this seed.
+    {
+      id: 'marcus_recent_vendor', topic: 'Controller duties',
+      ask: 'Ask which vendor Marcus most recently onboarded for payment.',
+      truth: 'Ridgeline Logistics', accept_tokens: ['ridgeline', 'logistics'],
+      identity_ids: ['marcus-obi'],
+    },
+    {
+      id: 'marcus_cost_centre', topic: 'Controller duties',
+      ask: 'Ask which cost centre Marcus approves treasury payments under.',
+      truth: 'CC-2210', accept_tokens: ['cc', '2210'],
+      identity_ids: ['marcus-obi'],
+    },
+    {
+      id: 'elena_recent_po', topic: 'Payment desk operations',
+      ask: 'Ask for the purchase order number Elena most recently raised.',
+      truth: 'PO-6612', accept_tokens: ['po', '6612'],
+      identity_ids: ['elena-park'],
+    },
+    {
+      id: 'elena_covering_colleague', topic: 'Payment desk operations',
+      ask: 'Ask who covers the payment desk when Elena is out.',
+      truth: 'Dana Whitfield', accept_tokens: ['dana', 'whitfield'],
+      identity_ids: ['elena-park'],
+    },
   ],
   rails: [{ id: 'TREASURY-WIRE', label: 'Treasury wire rail' }],
   second_approver_id: 'marcus-obi',

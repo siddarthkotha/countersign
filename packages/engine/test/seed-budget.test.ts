@@ -80,10 +80,28 @@ function hartwellStyleClaims(identityId: string): Claim[] {
   ];
 }
 
+/** SEED-THIN-IDENTITIES (backlog, found 2026-09-11 by this very guard lane): the leanest
+ *  possible request of all -- an amount and NOTHING else. No beneficiary, no account, no
+ *  approver, no counsel, no escrow -- so TRAP_FACT and RELATIONAL both have no claim to
+ *  work from (both require a beneficiary/counsel/escrow_institution/approver claim) and
+ *  LIVE_COMMITMENT has only the one amount_usd field to restate. Once that single
+ *  LIVE_COMMITMENT round is spent, everything left to fill the budget has to come from
+ *  SEED_FACT -- which is exactly why Marcus Obi and Elena Park having zero scoped
+ *  seed.knowledge entries stalled them two challenges short (see the two new facts each in
+ *  seed/meridian.ts). This shape is not claimed to be reachable through today's FSM/prompt
+ *  path (a request without a beneficiary may never reach CHALLENGE in the live demo) -- it
+ *  is the shape that most sharply isolates the SEED_FACT-only budget, so it is the one this
+ *  guard needs to hold for every identity regardless of whether the UI can currently drive
+ *  a caller into it. */
+function amountOnlyClaims(identityId: string): Claim[] {
+  return [claim('c-id', 'identity', identityId, 0, identityId), claim('c-amount', 'amount_usd', 84_500, 2000, '$84,500')];
+}
+
 const REQUEST_SHAPES: Record<string, (identityId: string) => Claim[]> = {
   'bare request (amount + beneficiary + account only)': bareRequestClaims,
   'Scenario-A/Dana shape (+ named approver)': fullRequestWithApproverClaims,
   'Scenario-B/Miller Hartwell-escrow shape (counsel + escrow, no beneficiary)': hartwellStyleClaims,
+  'amount-only shape (no beneficiary at all)': amountOnlyClaims,
 };
 
 /** Two caller turns strictly after every claim's t_ms=2000 (the LIVE_COMMITMENT age gate,
