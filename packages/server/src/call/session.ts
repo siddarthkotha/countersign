@@ -206,6 +206,71 @@ export class CallSession {
    *  render restarting from an empty `used` set. */
   private readonly usedStalls = new Map<StallKind, Set<string>>();
 
+  /** Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T16-35-23-
+   *  scenario-a-dana-legitimate.md): SEALED (goal CLOSE) used to render a close line the
+   *  model could -- and did -- improvise past, and the server never hung up on its own; only
+   *  the caller, idle timer, cap, or an error ever ended the call. Once the caller
+   *  disconnected 47 seconds of off-goal turns had already played. Two config values, kept
+   *  local to this class (not `config.ts` -- owned by another lane in this worktree split):
+   *  `CLOSE_GRACE_MS` lets the CLOSE line's own audio actually finish flushing to the wire
+   *  before the socket closes; `CLOSE_TIMEOUT_MS` is the hard cap in case `reply.done` for
+   *  the CLOSE goal never arrives at all (a dropped AAI reply, a model that never speaks).
+   *  Both timers funnel into the existing `end()` path -- nothing new about HOW a call ends,
+   *  only WHEN one more automatic trigger fires it. See this task's report for why this is
+   *  wired to `state === 'SEALED'` (STAGE/FREEZE/ESCALATE, the only verdicts CLOSE is ever
+   *  rendered for today) and deliberately NOT to OUT_OF_SCOPE/NO_ACTION -- a judgment call
+   *  flagged for the founder. */
+  private static readonly CLOSE_GRACE_MS = 1500;
+  private static readonly CLOSE_TIMEOUT_MS = 15_000;
+  private closeGraceTimer: ReturnType<typeof setTimeout> | null = null;
+  private closeHardCapTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private clearCloseTimers(): void {
+    if (this.closeGraceTimer) {
+      clearTimeout(this.closeGraceTimer);
+      this.closeGraceTimer = null;
+    }
+    if (this.closeHardCapTimer) {
+      clearTimeout(this.closeHardCapTimer);
+      this.closeHardCapTimer = null;
+    }
+  }
+
+  /** Started the first tick the goal becomes CLOSE (from `applyEvaluate`'s goal-changed
+   *  branch) -- if no `reply.done` for it ever arrives (a dropped reply, a model that never
+   *  speaks), the call still ends rather than sitting open forever. Idempotent: a second
+   *  call while one is already pending is a no-op, so a goal that briefly changes away from
+   *  CLOSE and back (not possible today -- SEALED is a one-way state -- but defensive
+   *  regardless) never stacks timers. */
+  private armCloseHardCap(): void {
+    if (this.closeHardCapTimer || this.ended) return;
+    this.closeHardCapTimer = setTimeout(() => {
+      this.closeHardCapTimer = null;
+      if (!this.ended) this.end('close_timeout');
+    }, CallSession.CLOSE_TIMEOUT_MS);
+    this.closeHardCapTimer.unref?.();
+  }
+
+  /** Fired from `reply.done`, while `this.last` is still the goal that reply was phrased
+   *  for (see `recordGoalCompletionAction`'s own doc comment on that ordering). Any
+   *  `reply.done` for a CLOSE goal -- completed or interrupted -- schedules the hang-up:
+   *  once SEALED, there is nothing left for the model to do, so a caller who talks over the
+   *  close line does not buy the call more time. The short grace period lets the close
+   *  line's own audio frames actually reach the wire before the socket shuts. */
+  private scheduleCloseIfNeeded(): void {
+    if (!this.last || this.last.goal.code !== 'CLOSE') return;
+    if (this.closeGraceTimer || this.ended) return;
+    if (this.closeHardCapTimer) {
+      clearTimeout(this.closeHardCapTimer);
+      this.closeHardCapTimer = null;
+    }
+    this.closeGraceTimer = setTimeout(() => {
+      this.closeGraceTimer = null;
+      if (!this.ended) this.end('agent_closed');
+    }, CallSession.CLOSE_GRACE_MS);
+    this.closeGraceTimer.unref?.();
+  }
+
   constructor(opts: CallSessionOpts) {
     this.opts = opts;
     this.startMs = opts.now();
@@ -239,6 +304,7 @@ export class CallSession {
   end(reason: string): void {
     if (this.ended) return;
     this.ended = true;
+    this.clearCloseTimers();
     // Red team item 4 (founder ruling, 2026-09-09): before anything else about ending the
     // call, record the structured fact that it ended -- LAW 3 forbids the SERVER from
     // deciding what that means (a rejected first attempt at this fix, branch
@@ -522,6 +588,12 @@ export class CallSession {
         this.speaking = false;
         this.recordGoalCompletionAction(evt.status);
         this.diag('reply.done', { status: evt.status });
+        // Bug fix (2026-09-11): `this.last` here is still the goal this reply was phrased
+        // for (recordGoalCompletionAction's own doc comment) -- if it was CLOSE, the call
+        // is done saying what it needs to say and the server hangs up itself. Checked
+        // regardless of `evt.status`: an interrupted close still means nothing more is
+        // owed (see `scheduleCloseIfNeeded`'s own doc comment).
+        this.scheduleCloseIfNeeded();
         if (evt.status === 'interrupted') {
           this.opts.onServerEvent({ type: 'flush' });
           // docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md: "If reply.done.status == 'interrupted'
@@ -881,6 +953,11 @@ export class CallSession {
         t_ms: this.nowT(),
         detail: `goal=${output.goal.code}`,
       });
+      // The hard cap starts the moment CLOSE is first rendered (session.update just sent
+      // it) -- not from `this.last = output` below, which would fire on every tick, and not
+      // from `reply.done`, which is exactly the event this cap exists to cover the absence
+      // of. See `armCloseHardCap`'s own doc comment.
+      if (output.goal.code === 'CLOSE') this.armCloseHardCap();
     }
     this.last = output;
   }

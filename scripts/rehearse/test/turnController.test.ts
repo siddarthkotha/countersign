@@ -3,7 +3,7 @@
 // polling loop against a client whose `latestState()` changes over time.
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
-import { computeTurnGaps, waitForGreeting, waitForVerdict } from '../turnController.js';
+import { computeTurnGaps, scriptedCallerShouldStop, waitForGreeting, waitForVerdict } from '../turnController.js';
 import type { CallClient } from '../wsClient.js';
 import type { ScreenState } from '@countersign/engine';
 
@@ -47,6 +47,7 @@ function fakeState(verdict: ScreenState['verdict']): ScreenState {
 function makeFakeClient(): CallClient & { setState(v: ScreenState['verdict']): void } {
   const startedAt = performance.now();
   let state: ScreenState | null = null;
+  let ended: string | null = null;
   return {
     startedAt,
     send() {},
@@ -59,7 +60,10 @@ function makeFakeClient(): CallClient & { setState(v: ScreenState['verdict']): v
     },
     onEnded() {},
     async waitForEnded() {
-      return null;
+      return ended;
+    },
+    endedReason() {
+      return ended;
     },
     setState(v) {
       state = fakeState(v);
@@ -118,6 +122,29 @@ describe('waitForVerdict', () => {
     const result = await waitForVerdict(client, 100);
     expect(result.reached).toBe(false);
     expect(result.verdict).toBeNull();
+  });
+});
+
+// Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T16-35-23-
+// scenario-a-dana-legitimate.md): the server now hangs up on its own once it reaches SEALED
+// (packages/server/src/call/session.ts's CLOSE grace period/hard cap). A scripted or LLM
+// caller with more turns still queued must notice the call already ended and stop speaking
+// into a dead session -- `runTurns`/`runLlmTurns` call this once per loop iteration.
+describe('scriptedCallerShouldStop', () => {
+  it('does not stop while the call has not ended', () => {
+    expect(scriptedCallerShouldStop(null)).toEqual({ stop: false, warning: null });
+  });
+
+  it('"agent_closed" is the normal, expected end -- stops with no warning', () => {
+    expect(scriptedCallerShouldStop('agent_closed')).toEqual({ stop: true, warning: null });
+  });
+
+  it('any other end reason mid-script still stops the caller, but with a warning naming the reason', () => {
+    for (const reason of ['idle_timeout', 'cap_reached', 'caller_ended', 'close_timeout']) {
+      const result = scriptedCallerShouldStop(reason);
+      expect(result.stop).toBe(true);
+      expect(result.warning).toContain(reason);
+    }
   });
 });
 

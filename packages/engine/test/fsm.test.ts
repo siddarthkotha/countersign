@@ -368,3 +368,69 @@ describe('deriveState -- an errored seal_evidence_record result never seals the 
     expect(deriveState(FREEZE_DECISION, [], tools)).toBe('SEALED');
   });
 });
+
+// ---------------------------------------------------------------------------------------
+// Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T16-35-23-
+// scenario-a-dana-legitimate.md): the SEALED goal used to hand the model one generic prose
+// hint for every outcome ("Close the call politely; the hash-chained evidence export is
+// complete."), with nothing telling it to say only that -- the model improvised three
+// off-goal turns over 47 seconds before ever saying something close-shaped. `phrasingGoal`'s
+// SEALED branch now composes the exact, ready-to-speak close sentence itself, per verdict.
+describe('phrasingGoal -- SEALED composes an exact, ready-to-speak close sentence per outcome', () => {
+  function sealedGoal(verdict: Verdict) {
+    return phrasingGoal({
+      state: 'SEALED',
+      decideResult: { ...stubDecideResult(0), verdict },
+      evidence: [],
+      ledger: [],
+      seed: MERIDIAN,
+      tools: [],
+      actions: [],
+      nextChallenge: null,
+    });
+  }
+
+  const BANNED = ['immutable', 'sealed', 'cryptographically guaranteed', 'detect', 'deepfake', 'clone', 'biometric'];
+
+  function assertHonestAndShort(hint: string) {
+    const words = hint.trim().split(/\s+/);
+    expect(words.length).toBeLessThan(25);
+    const lower = hint.toLowerCase();
+    for (const word of BANNED) expect(lower).not.toContain(word);
+    expect(hint).not.toContain('—'); // no em-dashes in spoken lines
+  }
+
+  it('STAGE: names the staging/second-approval outcome, nothing released, evidence complete', () => {
+    const out = sealedGoal('STAGE');
+    expect(out.code).toBe('CLOSE');
+    expect(out.hint).toBe('Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.');
+    assertHonestAndShort(out.hint);
+  });
+
+  it('FREEZE: names the freeze and the incident, nothing moved -- no detection language', () => {
+    const out = sealedGoal('FREEZE');
+    expect(out.code).toBe('CLOSE');
+    expect(out.hint).toBe('This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.');
+    assertHonestAndShort(out.hint);
+  });
+
+  it('ESCALATE: says voice cannot complete this and a human callback will follow', () => {
+    const out = sealedGoal('ESCALATE');
+    expect(out.code).toBe('CLOSE');
+    expect(out.hint).toBe('This cannot be completed by voice. A callback on the registered number will follow. Goodbye.');
+    assertHonestAndShort(out.hint);
+  });
+
+  it('NO_ACTION (or any other verdict SEALED is never actually reached with): a short polite goodbye', () => {
+    const out = sealedGoal('NO_ACTION');
+    expect(out.code).toBe('CLOSE');
+    expect(out.hint).toBe('Thank you for calling. Goodbye.');
+    assertHonestAndShort(out.hint);
+  });
+
+  it('every close sentence is a statement, never a question -- nothing left for the model to ask', () => {
+    for (const verdict of ['STAGE', 'FREEZE', 'ESCALATE', 'NO_ACTION'] as Verdict[]) {
+      expect(sealedGoal(verdict).hint).not.toContain('?');
+    }
+  });
+});

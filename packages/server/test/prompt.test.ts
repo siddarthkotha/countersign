@@ -249,6 +249,23 @@ describe('renderPrompt', () => {
     expect(prompt).not.toContain('and ask if that is correct');
   });
 
+  // Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T16-35-23-
+  // scenario-a-dana-legitimate.md): CLOSE used to fall through to the unconstrained
+  // `default` branch, which relayed `goal.hint` as a loose instruction with nothing telling
+  // the model to say only that and stop -- the model improvised three off-goal turns for 47
+  // seconds before ever saying something close-shaped. fsm.ts now composes the exact,
+  // ready-to-speak close sentence into `goal.hint`; prompt.ts's job is only to relay it
+  // verbatim, the same treatment READBACK already gets.
+  it('CLOSE says the engine-composed close sentence verbatim, wrapped in "say exactly", and carries no instruction to ask anything', () => {
+    const say = 'Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.';
+    const prompt = renderPrompt(baseGoal('CLOSE', { hint: say }), makeCtx());
+    // The "Now" section (after the standing rules) is exactly the verbatim wrapper -- no
+    // extra sentence, question, or instruction to ask anything appended around it.
+    const nowSection = prompt.split('\n\n').at(-1);
+    expect(nowSection).toBe(`Say exactly this and nothing else: "${say}"`);
+    expect(say).not.toContain('?');
+  });
+
   describe('STALL', () => {
     it('picks a stalling line from the library matching ctx.stall_kind (not the hint -- fix round 1, finding 2)', () => {
       const promptGeneric = renderPrompt(baseGoal('STALL'), makeCtx({ stall_kind: 'generic' }));

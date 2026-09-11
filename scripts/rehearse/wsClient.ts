@@ -53,6 +53,15 @@ export interface CallClient {
   latestState(): ScreenState | null;
   onEnded(cb: (reason: string) => void): void;
   waitForEnded(timeoutMs: number): Promise<string | null>;
+  /** Bug fix (2026-09-11): the server can now end a call on its own once it reaches SEALED
+   *  (packages/server/src/call/session.ts's CLOSE grace period/hard cap, reason
+   *  "agent_closed" or "close_timeout") -- a scripted caller with more turns still queued
+   *  must notice this and stop speaking into a dead session rather than run every remaining
+   *  turn into a closed socket. Synchronous (unlike `waitForEnded`/`onEnded`, both async) so
+   *  a turn loop can check it once per iteration with no await. Returns the same reason
+   *  `onEnded`/`waitForEnded` already deliver -- one more accessor onto the same fact,
+   *  never a second source of truth. */
+  endedReason(): string | null;
 }
 
 export interface MintResult {
@@ -169,6 +178,9 @@ export async function connectCall(baseUrl: string, wsPath: string): Promise<Call
     onEnded(cb) {
       endedCb = cb;
       if (endedReason !== null) cb(endedReason);
+    },
+    endedReason() {
+      return endedReason;
     },
     async waitForEnded(timeoutMs: number): Promise<string | null> {
       if (endedReason !== null) return endedReason;

@@ -187,6 +187,36 @@ function readbackSentence(field: ClaimField, claim: Claim): string {
   }
 }
 
+/** Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T16-35-23-
+ *  scenario-a-dana-legitimate.md): the SEALED goal used to hand the model a bare PROSE
+ *  instruction ("Close the call politely; the hash-chained evidence export is complete."),
+ *  the same class of bug READBACK/ASK_CHALLENGE already had fixed on 2026-09-03 (see
+ *  `readbackSentence` above) -- the model filled the gap with three improvised, off-goal
+ *  turns ("Please state the authorization code", ...) over 47 seconds before ever saying
+ *  something close-shaped. `phrasingGoal`'s SEALED branch now composes the exact,
+ *  ready-to-speak close sentence itself, one per outcome, and hands it to prompt.ts's CLOSE
+ *  case the same "say exactly this and nothing else" way READBACK's sentence is relayed.
+ *  Each sentence is honest (LAW 1: no detection language), names no forbidden word for the
+ *  evidence record (LAW 4: never "immutable"/"sealed"/"cryptographically guaranteed" in
+ *  speech), and stays under 25 words. `state === 'SEALED'` is only ever reached for a
+ *  STAGE/FREEZE/ESCALATE verdict (deriveState checks NO_ACTION first, line 96, and
+ *  `requiredActions`/`ACTION_ALLOWLIST` only ever add `seal_evidence_record` for those three
+ *  -- see this task's report for why NO_ACTION's own close line, kept below for
+ *  completeness and for whichever future lane wires OUT_OF_SCOPE's own close, is never
+ *  actually selected via this branch today). */
+function closeSentence(verdict: Verdict): string {
+  switch (verdict) {
+    case 'STAGE':
+      return 'Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.';
+    case 'FREEZE':
+      return 'This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.';
+    case 'ESCALATE':
+      return 'This cannot be completed by voice. A callback on the registered number will follow. Goodbye.';
+    default:
+      return 'Thank you for calling. Goodbye.';
+  }
+}
+
 /** seed keyterms + every proper noun/amount the caller has stated, fed to `session.update`
  *  as listening vocabulary. For an amount, BOTH forms go in -- the caller's verbatim quote
  *  (e.g. "$1.8 million" or "one point eight million") and the normalized display string
@@ -252,7 +282,7 @@ export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
   }
 
   if (state === 'SEALED') {
-    return goal('CLOSE', 'Close the call politely; the hash-chained evidence export is complete.', keyterms, patient);
+    return goal('CLOSE', closeSentence(decideResult.verdict), keyterms, patient);
   }
 
   if (state === 'INTAKE') {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { MERIDIAN, mockToolResult } from '@countersign/engine';
 import type { AgentAction, CallContext, ServerEvent, ToolLogEntry } from '@countersign/engine';
@@ -724,5 +724,188 @@ describe('CallSession — end() reaches the engine\'s call-ended row (RT-4)', ()
     const source = readFileSync(new URL('../src/ws/browser.ts', import.meta.url), 'utf8');
     const endCallCalls = source.match(/entry\.session\.end\(/g) ?? [];
     expect(endCallCalls.length).toBeGreaterThanOrEqual(2); // caller hangup + endCall (reaper/cap)
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T16-35-23-
+// scenario-a-dana-legitimate.md): after the engine reached STAGE and SEALED, the server
+// never hung up on its own -- the model improvised three off-goal turns for 47 seconds
+// before ever saying something close-shaped, and the call sat open until the caller/idle
+// timer/cap ended it. `CallSession` now ends itself: a short grace period after the CLOSE
+// reply's `reply.done` (so the close line's own audio has time to reach the wire), and a
+// 15-second hard cap in case `reply.done` for CLOSE never arrives at all. Both funnel
+// through the existing `end()` path.
+describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the call itself after SEALED', () => {
+  /** Replays Scenario A's c1..c5 (the same live-driven path session.test.ts's own Scenario A
+   *  describe block above proves reaches STAGE/SEALED) far enough that `session.last.state`
+   *  is 'SEALED' and `session.last.goal.code` is 'CLOSE' -- the exact shape this fix reacts
+   *  to. Kept local to this describe block (not shared with the Scenario A test above, which
+   *  asserts on its own ledger/challenge detail) since here only the terminal shape matters. */
+  function driveToSealedStage(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
+    clock.now = 1000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c1',
+      text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
+    });
+    clock.now = 1500;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'a1',
+      text: 'You are requesting a wire transfer of $84,500 to Northgate Partners. Is that correct?',
+      reply_id: 'a1',
+      interrupted: false,
+    });
+    clock.now = 2000;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    clock.now = 2500;
+    aai.emit({ type: 'transcript.user', item_id: 'c2', text: "No, that's wrong. It's Meridian Supply." });
+    clock.now = 3000;
+    aai.emit({ type: 'reply.started', reply_id: 'a2' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a2', text: session.last!.goal.hint, reply_id: 'a2', interrupted: false });
+    clock.now = 3500;
+    aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
+
+    clock.now = 4000;
+    aai.emit({ type: 'transcript.user', item_id: 'c3', text: "Yes, that's right." });
+    clock.now = 4500;
+    aai.emit({ type: 'reply.started', reply_id: 'a3' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a3', text: session.last!.goal.hint, reply_id: 'a3', interrupted: false });
+    clock.now = 5000;
+    aai.emit({ type: 'reply.done', reply_id: 'a3', status: 'completed' });
+
+    clock.now = 5500;
+    aai.emit({ type: 'transcript.user', item_id: 'c4', text: 'Yes, correct.' });
+    clock.now = 6000;
+    aai.emit({ type: 'reply.started', reply_id: 'a4' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a4', text: session.last!.goal.hint, reply_id: 'a4', interrupted: false });
+    clock.now = 6500;
+    aai.emit({ type: 'reply.done', reply_id: 'a4', status: 'completed' });
+
+    clock.now = 7000;
+    aai.emit({ type: 'transcript.user', item_id: 'c5', text: "Yes, that's right." });
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('reaches SEALED/CLOSE (sanity check the drive helper reproduces the PROVEN bug shape)', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-close-sanity', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+    driveToSealedStage(session, aai, clock);
+
+    expect(session.last?.verdict).toBe('STAGE');
+    expect(session.last?.state).toBe('SEALED');
+    expect(session.last?.goal.code).toBe('CLOSE');
+    expect(session.last?.goal.hint).toMatch(/staged for a second, independent approval/i);
+  });
+
+  it('ends the call reason "agent_closed" a short grace period after the CLOSE reply completes', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-close-grace', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+    driveToSealedStage(session, aai, clock);
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    // Not yet ended: the CLOSE reply hasn't completed yet.
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+
+    clock.now = 7500;
+    aai.emit({ type: 'reply.started', reply_id: 'a5' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
+    clock.now = 8000;
+    aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' });
+
+    // Still not ended immediately -- the grace period lets the close line's audio flush.
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+
+    vi.advanceTimersByTime(1499);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+
+    // The 15s hard cap was cancelled by the grace timer -- advancing well past it must not
+    // produce a second 'ended' (end() is idempotent either way, but this proves the hard
+    // cap was actually cleared, not just masked by that idempotency).
+    const endedCountBefore = sent.filter((e) => e.type === 'ended').length;
+    vi.advanceTimersByTime(20_000);
+    expect(sent.filter((e) => e.type === 'ended').length).toBe(endedCountBefore);
+  });
+
+  it('an INTERRUPTED reply.done for CLOSE still schedules the hang-up -- nothing more is owed once SEALED', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-close-interrupt', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+    driveToSealedStage(session, aai, clock);
+
+    clock.now = 7500;
+    aai.emit({ type: 'reply.started', reply_id: 'a5' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a5', text: 'Your requ', reply_id: 'a5', interrupted: true });
+    clock.now = 7700;
+    aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'interrupted' });
+
+    vi.advanceTimersByTime(1500);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+  });
+
+  it('the hard cap ends the call with reason "close_timeout" if no reply.done for CLOSE ever arrives', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-close-hardcap', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+    driveToSealedStage(session, aai, clock);
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    vi.advanceTimersByTime(14_999);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
+  });
+
+  // Row 14 (rules.ts) only ever converts a PENDING verdict on call_ended -- an
+  // already-terminal STAGE/FREEZE/ESCALATE verdict is untouched (proven at the engine level
+  // in packages/engine/test/rules.test.ts's "row 14 never overrides an already-terminal
+  // STAGE/ESCALATE/NO_ACTION verdict"). This proves the SERVER-side consequence of that: now
+  // that reaching SEALED can itself trigger `end()` (the grace/hard-cap timers above), a
+  // call that ends AFTER a terminal verdict is already on record must not re-evaluate to
+  // ESCALATE -- `end()` logs one more `call_ended` action and re-runs the real engine, and
+  // the verdict it recomputes must still read STAGE.
+  it('end() called after SEALED does not re-evaluate the verdict to ESCALATE (row 14 ignores call_ended once terminal)', async () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-close-row14', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+    driveToSealedStage(session, aai, clock);
+    expect(session.last?.verdict).toBe('STAGE');
+    expect(session.last?.state).toBe('SEALED');
+
+    clock.now = 9000;
+    session.end('caller_ended'); // e.g. the caller hangs up before the grace timer fires
+    await session.whenIdle();
+
+    expect(session.last?.verdict).toBe('STAGE');
+    expect(session.last?.reasons).toEqual([]);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'caller_ended' });
   });
 });

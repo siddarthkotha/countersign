@@ -122,6 +122,17 @@ function nowSection(goal: PhrasingGoal, ctx: PromptCtx): string {
       // AgentAction (see fsm.ts's own doc comment on `readbackSentence` for why that had to
       // change too).
       return `Say exactly this and nothing else: "${goal.hint}"`;
+    case 'CLOSE':
+      // Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T16-35-23-
+      // scenario-a-dana-legitimate.md): CLOSE used to fall through to the `default` branch
+      // below, which relays `goal.hint` as a loose instruction ("Close the call politely; ...")
+      // with nothing telling the model to say only that and stop -- the model improvised
+      // three off-goal turns (asking for an "authorization code") for 47 seconds before ever
+      // saying something close-shaped. fsm.ts now composes the exact, ready-to-speak close
+      // sentence per outcome into `goal.hint` itself; this case relays it the same verbatim
+      // way READBACK's sentence is relayed, so the model has nothing left to fill in and
+      // nothing left to ask.
+      return `Say exactly this and nothing else: "${goal.hint}"`;
     case 'STALL': {
       const line = ctx.stalls.pick(ctx.stall_kind);
       return `Hold the floor with this line: "${line}"`;
@@ -136,9 +147,10 @@ function nowSection(goal: PhrasingGoal, ctx: PromptCtx): string {
         return `${goal.hint} Address the caller as ${ctx.claimed_identity_name}.`;
       }
       // ELICIT_IDENTITY, ELICIT_REQUEST, PROBE_CONSISTENCY, REFUSE_AUTHORITY,
-      // EXPLAIN_OUT_OF_SCOPE, CLOSE, RE_ELICIT_AFTER_SWITCH, EXPLAIN_OPEN_REQUEST, and an
+      // EXPLAIN_OUT_OF_SCOPE, RE_ELICIT_AFTER_SWITCH, EXPLAIN_OPEN_REQUEST, and an
       // ANNOUNCE_* goal before any identity is claimed: the hint, verbatim, and nothing
-      // added (the engine already wrote whatever reasons belong in it).
+      // added (the engine already wrote whatever reasons belong in it). CLOSE has its own
+      // case above, not this one.
       return goal.hint;
   }
 }

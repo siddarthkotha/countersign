@@ -161,6 +161,22 @@ async function speakLine(client: CallClient, text: string, voice: string | undef
   return { startedMs, endedMs: nowT(client) };
 }
 
+/** Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T16-35-23-
+ *  scenario-a-dana-legitimate.md): the server now hangs up on its own once it reaches
+ *  SEALED (packages/server/src/call/session.ts's CLOSE grace period/hard cap) -- a scripted
+ *  or LLM caller that still has turns queued must notice the call already ended and stop,
+ *  rather than keep sending scripted lines (or asking an LLM for more) into a closed
+ *  socket. "agent_closed" is the NORMAL, expected shape of that end (the fix this function
+ *  exists to accommodate) and produces no warning; any other reason ending the call mid-
+ *  script is still worth a warning (an idle timeout, a cap, or a dropped socket cutting the
+ *  scenario short is not something this fix is about). Pure and independently testable --
+ *  the two loops below only ever call it, never re-implement the branching. */
+export function scriptedCallerShouldStop(endedReason: string | null): { stop: boolean; warning: string | null } {
+  if (endedReason === null) return { stop: false, warning: null };
+  if (endedReason === 'agent_closed') return { stop: true, warning: null };
+  return { stop: true, warning: `call already ended (reason: ${endedReason}) before every scripted turn was spoken; stopping the caller` };
+}
+
 export interface TurnRunOutcome {
   warnings: string[];
   callerEndTimes: { turn_id: string; caller_end_ms: number; barge_in: boolean }[];
@@ -179,6 +195,11 @@ export async function runTurns(client: CallClient, scenario: Scenario, voice: st
   const resolvedLines: ResolvedLineRecord[] = [];
 
   for (let turnIdx = 0; turnIdx < scenario.turns.length; turnIdx++) {
+    const { stop, warning } = scriptedCallerShouldStop(client.endedReason());
+    if (stop) {
+      if (warning) warnings.push(warning);
+      break;
+    }
     const turn = scenario.turns[turnIdx]!;
     if (turn.barge_in_after_ms !== undefined) {
       const markerCount = client.audioTimestamps.length;
@@ -250,6 +271,11 @@ export async function runLlmTurns(
 
   let turnIndex = 0;
   while (turnIndex < caps.max_turns) {
+    const { stop, warning } = scriptedCallerShouldStop(client.endedReason());
+    if (stop) {
+      if (warning) warnings.push(`llm caller turn ${turnIndex}: ${warning}`);
+      break;
+    }
     if (nowT(client) > deadline) {
       warnings.push(`llm caller: stopped after ${turnIndex} turn(s), hit its own max_wall_ms cap (${caps.max_wall_ms}ms)`);
       break;
