@@ -224,6 +224,23 @@ export class CallSession {
   private static readonly CLOSE_TIMEOUT_MS = 15_000;
   private closeGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private closeHardCapTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Fix round 2 (review finding, Important, 2026-09-11): the reply_id of whichever reply
+   *  was in flight (or the most recent one that already finished, or null if none has ever
+   *  started) at the EXACT moment the CLOSE goal was first rendered -- i.e. any reply this
+   *  is NOT the phrasing of the close line, no matter what `this.last.goal.code` reads by
+   *  the time its own `reply.done` arrives. Root cause this fixes: `handleToolCall` also
+   *  calls `tick()`, so a tool.call arriving mid-reply can advance the engine to SEALED/
+   *  CLOSE WHILE an earlier, unrelated reply is still speaking. That earlier reply's own
+   *  `reply.done` -- for a goal phrased before CLOSE ever existed -- would otherwise be
+   *  mistaken for the close line finishing, arming the 1.5s hang-up while the actual close
+   *  line has not been said yet (or ever will be, if the grace timer fires first). Recorded
+   *  once, from `armClose` (the single call site that also arms the hard cap), and never
+   *  updated again -- `scheduleCloseIfNeeded` only ever needs to know the ONE stale id to
+   *  reject; every reply_id that starts after CLOSE is sent is, by construction, new. */
+  private closeStaleReplyId: string | null = null;
+  /** The reply_id of the most recent `reply.started` -- tracked purely so `armClose` can
+   *  snapshot it into `closeStaleReplyId` above; never consulted anywhere else. */
+  private currentReplyId: string | null = null;
 
   private clearCloseTimers(): void {
     if (this.closeGraceTimer) {
@@ -236,14 +253,17 @@ export class CallSession {
     }
   }
 
-  /** Started the first tick the goal becomes CLOSE (from `applyEvaluate`'s goal-changed
-   *  branch) -- if no `reply.done` for it ever arrives (a dropped reply, a model that never
-   *  speaks), the call still ends rather than sitting open forever. Idempotent: a second
-   *  call while one is already pending is a no-op, so a goal that briefly changes away from
-   *  CLOSE and back (not possible today -- SEALED is a one-way state -- but defensive
-   *  regardless) never stacks timers. */
-  private armCloseHardCap(): void {
+  /** Called once, the first tick the goal becomes CLOSE (from `applyEvaluate`'s goal-changed
+   *  branch): snapshots whichever reply_id was current at that instant as "stale" (see
+   *  `closeStaleReplyId`'s own doc comment) and arms the 15s hard cap in case `reply.done`
+   *  for the real close line never arrives at all (a dropped AAI reply, a model that never
+   *  speaks). Idempotent via the hard-cap-timer guard: a second call while one is already
+   *  pending is a no-op, so a goal that briefly changes away from CLOSE and back (not
+   *  possible today -- SEALED is a one-way state -- but defensive regardless) never
+   *  re-snapshots a now-stale `currentReplyId` over the original one. */
+  private armClose(): void {
     if (this.closeHardCapTimer || this.ended) return;
+    this.closeStaleReplyId = this.currentReplyId;
     this.closeHardCapTimer = setTimeout(() => {
       this.closeHardCapTimer = null;
       if (!this.ended) this.end('close_timeout');
@@ -252,13 +272,21 @@ export class CallSession {
   }
 
   /** Fired from `reply.done`, while `this.last` is still the goal that reply was phrased
-   *  for (see `recordGoalCompletionAction`'s own doc comment on that ordering). Any
-   *  `reply.done` for a CLOSE goal -- completed or interrupted -- schedules the hang-up:
-   *  once SEALED, there is nothing left for the model to do, so a caller who talks over the
-   *  close line does not buy the call more time. The short grace period lets the close
-   *  line's own audio frames actually reach the wire before the socket shuts. */
-  private scheduleCloseIfNeeded(): void {
+   *  for (see `recordGoalCompletionAction`'s own doc comment on that ordering) -- EXCEPT
+   *  that is only true when `replyId` actually started after CLOSE was sent (fix round 2,
+   *  review finding: a reply already in flight when CLOSE was rendered still finishes on
+   *  its own schedule, and its `reply.done` says nothing about whether the close line has
+   *  been spoken). A `reply.done` whose `replyId` matches `closeStaleReplyId` is ignored
+   *  for hang-up purposes here -- it is still handled completely normally by every other
+   *  branch of the `reply.done` case (flush/discard, `recordGoalCompletionAction`, the
+   *  diagnostics event); only the arming of the grace timer is skipped. Any OTHER reply_id
+   *  -- completed or interrupted -- schedules the hang-up: once SEALED, there is nothing
+   *  left for the model to do, so a caller who talks over the close line does not buy the
+   *  call more time. The short grace period lets the close line's own audio frames actually
+   *  reach the wire before the socket shuts. */
+  private scheduleCloseIfNeeded(replyId: string): void {
     if (!this.last || this.last.goal.code !== 'CLOSE') return;
+    if (replyId === this.closeStaleReplyId) return;
     if (this.closeGraceTimer || this.ended) return;
     if (this.closeHardCapTimer) {
       clearTimeout(this.closeHardCapTimer);
@@ -564,6 +592,10 @@ export class CallSession {
         // Skipping it would leave the browser showing "not speaking" for the whole reply.
         this.speaking = true;
         this.replyFirstAudioRecorded = false;
+        // Fix round 2 (review finding, Important): tracked purely so `armClose` can
+        // snapshot "whichever reply is in flight right now" the instant CLOSE is first
+        // rendered -- see `closeStaleReplyId`'s own doc comment.
+        this.currentReplyId = evt.reply_id;
         this.diag('reply.started', {});
         break;
 
@@ -592,8 +624,10 @@ export class CallSession {
         // for (recordGoalCompletionAction's own doc comment) -- if it was CLOSE, the call
         // is done saying what it needs to say and the server hangs up itself. Checked
         // regardless of `evt.status`: an interrupted close still means nothing more is
-        // owed (see `scheduleCloseIfNeeded`'s own doc comment).
-        this.scheduleCloseIfNeeded();
+        // owed (see `scheduleCloseIfNeeded`'s own doc comment). `evt.reply_id` is what lets
+        // it reject a stale reply.done for a reply that was already in flight when CLOSE
+        // was sent (fix round 2, review finding).
+        this.scheduleCloseIfNeeded(evt.reply_id);
         if (evt.status === 'interrupted') {
           this.opts.onServerEvent({ type: 'flush' });
           // docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md: "If reply.done.status == 'interrupted'
@@ -953,11 +987,11 @@ export class CallSession {
         t_ms: this.nowT(),
         detail: `goal=${output.goal.code}`,
       });
-      // The hard cap starts the moment CLOSE is first rendered (session.update just sent
-      // it) -- not from `this.last = output` below, which would fire on every tick, and not
-      // from `reply.done`, which is exactly the event this cap exists to cover the absence
-      // of. See `armCloseHardCap`'s own doc comment.
-      if (output.goal.code === 'CLOSE') this.armCloseHardCap();
+      // The hard cap starts, and the stale reply_id gets snapshotted, the moment CLOSE is
+      // first rendered (session.update just sent it) -- not from `this.last = output`
+      // below, which would fire on every tick, and not from `reply.done`, which is exactly
+      // the event this cap exists to cover the absence of. See `armClose`'s own doc comment.
+      if (output.goal.code === 'CLOSE') this.armClose();
     }
     this.last = output;
   }

@@ -881,6 +881,145 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
   });
 
+  // ---------------------------------------------------------------------------------------
+  // Fix round 2 (review finding, Important, 2026-09-11): `scheduleCloseIfNeeded` used to key
+  // ONLY on `this.last.goal.code === 'CLOSE'`, never on which reply the `reply.done` was
+  // actually for. `handleToolCall` (like every AAI event) ticks the engine at the end of
+  // `dispatchAaiEvent` -- so a tool.call arriving WHILE an earlier reply is still speaking
+  // can tick the engine straight to SEALED/CLOSE mid-reply. When that earlier, unrelated
+  // reply's OWN `reply.done` then lands, the old code mistook it for the close line
+  // finishing and armed the 1.5s hang-up -- while the close line itself had not been said
+  // yet (and might never be, if the grace timer won the race). `closeStaleReplyId` (session
+  // .ts) now snapshots whichever reply was in flight the instant CLOSE was rendered, and
+  // `scheduleCloseIfNeeded` ignores a `reply.done` for that exact stale id.
+  //
+  // Drives the race precisely: c1..c4 as `driveToSealedStage` does, then reply.started('a4')
+  // for the beneficiary READBACK (goal at that point, still unconfirmed), then a stray
+  // mid-reply tool.call while 'a4' is still speaking. The model is never offered any tool in
+  // any state (fsm.ts's `allowedTools` is always []), so this is always rejected --
+  // `not_allowed_in_state` -- but `handleToolCall` still logs it with a `result.error` set,
+  // and `computeEvaluationIncomplete` (compose.ts) treats ANY tool log entry carrying
+  // `result.error` as making the evaluation incomplete, regardless of the request. Invariant
+  // I4 (rules.ts) then downgrades the tentative PENDING verdict straight to ESCALATE (a
+  // request is on record) -- reaching SEALED/CLOSE on exactly this tick, entirely from the
+  // tool.call's own `tick()`, precisely the mechanism the review flagged, with 'a4' STILL
+  // the unfinished in-flight reply. 'a4' then reports reply.done: this must NOT arm the
+  // hang-up. Only once a genuinely NEW reply ('a5') starts and completes does it arm.
+  function driveThroughC4AndStartA4(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
+    clock.now = 1000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c1',
+      text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
+    });
+    clock.now = 1500;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'a1',
+      text: 'You are requesting a wire transfer of $84,500 to Northgate Partners. Is that correct?',
+      reply_id: 'a1',
+      interrupted: false,
+    });
+    clock.now = 2000;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    clock.now = 2500;
+    aai.emit({ type: 'transcript.user', item_id: 'c2', text: "No, that's wrong. It's Meridian Supply." });
+    clock.now = 3000;
+    aai.emit({ type: 'reply.started', reply_id: 'a2' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a2', text: session.last!.goal.hint, reply_id: 'a2', interrupted: false });
+    clock.now = 3500;
+    aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
+
+    clock.now = 4000;
+    aai.emit({ type: 'transcript.user', item_id: 'c3', text: "Yes, that's right." });
+    clock.now = 4500;
+    aai.emit({ type: 'reply.started', reply_id: 'a3' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a3', text: session.last!.goal.hint, reply_id: 'a3', interrupted: false });
+    clock.now = 5000;
+    aai.emit({ type: 'reply.done', reply_id: 'a3', status: 'completed' });
+
+    clock.now = 5500;
+    aai.emit({ type: 'transcript.user', item_id: 'c4', text: 'Yes, correct.' });
+    clock.now = 6000;
+    aai.emit({ type: 'reply.started', reply_id: 'a4' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a4', text: session.last!.goal.hint, reply_id: 'a4', interrupted: false });
+    // Deliberately NO reply.done for 'a4' here -- the reply is still "speaking" when the
+    // race below fires.
+  }
+
+  it('a mid-reply tick to SEALED/CLOSE does not arm the hang-up on the STALE reply already in flight -- only a reply that started after CLOSE does', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-close-race', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+    driveThroughC4AndStartA4(session, aai, clock);
+    expect(session.last?.state).toBe('CONSISTENCY_CHECK');
+    expect(session.last?.goal.code).toBe('READBACK'); // still speaking 'a4', beneficiary not yet confirmed
+    expect(session.last?.verdict).toBe('PENDING');
+
+    // A stray, mid-reply tool.call while 'a4' is STILL speaking (no reply.done for it yet).
+    // Rejected (`not_allowed_in_state`, since `allowedTools` is always []), but its own
+    // `tick()` -- exactly like a real `handleToolCall` -- reaches SEALED/CLOSE this same
+    // tick (see this block's own doc comment for exactly why: computeEvaluationIncomplete
+    // treats the rejected call's own logged `result.error` as an incomplete evaluation, and
+    // I4 downgrades PENDING-with-a-request straight to ESCALATE).
+    clock.now = 6200;
+    aai.emit({ type: 'tool.call', call_id: 'stray-1', name: 'check_sso_context', arguments: {} });
+    expect(session.last?.verdict).toBe('ESCALATE');
+    expect(session.last?.state).toBe('SEALED');
+    expect(session.last?.goal.code).toBe('CLOSE');
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+
+    // 'a4' (the STALE reply, in flight before CLOSE was ever rendered) now reports done.
+    // This must NOT arm the grace hang-up.
+    clock.now = 6500;
+    aai.emit({ type: 'reply.done', reply_id: 'a4', status: 'completed' });
+    vi.advanceTimersByTime(1500); // the grace period, if it had (wrongly) armed on 'a4'
+    expect(sent.some((e) => e.type === 'ended')).toBe(false); // proves the stale id was rejected, not just delayed
+
+    // A genuinely NEW reply ('a5') -- the actual close line -- starts and completes.
+    clock.now = 7000;
+    aai.emit({ type: 'reply.started', reply_id: 'a5' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
+    clock.now = 7500;
+    aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' });
+    expect(sent.some((e) => e.type === 'ended')).toBe(false); // not yet -- grace period still running
+
+    vi.advanceTimersByTime(1500);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+  });
+
+  it('if no genuinely new reply ever starts after the stale reply.done, the 15s hard cap still fires close_timeout', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-close-race-hardcap', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+    driveThroughC4AndStartA4(session, aai, clock);
+
+    clock.now = 6200;
+    aai.emit({ type: 'tool.call', call_id: 'stray-1', name: 'check_sso_context', arguments: {} });
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    // The stale 'a4' reply.done arrives and is correctly ignored for hang-up purposes...
+    clock.now = 6500;
+    aai.emit({ type: 'reply.done', reply_id: 'a4', status: 'completed' });
+
+    // ...but no new reply ever starts. The 15s hard cap (armed the instant CLOSE was first
+    // rendered, at the tool.call tick above) is the backstop that still ends the call.
+    vi.advanceTimersByTime(14_999);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
+  });
+
   // Row 14 (rules.ts) only ever converts a PENDING verdict on call_ended -- an
   // already-terminal STAGE/FREEZE/ESCALATE verdict is untouched (proven at the engine level
   // in packages/engine/test/rules.test.ts's "row 14 never overrides an already-terminal
