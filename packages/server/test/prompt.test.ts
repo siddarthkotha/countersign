@@ -309,15 +309,37 @@ describe('renderPrompt', () => {
     }
   });
 
-  describe('GREET mentioning the treasury desk (fix round 1 minor)', () => {
-    it('mentions the desk explicitly when it is truly the opening turn (state INTAKE)', () => {
+  // Fix (2026-09-11, composes with the sibling AAI-greeting lane, commit e200f20): GREET
+  // used to append "Mention this is the treasury desk." on the opening turn (state INTAKE),
+  // back when the model itself spoke the very first line. Now the connect-time audio
+  // greeting (AssemblyAI's `greeting` field) already speaks the desk name and opening
+  // question before this prompt is ever rendered, so GREET must render the hint verbatim in
+  // every state, with no added desk mention -- a second greeting on a live call would
+  // announce the desk twice in a row.
+  describe('GREET renders the hint verbatim, never a second desk mention (fix 2026-09-11)', () => {
+    it('renders the hint verbatim on the opening turn (state INTAKE)', () => {
       const prompt = renderPrompt(baseGoal('GREET'), makeCtx({ state: 'INTAKE' }));
-      expect(prompt).toContain('Mention this is the treasury desk.');
+      expect(prompt).toContain('Test hint for GREET.');
+      expect(prompt).not.toContain('Mention this is the treasury desk.');
     });
 
-    it('does not add the mention once the call has moved past INTAKE', () => {
+    it('renders the same way once the call has moved past INTAKE', () => {
       const prompt = renderPrompt(baseGoal('GREET'), makeCtx({ state: 'CLAIM' }));
+      expect(prompt).toContain('Test hint for GREET.');
       expect(prompt).not.toContain('Mention this is the treasury desk.');
+    });
+
+    // Proves the actual first-turn prompt (real engine hint, not the test stub) carries no
+    // second desk greeting -- no repeat of the fixed audio greeting's desk name/line phrasing
+    // and no instruction telling the model to greet.
+    it('the real first-turn GREET prompt contains no second desk greeting', () => {
+      const firstTurnGoal = baseGoal('GREET', {
+        hint: 'The desk has already greeted the caller; do not greet again or name the desk. Ask who is calling and what they need, in one short line.',
+      });
+      const prompt = renderPrompt(firstTurnGoal, makeCtx({ state: 'INTAKE' }));
+      expect(prompt.toLowerCase()).not.toContain('meridian payments desk');
+      expect(prompt.toLowerCase()).not.toContain('verification line');
+      expect(prompt.toLowerCase()).not.toMatch(/\bgreet\b(?! again)/);
     });
   });
 

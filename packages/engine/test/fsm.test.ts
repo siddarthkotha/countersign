@@ -173,6 +173,35 @@ describe('phrasingGoal -- READBACK carries a ready-to-speak exact sentence, not 
   });
 });
 
+// Fix (2026-09-11, composes with the sibling AAI-greeting lane, commit e200f20): the server
+// now speaks a fixed audio greeting (AssemblyAI's connect-time `greeting` field) naming the
+// desk before the model is ever prompted, so the INTAKE goal's hint must not tell the model
+// to greet or name the desk again -- only to ask who is calling and what they need. Goal kind
+// stays 'GREET' (stalls.ts's kindFromHint and anything else keying off the goal code is
+// unaffected; only the hint text changed -- a pure text change, no new inputs, so it can never
+// move a verdict).
+describe('phrasingGoal -- INTAKE/GREET hint does not re-greet or re-name the desk', () => {
+  it('the GREET hint tells the model the desk already greeted and to ask who is calling, without naming the desk again', () => {
+    const out = phrasingGoal({
+      state: 'INTAKE',
+      decideResult: stubDecideResult(0),
+      evidence: [],
+      ledger: [],
+      seed: MERIDIAN,
+      tools: [],
+      actions: [],
+      nextChallenge: null,
+    });
+
+    expect(out.code).toBe('GREET');
+    expect(out.hint).toBe(
+      'The desk has already greeted the caller; do not greet again or name the desk. Ask who is calling and what they need, in one short line.',
+    );
+    expect(out.hint.toLowerCase()).not.toContain('meridian treasury desk');
+    expect(out.hint.toLowerCase()).not.toContain('countersign');
+  });
+});
+
 describe('phrasingGoal -- CHALLENGE-SPEAKABLE: ASK_CHALLENGE prefers the composed speak sentence over the ask instruction', () => {
   function baseInput(nextChallenge: import('../src/types').ChallengeSpec | null) {
     return {

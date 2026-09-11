@@ -256,7 +256,18 @@ export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
   }
 
   if (state === 'INTAKE') {
-    return goal('GREET', 'Greet as Countersign for the Meridian treasury desk; ask who is calling and what they need.', keyterms, patient);
+    // Fix (2026-09-11, composes with the sibling AAI-greeting lane, commit e200f20): the
+    // fixed connect-time audio greeting (AssemblyAI's `greeting` field, "Meridian payments
+    // desk, verification line. How can I help you today?") now speaks the desk name BEFORE
+    // this goal is ever rendered, so GREET must not name the desk or greet again -- it only
+    // asks the one open question. Kept as goal kind 'GREET' (stalls.ts's kindFromHint and
+    // anything else that keys off the goal code are unaffected; only the hint text changed).
+    return goal(
+      'GREET',
+      'The desk has already greeted the caller; do not greet again or name the desk. Ask who is calling and what they need, in one short line.',
+      keyterms,
+      patient,
+    );
   }
 
   if (state === 'CLAIM') {

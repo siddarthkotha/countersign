@@ -75,12 +75,17 @@ const ANNOUNCE_CODES = new Set<PhrasingGoal['code']>(['ANNOUNCE_STAGED', 'ANNOUN
 
 /** The "Now" section: what to do about THIS goal, and nothing else -- never the expected
  *  answer, never a seed fact, never more of a tool result than the hint already carries.
- *  Minor (fix round 1): `ctx.state`/`ctx.claimed_identity_name` are put to real use here --
- *  GREET names the desk explicitly when it's truly the call's opening turn (`state ===
- *  'INTAKE'`), and once an identity is claimed, an ANNOUNCE_* goal may address the caller by
- *  that name (a cheap, warmer touch for the demo). Deliberately NOT done for ASK_CHALLENGE --
- *  addressing the caller by the name they themselves claimed, right as their claim to that
- *  identity is being tested, would read as the system tipping its hand. */
+ *  Minor (fix round 1): `ctx.claimed_identity_name` is put to real use here -- once an
+ *  identity is claimed, an ANNOUNCE_* goal may address the caller by that name (a cheap,
+ *  warmer touch for the demo). Deliberately NOT done for ASK_CHALLENGE -- addressing the
+ *  caller by the name they themselves claimed, right as their claim to that identity is
+ *  being tested, would read as the system tipping its hand.
+ *  Fix (2026-09-11, composes with the sibling AAI-greeting lane, commit e200f20): GREET used
+ *  to name the desk explicitly on the call's opening turn (`state === 'INTAKE'`), back when
+ *  the model itself spoke the very first line. Now the connect-time audio greeting (AssemblyAI's
+ *  `greeting` field) speaks the desk name and opening question before this prompt is ever
+ *  rendered, so GREET renders the engine's hint verbatim in every state -- no `ctx.state`
+ *  branch, no second desk mention, ever. */
 function nowSection(goal: PhrasingGoal, ctx: PromptCtx): string {
   switch (goal.code) {
     // Bug fix (2026-09-03 later that night): a bare challenge question (or the old prose
@@ -125,7 +130,7 @@ function nowSection(goal: PhrasingGoal, ctx: PromptCtx): string {
     case 'CONTAIN_NO_DISCLOSURE':
       return CONTAIN_LINE;
     case 'GREET':
-      return ctx.state === 'INTAKE' ? `${goal.hint} Mention this is the treasury desk.` : goal.hint;
+      return goal.hint;
     default:
       if (ANNOUNCE_CODES.has(goal.code) && ctx.claimed_identity_name) {
         return `${goal.hint} Address the caller as ${ctx.claimed_identity_name}.`;
