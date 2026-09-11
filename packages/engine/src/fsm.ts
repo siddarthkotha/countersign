@@ -309,7 +309,19 @@ export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
   }
 
   if (state === 'CHALLENGE') {
-    return goal('ASK_CHALLENGE', nextChallenge?.ask ?? 'Ask the caller a verification question.', keyterms, patient, {
+    // CHALLENGE-SPEAKABLE (2026-09-11): `nextChallenge.speak` (challenges.ts's
+    // selectLiveCommitment/selectTrapFact/selectRelational/selectSeedFact) is the engine-
+    // composed, ready-to-speak sentence for this challenge -- same treatment
+    // `readbackSentence` above already gives READBACK. Prefer it over the older `ask`
+    // instruction-string when present; `ask` is kept as the fallback (for any spec that
+    // predates this field, e.g. a hand-authored test fixture or a replayed corpus action)
+    // and untouched everywhere else it's used (evidence-label building in compose.ts).
+    // NOT yet wired into the live voice prompt: `goal.challenge` (below) still carries the
+    // full spec including `ask`, and packages/server/src/call/prompt.ts's ASK_CHALLENGE
+    // case still reads `goal.challenge.ask` and tells the model to paraphrase it, not
+    // `goal.hint`/`goal.challenge.speak` verbatim -- flipping that is a separate, deliberately
+    // un-taken step (see this task's report and prompt.ts's "Parked follow-up" comment).
+    return goal('ASK_CHALLENGE', nextChallenge?.speak ?? nextChallenge?.ask ?? 'Ask the caller a verification question.', keyterms, patient, {
       ...(nextChallenge ? { challenge: nextChallenge } : {}),
     });
   }

@@ -173,6 +173,60 @@ describe('phrasingGoal -- READBACK carries a ready-to-speak exact sentence, not 
   });
 });
 
+describe('phrasingGoal -- CHALLENGE-SPEAKABLE: ASK_CHALLENGE prefers the composed speak sentence over the ask instruction', () => {
+  function baseInput(nextChallenge: import('../src/types').ChallengeSpec | null) {
+    return {
+      state: 'CHALLENGE' as const,
+      decideResult: stubDecideResult(4),
+      evidence: [],
+      ledger: [],
+      seed: MERIDIAN,
+      tools: [],
+      actions: [],
+      nextChallenge,
+    };
+  }
+
+  it('hint is the ready-to-speak `speak` sentence, not the prose `ask` instruction, when speak is present', () => {
+    const out = phrasingGoal(
+      baseInput({
+        challenge_id: 'sess-1',
+        kind: 'LIVE_COMMITMENT',
+        field: 'amount_usd',
+        ask: 'Ask the caller to restate the amount_usd they gave earlier. Do not say the value yourself.',
+        speak: 'Can you restate the amount in dollars you gave me earlier?',
+        expect: { commitment_claim_id: 'cl-1' },
+      }),
+    );
+    expect(out.code).toBe('ASK_CHALLENGE');
+    expect(out.hint).toBe('Can you restate the amount in dollars you gave me earlier?');
+    expect(out.hint).not.toContain('amount_usd');
+    // The full spec (still carrying `ask`) is preserved on the goal untouched -- prompt.ts's
+    // ASK_CHALLENGE case reads `goal.challenge.ask` directly, not `goal.hint`, so this
+    // change is inert for the live voice prompt (see this task's report).
+    expect(out.challenge?.ask).toBe('Ask the caller to restate the amount_usd they gave earlier. Do not say the value yourself.');
+  });
+
+  it('falls back to `ask` when a spec carries no `speak` (a pre-existing hand-authored spec, or a replayed corpus action from before this field existed)', () => {
+    const out = phrasingGoal(
+      baseInput({
+        challenge_id: 'sess-2',
+        kind: 'SEED_FACT',
+        field: 'counsel',
+        ask: 'Ask which law firm is our counsel of record on the Hartwell deal.',
+        expect: { accept_tokens: ['calder', 'finch'] },
+      }),
+    );
+    expect(out.hint).toBe('Ask which law firm is our counsel of record on the Hartwell deal.');
+  });
+
+  it('falls back to the generic line when there is no next challenge at all', () => {
+    const out = phrasingGoal(baseInput(null));
+    expect(out.hint).toBe('Ask the caller a verification question.');
+    expect(out.challenge).toBeUndefined();
+  });
+});
+
 describe('READBACK closes the loop: readback + affirm actually confirms the field (regression for the 2026-09-03 CONSISTENCY_CHECK stall)', () => {
   /** Mirrors exactly what call/session.ts's `recordGoalCompletionAction` does when the
    *  agent's reply for a READBACK goal completes: writes a `readback_issued` action from the

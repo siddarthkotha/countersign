@@ -679,3 +679,146 @@ describe('selectChallenge — ask never leaks the expected answer', () => {
     }
   });
 });
+
+// CHALLENGE-SPEAKABLE (2026-09-11, backlog): FIX7 (571ee31) gave the READBACK goal a
+// deterministic, ready-to-speak sentence composed by the engine instead of a prose
+// instruction for the LLM to paraphrase (fsm.ts's `readbackSentence`). Challenge questions
+// were left as prose ("Ask the caller to restate X...", "Confirm the request back... say Y
+// in place of Z"), which is why the server's ASK_CHALLENGE prompt (prompt.ts) still tells
+// the model to phrase the direction "in your own words" instead of relaying it verbatim --
+// see that file's "Parked follow-up" comment. These tests pin down the same treatment for
+// every `ChallengeSpec.speak`: a deterministic, natural, speakable sentence that never names
+// a raw field id, never asks for an identifier/code, and never leaks a fact belonging to a
+// different claimed identity. Wiring the server to require verbatim speech is a separate,
+// deliberately un-taken step (see fsm.test.ts's ASK_CHALLENGE section and this task's report).
+describe('selectChallenge — speak: a deterministic, ready-to-speak sentence per kind', () => {
+  const FORBIDDEN_RE = /\b(id|ids|identifier|code|ssn|ein|password|pin)\b/i;
+  const RAW_FIELD_RE = /amount_usd|account_last4|escrow_institution(?!\s)/;
+
+  it('LIVE_COMMITMENT: asks to restate the field in spoken words, never the raw field id or the value itself', () => {
+    const claims: Claim[] = [claim('c-amount', 'amount_usd', 'STATED', 84_500, 1000, '$84,500')];
+    const conversation: Utterance[] = [
+      utt('u1', 1000, "it's $84,500"),
+      utt('u2', 2000, 'still here'),
+      utt('u3', 3000, 'one more thing'),
+    ];
+    const spec = selectChallenge(claims, [], {}, SEED, 'speak-live', conversation);
+    expect(spec?.kind).toBe('LIVE_COMMITMENT');
+    expect(spec?.speak).toBe('Can you restate the amount in dollars you gave me earlier?');
+    expect(spec!.speak).not.toMatch(RAW_FIELD_RE);
+    expect(spec!.speak).not.toMatch(FORBIDDEN_RE);
+    expect(spec!.speak).not.toContain('84,500'); // never says the value back
+    expect(spec!.speak!.trim().endsWith('?')).toBe(true);
+  });
+
+  it('TRAP_FACT: states the wrong value back as a plain confirmation, one field, no raw field id', () => {
+    // The claim's own utterance is the LAST one in `conversation` (0 caller turns after
+    // it), which disqualifies it from LIVE_COMMITMENT (< 2 turns old -- see
+    // `callerTurnsAfter`) so selection falls through to TRAP_FACT, same technique the
+    // file's first describe block ("selectChallenge — selection order") already uses.
+    const claims: Claim[] = [claim('c-cns', 'counsel', 'STATED', 'whitmore and bass', 1000, 'Whitmore and Bass')];
+    const conversation: Utterance[] = [utt('u1', 1000, 'counsel is Whitmore and Bass')];
+    const spec = selectChallenge(claims, [], {}, SEED, 'speak-trap', conversation);
+    expect(spec?.kind).toBe('TRAP_FACT');
+    const trapValue = (spec!.expect as { trap_value: string }).trap_value;
+    expect(spec?.speak).toBe(`Just to confirm, our counsel of record is ${trapValue}. Is that correct?`);
+    expect(spec!.speak).not.toMatch(FORBIDDEN_RE);
+    expect(spec!.speak!.trim().endsWith('?')).toBe(true);
+  });
+
+  it('TRAP_FACT: every trap field gets natural, distinct phrasing (no field enum names)', () => {
+    const fixtures: { field: Claim['field']; value: string; quoteText: string }[] = [
+      { field: 'beneficiary', value: 'meridian supply', quoteText: 'Meridian Supply' },
+      { field: 'escrow_institution', value: 'first meridian trust', quoteText: 'First Meridian Trust' },
+      { field: 'approver', value: 'marcus obi', quoteText: 'Marcus Obi' },
+    ];
+    for (const { field, value, quoteText } of fixtures) {
+      const claims: Claim[] = [claim(`c-${field}`, field, 'STATED', value, 1000, quoteText)];
+      const conversation: Utterance[] = [utt('u1', 1000, quoteText)];
+      const spec = selectChallenge(claims, [], {}, SEED, `speak-trap-${field}`, conversation);
+      expect(spec?.kind).toBe('TRAP_FACT');
+      expect(spec?.field).toBe(field);
+      const trapValue = (spec!.expect as { trap_value: string }).trap_value;
+      expect(spec!.speak).toContain(trapValue);
+      expect(spec!.speak).toMatch(/is that correct\?/i);
+      expect(spec!.speak).not.toMatch(RAW_FIELD_RE);
+      expect(spec!.speak).not.toMatch(FORBIDDEN_RE);
+    }
+  });
+
+  it('RELATIONAL: asks for the last four digits in plain words, names the human field, no raw field id', () => {
+    const withBeneficiary: Claim[] = [claim('c-ben', 'beneficiary', 'STATED', 'meridian supply', 1000, 'Meridian Supply')];
+    const noKnowledgeSeed = { ...SEED, knowledge: [], thresholds: { ...SEED.thresholds, max_challenges: 100 } };
+    // Same blocker technique as "selectChallenge — RELATIONAL grades against the named
+    // beneficiary's own account" above: a placeholder TRAP_FACT already issued on the
+    // `beneficiary` field blocks both LIVE_COMMITMENT (field already issued) and TRAP_FACT
+    // (kind already issued, once-per-call), so selection reaches RELATIONAL.
+    const blockLive: ChallengeSpec = {
+      challenge_id: 'speak-rel-block',
+      kind: 'TRAP_FACT',
+      field: 'beneficiary',
+      ask: 'x',
+      expect: { trap_value: 'Northgate Partners', true_claim_id: 'c-ben' },
+    };
+    const spec = selectChallenge(withBeneficiary, [blockLive], {}, noKnowledgeSeed, 'speak-rel', undefined);
+    expect(spec?.kind).toBe('RELATIONAL');
+    expect(spec?.speak).toBe('Can you give me the last four digits of the account attached to the beneficiary you named?');
+    expect(spec!.speak).not.toMatch(RAW_FIELD_RE);
+    expect(spec!.speak).not.toMatch(FORBIDDEN_RE);
+    expect(spec!.speak!.trim().endsWith('?')).toBe(true);
+  });
+
+  it('SEED_FACT: turns the seed author\'s "Ask ..." instruction into a direct, capitalized question', () => {
+    const claims: Claim[] = [claim('c-id', 'identity', 'STATED', 'robert-miller', 0, 'Robert Miller')];
+    const spec = selectChallenge(claims, [], {}, SEED, 'speak-seed', undefined);
+    expect(spec?.kind).toBe('SEED_FACT');
+    expect(spec?.fact_id).toBe('counsel_of_record'); // priority 1, the ratified demo opener
+    expect(spec?.ask).toBe('Ask which law firm is our counsel of record on the Hartwell deal.');
+    expect(spec?.speak).toBe('Which law firm is our counsel of record on the Hartwell deal?');
+    expect(spec!.speak!.startsWith('Ask')).toBe(false);
+    expect(spec!.speak!.trim().endsWith('?')).toBe(true);
+  });
+
+  it('SEED_FACT: never surfaces a fact belonging to a different claimed identity (Dana never gets a Hartwell/robert-miller speak line)', () => {
+    const dana: Claim[] = [claim('c-id2', 'identity', 'STATED', 'dana-whitfield', 0, 'Dana Whitfield')];
+    const spec = selectChallenge(dana, [], {}, SEED, 'speak-dana', undefined);
+    expect(spec?.kind).toBe('SEED_FACT');
+    expect(spec!.fact_id!.startsWith('dana_')).toBe(true);
+    expect(spec!.speak).not.toMatch(/hartwell|calder|finch|voss|zurich/i);
+  });
+
+  it('every generated spec across a full selection sequence carries a non-empty, question-shaped speak with no raw field id and no forbidden id/code words', () => {
+    const claims: Claim[] = [
+      claim('c-id', 'identity', 'STATED', 'robert-miller', 0, 'Robert Miller'),
+      claim('c-amount', 'amount_usd', 'STATED', 1000, 1000, 'a thousand dollars'),
+      claim('c-counsel', 'counsel', 'STATED', 'whitmore and bass', 5000, 'Whitmore and Bass'),
+    ];
+    const conversation: Utterance[] = [
+      utt('u1', 1000, "it's a thousand dollars"),
+      utt('u2', 2000, 'ok go on'),
+      utt('u3', 3000, 'still here'),
+      utt('u4', 4000, 'one more thing'),
+      utt('u5', 5000, 'counsel is Whitmore and Bass'),
+    ];
+    const bigMaxSeed = { ...SEED, thresholds: { ...SEED.thresholds, max_challenges: 100 } };
+    let issued: ChallengeSpec[] = [];
+    for (let i = 0; i < 20; i++) {
+      const spec = selectChallenge(claims, issued, {}, bigMaxSeed, 'speak-sweep', conversation);
+      if (!spec) break;
+      expect(spec.speak).toBeTruthy();
+      expect(spec.speak!.trim().length).toBeGreaterThan(0);
+      expect(spec.speak!.trim().endsWith('?')).toBe(true);
+      expect(spec.speak).not.toMatch(RAW_FIELD_RE);
+      expect(spec.speak).not.toMatch(FORBIDDEN_RE);
+      issued = [...issued, spec];
+    }
+    expect(issued.length).toBeGreaterThan(0);
+  });
+
+  it('is deterministic: the same inputs always compose the same speak text', () => {
+    const claims: Claim[] = [claim('c-cns', 'counsel', 'STATED', 'whitmore and bass', 1000, 'Whitmore and Bass')];
+    const spec1 = selectChallenge(claims, [], {}, SEED, 'speak-det', undefined);
+    const spec2 = selectChallenge(claims, [], {}, SEED, 'speak-det', undefined);
+    expect(spec1?.speak).toBe(spec2?.speak);
+  });
+});

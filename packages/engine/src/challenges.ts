@@ -80,6 +80,10 @@ function selectLiveCommitment(
     kind: 'LIVE_COMMITMENT',
     field: best.field,
     ask: `Ask the caller to restate the ${spokenField(best.field)} they gave earlier. Do not say the value yourself.`,
+    // CHALLENGE-SPEAKABLE (2026-09-11): the exact, ready-to-speak version of `ask` above --
+    // same spoken-label rule (never the raw field id), same "never say the value" behavior
+    // (the value simply never appears in the template).
+    speak: `Can you restate the ${spokenField(best.field)} you gave me earlier?`,
     expect: { commitment_claim_id: best.claim.id },
   };
 }
@@ -101,6 +105,29 @@ function knowledgeTruthForField(field: TrapField, seed: SeedConfig, claimed_iden
         : undefined;
   if (!entry || !factInScope(entry, claimed_identity_id)) return null;
   return entry.truth;
+}
+
+/** CHALLENGE-SPEAKABLE (2026-09-11): natural, per-field confirmation sentence for a
+ *  TRAP_FACT's `speak` -- deliberately narrower than `ask`'s "confirm the whole request as
+ *  if summarizing" direction (which needs the rest of the live request context, not just
+ *  this one field, to actually phrase): states back only the one field under test with the
+ *  wrong value and asks for confirmation, the same "Just to confirm... Is that correct?"
+ *  shape `fsm.ts`'s `readbackSentence` already uses for READBACK. Judgment call flagged in
+ *  this task's report: this is a real behavior narrowing (a single stated fact instead of a
+ *  full request summary), traded for a deterministic, testable sentence -- grading is
+ *  unaffected either way (gradeChallenges only inspects the caller's reply, never the
+ *  question's own wording). */
+function trapSentence(field: TrapField, trapValue: string): string {
+  switch (field) {
+    case 'beneficiary':
+      return `Just to confirm, this transfer goes to ${trapValue}. Is that correct?`;
+    case 'counsel':
+      return `Just to confirm, our counsel of record is ${trapValue}. Is that correct?`;
+    case 'escrow_institution':
+      return `Just to confirm, the escrow institution is ${trapValue}. Is that correct?`;
+    case 'approver':
+      return `Just to confirm, this was approved by ${trapValue}. Is that correct?`;
+  }
 }
 
 function selectTrapFact(claims: Claim[], seed: SeedConfig, challengeId: string): ChallengeSpec | null {
@@ -125,6 +152,7 @@ function selectTrapFact(claims: Claim[], seed: SeedConfig, challengeId: string):
       kind: 'TRAP_FACT',
       field,
       ask: `Confirm the request back to the caller as if summarizing, but say "${trapValue}" in place of their ${field}, then pause.`,
+      speak: trapSentence(field, trapValue),
       expect: { trap_value: trapValue, true_claim_id: claim.id },
     };
   }
@@ -183,6 +211,22 @@ function spokenTruths(issued: ChallengeSpec[], seed: SeedConfig): Set<string> {
   return spoken;
 }
 
+/** CHALLENGE-SPEAKABLE (2026-09-11): seed.knowledge `ask` strings are authored as
+ *  imperatives for the model to phrase itself, e.g. "Ask which law firm is our counsel of
+ *  record on the Hartwell deal." -- this is a mechanical, content-free reshaping into a
+ *  direct question ("Which law firm is our counsel of record on the Hartwell deal?"):
+ *  strip a leading "Ask " (case-insensitive) and any trailing punctuation, capitalize the
+ *  first letter, append "?". Never adds or removes a fact; every entry in
+ *  seed/meridian.ts's `knowledge` array already reads as a natural question once the
+ *  leading "Ask " is gone (the same words `stripAskPrefix` in compose.ts strips for the
+ *  judge-legible evidence label, though that call site keeps the lower-case, non-question
+ *  form since it's describing what was asked, not phrasing a question). */
+function askToQuestion(ask: string): string {
+  const body = ask.replace(/^ask\s+/i, '').replace(/[.?!]+$/, '').trim();
+  if (body.length === 0) return ask;
+  return `${body.charAt(0).toUpperCase()}${body.slice(1)}?`;
+}
+
 function selectSeedFact(
   claims: Claim[],
   issued: ChallengeSpec[],
@@ -223,6 +267,7 @@ function selectSeedFact(
     kind: 'SEED_FACT',
     field: seedFieldForEntry(entry.id),
     ask: entry.ask,
+    speak: askToQuestion(entry.ask),
     expect: { accept_tokens: entry.accept_tokens },
     fact_id: entry.id,
   };
@@ -277,6 +322,7 @@ function selectRelational(claims: Claim[], issued: ChallengeSpec[], seed: SeedCo
     kind: 'RELATIONAL',
     field: 'account_last4',
     ask: `Ask for the last four digits of the account attached to the ${humanField} they named.`,
+    speak: `Can you give me the last four digits of the account attached to the ${humanField} you named?`,
     expect: { accept_tokens: acceptTokens },
   };
 }

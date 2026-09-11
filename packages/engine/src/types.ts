@@ -114,6 +114,15 @@ export interface ChallengeSpec {
   kind: ChallengeKind;
   field: ClaimField;
   ask: string; // phrasing goal for the LLM (never contains the expected answer)
+  // CHALLENGE-SPEAKABLE (2026-09-11): the engine-composed, ready-to-speak question or
+  // confirmation sentence for this challenge -- same treatment FIX7 (571ee31) gave the
+  // READBACK sentence in fsm.ts's `readbackSentence`. Deterministic, never contains the
+  // expected answer, never a system field name. Optional so pre-existing hand-authored
+  // ChallengeSpec literals (tests, and any `challenge_issued` action recorded before this
+  // field existed) remain valid without it -- consumers fall back to `ask`. Not yet wired
+  // into the live voice prompt (packages/server/src/call/prompt.ts's ASK_CHALLENGE case
+  // still ignores it, deliberately -- see that file's comment on why).
+  speak?: string;
   expect:
     | { accept_tokens: string[] }
     | { commitment_claim_id: string }
