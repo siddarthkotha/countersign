@@ -169,6 +169,10 @@ export interface DiagnosticsSummary {
    *  this call's persona actually resolved to at WS attach (PROVEN: ws/browser.ts, where
    *  defaultCallContext is built) -- `null` for a bundle that predates this fix. */
   call_context_event: RehearseDiagnosticEvent | null;
+  /** Founder ruling 2026-09-11: whether this call's AAI connection requested a greeting
+   *  (the agent speaks first). Extracted from the aai_ready event's detail. `null` for a
+   *  bundle that predates this field. */
+  greeting_configured: boolean | null;
 }
 
 export interface DiagnosticsFailure {

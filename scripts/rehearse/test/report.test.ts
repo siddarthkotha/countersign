@@ -244,6 +244,57 @@ describe('report rendering', () => {
     expect(line).toContain('[FAIL]');
     expect(line).toContain('verdict=FREEZE');
   });
+
+  // Founder ruling 2026-09-11: greeting_configured field distinguishes between greeting
+  // (agent speaks first) and legacy caller-first audio timing
+  it('renders "Ready to greeting audio" when greeting_configured is true', () => {
+    const md = renderReport(
+      baseResult({
+        diagnostics: {
+          ok: true,
+          event_kind_counts: { evaluate: 3 },
+          tool_events: [],
+          evaluate_events: [],
+          deployed_commit: null,
+          ended_at_ms: 42000,
+          end_reason: 'caller_ended',
+          session_minted_event: null,
+          call_context_event: null,
+          greeting_configured: true,
+        },
+      }),
+    );
+    expect(md).toContain('Ready to greeting audio');
+    expect(md).toContain('Greeting configured: yes');
+    expect(md).not.toContain('Ready to first agent audio');
+  });
+
+  it('renders "Ready to first agent audio" when greeting_configured is false', () => {
+    const md = renderReport(
+      baseResult({
+        diagnostics: {
+          ok: true,
+          event_kind_counts: { evaluate: 3 },
+          tool_events: [],
+          evaluate_events: [],
+          deployed_commit: null,
+          ended_at_ms: 42000,
+          end_reason: 'caller_ended',
+          session_minted_event: null,
+          call_context_event: null,
+          greeting_configured: false,
+        },
+      }),
+    );
+    expect(md).toContain('Ready to first agent audio');
+    expect(md).toContain('Greeting configured: no');
+    expect(md).not.toContain('Ready to greeting audio');
+  });
+
+  it('renders "Greeting configured: unknown" when greeting_configured is null (older bundle)', () => {
+    const md = renderReport(baseResult());
+    expect(md).toContain('Greeting configured: unknown');
+  });
 });
 
 describe('report file naming', () => {

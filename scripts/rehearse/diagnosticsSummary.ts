@@ -27,6 +27,7 @@ export function summarizeDiagnostics(bundle: RehearseDiagnosticBundle | null): D
   const evaluateEvents: RehearseDiagnosticEvent[] = [];
   let sessionMintedEvent: RehearseDiagnosticEvent | null = null;
   let callContextEvent: RehearseDiagnosticEvent | null = null;
+  let greetingConfigured: boolean | null = null;
 
   for (const e of bundle.server_events) {
     counts[e.kind] = (counts[e.kind] ?? 0) + 1;
@@ -36,6 +37,13 @@ export function summarizeDiagnostics(bundle: RehearseDiagnosticBundle | null): D
     // one 'session_minted' (mint time) and one 'call_context' (first WS attach) per bundle.
     if (e.kind === 'session_minted' && sessionMintedEvent === null) sessionMintedEvent = e;
     if (e.kind === 'call_context' && callContextEvent === null) callContextEvent = e;
+    // Founder ruling 2026-09-11: extract greeting_configured from aai_ready event's detail.
+    if (e.kind === 'aai_ready' && greetingConfigured === null) {
+      if (typeof e.detail === 'object' && e.detail !== null && 'greeting_configured' in e.detail) {
+        const detail = e.detail as Record<string, unknown>;
+        greetingConfigured = typeof detail.greeting_configured === 'boolean' ? detail.greeting_configured : null;
+      }
+    }
   }
 
   return {
@@ -48,5 +56,6 @@ export function summarizeDiagnostics(bundle: RehearseDiagnosticBundle | null): D
     end_reason: bundle.end_reason,
     session_minted_event: sessionMintedEvent,
     call_context_event: callContextEvent,
+    greeting_configured: greetingConfigured,
   };
 }

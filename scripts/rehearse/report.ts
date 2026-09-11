@@ -230,8 +230,15 @@ export function renderReport(r: RunResult): string {
   }
   lines.push('## Timings (measured at the harness)');
   lines.push('');
+  const diagnostics = r.diagnostics;
+  const greetingConfigured = diagnostics.ok ? diagnostics.greeting_configured : null;
   lines.push(`- Connect to ready (first \`state\` event): ${fmtMs(r.timings.ready_ms)}`);
-  lines.push(`- Ready to first agent audio: ${fmtMs(r.timings.first_audio_ms)}`);
+  if (greetingConfigured === true) {
+    lines.push(`- Ready to greeting audio: ${fmtMs(r.timings.first_audio_ms)}`);
+  } else {
+    lines.push(`- Ready to first agent audio: ${fmtMs(r.timings.first_audio_ms)}`);
+  }
+  lines.push(`- Greeting configured: ${greetingConfigured === true ? 'yes' : greetingConfigured === false ? 'no' : 'unknown'}`);
   lines.push('');
   lines.push('### Per-turn gaps (caller line end -> next agent audio)');
   lines.push('');
