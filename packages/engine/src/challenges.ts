@@ -235,8 +235,20 @@ function selectRelational(claims: Claim[], issued: ChallengeSpec[], seed: SeedCo
   let acceptTokens: string[] | null = null;
   if (escrow) {
     humanField = 'escrow institution';
-    const entry = seed.knowledge.find((k) => k.id === 'escrow_account_last4');
-    acceptTokens = entry ? entry.accept_tokens : [];
+    // Fix (RT-9b-escrow-grading, trap-scope lane finding 2026-09-09): grade against the
+    // escrow_account_last4 fact scoped to whoever is actually claiming an identity on this
+    // call, never unconditionally Robert Miller's -- same factInScope gate selectSeedFact/
+    // knowledgeTruthForField already use. The old code looked the fact up by id alone, so a
+    // caller with no claim to the Hartwell escrow account (e.g. Dana Whitfield, naming an
+    // unrelated institution) would be graded against Robert Miller's own digits. If no
+    // escrow-account fact is in scope for this caller, there is nothing correct to ask --
+    // fail-safe null (same shape as selectSeedFact's out-of-scope null), never someone
+    // else's account.
+    const claimedIdentity = currentClaim(claims, 'identity');
+    const claimed_identity_id = claimedIdentity ? String(claimedIdentity.value) : null;
+    const entry = seed.knowledge.find((k) => k.id === 'escrow_account_last4' && factInScope(k, claimed_identity_id));
+    if (!entry) return null;
+    acceptTokens = entry.accept_tokens;
   } else if (beneficiary) {
     humanField = 'beneficiary';
     // Founder ruling (2026-09-09, sibling bug): grade against the NAMED beneficiary's OWN

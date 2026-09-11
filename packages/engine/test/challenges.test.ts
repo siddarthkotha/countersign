@@ -519,6 +519,52 @@ describe('selectChallenge — RELATIONAL grades against the named beneficiary\'s
   });
 });
 
+describe('selectChallenge — RELATIONAL escrow branch grades against the identity who named the escrow institution (RT-9b-escrow-grading)', () => {
+  it('Robert Miller names the Hartwell escrow institution: RELATIONAL grades against his own escrow_account_last4 (8830)', () => {
+    const claims: Claim[] = [
+      claim('c-id', 'identity', 'STATED', 'robert-miller', 0, 'Robert Miller'),
+      claim('c-esc', 'escrow_institution', 'STATED', 'first meridian trust', 1000, 'First Meridian Trust'),
+    ];
+    const blockLive: ChallengeSpec = {
+      challenge_id: 'rm-block-live',
+      kind: 'TRAP_FACT',
+      field: 'escrow_institution',
+      ask: 'x',
+      expect: { trap_value: 'Harbor Fidelity Trust', true_claim_id: 'c-esc' },
+    };
+    const bigSeed = { ...SEED, thresholds: { ...SEED.thresholds, max_challenges: 100 } };
+    const spec = selectChallenge(claims, [blockLive], {}, bigSeed, 'rm-esc-sess', undefined);
+    expect(spec?.kind).toBe('RELATIONAL');
+    expect(spec?.expect).toEqual({ accept_tokens: ['8830'] });
+  });
+
+  it('bug reproduction: Dana Whitfield names an escrow institution that is not hers -- must never be graded against Robert Miller\'s escrow_account_last4 (8830)', () => {
+    // Dana Whitfield has no Hartwell business at all -- escrow_account_last4 is scoped
+    // (identity_ids: ['robert-miller']) to Robert Miller only. The old code's escrow branch
+    // looked up seed.knowledge's escrow_account_last4 by id alone, with no identity gate, so
+    // ANY caller who named ANY escrow institution was graded against Robert Miller's digits
+    // regardless of who was actually on the line -- found by the trap-scope lane, 2026-09-09.
+    const claims: Claim[] = [
+      claim('c-id', 'identity', 'STATED', 'dana-whitfield', 0, 'Dana Whitfield'),
+      claim('c-esc', 'escrow_institution', 'STATED', 'northgate bank', 1000, 'Northgate Bank'),
+    ];
+    const blockLive: ChallengeSpec = {
+      challenge_id: 'dana-block-live',
+      kind: 'TRAP_FACT',
+      field: 'escrow_institution',
+      ask: 'x',
+      expect: { trap_value: 'Harbor Fidelity Trust', true_claim_id: 'c-esc' },
+    };
+    const bigSeed = { ...SEED, thresholds: { ...SEED.thresholds, max_challenges: 100 } };
+    const spec = selectChallenge(claims, [blockLive], {}, bigSeed, 'dana-esc-sess', undefined);
+    // Dana has no escrow account of her own in this seed -- there is nothing correct to
+    // grade against, so RELATIONAL must fail safe (same shape as selectSeedFact's
+    // out-of-scope null) rather than reach for Robert Miller's account.
+    expect(spec?.expect).not.toEqual({ accept_tokens: ['8830'] });
+    expect(spec?.kind).not.toBe('RELATIONAL');
+  });
+});
+
 describe('selectChallenge — RELATIONAL dedup', () => {
   it('does not re-ask escrow_account_last4 as RELATIONAL if already issued as SEED_FACT', () => {
     const last4Fact = SEED.knowledge.find((k) => k.id === 'escrow_account_last4')!;
