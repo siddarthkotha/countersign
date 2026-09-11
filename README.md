@@ -26,7 +26,7 @@ gitignored, named here as the source). The fraud path (Scenario B, FREEZE) was p
 commit at 57.4 s (report
 `scripts/rehearse/reports/2026-09-09T20-06-19-scenario-b-miller-fraud.md`). Both paths are
 now proven live on one commit. PROVEN by `npm test` on
-commit `6e6d5c1`: 1,050 tests pass across 70 files, typecheck is clean, and all 19 recorded call
+commit `49ec21d`: 1,053 tests pass across 70 files, typecheck is clean, and all 19 recorded call
 transcripts replay exactly through the real policy engine. The five-day honest-caller failure
 was a harness bug: the scenario loader dropped the persona field, fixed 2026-09-09 at commit
 `75e31df`. The policy engine itself was never wrong.
@@ -154,7 +154,7 @@ Four invariants are checked last and override every rule (`rules.ts` lines 300â€
 4. A tool result that errored or is still missing past its timeout makes the evaluation
    incomplete, which can only ever become ESCALATE (or NO_ACTION with nothing open). It never becomes STAGE.
 
-Before STAGE can fire, ten checklist items must each read **true**: affirmative checks, never
+Before STAGE can fire, twelve checklist items must each read **true**: affirmative checks, never
 "zero failures" (`AssuranceChecklist` in `packages/engine/src/types.ts`, gated in `rules.ts` row
 11): identity claimed; the SSO/identity check currently passing; the out-of-band check currently
 confirmed; the context check currently passing; no unresolved contradiction in what the caller
@@ -181,7 +181,7 @@ flipped and reports which flips would change the verdict. Nothing here is simula
 from the real engine.
 
 **Replay guarantee:** the same inputs always produce the same verdict. `packages/engine/corpus/`
-holds 18 recorded transcripts replayed through this real engine on every test run
+holds 19 recorded transcripts replayed through this real engine on every test run
 (`test/corpus.test.ts`). Every rule-table row and invariant is also exercised directly, one
 scenario at a time, in `test/rules.test.ts`. On top of that, mutation tests
 (`test/mutants.test.ts`) deliberately break four specific rule mechanics: the readback gate
@@ -192,7 +192,7 @@ corpus" below.
 
 ## Replay the corpus
 
-`packages/engine/corpus/*.json` holds 18 transcripts replayed through the real engine every
+`packages/engine/corpus/*.json` holds 19 transcripts replayed through the real engine every
 test run (`test/corpus.test.ts`), and every rule mutant breaks at least one of them
 (`test/mutants.test.ts`). This is G3's evidence that the rulebook is load-bearing, not decorative.
 Inspect any file judge-legibly:
