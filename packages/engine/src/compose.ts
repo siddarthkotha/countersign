@@ -316,23 +316,55 @@ export function buildConsistencyEvidence(claims: Claim[], request_version: numbe
   return out;
 }
 
-export function buildReadbackEvidence(claims: Claim[], request_version: number): Evidence[] {
+/** Founder decision 2026-09-12 9:00 AM: how many `readback_issued` actions have been
+ *  recorded for `field`, regardless of whether any of them were ever answered -- the raw
+ *  count `computeReadbackReaskExhausted` (below) and `buildReadbackEvidence` both key off. */
+function countReadbackIssued(actions: AgentAction[], field: ClaimField): number {
+  return actions.filter((a) => a.kind === 'readback_issued' && a.field === field).length;
+}
+
+/** Founder decision 2026-09-12 9:00 AM (background: a live call on 2026-09-11 re-asked the
+ *  same beneficiary readback five times while the caller kept answering without ever
+ *  confirming, until the 60s idle timeout escalated it -- see
+ *  scripts/rehearse/reports/2026-09-11T22-51-38-barge-in-interrupt.md; the restatement fix,
+ *  main 4fe3345, closed that ONE caller shape but left the loop itself unbounded for any
+ *  other non-confirming reply). Returns the first CRITICAL_FIELDS field whose
+ *  `readback_issued` count has reached `seed.thresholds.max_readback_reasks` while it still
+ *  has not reached CONFIRMED, or null if none has. Feeds rules.ts's new row 13 (ESCALATE,
+ *  naming the field) and, mirrored below, the readback_result evidence card's own FAIL
+ *  status -- both read the exact same count, computed once each in this function and in
+ *  `buildReadbackEvidence`. */
+export function computeReadbackReaskExhausted(claims: Claim[], actions: AgentAction[], seed: SeedConfig): ClaimField | null {
+  for (const field of CRITICAL_FIELDS) {
+    if (isConfirmed(claims, field)) continue;
+    if (countReadbackIssued(actions, field) >= seed.thresholds.max_readback_reasks) return field;
+  }
+  return null;
+}
+
+export function buildReadbackEvidence(claims: Claim[], actions: AgentAction[], seed: SeedConfig, request_version: number): Evidence[] {
   const out: Evidence[] = [];
   for (const field of CRITICAL_FIELDS) {
     const claim = currentClaim(claims, field);
     const confirmed = isConfirmed(claims, field);
+    const issuedCount = countReadbackIssued(actions, field);
+    const exhausted = !confirmed && issuedCount >= seed.thresholds.max_readback_reasks;
     out.push({
       id: `ev-readback-${field}`,
       kind: 'readback_result',
       t_ms: claim?.t_ms ?? 0,
       label: `Readback: ${field.replace('_', ' ')}`,
-      status: confirmed ? 'PASS' : 'PENDING',
+      status: confirmed ? 'PASS' : exhausted ? 'FAIL' : 'PENDING',
       detail: confirmed
         ? `${field.replace('_', ' ')} confirmed by the caller.`
-        : claim
-          ? `${field.replace('_', ' ')} claimed but not yet confirmed by the caller.`
-          : `${field.replace('_', ' ')} has not been claimed yet.`,
-      facts: { field, confirmed, value: claim ? claim.value : null },
+        : exhausted
+          // Founder decision 2026-09-12 9:00 AM: the reason a human callback is naming this
+          // specific field -- see rules.ts row 13.
+          ? `${field.replace('_', ' ')} was read back ${issuedCount} times without a confirmed answer; escalating for a human callback.`
+          : claim
+            ? `${field.replace('_', ' ')} claimed but not yet confirmed by the caller.`
+            : `${field.replace('_', ' ')} has not been claimed yet.`,
+      facts: { field, confirmed, value: claim ? claim.value : null, readbacks_issued: issuedCount },
       quotes: claim ? [claim.quote] : [],
       source: 'transcript',
       provenance: confirmed ? 'CALLER_SAID' : 'UNRESOLVED',
@@ -562,6 +594,9 @@ export function deriveRuleContext(
     critical_confirmed: computeCriticalConfirmed(claims),
     identity_switch_stale: identitySwitchEv?.status === 'FLAG',
     challenge_awaiting_answer: computeChallengeAwaitingAnswer(tools, conversation, actions, seed),
+    // Founder decision 2026-09-12 9:00 AM: see computeReadbackReaskExhausted above and
+    // rules.ts's new row 13.
+    readback_reask_exhausted_field: computeReadbackReaskExhausted(claims, actions, seed),
     // Red team item 4 (founder ruling 2026-09-09): true once the server has recorded a
     // `call_ended` action anywhere in the log -- see rules.ts row 14. A structured fact
     // about the call's lifecycle, not a verdict; the engine alone decides what it means.

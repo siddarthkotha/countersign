@@ -40,6 +40,7 @@ function ctx(overrides?: Partial<RuleContext>): RuleContext {
     identity_switch_stale: false,
     challenge_awaiting_answer: false,
     call_ended: false,
+    readback_reask_exhausted_field: null,
     ...overrides,
   };
 }
@@ -229,43 +230,74 @@ describe('decide -- rule table (first match wins)', () => {
     expect(r.failure_tally).toBeLessThan(3);
   });
 
-  it('row 13: otherwise -> ESCALATE (challenges exhausted, still short)', () => {
+  it('row 14: otherwise -> ESCALATE (challenges exhausted, still short)', () => {
     const evidence = [
       ...stageEvidence({ context: 'FAIL' }),
       ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
     ];
     const r = decide(evidence, SEED, ctx({ challenges_issued: 3 }));
     expect(r.verdict).toBe('ESCALATE');
-    expect(r.rule_hit).toBe(13);
+    expect(r.rule_hit).toBe(14);
   });
 
-  it('row 14 (red team item 4, founder ruling 2026-09-09): call ended with a request stated and no terminal verdict yet -> ESCALATE, empty reasons', () => {
+  it('row 13 (founder decision 2026-09-12): a critical field\'s readback re-ask cap is exhausted -> ESCALATE naming the field, reachable ahead of row 14', () => {
+    const evidence = [
+      ...stageEvidence(),
+      ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
+    ];
+    const r = decide(evidence, SEED, ctx({ critical_confirmed: false, challenges_issued: 3, readback_reask_exhausted_field: 'beneficiary' }));
+    expect(r.verdict).toBe('ESCALATE');
+    expect(r.rule_hit).toBe(13);
+    expect(r.reasons).toContain('READBACK_LIMIT_EXCEEDED');
+  });
+
+  it('row 13 takes priority over row 5 once the field is exhausted -- row 5 alone (not exhausted) still holds', () => {
+    const evidence = [
+      ...stageEvidence(),
+      ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
+    ];
+    const stillHolding = decide(evidence, SEED, ctx({ critical_confirmed: false, challenges_issued: 3 }));
+    expect(stillHolding.verdict).toBe('PENDING');
+    expect(stillHolding.rule_hit).toBe(5);
+
+    const exhausted = decide(evidence, SEED, ctx({ critical_confirmed: false, challenges_issued: 3, readback_reask_exhausted_field: 'amount_usd' }));
+    expect(exhausted.verdict).toBe('ESCALATE');
+    expect(exhausted.rule_hit).toBe(13);
+  });
+
+  it('row 13 never fires ahead of FREEZE -- a freeze-eligible call freezes even with the readback cap also exhausted', () => {
+    const r = decide(stageEvidence({ sso: 'FAIL', oob: 'FAIL' }), SEED, ctx({ readback_reask_exhausted_field: 'beneficiary' }));
+    expect(r.verdict).toBe('FREEZE');
+    expect(r.rule_hit).toBe(8);
+  });
+
+  it('row 15 (red team item 4, founder ruling 2026-09-09): call ended with a request stated and no terminal verdict yet -> ESCALATE, empty reasons', () => {
     // Identity + request present but no live checks/challenges done yet -> tentative
     // verdict is PENDING (row 4, a challenge is still owed). Ending the call while a
     // request is on record must not leave this open forever.
     const r = decide([IDENTITY, REQUEST], SEED, ctx({ call_ended: true }));
     expect(r.verdict).toBe('ESCALATE');
-    expect(r.rule_hit).toBe(14);
+    expect(r.rule_hit).toBe(15);
     expect(r.reasons).toEqual([]);
   });
 
-  it('row 14: call ended with NO request ever stated -> NO_ACTION, not ESCALATE', () => {
+  it('row 15: call ended with NO request ever stated -> NO_ACTION, not ESCALATE', () => {
     const withoutIdentity = decide([], SEED, ctx({ call_ended: true }));
     expect(withoutIdentity.verdict).toBe('NO_ACTION');
-    expect(withoutIdentity.rule_hit).toBe(14);
+    expect(withoutIdentity.rule_hit).toBe(15);
 
     const withIdentityOnly = decide([IDENTITY], SEED, ctx({ call_ended: true }));
     expect(withIdentityOnly.verdict).toBe('NO_ACTION');
-    expect(withIdentityOnly.rule_hit).toBe(14);
+    expect(withIdentityOnly.rule_hit).toBe(15);
   });
 
-  it('row 14 never overrides a FREEZE already owed -- a fraud call that ends mid-interrogation still FREEZEs', () => {
+  it('row 15 never overrides a FREEZE already owed -- a fraud call that ends mid-interrogation still FREEZEs', () => {
     const r = decide(stageEvidence({ sso: 'FAIL', oob: 'FAIL' }), SEED, STAGE_CTX_WITH_CALL_ENDED);
     expect(r.verdict).toBe('FREEZE');
     expect(r.rule_hit).toBe(8);
   });
 
-  it('row 14 never overrides an already-terminal STAGE/ESCALATE/NO_ACTION verdict', () => {
+  it('row 15 never overrides an already-terminal STAGE/ESCALATE/NO_ACTION verdict', () => {
     // row 11 (STAGE) unaffected by call_ended.
     const stageEv = [...stageEvidence(), ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } })];
     const staged = decide(stageEv, SEED, ctx({ call_ended: true }));
@@ -347,14 +379,14 @@ describe('decide -- founder rulings 2026-09-09', () => {
     expect(r.failure_tally).toBe(1);
   });
 
-  it('ruling C: same call once the answer has come in (no longer awaiting) -> ESCALATE at row 13', () => {
+  it('ruling C: same call once the answer has come in (no longer awaiting) -> ESCALATE at row 14', () => {
     const evidence = [
       ...stageEvidence({ context: 'FAIL' }),
       ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
     ];
     const r = decide(evidence, SEED, ctx({ challenges_issued: 3, challenge_awaiting_answer: false }));
     expect(r.verdict).toBe('ESCALATE');
-    expect(r.rule_hit).toBe(13);
+    expect(r.rule_hit).toBe(14);
   });
 });
 
@@ -509,10 +541,23 @@ describe('phrasingGoal (fsm.ts) -- CONSISTENCY_CHECK sub-branches', () => {
 });
 
 describe('RULES_DOC', () => {
-  it('publishes all 14 rows and the VOICE_CAN_NEVER_RELEASE invariant', () => {
+  it('publishes all 15 rows and the VOICE_CAN_NEVER_RELEASE invariant', () => {
     expect(RULES_DOC).toContain('13.');
     expect(RULES_DOC).toContain('14.');
+    expect(RULES_DOC).toContain('15.');
     expect(RULES_DOC).toContain('VOICE_CAN_NEVER_RELEASE');
+  });
+
+  it('row 13 text agrees with the code: readback re-ask cap, names the field, sits ahead of the old row-13 catch-all (founder decision 2026-09-12)', () => {
+    // Guards against RULES_DOC drifting from decide()'s actual row-13 condition -- the same
+    // staleness class the row-4/row-6 tests below already guard against.
+    const row13 = RULES_DOC.split('\n').find((line) => /^13\./.test(line));
+    expect(row13).toBeDefined();
+    const lower = row13!.toLowerCase();
+    expect(lower).toContain('readback');
+    expect(lower).toContain('re-ask');
+    expect(lower).toContain('max_readback_reasks');
+    expect(lower).toContain('naming the field');
   });
 
   it('never uses RELEASE as a verdict word (only as the invariant name)', () => {

@@ -67,7 +67,7 @@ export function evaluate(input: EngineInput, overrides?: Record<string, Evidence
 
   // 5. Ledger-derived evidence.
   const consistencyEv = buildConsistencyEvidence(claims, request_version);
-  const readbackEv = buildReadbackEvidence(claims, request_version);
+  const readbackEv = buildReadbackEvidence(claims, actions, seed, request_version);
   const exposureEv = buildExposureEvidence(claims, seed, request_version);
 
   // 6. Merge (transcript, ledger-derived, knowledge, tools) and apply test-only overrides.

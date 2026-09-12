@@ -6,6 +6,7 @@
 // CI workflow are) -- it is a new, freely-appendable unit test file.
 import { describe, expect, it } from 'vitest';
 import { buildConsistencyEvidence, deriveRuleContext, reconstructIssued, resolveIdentitySwitch } from '../src/compose';
+import { buildReadbackEvidence, computeReadbackReaskExhausted, deriveRuleContext, reconstructIssued, resolveIdentitySwitch } from '../src/compose';
 import { evidenceFromTranscript } from '../src/evidence/fromTranscript';
 import { buildLedger } from '../src/ledger';
 import { MERIDIAN } from '../src/seed/meridian';
@@ -262,6 +263,84 @@ describe('deriveRuleContext -- challenge_awaiting_answer (ruling C, 2026-09-09, 
     const tools = [{ id: 't1', name: 'check_sso_context' as const, t_ms: 10_000 + WINDOW + 1, args: {} }];
     const ctx = deriveRuleContext([], 1, [], tools, [], actions, 1, SEED);
     expect(ctx.challenge_awaiting_answer).toBe(false);
+  });
+});
+
+// Founder decision 2026-09-12 9:00 AM: caps how many times the SAME critical field may be
+// read back and re-asked without a CONFIRMED answer before the engine gives up holding
+// (rules.ts row 5) and escalates instead (row 13) -- see rules.ts's RuleContext comment for
+// the live-call background this closes.
+describe('computeReadbackReaskExhausted (founder decision 2026-09-12 9:00 AM)', () => {
+  const CAP = SEED.thresholds.max_readback_reasks; // 3
+
+  function readback(id: string, field: Claim['field'], t_ms: number): AgentAction {
+    return { id, kind: 'readback_issued', t_ms, field, value: 'Meridian Supply' };
+  }
+
+  function confirmedClaim(field: Claim['field']): Claim {
+    return { id: `cl-${field}`, field, kind: 'CONFIRMED', value: 'meridian supply', quote: { utterance_id: 'u1', text: 'Meridian Supply' }, t_ms: 0, request_version: 1 };
+  }
+
+  it('null when no readback has ever been issued for any critical field', () => {
+    expect(computeReadbackReaskExhausted([], [], SEED)).toBeNull();
+  });
+
+  it('null while the count sits below the cap', () => {
+    const actions = [readback('r1', 'beneficiary', 1000), readback('r2', 'beneficiary', 2000)]; // CAP - 1
+    expect(computeReadbackReaskExhausted([], actions, SEED)).toBeNull();
+  });
+
+  it('returns the field once its readback count reaches the cap while still unconfirmed', () => {
+    const actions = Array.from({ length: CAP }, (_, i) => readback(`r${i}`, 'beneficiary', 1000 * (i + 1)));
+    expect(computeReadbackReaskExhausted([], actions, SEED)).toBe('beneficiary');
+  });
+
+  it('a readback count past the cap still counts (>=, not ===)', () => {
+    const actions = Array.from({ length: CAP + 2 }, (_, i) => readback(`r${i}`, 'beneficiary', 1000 * (i + 1)));
+    expect(computeReadbackReaskExhausted([], actions, SEED)).toBe('beneficiary');
+  });
+
+  it('null once the field has reached CONFIRMED, no matter how many readbacks were issued', () => {
+    const actions = Array.from({ length: CAP }, (_, i) => readback(`r${i}`, 'beneficiary', 1000 * (i + 1)));
+    expect(computeReadbackReaskExhausted([confirmedClaim('beneficiary')], actions, SEED)).toBeNull();
+  });
+
+  it('a different field reaching the cap does not report an unrelated, still-under-cap field', () => {
+    const actions = [
+      ...Array.from({ length: CAP }, (_, i) => readback(`ra${i}`, 'beneficiary', 1000 * (i + 1))),
+      readback('rb1', 'amount_usd', 5000),
+    ];
+    expect(computeReadbackReaskExhausted([], actions, SEED)).toBe('beneficiary');
+  });
+
+  it('reports fields in CRITICAL_FIELDS order (amount_usd, account_last4, beneficiary) when more than one is exhausted', () => {
+    const actions = [
+      ...Array.from({ length: CAP }, (_, i) => readback(`ra${i}`, 'beneficiary', 1000 * (i + 1))),
+      ...Array.from({ length: CAP }, (_, i) => readback(`rb${i}`, 'amount_usd', 5000 + 1000 * (i + 1))),
+    ];
+    expect(computeReadbackReaskExhausted([], actions, SEED)).toBe('amount_usd');
+  });
+
+  it('deriveRuleContext wires the exhausted field straight through into RuleContext', () => {
+    const actions = Array.from({ length: CAP }, (_, i) => readback(`r${i}`, 'beneficiary', 1000 * (i + 1)));
+    const ctx = deriveRuleContext([], 1, [], [], [], actions, 0, SEED);
+    expect(ctx.readback_reask_exhausted_field).toBe('beneficiary');
+  });
+
+  it('buildReadbackEvidence: FAILs the readback_result card and names the field and count once exhausted', () => {
+    const actions = Array.from({ length: CAP }, (_, i) => readback(`r${i}`, 'beneficiary', 1000 * (i + 1)));
+    const evidence = buildReadbackEvidence([], actions, SEED, 1);
+    const card = evidence.find((e) => e.id === 'ev-readback-beneficiary')!;
+    expect(card.status).toBe('FAIL');
+    expect(card.detail.toLowerCase()).toContain('beneficiary');
+    expect(card.detail).toContain(String(CAP));
+    expect(card.facts.readbacks_issued).toBe(CAP);
+  });
+
+  it('buildReadbackEvidence: still PENDING (not FAIL) below the cap', () => {
+    const actions = [readback('r1', 'beneficiary', 1000)];
+    const evidence = buildReadbackEvidence([], actions, SEED, 1);
+    expect(evidence.find((e) => e.id === 'ev-readback-beneficiary')!.status).toBe('PENDING');
   });
 });
 

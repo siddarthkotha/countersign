@@ -199,6 +199,14 @@ export interface SeedConfig {
     approximate_jump_ratio: number; // fix-round-2: an APPROXIMATE claim's replacement value is
     // CORRECTED only if it stays within this multiple (and its reciprocal) of the approximate
     // value; a bigger jump is CONTRADICTED. Numeric fields only (amount_usd).
+    // Founder decision 2026-09-12 9:00 AM: how many times the SAME critical field
+    // (amount_usd/account_last4/beneficiary) may be read back and re-asked without a
+    // CONFIRMED answer before the engine stops holding (row 5) and escalates to a human
+    // instead (rules.ts's new row 13) -- closes the unbounded readback loop a live call hit
+    // on 2026-09-11 (report scripts/rehearse/reports/2026-09-11T22-51-38-barge-in-interrupt.md,
+    // fixed for that one specific caller shape by the restatement fix, main 4fe3345, but
+    // still open for any other non-confirming reply).
+    max_readback_reasks: number; // v2: 3
   };
   pressure_lexicon: string[]; // lower-case phrases
   out_of_scope_lexicon: string[]; // lower-case phrases
@@ -283,7 +291,13 @@ export type VerdictReason =
   // these give the anti-structuring and first-time-beneficiary escalations their own
   // reason codes, appended after URGENCY_ESCALATION in the ordered reasons list.
   | 'EXPOSURE_LIMIT'
-  | 'NEW_BENEFICIARY';
+  | 'NEW_BENEFICIARY'
+  // Founder decision 2026-09-12 9:00 AM: rules.ts's new row 13 -- a critical field's
+  // readback hit seed.thresholds.max_readback_reasks without ever reaching CONFIRMED.
+  // Appended after NEW_BENEFICIARY in the ordered reasons list, same convention as every
+  // other row-specific reason above; which field it was is named in the readback_result
+  // evidence card's `detail` and `facts.field`, not encoded into this reason itself.
+  | 'READBACK_LIMIT_EXCEEDED';
 
 export type GoalCode =
   | 'GREET'

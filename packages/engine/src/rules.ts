@@ -7,7 +7,7 @@
 // anywhere in this file or its output. LAW 3: this is the only place a verdict is decided.
 // See amendment-v2-brief.md section D (the 13-row table + 4 invariants) -- this file is
 // that table, implemented, and RULES_DOC below is that table, published verbatim.
-import type { AssuranceChecklist, Evidence, EvidenceKind, SeedConfig, Verdict, VerdictReason } from './types.js';
+import type { AssuranceChecklist, ClaimField, Evidence, EvidenceKind, SeedConfig, Verdict, VerdictReason } from './types.js';
 
 export interface RuleContext {
   request_version: number;
@@ -25,9 +25,20 @@ export interface RuleContext {
   // Derived purely in compose.ts's deriveRuleContext -- never set from a live clock.
   challenge_awaiting_answer: boolean;
   // Red team item 4 (founder ruling 2026-09-09): true when the call itself has ended
-  // (idle timeout, session cap, a hangup, or a dropped socket) -- see row 14 below and
+  // (idle timeout, session cap, a hangup, or a dropped socket) -- see row 15 below and
   // types.ts's `AgentActionKind.call_ended`. Server-observed, never engine-derived.
   call_ended: boolean;
+  // Founder decision 2026-09-12 9:00 AM: the first CRITICAL_FIELDS field (amount_usd,
+  // account_last4, beneficiary, in that order) whose `readback_issued` count has reached
+  // seed.thresholds.max_readback_reasks while it still has not reached CONFIRMED, or null
+  // if none has. See compose.ts's computeReadbackReaskExhausted (the sole place this is
+  // derived) and row 13 below. Background: a live call on 2026-09-11 re-asked the same
+  // beneficiary readback five times while the caller kept answering without ever
+  // confirming, until the 60s idle timeout escalated it (report
+  // scripts/rehearse/reports/2026-09-11T22-51-38-barge-in-interrupt.md); the restatement
+  // fix (main, 4fe3345) closed that one caller shape (a bare exact restatement) but left
+  // the loop itself unbounded for any other non-confirming reply.
+  readback_reask_exhausted_field: ClaimField | null;
 }
 
 /** Deliberate rule-breaks used only by test/mutants.test.ts to prove each rule is
@@ -46,7 +57,7 @@ export interface DecideResult {
   failure_tally: number;
   assurance: AssuranceChecklist;
   invariants_ok: boolean;
-  rule_hit: number; // which table row (1-14) produced the tentative verdict; 0 = invariant override
+  rule_hit: number; // which table row (1-15) produced the tentative verdict; 0 = invariant override
 }
 
 function find(evidence: Evidence[], kind: EvidenceKind): Evidence | undefined {
@@ -254,7 +265,16 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
   // d672070), same reasoning as row 4: reading an amount back to "whoever is on the line
   // now" would trust the abandoned claim's context just as much as challenging them would,
   // so row 6 (re-establish identity from scratch) must win here too, not just at row 4.
-  else if (freezeGate && !ctx.identity_switch_stale && !mutant?.skip_readback_gate && !ctx.critical_confirmed) {
+  // Founder decision 2026-09-12 9:00 AM: also yields once the field stuck here has hit the
+  // readback re-ask cap (row 13 below) -- otherwise this row would hold PENDING forever on
+  // a caller who never confirms and never triggers a contradiction either.
+  else if (
+    freezeGate &&
+    !ctx.identity_switch_stale &&
+    !mutant?.skip_readback_gate &&
+    !ctx.critical_confirmed &&
+    !ctx.readback_reask_exhausted_field
+  ) {
     verdict = 'PENDING';
     rule_hit = 5;
   }
@@ -301,30 +321,49 @@ export function decide(evidence: Evidence[], seed: SeedConfig, ctx: RuleContext,
     verdict = 'PENDING';
     rule_hit = 12;
   }
-  // Row 13: otherwise, human callback.
+  // Row 13 (founder decision 2026-09-12 9:00 AM): a critical field's readback has been
+  // re-asked to seed.thresholds.max_readback_reasks without ever reaching CONFIRMED ->
+  // escalate for a human callback, naming the field. Sits exactly where row 13 used to sit
+  // (the old catch-all below is now row 14): reached only once rows 1-12 have all already
+  // failed to match, so -- the same way the old row 13 always did -- it never needs its own
+  // explicit freeze guard; FREEZE (row 8) already claimed priority earlier in the chain if
+  // it was eligible. Row 5 above yields to this row once the cap is hit (its own guard),
+  // which is what makes this row reachable at all instead of holding at row 5 forever.
+  else if (ctx.readback_reask_exhausted_field) {
+    verdict = 'ESCALATE';
+    reasons = [
+      ...orderedFreezeReasons(ssoFail, oobFail, contextFail, hasContradiction, anyKnowledgeFail, pressureFlag, exposureFail, ctx.new_beneficiary),
+      'READBACK_LIMIT_EXCEEDED',
+    ];
+    rule_hit = 13;
+  }
+  // Row 14: otherwise, human callback. (Was row 13 before the readback re-ask cap, above,
+  // was inserted in its place on 2026-09-12.)
   else {
     verdict = 'ESCALATE';
     reasons = orderedFreezeReasons(ssoFail, oobFail, contextFail, hasContradiction, anyKnowledgeFail, pressureFlag, exposureFail, ctx.new_beneficiary);
-    rule_hit = 13;
+    rule_hit = 14;
   }
 
-  // Row 14 (red team item 4, founder ruling 2026-09-09): the call itself ended -- idle
-  // timeout, session cap, a hangup, or a dropped socket -- while the table above left the
-  // tentative verdict at PENDING (rows 3-7, 12: no identity/request yet, a challenge or
+  // Row 15 (red team item 4, founder ruling 2026-09-09; renumbered from row 14 on
+  // 2026-09-12 when the readback re-ask cap took the row-13 slot): the call itself ended --
+  // idle timeout, session cap, a hangup, or a dropped socket -- while the table above left
+  // the tentative verdict at PENDING (rows 3-7, 12: no identity/request yet, a challenge or
   // readback still owed, an identity switch to resolve, a live check still outstanding, or
   // some failures short of the freeze line with challenges remaining). Every terminal row
-  // above (1, 2, 8, 9, 10, 11, 13) is already final by the time this check runs and is left
-  // untouched -- FREEZE (row 8) in particular keeps its priority: a fraud call that ends
-  // mid-interrogation with a freeze already owed still FREEZEs, never downgrades. A request
-  // already on record (request_params evidence present) gets the same human-callback
-  // containment an organic ESCALATE gets, with no rule-failure reason to name (there is
-  // none -- only "the call ended before the checks finished"); no request ever stated has
-  // nothing to route, so it closes as NO_ACTION instead -- the same fail-open direction I4
-  // already uses below for an incomplete evaluation with nothing at stake.
+  // above (1, 2, 8, 9, 10, 11, 13, 14) is already final by the time this check runs and is
+  // left untouched -- FREEZE (row 8) in particular keeps its priority: a fraud call that
+  // ends mid-interrogation with a freeze already owed still FREEZEs, never downgrades. A
+  // request already on record (request_params evidence present) gets the same
+  // human-callback containment an organic ESCALATE gets, with no rule-failure reason to
+  // name (there is none -- only "the call ended before the checks finished"); no request
+  // ever stated has nothing to route, so it closes as NO_ACTION instead -- the same
+  // fail-open direction I4 already uses below for an incomplete evaluation with nothing at
+  // stake.
   if (ctx.call_ended && verdict === 'PENDING') {
     verdict = requestEv ? 'ESCALATE' : 'NO_ACTION';
     reasons = [];
-    rule_hit = 14;
+    rule_hit = 15;
   }
 
   // ---- invariants (checked last, override everything) ----
@@ -370,7 +409,7 @@ Rule table (evidence-first, first match wins):
 2. An out-of-scope marker with an open request -> NO_ACTION; the request stays open and unstaged, for a human to route.
 3. No identity claim, or no request -> hold; ask for whichever is missing.
 4. A required challenge is asked before the amount is read back: not enough passed challenges yet for the risk level, challenges remain to ask, and there is no in-progress identity switch to resolve first -> hold; ask the next challenge. At least one genuinely graded knowledge or relational PASS is always required before STAGE, and two when the beneficiary is new; a caller matching an existing scheduled payment exactly no longer lowers this requirement (ruling 2026-09-09 floors it at one, closing the carve-out that used to let it drop to zero).
-5. A readback is still required before anything can be staged: any critical field (amount, account, beneficiary) that has been claimed but not yet confirmed -> hold; read it back and ask the caller to confirm. Reached once any challenge required by row 4 has already been asked (or none is required for this risk level).
+5. A readback is still required before anything can be staged: any critical field (amount, account, beneficiary) that has been claimed but not yet confirmed -> hold; read it back and ask the caller to confirm. Reached once any challenge required by row 4 has already been asked (or none is required for this risk level). Yields to row 13 once that same field's readback has been re-asked to the cap without a confirmed answer (founder decision 2026-09-12) -- this row never holds a caller in that loop forever.
 6. An identity switch this version, with now-stale evidence -> hold; re-establish who is calling from scratch (this always takes priority over asking a fresh challenge or a readback, since both would otherwise address someone whose claimed identity has already been abandoned). Resolved (founder decision 2026-09-11, option B) once, strictly after the switch, the caller re-states the new identity again AND the request is unchanged or re-confirmed since the switch (at least one genuinely graded re-statement of who is calling, not just the original switch line, plus no still-unconfirmed change to amount/account/beneficiary since); resolution never lowers the switch off the record -- it stays a contradiction (row 8b, and the tally) for the rest of the call, so a resolved switch can still freeze or escalate, and row 11's STAGE stays permanently out of reach for it. A caller who switches more than once in the same call (A -> B -> C) reopens this row at each additional switch: the evidence card and this resolution condition always track only the LATEST pair (whoever was claimed immediately before, and whoever is claimed now) -- restating an EARLIER identity in the chain never resolves it (that is itself just a further switch to track), only restating the CURRENT one does -- and every switch in the chain still counts its own contradicted claim toward the tally (capped at 2), resolved or not.
 7. Any identity, out-of-band, or context check still pending, absent, or stale -> hold; keep the floor with one short neutral line.
 8. Freeze the transfer rail when any of:
@@ -383,9 +422,10 @@ Rule table (evidence-first, first match wins):
 9. Distinct amounts stated across the call add up past the high-value threshold while the current amount alone reads under it -> escalate for a human callback (this guards against splitting one large request into smaller-looking pieces).
 10. A first-time beneficiary not on record -> escalate for a human callback, regardless of amount.
 11. Every AssuranceChecklist item reads true -> STAGE for second approval. A pressure flag never blocks this step, but it keeps the details off the call and adds the principal alert to the required actions. At least one knowledge or relational challenge must have graded PASS (ruling 2026-09-09) -- stated as its own explicit assurance item (at_least_one_challenge_passed), separate from and mathematically redundant with the general per-risk-level requirement (challenge_requirement_met) whenever that requirement is 1, so the "never zero challenges" floor stays visible and enforced on its own even if the general requirement's arithmetic changes later. An explicit instruction-injection attempt anywhere in the call (ruling 2026-09-09) makes STAGE unreachable for the rest of the call, regardless of how everything else resolves.
-12. Some checks have failed, fewer than three, and either challenges remain to ask, or the challenge just asked has not been answered yet and the call is still live -> hold; ask another challenge, or wait the few seconds a reply is still due (ruling 2026-09-09): the instant the last allowed challenge is asked must not by itself fall through to row 13 before the caller has had a chance to answer it.
-13. Otherwise -> escalate for a human callback; nothing moves by voice alone.
-14. The call itself ends (idle timeout, session cap, a hangup, or a dropped socket) while the table above still leaves the outcome on hold (rows 3-7 or 12) -> escalate for a human callback if a request was ever stated (the same containment an organic escalation gets, with no rule-failure reason to name -- only that the call ended before the checks finished); with no request ever stated, there is nothing to route, so this closes as no action instead. Every terminal row above (freeze included) keeps strict priority: this row is only reached when nothing else already decided.
+12. Some checks have failed, fewer than three, and either challenges remain to ask, or the challenge just asked has not been answered yet and the call is still live -> hold; ask another challenge, or wait the few seconds a reply is still due (ruling 2026-09-09): the instant the last allowed challenge is asked must not by itself fall through to row 14 before the caller has had a chance to answer it.
+13. A critical field's readback has been re-asked to seed.thresholds.max_readback_reasks (default 3) without ever reaching a confirmed answer -> escalate for a human callback, naming the field (founder decision 2026-09-12 9:00 AM: closes an unbounded readback loop a live call hit on 2026-09-11 -- report scripts/rehearse/reports/2026-09-11T22-51-38-barge-in-interrupt.md -- where the agent re-asked the same beneficiary readback five times before the 60s idle timeout finally escalated it). Sits exactly where row 14 (the plain "otherwise" catch-all) used to sit: reached only once rows 1-12 have already failed to match, so it never needs its own explicit freeze guard -- FREEZE (row 8) already claimed priority earlier in the chain if it was eligible.
+14. Otherwise -> escalate for a human callback; nothing moves by voice alone.
+15. The call itself ends (idle timeout, session cap, a hangup, or a dropped socket) while the table above still leaves the outcome on hold (rows 3-7 or 12) -> escalate for a human callback if a request was ever stated (the same containment an organic escalation gets, with no rule-failure reason to name -- only that the call ended before the checks finished); with no request ever stated, there is nothing to route, so this closes as no action instead. Every terminal row above (freeze included) keeps strict priority: this row is only reached when nothing else already decided.
 
 Tally (independent failed checks; used by rows 8c and 12): SSO/identity fail 1, out-of-band fail 1, context fail 1, each contradicted claim 1 (capped at 2), each failed challenge 1, each ambiguous/refused challenge 0.5 (evasion is not free, but not fatal either), each instruction-injection hit 1 (ruling 2026-09-09: no longer free -- it is itself behavioural evidence, weighted the same as a failed check, and separately makes STAGE unreachable for the rest of the call). Pressure and an identity switch each still count 0 toward the tally -- they are behavior, never proof, and an identity switch resets the evaluation instead of accruing against it.
 `;

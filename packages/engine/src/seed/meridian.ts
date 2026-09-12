@@ -158,6 +158,7 @@ export const MERIDIAN: SeedConfig = {
     tool_timeout_ms: 45_000, // v2
     challenge_answer_window_ms: 15_000, // ruling 2026-09-09 (item 21)
     approximate_jump_ratio: 2, // fix-round-2: red team item 2
+    max_readback_reasks: 3, // founder decision 2026-09-12 9:00 AM
   },
   pressure_lexicon: [
     'minutes', 'right now', 'immediately', 'fired', 'do not loop', "don't loop", "don't tell",
