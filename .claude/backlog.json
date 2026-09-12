@@ -1116,7 +1116,7 @@
     "packages/web"
    ],
    "status": "held",
-   "held_because": "UNKNOWN cause, not reproduced; reopen if CI or any lane sees it again",
+   "held_because": "n=2 now: flaked again in the option B lane's full run 10:34 PM (15/15 standalone); still not seen on main gates; investigate at a quiet moment",
    "agent_id": "",
    "started_at": ""
   },
@@ -1637,11 +1637,11 @@
     "packages/engine/src/rules.ts",
     "packages/server/src/call/session.ts"
    ],
-   "status": "running",
+   "status": "done",
    "held_because": "",
-   "agent_id": "(engine lane 10:20 PM)",
+   "agent_id": "",
    "started_at": "2026-09-12T03:16:36.204Z",
-   "lane_note": "founder chose B 10:15 PM: resolve the switch after re-established identity + request, re-run lookups for the new identity, freeze on failures; contradiction card stays; hand-built corpus recording expected FREEZE"
+   "lane_note": "founder chose B 10:15 PM: resolve the switch after re-established identity + request, re-run lookups for the new identity, freeze on failures; contradiction card stays; hand-built corpus recording expected FREEZE; code done 91da7ec 10:34 PM (resolveIdentitySwitch in compose.ts, wired in evaluate.ts, corpus identity-switch-freeze.json, RULES_DOC row 6); lane's honest-handoff test ends FREEZE via a failed context check; review running, must settle the all-pass case; landed on main b56be9e 10:46 PM; gate 1307 x3, typecheck clean, corpus 107/107 (21 files); push 20"
   },
   {
    "id": "SINGLE-WRONG-ANSWER-INVESTIGATION",
@@ -1694,6 +1694,76 @@
    "files": [],
    "status": "held",
    "held_because": "founder decision before Sep 18; recommendation: judge + harness bundles (no new tooling)",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "CLIENT-DROP-STATE",
+   "title": "what the browser shows when the server drops mid-call (restart, cold start); run 24 ended PENDING with no 'ended' event",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T03:32:43.981Z",
+   "lane_note": "10:40 PM: worker retries ~7.5 s then ends with link_lost; UI says the call was closed and offers Start over; gap: no 'nothing was staged or frozen' line when PENDING; copy fix lane launched"
+  },
+  {
+   "id": "LINK-LOST-COPY",
+   "title": "ended message for link_lost with no verdict: 'Connection lost. This call was not completed, and nothing was staged or frozen. Start over to try again.'",
+   "files": [
+    "packages/web/src"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T03:33:58.703Z",
+   "lane_note": "landed on main a1b3d55 10:45 PM (5-line copy change + 2 tests, 1287/1287 in lane); scoped review running; goes out in push 20"
+  },
+  {
+   "id": "IDSWITCH-review",
+   "title": "review of 91da7ec (option B): determinism, laundering, honest-handoff verdict, resolution strictness, corpus",
+   "files": [],
+   "status": "done",
+   "agent_id": "(launched 10:42 PM)",
+   "started_at": "2026-09-12T03:35:02.761Z",
+   "lane_note": "PASS 10:38 PM; Important: a second switch (A->B->C) is fail-safe but never resolves and is untested; Minor: honest handoff test ends FREEZE only because the mock history is scoped to the original requester"
+  },
+  {
+   "id": "LINKLOST-review",
+   "title": "scoped review of a1b3d55",
+   "files": [],
+   "status": "done",
+   "agent_id": "(haiku 10:45 PM)",
+   "started_at": "2026-09-12T03:37:42.965Z",
+   "lane_note": "PASS 10:39 PM; recommendation: treat an undefined verdict (drop before any state) as PENDING for the reassuring message"
+  },
+  {
+   "id": "IDSWITCH-DOUBLE",
+   "title": "a second identity switch (A->B->C) is held fail-safe but never resolves; add the case to resolveIdentitySwitch with a test",
+   "files": [
+    "packages/engine/src/compose.ts",
+    "packages/engine/src/evidence/fromTranscript.ts"
+   ],
+   "status": "held",
+   "held_because": "engine follow-up, fail-safe today; do at a quiet moment with review",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "LINKLOST-UNDEFINED",
+   "title": "link_lost before any screen state should show the 'not completed, nothing staged or frozen' message (treat undefined verdict as PENDING)",
+   "files": [
+    "packages/web/src/screens/Call.tsx"
+   ],
+   "status": "held",
+   "held_because": "one-token change; batch with the next web push",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "push-20",
+   "title": "push 20: a4d4f78..b56be9e (identity switch option B, link-lost copy, cover-2-final, logs)",
+   "files": [],
+   "status": "held",
+   "held_because": "gate green 10:46 PM; waits for the batch's round 4 to finish (~10:48 PM) so the deploy does not cut the last fraud sample",
    "agent_id": "",
    "started_at": ""
   }
