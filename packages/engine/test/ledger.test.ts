@@ -95,6 +95,47 @@ describe('buildLedger', () => {
     expect(request_version).toBe(2);
   });
 
+  it('4d. review fix: an implausible jump from an APPROXIMATE claim stays CONTRADICTED even when a correction-lexicon word sits in the immediately preceding caller turn', () => {
+    // Reviewer finding on e433670/d9846d0: the cross-turn correction lookback (a2, added
+    // for the structuring-two-wires split-turn bug) ran BEFORE the Sep-9 ratified
+    // magnitude bound (isImplausibleJumpFromApproximate), so a correction-lexicon word
+    // landing in the turn immediately before an implausible jump laundered it to
+    // CORRECTED -- the same 4.8x jump that stays CONTRADICTED inside one utterance (test
+    // 4b) must also stay CONTRADICTED when the "actually" and the new figure are split
+    // across two adjacent caller turns with no agent turn between them.
+    const conversation = [
+      u('u1', "It's about fifty thousand-ish.", 0),
+      u('u2', 'Actually, hold on one second.', 30_000),
+      u('u3', 'The wire will be two hundred forty thousand.', 31_000),
+    ];
+    const { claims } = buildLedger(conversation, [], MERIDIAN);
+    const amountClaims = claims.filter((c) => c.field === 'amount_usd');
+    expect(amountClaims).toHaveLength(2);
+    expect(amountClaims[0]).toMatchObject({ kind: 'APPROXIMATE', value: 50_000 });
+    expect(amountClaims[1]).toMatchObject({
+      kind: 'CONTRADICTED',
+      value: 240_000,
+      supersedes: amountClaims[0]!.id,
+    });
+  });
+
+  it('4e. ...but a SMALL refinement split the same way still grades CORRECTED (the cue still works within the ratified bound)', () => {
+    const conversation = [
+      u('u1', 'It is about fifty thousand.', 0),
+      u('u2', 'Actually, hold on one second.', 30_000),
+      u('u3', 'The wire will be fifty two thousand four hundred.', 31_000),
+    ];
+    const { claims } = buildLedger(conversation, [], MERIDIAN);
+    const amountClaims = claims.filter((c) => c.field === 'amount_usd');
+    expect(amountClaims).toHaveLength(2);
+    expect(amountClaims[0]).toMatchObject({ kind: 'APPROXIMATE', value: 50_000 });
+    expect(amountClaims[1]).toMatchObject({
+      kind: 'CORRECTED',
+      value: 52_400,
+      supersedes: amountClaims[0]!.id,
+    });
+  });
+
   it('5. readback + affirm -> CONFIRMED; readback + negate -> UNKNOWN', () => {
     const readback: AgentAction = { id: 'a1', kind: 'readback_issued', t_ms: 5000, field: 'amount_usd', value: '84500' };
 
@@ -197,6 +238,45 @@ describe('buildLedger', () => {
     const conversation = [u('u1', 'The account ending in 4471.', 0), u('u2', '4471.', 8000)];
     const { claims } = buildLedger(conversation, [readback], MERIDIAN);
     expect(currentClaim(claims, 'account_last4')?.kind).toBe('CONFIRMED');
+  });
+
+  it('5h2. bare exact restatement confirms: account last four digits spoken/typed as spaced single digits ("4 4 7 1")', () => {
+    // Reviewer finding: a spaced-digit readback answer ("4 4 7 1", matching how the agent
+    // itself reads the digits back per the live transcripts) never matched the joined
+    // stored value "4471" and stayed unresolved.
+    const readback: AgentAction = { id: 'a1', kind: 'readback_issued', t_ms: 5000, field: 'account_last4', value: '4471' };
+    const conversation = [u('u1', 'The account ending in 4471.', 0), u('u2', '4 4 7 1.', 8000)];
+    const { claims } = buildLedger(conversation, [readback], MERIDIAN);
+    expect(currentClaim(claims, 'account_last4')?.kind).toBe('CONFIRMED');
+  });
+
+  it('5g2. bare exact restatement confirms: amount spoken as number words ("eighty four thousand five hundred")', () => {
+    // Reviewer finding: reuses the Sep 9 spoken-number parser (extractSpokenAmounts) so a
+    // spoken-word restatement of the readback value also counts, not just digit forms.
+    const readback: AgentAction = { id: 'a1', kind: 'readback_issued', t_ms: 5000, field: 'amount_usd', value: '84500' };
+    const conversation = [
+      u('u1', 'I need to wire $84,500.', 0),
+      u('u2', "It's eighty four thousand five hundred.", 8000),
+    ];
+    const { claims } = buildLedger(conversation, [readback], MERIDIAN);
+    expect(currentClaim(claims, 'amount_usd')?.kind).toBe('CONFIRMED');
+  });
+
+  it('5g3. a WRONG spoken-number restatement does not confirm -- it grades as a new differing value, same as any other amount change', () => {
+    const readback: AgentAction = { id: 'a1', kind: 'readback_issued', t_ms: 5000, field: 'amount_usd', value: '84500' };
+    const conversation = [
+      u('u1', 'I need to wire $84,500.', 0),
+      u('u2', 'Eighty five thousand.', 8000),
+    ];
+    const { claims } = buildLedger(conversation, [readback], MERIDIAN);
+    // Not CONFIRMED (the spoken restatement is a different number, "Eighty five thousand"
+    // = 85000 != 84500). "Eighty five thousand" carries its own scale word, so it's
+    // picked up by the ordinary extractAmounts path too and lands a new CONTRADICTED
+    // claim -- exactly as any other differing amount would, no special-casing needed.
+    const amountClaims = claims.filter((c) => c.field === 'amount_usd');
+    expect(amountClaims).toHaveLength(2);
+    expect(amountClaims[1]).toMatchObject({ kind: 'CONTRADICTED', value: 85_000 });
+    expect(isConfirmed(claims, 'amount_usd')).toBe(false);
   });
 
   it('5i. a genuinely different value in reply to a readback is still graded CORRECTED/CONTRADICTED as before (restatement path does not touch it)', () => {

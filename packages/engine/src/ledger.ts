@@ -19,6 +19,7 @@
 // full stop — "it happened soon after" is not, by itself, evidence the caller was honest.
 import { extractAccountLast4, extractCuedNames, extractDeadline } from './extract/claims.js';
 import { extractAmounts } from './extract/amounts.js';
+import { extractSpokenAmounts } from './extract/spokenNumbers.js';
 import { extractIdentityClaim } from './extract/identity.js';
 import { hasLexiconHit, normalizeText, normalizeValue } from './normalize.js';
 import { escapeRegExp } from './util.js';
@@ -74,9 +75,18 @@ function referencesPreviousValue(text: string, current: Claim): boolean {
 // since a materially different name is exactly the kind of thing this ledger exists to
 // catch. A genuinely different value is untouched by this path; it is graded exactly as
 // before by `processHit`/`classifyDifferentValue` further down this same utterance loop.
+// Review fix (fail on e433670, Important): a literal token-for-token comparison misses
+// two forms a caller routinely uses to restate a value the AGENT itself just spoke back
+// in that same form -- a spoken-word amount ("eighty four thousand five hundred" for
+// stored "84500") and a spaced-out digit readback for an account number ("4 4 7 1" for
+// stored "4471", exactly how the live agent reads it: "the account ends in 4 4 7 1").
+// Fixed by reusing the Sep-9 spoken-number parser (extractSpokenAmounts, already used by
+// extractAmounts elsewhere in this file) for amount_usd, and by joining a run of bare
+// single-digit tokens for account_last4, ONLY as fallbacks after the literal comparison
+// fails -- so the existing digit-string and word-for-word paths are untouched.
 const RESTATEMENT_FILLER_TOKENS = new Set(['yes', 'yeah', 'yep', 'its', 'thats']);
 
-function isExactRestatement(text: string, expectedValue: string): boolean {
+function isExactRestatement(field: ClaimField, text: string, expectedValue: string): boolean {
   const expectedNorm = normalizeText(expectedValue);
   if (expectedNorm.length === 0) return false;
   const tokens = normalizeText(text)
@@ -84,8 +94,28 @@ function isExactRestatement(text: string, expectedValue: string): boolean {
     .filter((w) => w.length > 0);
   let start = 0;
   while (start < tokens.length && RESTATEMENT_FILLER_TOKENS.has(tokens[start]!)) start += 1;
-  if (start >= tokens.length) return false;
-  return tokens.slice(start).join(' ') === expectedNorm;
+  const remainder = tokens.slice(start);
+  if (remainder.length === 0) return false;
+  if (remainder.join(' ') === expectedNorm) return true;
+
+  if (field === 'amount_usd') {
+    const remainderText = remainder.join(' ');
+    const spokenHits = extractSpokenAmounts(remainderText);
+    if (
+      spokenHits.length === 1 &&
+      spokenHits[0]!.start === 0 &&
+      spokenHits[0]!.end === remainderText.length &&
+      String(spokenHits[0]!.value_usd) === expectedNorm
+    ) {
+      return true;
+    }
+  }
+
+  if (field === 'account_last4' && remainder.every((t) => /^\d$/.test(t))) {
+    return remainder.join('') === expectedNorm;
+  }
+
+  return false;
 }
 
 /** The latest (most recently added) claim for `field`, or null. Claims are appended in
@@ -187,7 +217,20 @@ export function buildLedger(
     value: string | number,
     precedingCorrectionText: string | undefined,
   ): ClaimKind {
-    if (hasLexiconHit(u.text, seed.correction_lexicon)) return 'CORRECTED'; // (a)
+    // Review fix (fail on e433670/d9846d0, Critical): the Sep-9 ratified magnitude bound
+    // must gate EVERY correction-lexicon path, not just the APPROXIMATE-with-no-cue path
+    // (b) below -- a cue's job is to explain a SMALL refinement, never to launder a jump
+    // beyond the ratified bound. Computed once and reused by (a) and (a2): reviewer
+    // proved that without this gate on (a2), "It's about fifty thousand-ish." ->
+    // "Actually, hold on one second." -> "The wire will be two hundred forty thousand."
+    // (no agent turn between the last two) graded the 4.8x jump CORRECTED purely because
+    // "actually" sat in the immediately preceding turn, while the identical jump inside
+    // one utterance (test 4b) stays CONTRADICTED. `isImplausibleJumpFromApproximate`
+    // no-ops for anything but a numeric field whose CURRENT claim is APPROXIMATE, so this
+    // gate never touches an ordinary correction (test 2 and friends are unaffected).
+    const implausibleJump = current.kind === 'APPROXIMATE' && isImplausibleJumpFromApproximate(field, current.value, value);
+
+    if (!implausibleJump && hasLexiconHit(u.text, seed.correction_lexicon)) return 'CORRECTED'; // (a)
     // (a2) fix (run 34, report 2026-09-11T22-48-44-structuring-two-wires.md): the
     // scripted line "Actually, there's a second one too -- $42,300 to the same account,
     // same vendor." is normally ONE utterance, so "actually" and the new amount land in
@@ -201,11 +244,11 @@ export function buildLedger(
     // (see `hasAgentTurnBetween` above), mirroring the adjacency the readback affirm/
     // negate resolution loop already relies on. A correction word from further back, or
     // after the agent has moved on to something else, does not retroactively soften a
-    // later contradiction.
-    if (precedingCorrectionText !== undefined && hasLexiconHit(precedingCorrectionText, seed.correction_lexicon)) {
+    // later contradiction. Gated on `!implausibleJump` for the same reason as (a) above.
+    if (!implausibleJump && precedingCorrectionText !== undefined && hasLexiconHit(precedingCorrectionText, seed.correction_lexicon)) {
       return 'CORRECTED';
     }
-    if (current.kind === 'APPROXIMATE' && !isImplausibleJumpFromApproximate(field, current.value, value)) return 'CORRECTED'; // (b)
+    if (current.kind === 'APPROXIMATE' && !implausibleJump) return 'CORRECTED'; // (b)
     if (hasLexiconHit(u.text, seed.negate_lexicon) && referencesPreviousValue(u.text, current)) return 'CORRECTED'; // (c)
     const repairSince = repairWindowSince[field];
     if (repairSince !== undefined && u.t_ms - repairSince <= seed.thresholds.correction_window_ms) {
@@ -269,7 +312,7 @@ export function buildLedger(
       const negated = hasLexiconHit(u.text, seed.negate_lexicon);
       const affirmed = hasLexiconHit(u.text, seed.affirm_lexicon);
       const restated =
-        !negated && !affirmed && pending.action.value !== undefined && isExactRestatement(u.text, pending.action.value);
+        !negated && !affirmed && pending.action.value !== undefined && isExactRestatement(field, u.text, pending.action.value);
       if (negated || affirmed || restated) {
         const current = currentClaim(claims, field);
         if (current && pending.action.value !== undefined && normalizeValue(field, pending.action.value) === current.value) {
