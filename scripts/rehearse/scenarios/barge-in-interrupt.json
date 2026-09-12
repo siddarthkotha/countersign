@@ -1,8 +1,8 @@
 {
   "name": "barge-in-interrupt",
-  "title": "Dana Whitfield -- talks over the agent's readback (barge-in)",
-  "description": "Judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md addendum): across all three live bundles rehearsed so far, zero `reply.done` events were \"interrupted\" -- the client-side barge-in flush (BRIEF's engineering laws: \"Barge-in is won in the CLIENT audio buffer\") had never actually been exercised on a live call, even though scenario-b-miller-fraud.json already carries a barge_in_after_ms turn. This scenario is Dana's own honest script (scenario-a-dana-legitimate.json's opening line and later reactive confirmations, verbatim) with ONE change: turn c2, the caller's very first reply to the agent's readback of her request, deliberately talks over that readback 1.5 seconds into it (`barge_in_after_ms: 1500`) instead of waiting for it to finish -- same mechanism scenario-b already uses for its own barge-in (a fixed line, no `respond` block, so the caller never has to read a still-in-flight transcript line). Dana affirms whatever she interrupted (\"Yes, go ahead\") rather than contradicting it, so the interruption itself is the point being tested here, not a correction. Expects STAGE (LAW 2 -- a real, honest caller is never released past STAGE) AND at least one transcript line the server marks `interrupted: true` (expected.min_interrupted_agent_lines) -- proof the real reply.done status:\"interrupted\" mechanic actually fired, not just that the call happened to reach the right verdict.",
-  "source": "docs/BRIEF.md section 4 \"Scenario A\" + packages/engine/corpus/scenario-a-dana-legitimate.json (caller turns c1-c4, read-only source) + judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md addendum)",
+  "title": "Dana Whitfield -- talks over the agent's greeting (barge-in)",
+  "description": "Judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md addendum) originally targeted turn c2 (the caller's reply to the agent's readback of her request) for the interruption. A later PROVEN finding (bargein-no-interrupt.md, tonight's bundles) showed that target never actually lands: the readback is an LLM-phrased line that lasts only ~4s, and AssemblyAI confirms the caller's own speech onset 2.4-3.7s after the caller's audio starts -- so by the time the interruption is detected, the readback has usually already finished (reply.done already fired) and no `interrupted` agent line is produced. The FIXED greeting (\"Meridian payments desk, verification line. How can I help you today?\") lasts 5.3-5.8s in every run, a far bigger and more reliable target. This scenario is Dana's own honest script (scenario-a-dana-legitimate.json's opening line and later reactive confirmations, verbatim) with ONE change: turn c1, Dana's own opening request -- the caller's FIRST turn of the whole call -- talks over the agent's greeting 1.2 seconds into it (`barge_in_after_ms: 1200`, an impatient caller who doesn't wait for the greeting to finish) instead of waiting for it to end. Turn c2 (the readback reply) now proceeds normally, waiting for the readback to finish before affirming it. Expects STAGE (LAW 2 -- a real, honest caller is never released past STAGE) AND at least one transcript line the server marks `interrupted: true` (expected.min_interrupted_agent_lines) -- proof the real reply.done status:\"interrupted\" mechanic actually fired, not just that the call happened to reach the right verdict.",
+  "source": "docs/BRIEF.md section 4 \"Scenario A\" + packages/engine/corpus/scenario-a-dana-legitimate.json (caller turns c1-c4, read-only source) + judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md addendum) + PROVEN retarget from tonight's bundles (scratchpad bargein-no-interrupt.md: readback lasts ~4s and is missed 2.4-3.7s in; the fixed greeting lasts 5.3-5.8s in every run)",
   "truth": {
     "identity": "Dana Whitfield",
     "beneficiary": "Meridian Supply",
@@ -13,17 +13,17 @@
     "approver": null,
     "deadline": "today"
   },
-  "persona": "You are Dana Whitfield, corporate treasury at Meridian Dynamics. You are calling to move a real, already-approved wire payment earlier than scheduled: $84,500 to Meridian Supply, account ending 4471, approved in yesterday's close meeting, moving today instead of Friday. You know these facts exactly. You are in a genuine hurry, and the FIRST time the agent starts reading your request back to confirm it, you talk over it partway through -- \"Yes, go ahead, that's right\" -- rather than waiting silently for it to finish. After that one interruption you settle down: for every later readback, wait for the agent to finish, then confirm it if it matches what you said, or firmly and plainly correct it with the true value if it does not. If asked for something you were never given (an id, a code, a PIN), say plainly that you do not have that and repeat your name. Under 30 words per line.",
+  "persona": "You are Dana Whitfield, corporate treasury at Meridian Dynamics. You are calling to move a real, already-approved wire payment earlier than scheduled: $84,500 to Meridian Supply, account ending 4471, approved in yesterday's close meeting, moving today instead of Friday. You know these facts exactly. You are in a genuine hurry, and the moment the agent's own greeting starts playing, you talk over it partway through with your opening request -- you do not wait for it to finish. After that one interruption you settle down: for every readback, wait for the agent to finish, then confirm it if it matches what you said, or firmly and plainly correct it with the true value if it does not. If asked for something you were never given (an id, a code, a PIN), say plainly that you do not have that and repeat your name. Under 30 words per line.",
   "turns": [
     {
       "id": "c1",
       "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply, $84,500, account ending 4471, moving today instead of Friday, approved in yesterday's close meeting.",
-      "pause_ms": 500
+      "barge_in_after_ms": 1200
     },
     {
       "id": "c2",
       "text": "Yes, go ahead, that's right -- please move it today.",
-      "barge_in_after_ms": 1500
+      "pause_ms": 400
     },
     {
       "id": "c3",

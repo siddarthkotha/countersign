@@ -241,6 +241,39 @@ export async function waitForBargeIn(
   };
 }
 
+/** Finding 2026-09-11 (PROVEN from tonight's bundles; scratchpad bargein-no-interrupt.md):
+ *  every anchored barge-in scenario written so far targeted a LATER, LLM-phrased readback
+ *  turn that lasts only ~4s, while AssemblyAI confirms the caller's own speech onset
+ *  2.4-3.7s after the caller's audio starts -- so the interruption usually lands AFTER that
+ *  reply has already finished (`reply.done` already fired, no `interrupted` line produced).
+ *  The fixed greeting ("Meridian payments desk, verification line. How can I help you
+ *  today?") lasts 5.3-5.8s in every run -- a much bigger, more reliable barge-in target.
+ *
+ *  This is the OPENING (turn-index-0) counterpart to `waitForBargeIn` above: an opening turn
+ *  that carries `barge_in_after_ms` now takes PRECEDENCE over the ordinary greeting-wait
+ *  (`waitForGreeting`) -- it talks over the greeting itself, anchored to the greeting's own
+ *  `reply.audio.first` (the very first agent audio frame after connect, since nothing has
+ *  been sent by anyone before turn 0), via the exact same `waitForBargeIn` path any other
+ *  barge-in turn uses (commit ffb8141) -- never a separate implementation. An opening turn
+ *  with no `barge_in_after_ms` is unchanged: it still waits for the greeting to finish.
+ *  Returns the `BargeInTiming` `waitForBargeIn` resolved when it barged in, or `null` for the
+ *  ordinary greeting-wait path (nothing for a barge-in note to build). `timeoutMs` is plumbed
+ *  through to whichever underlying wait is used (tests override it to a small value so
+ *  neither fallback path needs a real multi-second wait, same pattern as `waitForGreeting`
+ *  and `waitForBargeIn` themselves). */
+export async function waitForOpeningTurn(
+  client: CallClient,
+  turn: ScenarioTurn,
+  warnings: string[],
+  timeoutMs?: number,
+): Promise<BargeInTiming | null> {
+  if (turn.barge_in_after_ms !== undefined) {
+    return timeoutMs === undefined ? waitForBargeIn(client, turn, warnings) : waitForBargeIn(client, turn, warnings, timeoutMs);
+  }
+  await (timeoutMs === undefined ? waitForGreeting(client, warnings) : waitForGreeting(client, warnings, timeoutMs));
+  return null;
+}
+
 /** Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T16-35-23-
  *  scenario-a-dana-legitimate.md): the server now hangs up on its own once it reaches
  *  SEALED (packages/server/src/call/session.ts's CLOSE grace period/hard cap) -- a scripted
@@ -330,6 +363,34 @@ export async function runTurns(
     const turn = scenario.turns[turnIdx]!;
     const dropOutcome = await maybeDropAai(turn, deps.dropAai);
     if (dropOutcome.warning) warnings.push(dropOutcome.warning);
+    if (turnIdx === 0) {
+      // Founder ruling 2026-09-11: the agent greets first. Ordinarily the caller's opening
+      // line waits for that greeting to finish; `waitForOpeningTurn` gives an opening turn's
+      // own `barge_in_after_ms` PRECEDENCE over that wait instead (finding 2026-09-11: the
+      // greeting is a much bigger, more reliable barge-in target than a later readback --
+      // see `waitForOpeningTurn`'s own doc comment). Resolved up front either way (safe: an
+      // opening turn is never reactive -- nothing has been said yet to react to) so synthesis
+      // can start CONCURRENTLY with the wait below, same reasoning as the generic barge-in
+      // branch further down (`streamPcm`'s doc comment covers why that ordering matters).
+      const lastAgentText = lastAgentTranscriptText(client);
+      const resolved = resolveTurnText(turn, scenario.truth, lastAgentText);
+      resolvedLines.push({ turn_id: turn.id, text: resolved.text, source: resolved.source, reacted_to: lastAgentText });
+      const pcmPromise = synthesizeLine(resolved.text, voice);
+      const timing = await waitForOpeningTurn(client, turn, warnings);
+      if (timing === null) {
+        // Ordinary opening: the greeting has already finished settling; still honor this
+        // turn's own pause before speaking, same as before this dispatcher existed.
+        await sleep(turn.pause_ms ?? 400);
+      }
+      const pcm = await pcmPromise;
+      const { startedMs, endedMs } = await streamPcm(client, pcm);
+      callerEndTimes.push(
+        timing
+          ? { turn_id: turn.id, caller_end_ms: endedMs, barge_in: true, note: timing.note(startedMs) }
+          : { turn_id: turn.id, caller_end_ms: endedMs, barge_in: false },
+      );
+      continue;
+    }
     if (turn.barge_in_after_ms !== undefined) {
       // Resolved up front (safe: a barge-in turn is documented to carry no `respond` block --
       // the interruption itself is the point, not a reaction to a still-in-flight reply -- so
@@ -345,14 +406,8 @@ export async function runTurns(
       const { startedMs, endedMs } = await streamPcm(client, pcm);
       callerEndTimes.push({ turn_id: turn.id, caller_end_ms: endedMs, barge_in: true, note: timing.note(startedMs) });
       continue;
-    } else if (turnIdx === 0) {
-      // Founder ruling 2026-09-11: the agent greets first -- wait for that greeting to
-      // finish (bounded, never deadlocks) before the caller's opening line.
-      await waitForGreeting(client, warnings);
-      await sleep(turn.pause_ms ?? 400);
-    } else {
-      await waitBeforeSpeaking(client, turn.pause_ms ?? 400, warnings);
     }
+    await waitBeforeSpeaking(client, turn.pause_ms ?? 400, warnings);
     const lastAgentText = lastAgentTranscriptText(client);
     const resolved = resolveTurnText(turn, scenario.truth, lastAgentText);
     resolvedLines.push({ turn_id: turn.id, text: resolved.text, source: resolved.source, reacted_to: lastAgentText });

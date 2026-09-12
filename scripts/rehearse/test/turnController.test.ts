@@ -3,7 +3,15 @@
 // polling loop against a client whose `latestState()` changes over time.
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
-import { computeTurnGaps, maybeDropAai, scriptedCallerShouldStop, waitForBargeIn, waitForGreeting, waitForVerdict } from '../turnController.js';
+import {
+  computeTurnGaps,
+  maybeDropAai,
+  scriptedCallerShouldStop,
+  waitForBargeIn,
+  waitForGreeting,
+  waitForOpeningTurn,
+  waitForVerdict,
+} from '../turnController.js';
 import type { CallClient } from '../wsClient.js';
 import type { ScenarioTurn } from '../types.js';
 import type { ScreenState } from '@countersign/engine';
@@ -299,4 +307,78 @@ describe('waitForBargeIn', () => {
     await expect(waitForBargeIn(client, plainTurn, warnings)).rejects.toThrow(/no barge_in_after_ms/);
     expect(warnings).toEqual([]);
   });
+});
+
+// Finding 2026-09-11 (PROVEN from tonight's bundles; scratchpad bargein-no-interrupt.md):
+// every anchored barge-in scenario so far targeted a LATER, LLM-phrased readback turn that
+// lasts only ~4s, and AssemblyAI confirms the caller's own speech onset 2.4-3.7s after the
+// caller's audio starts -- so the interruption usually lands after that reply has already
+// finished (reply.done already fired, no `interrupted` line). The fixed greeting lasts
+// 5.3-5.8s in every run -- a much bigger, more reliable barge-in target. `waitForOpeningTurn`
+// is the turn-0 dispatcher this scenario-a-lookalike relies on: an opening turn that carries
+// `barge_in_after_ms` now takes PRECEDENCE over the ordinary greeting-wait, anchoring to the
+// greeting's own `reply.audio.first` via the SAME `waitForBargeIn` path any other barge-in
+// turn uses (commit ffb8141) -- never a separate implementation. An opening turn with no
+// `barge_in_after_ms` is completely unchanged: it still waits for the greeting to finish.
+describe('waitForOpeningTurn', () => {
+  it('a turn-0 barge_in_after_ms barges into the greeting itself, anchored to its own first audio frame -- not waiting for it to finish', async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0; // nothing has been said yet -- the greeting hasn't started
+    const warnings: string[] = [];
+    const turn: ScenarioTurn = { id: 'c1', text: "This is Dana Whitfield.", barge_in_after_ms: 1200 };
+
+    const resultPromise = waitForOpeningTurn(client, turn, warnings, 5000);
+    await sleep(20);
+    client.audioTimestamps.push(performance.now() - client.startedAt); // the greeting's own first audio frame
+    const anchorWallClockMs = performance.now();
+
+    const timing = await resultPromise;
+    const elapsedSinceAnchor = performance.now() - anchorWallClockMs;
+
+    expect(timing).not.toBeNull();
+    expect(timing!.anchor_ms).not.toBeNull();
+    expect(elapsedSinceAnchor).toBeGreaterThanOrEqual(1200 - 100);
+    expect(warnings).toEqual([]);
+  });
+
+  it('a turn-0 with no barge_in_after_ms still waits for the greeting to finish (waitForGreeting behavior), unchanged', async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0; // greeting hasn't started
+    const warnings: string[] = [];
+    const turn: ScenarioTurn = { id: 'c1', text: 'This is Dana Whitfield, corporate treasury.' };
+
+    const resultPromise = waitForOpeningTurn(client, turn, warnings, 5000);
+    await sleep(20);
+    client.audioTimestamps.push(performance.now() - client.startedAt); // greeting audio starts
+
+    const timing = await resultPromise;
+
+    expect(timing).toBeNull();
+    expect(warnings).toEqual([]);
+  });
+
+  it('falls back to the grace-window check (never deadlocks) when a non-barge-in opening turn sees no greeting audio before the timeout', async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0; // greeting never arrives
+    const warnings: string[] = [];
+    const turn: ScenarioTurn = { id: 'c1', text: 'This is Dana Whitfield.' };
+
+    const timing = await waitForOpeningTurn(client, turn, warnings, 50);
+
+    expect(timing).toBeNull();
+    expect(warnings.some((w) => w.includes('no greeting audio observed within 50ms'))).toBe(true);
+  }, 10_000);
+
+  it('falls back to the unanchored barge-in behaviour (with a warning) when a barge-in opening turn sees no reply audio before the anchor timeout', async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0; // greeting never arrives
+    const warnings: string[] = [];
+    const turn: ScenarioTurn = { id: 'c1', text: 'This is Dana Whitfield.', barge_in_after_ms: 50 };
+
+    const timing = await waitForOpeningTurn(client, turn, warnings, 60);
+
+    expect(timing).not.toBeNull();
+    expect(timing!.anchor_ms).toBeNull();
+    expect(warnings.some((w) => w.includes('no reply audio started within 60ms'))).toBe(true);
+  }, 10_000);
 });

@@ -514,11 +514,20 @@ describe('the two judge-sim mechanics scenarios (finding 2026-09-11)', () => {
     expect(s.expected.min_interrupted_agent_lines).toBeGreaterThanOrEqual(1);
   });
 
-  it('barge-in-interrupt carries a barge_in_after_ms turn timed ~1.5s into the agent reply', async () => {
+  it('barge-in-interrupt carries a barge_in_after_ms turn on the OPENING turn (c1), timed ~1.2s into the agent greeting -- retargeted from the c2 readback (PROVEN 2026-09-11: the readback only lasts ~4s and is missed 2.4-3.7s in, while the fixed greeting lasts 5.3-5.8s)', async () => {
     const s = await loadScenario('barge-in-interrupt');
     const bargeInTurn = s.turns.find((t) => t.barge_in_after_ms !== undefined);
     expect(bargeInTurn, 'barge-in-interrupt should have a barge_in_after_ms turn').toBeDefined();
-    expect(bargeInTurn!.barge_in_after_ms).toBe(1500);
+    expect(bargeInTurn!.id).toBe('c1');
+    expect(s.turns[0]!.id).toBe('c1');
+    expect(bargeInTurn!.barge_in_after_ms).toBe(1200);
+  });
+
+  it('barge-in-interrupt no longer carries barge_in_after_ms on c2 -- the readback now proceeds normally', async () => {
+    const s = await loadScenario('barge-in-interrupt');
+    const c2 = s.turns.find((t) => t.id === 'c2');
+    expect(c2, 'barge-in-interrupt should still have a c2 turn').toBeDefined();
+    expect(c2!.barge_in_after_ms).toBeUndefined();
   });
 
   it('barge-in-interrupt carries a truth block and a persona (honest caller, Dana-shaped)', async () => {
