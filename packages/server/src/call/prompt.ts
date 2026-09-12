@@ -134,6 +134,16 @@ function nowSection(goal: PhrasingGoal, ctx: PromptCtx): string {
       // AgentAction (see fsm.ts's own doc comment on `readbackSentence` for why that had to
       // change too).
       return `Say exactly this and nothing else: "${goal.hint}"`;
+    // Bug fix (2026-09-11, live identity-switch rehearsal, see
+    // scratchpad/identity-switch-investigation.md section 3): this goal used to fall through
+    // to the unconstrained `default` branch below, which relays `goal.hint` as a loose
+    // instruction with nothing telling the model to say only that and stop -- on a live call
+    // the model filled the gap by demanding "the four digit account ending" four times,
+    // violating STANDING_RULES's own "never ask the caller for identifiers, ids, codes, or
+    // system fields" line. fsm.ts now composes the exact, ready-to-speak sentence into
+    // `goal.hint` itself; this case relays it verbatim, the same treatment READBACK/CLOSE get.
+    case 'RE_ELICIT_AFTER_SWITCH':
+      return `Say exactly this and nothing else: "${goal.hint}"`;
     case 'CLOSE':
       // Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T16-35-23-
       // scenario-a-dana-legitimate.md): CLOSE used to fall through to the `default` branch
@@ -159,10 +169,10 @@ function nowSection(goal: PhrasingGoal, ctx: PromptCtx): string {
         return `${goal.hint} Address the caller as ${ctx.claimed_identity_name}.`;
       }
       // ELICIT_IDENTITY, ELICIT_REQUEST, PROBE_CONSISTENCY, REFUSE_AUTHORITY,
-      // EXPLAIN_OUT_OF_SCOPE, RE_ELICIT_AFTER_SWITCH, EXPLAIN_OPEN_REQUEST, and an
-      // ANNOUNCE_* goal before any identity is claimed: the hint, verbatim, and nothing
-      // added (the engine already wrote whatever reasons belong in it). CLOSE has its own
-      // case above, not this one.
+      // EXPLAIN_OUT_OF_SCOPE, EXPLAIN_OPEN_REQUEST, and an ANNOUNCE_* goal before any
+      // identity is claimed: the hint, verbatim, and nothing added (the engine already wrote
+      // whatever reasons belong in it). CLOSE and RE_ELICIT_AFTER_SWITCH have their own
+      // verbatim-wrapped cases above, not this one.
       return goal.hint;
   }
 }

@@ -302,9 +302,16 @@ export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
 
   if (state === 'CLAIM') {
     if (decideResult.rule_hit === 6) {
+      // Bug fix (2026-09-11, live identity-switch rehearsal, see
+      // scratchpad/identity-switch-investigation.md section 3): this used to be bare prose
+      // with no dedicated prompt.ts case, so the model filled the gap by demanding "the four
+      // digit account ending" four times -- violating STANDING_RULES's own "never ask the
+      // caller for identifiers, ids, codes, or system fields" line. Same fix pattern as
+      // READBACK/CLOSE (`readbackSentence`/`closeSentence` above): one exact, ready-to-speak
+      // sentence, plain English, asking for nothing but a name and a request.
       return goal(
         'RE_ELICIT_AFTER_SWITCH',
-        'The caller switched who they claim to be mid-call. Re-establish identity and re-elicit the request from scratch; treat everything gathered before the switch as stale.',
+        'I heard a different name than the one this call started with. Please tell me again who is calling and what you need.',
         keyterms,
         patient,
       );

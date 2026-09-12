@@ -298,6 +298,27 @@ describe('renderPrompt', () => {
     expect(say).not.toContain('?');
   });
 
+  // Bug fix (2026-09-11, live identity-switch rehearsal, see
+  // scratchpad/identity-switch-investigation.md section 3): RE_ELICIT_AFTER_SWITCH had no
+  // dedicated case here -- it fell through to `default` and was relayed as a loose prose
+  // instruction with nothing telling the model to say only that and stop. On a live call the
+  // model filled the gap by demanding "the four digit account ending" four times, violating
+  // STANDING_RULES's own "never ask the caller for identifiers, ids, codes, or system
+  // fields" line. fsm.ts now composes the exact, ready-to-speak sentence into `goal.hint`
+  // itself; this case must relay it verbatim, the same treatment READBACK/CLOSE already get.
+  it('RE_ELICIT_AFTER_SWITCH says the engine-composed sentence verbatim, wrapped in "say exactly", and asks for no digit/id/code', () => {
+    const say = 'I heard a different name than the one this call started with. Please tell me again who is calling and what you need.';
+    const prompt = renderPrompt(baseGoal('RE_ELICIT_AFTER_SWITCH', { hint: say }), makeCtx());
+    const nowSection = prompt.split('\n\n').at(-1);
+    expect(nowSection).toBe(`Say exactly this and nothing else: "${say}"`);
+    // Checked against the Now section alone, not the whole prompt -- STANDING_RULES itself
+    // legitimately contains "ids"/"codes" (the rule forbidding asking for them).
+    const lowerNow = (nowSection ?? '').toLowerCase();
+    for (const word of ['account', 'digit', 'id number', 'identity id', 'code', 'pin']) {
+      expect(lowerNow).not.toContain(word);
+    }
+  });
+
   describe('STALL', () => {
     it('picks a stalling line from the library matching ctx.stall_kind (not the hint -- fix round 1, finding 2)', () => {
       const promptGeneric = renderPrompt(baseGoal('STALL'), makeCtx({ stall_kind: 'generic' }));

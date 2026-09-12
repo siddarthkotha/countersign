@@ -434,3 +434,41 @@ describe('phrasingGoal -- SEALED composes an exact, ready-to-speak close sentenc
     }
   });
 });
+
+// ---------------------------------------------------------------------------------------
+// Bug fix (2026-09-11, live identity-switch rehearsal -- see
+// scratchpad/identity-switch-investigation.md section 3): RE_ELICIT_AFTER_SWITCH used to
+// hand the model a bare PROSE hint ("Re-establish identity and re-elicit the request from
+// scratch..."), the same class of gap READBACK/CLOSE already had closed on 2026-09-03/09-11
+// (see `readbackSentence`/`closeSentence` above) -- prompt.ts's nowSection had no dedicated
+// case for this goal code, so it fell to `default` with no "say exactly this and nothing
+// else" wrapper, and the model improvised, demanding "the four digit account ending" four
+// times on a live call -- directly violating STANDING_RULES's own "never ask the caller for
+// identifiers, ids, codes, or system fields" line. Same fix pattern as READBACK/CLOSE:
+// `phrasingGoal` now composes one exact, ready-to-speak sentence for this goal itself; the
+// model has nothing left to fill in.
+describe('phrasingGoal -- RE_ELICIT_AFTER_SWITCH composes an exact, ready-to-speak sentence, not prose', () => {
+  it('re-establishes identity and the request, asks no id/code/digit, and is not a demand for a system field', () => {
+    const out = phrasingGoal({
+      state: 'CLAIM',
+      decideResult: stubDecideResult(6),
+      evidence: [],
+      ledger: [],
+      seed: MERIDIAN,
+      tools: [],
+      actions: [],
+      nextChallenge: null,
+    });
+
+    expect(out.code).toBe('RE_ELICIT_AFTER_SWITCH');
+    expect(out.hint).toBe(
+      'I heard a different name than the one this call started with. Please tell me again who is calling and what you need.',
+    );
+    const lower = out.hint.toLowerCase();
+    for (const word of ['account', 'digit', 'id number', 'identity id', 'code', 'pin']) {
+      expect(lower).not.toContain(word);
+    }
+    const words = out.hint.trim().split(/\s+/);
+    expect(words.length).toBeLessThan(25);
+  });
+});
