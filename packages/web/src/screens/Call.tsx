@@ -75,8 +75,9 @@ const FULL_ENDED_SENTENCES: Record<string, string> = {
 
 function endedReasonToPlainWords(reason: string, verdict?: string): string {
   // When the socket drops mid-call before a terminal verdict is reached, inform the
-  // caller that nothing was staged or frozen and they can try again.
-  if (reason === 'link_lost' && verdict === 'PENDING') {
+  // caller that nothing was staged or frozen and they can try again. Treat undefined
+  // verdict (no screen state arrived yet) the same as PENDING (call not completed).
+  if (reason === 'link_lost' && (verdict === 'PENDING' || verdict === undefined)) {
     return 'Connection lost. This call was not completed, and nothing was staged or frozen. Start over to try again.';
   }
   const fullSentence = FULL_ENDED_SENTENCES[reason];

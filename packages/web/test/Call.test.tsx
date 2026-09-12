@@ -265,6 +265,21 @@ describe('Call', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows the reassuring message when link_lost arrives before any screen state (undefined verdict)', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+
+    // Socket drops before any state event arrives (verdict is undefined)
+    fake.emitEnded('link_lost');
+
+    expect(
+      await screen.findByText('Connection lost. This call was not completed, and nothing was staged or frozen. Start over to try again.'),
+    ).toBeInTheDocument();
+  });
+
   it('shows the standard message when link_lost arrives after a terminal verdict has been reached', async () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
