@@ -1351,9 +1351,10 @@
    "files": [
     "packages/web/src"
    ],
-   "status": "running",
-   "agent_id": "(launched 8:35 PM)",
-   "started_at": "2026-09-12T01:32:39.864Z"
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T01:32:39.864Z",
+   "lane_note": "landed on main f6dcb35 8:40 PM (NO ACTION TAKEN + glyph + one-line description; ESCALATE already had a banner; replay covered; orchestrator self-reviewed the diff); push 15 for the founder to react on the live site"
   },
   {
    "id": "SIM1-BIZ-NUMBER",
@@ -1391,9 +1392,10 @@
    "files": [
     "packages/server/src/call/session.ts"
    ],
-   "status": "running",
-   "agent_id": "(haiku lane 8:40 PM)",
-   "started_at": "2026-09-12T01:39:36.911Z"
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T01:39:36.911Z",
+   "lane_note": "landed on main 344d1af 8:45 PM; gate 1160/1160, typecheck clean; push 16"
   },
   {
    "id": "SCEN-BARGEIN-RESUME",
@@ -1402,9 +1404,10 @@
     "scripts/rehearse",
     "packages/server/src"
    ],
-   "status": "running",
-   "agent_id": "(sonnet lane 8:40 PM)",
-   "started_at": "2026-09-12T01:39:36.911Z"
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T01:39:36.911Z",
+   "lane_note": "code done 8fec0f0 8:56 PM (two scenarios, expectations module, env-guarded debug drop route COUNTERSIGN_DEBUG_HOOKS=1, 1195/1195 in worktree with own install); review running; NOT run against any server; landed on main 3b3e1fc 9:01 PM; autopilot gate 1200 x3, typecheck clean, corpus 102/102; push 17"
   },
   {
    "id": "TOOLS-NOT-OFFERED-JUDGE-RISK",
@@ -1416,6 +1419,63 @@
    "held_because": "reopens a Sep 3 founder ruling; bring as one decision with the README paragraph after the barge-in/resume evidence is in",
    "agent_id": "",
    "started_at": ""
+  },
+  {
+   "id": "push-15",
+   "title": "push 15: e44ff69..f6dcb35 (NO_ACTION banner, sim card, addendum, submission FBI wording)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T01:48:20.377Z",
+   "lane_note": "pushed 8:41 PM; gate 1159/1159"
+  },
+  {
+   "id": "push-16",
+   "title": "push 16: f6dcb35..344d1af (recorder session_config_updated diag)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T01:48:20.377Z",
+   "lane_note": "pushed 8:45 PM; gate 1160/1160; deploy poll pending"
+  },
+  {
+   "id": "SCEN-review",
+   "title": "review of 8fec0f0 (debug route production safety, drop realism, expectation strictness)",
+   "files": [],
+   "status": "done",
+   "agent_id": "(launched 8:57 PM)",
+   "started_at": "2026-09-12T01:57:08.946Z",
+   "lane_note": "PASS 9:00 PM; one Minor (.env.example doc line) parked by the pre-commit hook"
+  },
+  {
+   "id": "ENV-EXAMPLE-DEBUG-HOOKS",
+   "title": "add COUNTERSIGN_DEBUG_HOOKS doc line to .env.example (blocked: pre-commit-gate rejects any staged .env* path)",
+   "files": [
+    ".env.example",
+    ".claude/hooks/pre-commit-gate.sh"
+   ],
+   "status": "held",
+   "held_because": "hook exemption for .env.example is a .claude edit (founder prompt); or founder cherry-picks the line",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "RUN-BARGEIN-RESUME-LIVE",
+   "title": "run barge-in-interrupt and socket-drop-resume against the deployed site (drop one needs COUNTERSIGN_DEBUG_HOOKS=1 on Render for the window)",
+   "files": [],
+   "status": "held",
+   "held_because": "credits (~3 min) and a temporary Render env flag are the founder's call",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "push-17",
+   "title": "push 17: 344d1af..3b3e1fc (barge-in and socket-drop scenarios, debug drop route env-guarded, board/log)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T02:02:33.377Z",
+   "lane_note": "autopilot push 9:03 PM after the full gate"
   }
  ]
 }
