@@ -987,6 +987,12 @@ export class CallSession {
         t_ms: this.nowT(),
         detail: `goal=${output.goal.code}`,
       });
+      this.diag('session_config_updated', {
+        goal_code: output.goal.code,
+        keyterms_count: output.goal.keyterms.length,
+        tools_count: output.allowed_tools.length,
+        has_turn_detection: !!output.goal.turn_detection_hint,
+      });
       // The hard cap starts, and the stale reply_id gets snapshotted, the moment CLOSE is
       // first rendered (session.update just sent it) -- not from `this.last = output`
       // below, which would fire on every tick, and not from `reply.done`, which is exactly

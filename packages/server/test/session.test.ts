@@ -559,6 +559,65 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
     expect(updatesAfter).toBe(1);
   });
 
+  it('emits a session_config_updated diag event once per goal change, with correct detail fields', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const call: CallContext = { session_id: 'sess-diag-goal-change', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = new CallSession({
+      session_id: call.session_id,
+      seed: MERIDIAN,
+      call,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+    });
+
+    session.start();
+    const diagesAfterStart = diagEvents.filter((e) => e.kind === 'session_config_updated');
+    expect(diagesAfterStart).toHaveLength(1);
+    const initialDiag = diagesAfterStart[0]!.detail as {
+      goal_code: string;
+      keyterms_count: number;
+      tools_count: number;
+      has_turn_detection: boolean;
+    };
+    expect(initialDiag.goal_code).toBe('GREET');
+    expect(initialDiag.keyterms_count).toBeGreaterThanOrEqual(0);
+    expect(typeof initialDiag.tools_count).toBe('number');
+    expect(typeof initialDiag.has_turn_detection).toBe('boolean');
+
+    // input.speech.stopped changes nothing about the goal, so no new diag event.
+    clock.now = 50;
+    aai.emit({ type: 'input.speech.stopped' });
+    const diagsAfterNoChange = diagEvents.filter((e) => e.kind === 'session_config_updated');
+    expect(diagsAfterNoChange).toHaveLength(1);
+
+    // Now drive through Scenario B to trigger a goal change.
+    driveScenarioBThroughA4(session, aai, clock);
+    const diagsAfterScenarioB = diagEvents.filter((e) => e.kind === 'session_config_updated');
+    expect(diagsAfterScenarioB.length).toBeGreaterThan(1);
+
+    // Every diag event should have all required fields with correct types.
+    diagsAfterScenarioB.forEach((diag) => {
+      const detail = diag.detail as {
+        goal_code: string;
+        keyterms_count: number;
+        tools_count: number;
+        has_turn_detection: boolean;
+      };
+      expect(typeof detail.goal_code).toBe('string');
+      expect(typeof detail.keyterms_count).toBe('number');
+      expect(typeof detail.tools_count).toBe('number');
+      expect(typeof detail.has_turn_detection).toBe('boolean');
+      expect(detail.keyterms_count).toBeGreaterThanOrEqual(0);
+      expect(detail.tools_count).toBeGreaterThanOrEqual(0);
+    });
+  });
+
   it('ends on session.error and on session.ended, closing the AAI socket', () => {
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
