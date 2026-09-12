@@ -24,7 +24,9 @@
     "smoke:live": "tsx packages/server/scripts/smoke-live.ts --live",
     "preflight:deploy": "tsx scripts/preflight-deploy.ts",
     "rehearse": "tsx scripts/rehearse/run.ts",
-    "rehearse:test": "vitest run --config scripts/rehearse/vitest.config.ts"
+    "rehearse:batch": "tsx scripts/rehearse/rehearseBatch.ts",
+    "rehearse:test": "vitest run --config scripts/rehearse/vitest.config.ts",
+    "latency:table": "tsx scripts/rehearse/latencyTable.ts"
   },
   "dependencies": {},
   "devDependencies": {
