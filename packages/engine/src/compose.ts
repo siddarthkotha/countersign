@@ -4,6 +4,7 @@
 // on every card built here; every quote is a verbatim substring of the utterance it cites.
 import { buildLedger, currentClaim, isConfirmed } from './ledger.js';
 import { gradeChallenges, selectChallenge, seedFieldForEntry } from './challenges.js';
+import { extractIdentityClaim } from './extract/identity.js';
 import { normalizeValue } from './normalize.js';
 import { money } from './util.js';
 import type { RuleContext } from './rules.js';
@@ -376,6 +377,84 @@ export function buildExposureEvidence(claims: Claim[], seed: SeedConfig, request
     provenance: 'POLICY_DERIVED',
     request_version,
   };
+}
+
+// ---------- identity-switch resolution (founder decision 2026-09-11 10:15 PM, option B) ----------
+
+/** PROVEN defect this fixes (docs read before this change, see the investigation the task
+ *  was handed): fromTranscript.ts's `ev-identity-switch` card is hardcoded `status: 'FLAG'`
+ *  forever, so `identity_switch_stale` (below) never ages out and rules.ts's row 6 traps
+ *  every identity-switch call permanently -- rows 7/8 (and the FREEZE a fraudulent switch
+ *  should reach) are unreachable, and the server never re-runs SSO/OOB/context lookups for
+ *  the new identity (call/session.ts's `runLookupsIfNeeded` only fires in EVIDENCE/
+ *  CONSISTENCY_CHECK, states row 6 can never produce).
+ *
+ *  Resolution condition (exact, both required, checked purely from the transcript + ledger
+ *  -- no clock, no LLM judgment):
+ *   1. IDENTITY RE-STATED: strictly after the utterance that first stated the new (later)
+ *      identity, the caller states that SAME identity again in a later utterance -- a second,
+ *      independent self-identification, not just the original switch line. This is exactly
+ *      what the RE_ELICIT_AFTER_SWITCH goal already asks the agent to elicit ("re-establish
+ *      identity ... from scratch").
+ *   2. REQUEST SETTLED (unchanged or re-confirmed): for every critical field (amount,
+ *      account, beneficiary) that had a claim as of the switch, the CURRENT claim for that
+ *      field is either the SAME claim as of the switch (the caller repeated, never altered,
+ *      the request -- restating an identical value creates no new ledger claim, so this is
+ *      the common case) or has since reached CONFIRMED (the caller re-confirmed it via a
+ *      readback). A field with no claim yet as of the switch has nothing to unsettle. If any
+ *      critical field was given a DIFFERENT, still-unconfirmed value after the switch, the
+ *      switch stays unresolved (fail-safe: row 6 keeps holding rather than trusting a request
+ *      that changed hands and shape at the same time).
+ *
+ *  What resolution does NOT do: it never erases the switch. `ev-identity-switch`'s raw
+ *  `facts` (first_id/later_id) and its two quotes are untouched -- only `status` moves off
+ *  'FLAG' (to 'INFO') so `identity_switch_stale` reads false and row 6 stops matching. The
+ *  switch's weight toward the failure tally and toward blocking STAGE is carried entirely by
+ *  the SEPARATE `ev-consistency-identity` card that `buildConsistencyEvidence` above already
+ *  builds for ANY contradicted claim (identity included, since ledger.ts records an identity
+ *  switch as a CONTRADICTED 'identity' claim like any other field) -- that card is never
+ *  touched by resolution, so a once-switched call can never again read `no_contradictions:
+ *  true` and row 11 (STAGE) stays permanently out of reach for it, even after resolution
+ *  (see evaluate.test.ts's legitimate-handoff case: resolved, checks all PASS, still no
+ *  STAGE -- ends in a defined ESCALATE instead, never a deadlock). */
+export function resolveIdentitySwitch(
+  transcriptEv: Evidence[],
+  conversation: Utterance[],
+  claims: Claim[],
+  seed: SeedConfig,
+): Evidence[] {
+  const switchEv = transcriptEv.find((e) => e.kind === 'identity_switch');
+  if (!switchEv || switchEv.status !== 'FLAG') return transcriptEv;
+
+  const laterId = switchEv.facts.later_id;
+  const switchQuote = switchEv.quotes[switchEv.quotes.length - 1];
+  const switchUtterance = switchQuote ? conversation.find((u) => u.id === switchQuote.utterance_id) : undefined;
+  if (typeof laterId !== 'string' || !switchUtterance) return transcriptEv;
+  const switchT = switchUtterance.t_ms;
+
+  const reclaimed = conversation.some((u) => {
+    if (u.speaker !== 'caller' || u.id === switchUtterance.id || u.t_ms <= switchT) return false;
+    return extractIdentityClaim(u.text, seed)?.identity_id === laterId;
+  });
+  if (!reclaimed) return transcriptEv;
+
+  const settled = CRITICAL_FIELDS.every((field) => {
+    const asOfSwitch = [...claims].reverse().find((c) => c.field === field && c.t_ms <= switchT);
+    if (!asOfSwitch) return true; // nothing claimed for this field yet -- nothing to unsettle
+    const current = currentClaim(claims, field);
+    return current === null || current.id === asOfSwitch.id || current.kind === 'CONFIRMED';
+  });
+  if (!settled) return transcriptEv;
+
+  return transcriptEv.map((e) =>
+    e.id !== switchEv.id
+      ? e
+      : {
+          ...e,
+          status: 'INFO',
+          detail: `${e.detail} The caller re-stated this identity and the request is unchanged or re-confirmed since the switch; evidence is being re-gathered under the new claim.`,
+        },
+  );
 }
 
 // ---------- overrides ----------

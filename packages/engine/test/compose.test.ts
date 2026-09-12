@@ -5,7 +5,9 @@
 // protected oracle (only test/corpus.test.ts, test/mutants.test.ts, corpus/*.json and the
 // CI workflow are) -- it is a new, freely-appendable unit test file.
 import { describe, expect, it } from 'vitest';
-import { deriveRuleContext, reconstructIssued } from '../src/compose';
+import { deriveRuleContext, reconstructIssued, resolveIdentitySwitch } from '../src/compose';
+import { evidenceFromTranscript } from '../src/evidence/fromTranscript';
+import { buildLedger } from '../src/ledger';
 import { MERIDIAN } from '../src/seed/meridian';
 import type { AgentAction, Claim, ChallengeSpec, Utterance } from '../src/types';
 
@@ -260,5 +262,83 @@ describe('deriveRuleContext -- challenge_awaiting_answer (ruling C, 2026-09-09, 
     const tools = [{ id: 't1', name: 'check_sso_context' as const, t_ms: 10_000 + WINDOW + 1, args: {} }];
     const ctx = deriveRuleContext([], 1, [], tools, [], actions, 1, SEED);
     expect(ctx.challenge_awaiting_answer).toBe(false);
+  });
+});
+
+// Founder decision 2026-09-11 10:15 PM, option B: resolveIdentitySwitch is the fix for the
+// PROVEN permanent trap (rules.ts row 6 had no exit -- see the investigation this task was
+// handed) -- real extraction, real ledger throughout (no hand-built Claim/Evidence here),
+// same convention fsm.test.ts's "full round trip" tests already use.
+describe('resolveIdentitySwitch (founder decision 2026-09-11 10:15 PM, option B)', () => {
+  function transcriptEvAfterResolution(conversation: Utterance[], actions: AgentAction[] = []) {
+    const { claims } = buildLedger(conversation, actions, MERIDIAN);
+    const raw = evidenceFromTranscript(conversation, MERIDIAN);
+    return resolveIdentitySwitch(raw, conversation, claims, MERIDIAN);
+  }
+
+  it('stays FLAG when the switch is never followed by anything (no re-statement, no resolution)', () => {
+    const convo = [
+      u('c1', 'caller', 'This is Dana Whitfield. Wire $84,500 to Meridian Supply.', 1000),
+      u('c2', 'caller', 'Actually, this is Robert Miller speaking, I will take it from here.', 5000),
+    ];
+    const ev = transcriptEvAfterResolution(convo);
+    expect(ev.find((e) => e.id === 'ev-identity-switch')!.status).toBe('FLAG');
+  });
+
+  it('stays FLAG when the request changes to a different, still-unconfirmed value after the switch', () => {
+    const convo = [
+      u('c1', 'caller', 'This is Dana Whitfield. Wire $84,500 to Meridian Supply.', 1000),
+      u('c2', 'caller', 'Actually, this is Robert Miller speaking, I will take it from here.', 5000),
+      u('c3', 'caller', 'This is Robert Miller. Make it $200,000 to Northgate Partners instead.', 9000),
+    ];
+    const ev = transcriptEvAfterResolution(convo);
+    expect(ev.find((e) => e.id === 'ev-identity-switch')!.status).toBe('FLAG');
+  });
+
+  it('resolves (status INFO) once the caller re-states the new identity and repeats the SAME request unchanged', () => {
+    const convo = [
+      u('c1', 'caller', 'This is Dana Whitfield. Wire $84,500 to Meridian Supply.', 1000),
+      u('c2', 'caller', 'Actually, this is Robert Miller speaking, I will take it from here.', 5000),
+      u('c3', 'caller', 'This is Robert Miller. Send the $84,500 to Meridian Supply now.', 9000),
+    ];
+    const ev = transcriptEvAfterResolution(convo);
+    const switchCard = ev.find((e) => e.id === 'ev-identity-switch')!;
+    expect(switchCard.status).toBe('INFO');
+    // Resolution never erases the switch: facts and quotes (LAW 4) are untouched.
+    expect(switchCard.facts).toMatchObject({ first_id: 'dana-whitfield', later_id: 'robert-miller' });
+    expect(switchCard.quotes).toEqual([
+      { utterance_id: 'c1', text: 'Dana Whitfield' },
+      { utterance_id: 'c2', text: 'Robert Miller' },
+    ]);
+  });
+
+  it('resolves when the pre-switch request was already CONFIRMED via readback and stays unchanged after', () => {
+    const convo = [
+      u('c1', 'caller', 'This is Dana Whitfield. Wire $84,500 to Meridian Supply, account ending 4471.', 1000),
+      u('a1', 'agent', 'Just to confirm, the amount is $84,500. Is that correct?', 2000),
+      u('c2', 'caller', 'Yes, that is right.', 2500),
+      u('c3', 'caller', 'Actually, this is Robert Miller speaking, I will take it from here.', 5000),
+      u('c4', 'caller', 'This is Robert Miller. I am taking this over.', 9000),
+    ];
+    const actions: AgentAction[] = [{ id: 'r1', kind: 'readback_issued', t_ms: 2000, field: 'amount_usd', value: '84500' }];
+    const ev = transcriptEvAfterResolution(convo, actions);
+    expect(ev.find((e) => e.id === 'ev-identity-switch')!.status).toBe('INFO');
+  });
+
+  it('does not resolve when the SAME identity is merely repeated before any switch happens', () => {
+    // Sanity: no switch card at all -> nothing for resolveIdentitySwitch to touch or crash on.
+    const convo = [
+      u('c1', 'caller', 'This is Dana Whitfield. Wire $84,500 to Meridian Supply.', 1000),
+      u('c2', 'caller', 'This is Dana Whitfield again, confirming the same request.', 5000),
+    ];
+    const ev = transcriptEvAfterResolution(convo);
+    expect(ev.find((e) => e.id === 'ev-identity-switch')).toBeUndefined();
+  });
+
+  it('is idempotent / a no-op on evidence with no identity_switch card', () => {
+    const convo = [u('c1', 'caller', 'This is Dana Whitfield. Wire $84,500 to Meridian Supply.', 1000)];
+    const { claims } = buildLedger(convo, [], MERIDIAN);
+    const raw = evidenceFromTranscript(convo, MERIDIAN);
+    expect(resolveIdentitySwitch(raw, convo, claims, MERIDIAN)).toEqual(raw);
   });
 });

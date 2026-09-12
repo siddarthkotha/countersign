@@ -353,6 +353,107 @@ describe('CallSession — Scenario A (Dana, legitimate, fully cooperative) repla
   });
 });
 
+// ---------------------------------------------------------------------------------------
+// Founder decision 2026-09-11 10:15 PM, option B. PROVES the server needed NO code change
+// for this fix: `runLookupsIfNeeded` (call/session.ts) already reads `output.claimed_
+// identity_id` fresh off the engine's own output on every tick, and the ledger already sets
+// that to the NEW identity the instant it's claimed (ledger.ts's `currentClaim` returns the
+// latest 'identity' claim regardless of kind -- true even before this fix). The only thing
+// that ever stopped lookups re-firing for the new identity was rules.ts's row 6 never
+// letting `deriveState` reach EVIDENCE/CONSISTENCY_CHECK again once a switch happened;
+// `runLookupsIfNeeded` only fires in those two states. This test drives the real
+// identity-switch call (c1 verbatim from corpus/identity-switch.json / evaluate.test.ts's
+// own Scenario A text; the switch line verbatim from scripts/rehearse/scenarios/
+// identity-switch.json's c5; the resolving line verbatim from tonight's live rehearsal,
+// scripts/rehearse/reports/2026-09-11T21-56-33-identity-switch.md's c6) through the REAL
+// CallSession and proves: (1) the server automatically issues fresh check_sso_context/
+// get_request_history/verify_out_of_band calls for 'robert-miller' with NO tool.call AAI
+// event from the model anywhere in this test, and (2) the call reaches FREEZE -- not the
+// idle-timeout ESCALATE the live rehearsal hit before this fix.
+// ---------------------------------------------------------------------------------------
+describe('CallSession — identity switch resolves live; server re-runs lookups for the new identity; reaches FREEZE (founder decision 2026-09-11 10:15 PM, option B)', () => {
+  it('re-runs all three lookups for robert-miller with no model tool.call, and FREEZEs', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-switch-live', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = newSession(clock, call, aai, sent);
+
+    session.start(); // INTAKE
+
+    // c1: Dana's opening claim + full request -- same line evaluate.test.ts's Scenario A uses.
+    clock.now = 1000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c1',
+      text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
+    });
+
+    // Row 4: one challenge required before any readback -- the engine's usual opening
+    // TRAP_FACT on the beneficiary (same as the Scenario A live test above).
+    expect(session.last?.state).toBe('CHALLENGE');
+    clock.now = 1500;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: session.last!.goal.hint, reply_id: 'a1', interrupted: false });
+    clock.now = 2000;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+    expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(true);
+
+    // c2: the caller catches the trap and states the true beneficiary -- challenge PASSES.
+    clock.now = 2500;
+    aai.emit({ type: 'transcript.user', item_id: 'c2', text: "No, that's wrong. It's Meridian Supply." });
+
+    // Challenge satisfied -> CONSISTENCY_CHECK/READBACK (no critical field confirmed yet).
+    // `runLookupsIfNeeded` also gets its first chance here and resolves Dana's own SSO/
+    // history/out-of-band -- proving the mechanism this fix relies on already worked for the
+    // FIRST identity; the switch below is what used to break it for a SECOND one.
+    expect(session.last?.state).toBe('CONSISTENCY_CHECK');
+    expect(session.logs.tools.some((t) => t.args.identity_id === 'dana-whitfield')).toBe(true);
+
+    // The switch (verbatim, scripts/rehearse/scenarios/identity-switch.json c5) -- no agent
+    // readback turn in between, matching how the caller actually barged in live tonight.
+    clock.now = 8000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c-switch',
+      text: "Actually -- hold on -- this is Robert Miller speaking, I'll take it from here.",
+    });
+    expect(session.last?.state).toBe('CLAIM');
+    expect(session.last?.goal.code).toBe('RE_ELICIT_AFTER_SWITCH');
+    expect(session.last?.assurance.no_identity_switch).toBe(false);
+    expect(session.last?.request_version).toBe(2);
+
+    // The resolving turn (verbatim, tonight's live rehearsal report, c6): Miller re-states
+    // who he is and repeats the SAME request, unchanged. THE FIX under test: before it, this
+    // call was pinned at CLAIM/row 6 forever (see the investigation this task was handed).
+    clock.now = 12000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c-reclaim',
+      text: "This is Robert Miller. I'm taking this over myself. Release the $84,500 to Meridian Supply now.",
+    });
+
+    // Resolved: no longer trapped at CLAIM/row 6 -- and the server has ALREADY re-run all
+    // three lookups for 'robert-miller' in this same tick, with no tool.call AAI event from
+    // the model anywhere in this test (the model never once calls a tool here, same as
+    // Scenario B's own regression above).
+    expect(session.last?.state).not.toBe('CLAIM');
+    expect(session.last?.assurance.no_identity_switch).toBe(true);
+    for (const name of ['check_sso_context', 'get_request_history', 'verify_out_of_band'] as const) {
+      const entry = session.logs.tools.find((t) => t.name === name && t.args.identity_id === 'robert-miller');
+      expect(entry, `${name} was never re-run for robert-miller`).toBeDefined();
+      expect(entry!.args.request_version).toBe(2);
+    }
+
+    // Robert Miller's own seed record fails both SSO (Frankfurt vs this call's Austin, TX)
+    // and out-of-band (hardcoded no_response) -- rule 8a freezes. This is the FREEZE the live
+    // rehearsal (idle_timeout -> ESCALATE, the wrong verdict) could never reach before this
+    // fix, because row 6 had no exit.
+    expect(session.last?.verdict).toBe('FREEZE');
+    expect(session.last?.state).toBe('SEALED');
+  });
+});
+
 describe('CallSession — protocol rules independent of any one scenario', () => {
   it('ignores an out-of-state tool call, logs it, and still answers with an error tool.result after the next reply.done', () => {
     const clock = { now: 0 };

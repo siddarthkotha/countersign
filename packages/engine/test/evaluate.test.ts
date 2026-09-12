@@ -512,3 +512,106 @@ describe('evaluate -- challenge log drift', () => {
     expect(out.failure_tally).toBe(0.5);
   });
 });
+
+// ---------------------------------------------------------------------------------------
+// Founder decision 2026-09-11 10:15 PM, option B: a LEGITIMATE handoff -- Dana Whitfield
+// opens and fully confirms an honest, already-approved request, then genuinely hands the
+// call to Marcus Obi (a real Meridian Dynamics colleague, Controller/second-approver, seed/
+// meridian.ts), who re-states who he is and repeats the SAME, unchanged request. This is
+// exactly the case rules.ts row 6 used to trap FOREVER (PENDING/CLAIM, no exit) even though
+// nothing fraudulent happened after the handoff -- this section proves that defect is gone
+// (the call reaches a real terminal state, not stuck at CLAIM) while also documenting the
+// design's known, deliberate cost of a switch: `no_contradictions` can never read true again
+// once ANY switch happened, so row 11 (STAGE) is permanently out of reach for this call even
+// though Marcus's own SSO/OOB check out clean -- the switch's contradiction weight is carried
+// forever by ev-consistency-identity (compose.ts's buildConsistencyEvidence), independent of
+// resolution. See this task's report for why: the mock's get_request_history is scoped by
+// the payment's `requester_id` (Dana's), so Marcus's own lookup reads no known vendor for
+// this beneficiary -- context FAILs, which combined with the standing contradiction reaches
+// FREEZE via row 8b (a contradicted claim alongside any failed check), not a deadlock.
+// ---------------------------------------------------------------------------------------
+describe('evaluate -- identity-switch resolution: a legitimate handoff (founder decision 2026-09-11 10:15 PM, option B)', () => {
+  const handoffConversation: Utterance[] = [
+    {
+      id: 'c1',
+      speaker: 'caller',
+      text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
+      t_ms: 1000,
+    },
+    { id: 'a1', speaker: 'agent', text: 'To confirm: $84,500 to Meridian Supply, account ending 4471. Is that right?', t_ms: 2000 },
+    { id: 'c2', speaker: 'caller', text: "Yes, that's right.", t_ms: 2500 },
+    { id: 'a2', speaker: 'agent', text: 'And the account ending 4471, correct?', t_ms: 3000 },
+    { id: 'c3', speaker: 'caller', text: 'Yes, correct.', t_ms: 3500 },
+    { id: 'a3', speaker: 'agent', text: 'And Meridian Supply is the beneficiary, correct?', t_ms: 4000 },
+    { id: 'c4', speaker: 'caller', text: "Yes, that's right.", t_ms: 4500 },
+    { id: 'c5', speaker: 'caller', text: "Actually, this is Marcus Obi, I'm covering for Dana. I'll take it from here.", t_ms: 5000 },
+    { id: 'c6', speaker: 'caller', text: 'This is Marcus Obi. I need the same $84,500 wire to Meridian Supply sent now.', t_ms: 9000 },
+  ];
+
+  const handoffActions: AgentAction[] = [
+    { id: 'r1', kind: 'readback_issued', t_ms: 2000, field: 'amount_usd', value: '84500' },
+    { id: 'r2', kind: 'readback_issued', t_ms: 3000, field: 'account_last4', value: '4471' },
+    { id: 'r3', kind: 'readback_issued', t_ms: 4000, field: 'beneficiary', value: 'Meridian Supply' },
+  ];
+
+  const handoffCall: CallContext = { session_id: 'sess-handoff', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+
+  const handoffTools: ToolLogEntry[] = [
+    tool('check_sso_context', 't1', 1500, 'dana-whitfield', 1),
+    tool('get_request_history', 't2', 1500, 'dana-whitfield', 1),
+    tool('verify_out_of_band', 't3', 1600, 'dana-whitfield', 1),
+    tool('check_sso_context', 't4', 9500, 'marcus-obi', 2),
+    tool('get_request_history', 't5', 9500, 'marcus-obi', 2),
+    tool('verify_out_of_band', 't6', 9600, 'marcus-obi', 2),
+  ];
+
+  const out = evaluate({
+    conversation: handoffConversation,
+    tools: handoffTools,
+    actions: handoffActions,
+    call: handoffCall,
+    seed: MERIDIAN,
+  });
+
+  it('resolves the switch (identity_switch card is no longer FLAG) instead of trapping the call at CLAIM/row 6 forever', () => {
+    const switchCard = out.evidence.find((e) => e.kind === 'identity_switch')!;
+    expect(switchCard.status).not.toBe('FLAG');
+    expect(out.assurance.no_identity_switch).toBe(true); // identity_switch_stale cleared
+    expect(out.state).not.toBe('CLAIM');
+    expect(out.rule_hit).not.toBe(6);
+  });
+
+  it("Marcus Obi's own checks are re-run and his SSO/OOB genuinely pass (the new identity, not Dana's)", () => {
+    const sso = out.evidence.find((e) => e.id === 'ev-sso')!;
+    const oob = out.evidence.find((e) => e.id === 'ev-oob')!;
+    expect(sso.facts).toMatchObject({ geo: 'Austin, TX' }); // Marcus's own seed geo, matching this call's origin
+    expect(sso.status).toBe('PASS');
+    expect(oob.status).toBe('PASS');
+  });
+
+  it('reaches a defined terminal verdict -- never PENDING forever, never a deadlock', () => {
+    expect(['STAGE', 'FREEZE', 'ESCALATE', 'NO_ACTION']).toContain(out.verdict);
+    expect(out.state).not.toBe('CLAIM');
+  });
+
+  it('the switch keeps counting as a permanent contradiction: STAGE (row 11) is never reachable for a call that ever switched, even after resolution', () => {
+    expect(out.assurance.no_contradictions).toBe(false);
+    expect(out.verdict).not.toBe('STAGE');
+    // Actual outcome today (documented, not incidental): the mock's get_request_history is
+    // scoped to the payment's original requester, so Marcus's own lookup shows no known
+    // vendor for this beneficiary -- context FAILs, and that failed check alongside the
+    // standing identity contradiction reaches FREEZE via row 8b, not merely ESCALATE.
+    expect(out.verdict).toBe('FREEZE');
+  });
+
+  it('determinism: evaluating the same input twice is deep-equal', () => {
+    const again = evaluate({
+      conversation: handoffConversation,
+      tools: handoffTools,
+      actions: handoffActions,
+      call: handoffCall,
+      seed: MERIDIAN,
+    });
+    expect(again).toEqual(out);
+  });
+});

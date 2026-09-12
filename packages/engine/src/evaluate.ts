@@ -19,6 +19,7 @@ import {
   buildReadbackEvidence,
   deriveRuleContext,
   reconstructIssued,
+  resolveIdentitySwitch,
 } from './compose.js';
 import type { ChallengeResult, EngineInput, EngineOutput, Evidence, EvidenceStatus } from './types.js';
 
@@ -38,8 +39,18 @@ export function evaluate(input: EngineInput, overrides?: Record<string, Evidence
   const beneficiary = beneficiaryClaim ? String(beneficiaryClaim.value) : null;
 
   // 2. Transcript evidence, re-stamped with the ledger's request_version (the ledger owns
-  // versioning; evidenceFromTranscript always tags its own cards version 1).
-  const transcriptEv: Evidence[] = evidenceFromTranscript(conversation, seed).map((e) => ({ ...e, request_version }));
+  // versioning; evidenceFromTranscript always tags its own cards version 1). Founder decision
+  // 2026-09-11 10:15 PM (option B): resolveIdentitySwitch then demotes ev-identity-switch off
+  // FLAG once, after the switch, the caller has re-stated the new identity AND the request is
+  // unchanged or re-confirmed -- see compose.ts for the exact conditions and why this never
+  // erases the switch's own contradiction weight (ev-consistency-identity, built below at
+  // step 5, is untouched either way).
+  const transcriptEv: Evidence[] = resolveIdentitySwitch(
+    evidenceFromTranscript(conversation, seed).map((e) => ({ ...e, request_version })),
+    conversation,
+    claims,
+    seed,
+  );
 
   // 3. Challenges: reconstruct what was issued, grade it, build knowledge_check_result cards.
   const issued = reconstructIssued(claims, actions, seed, call.session_id, conversation);

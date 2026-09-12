@@ -536,4 +536,20 @@ describe('RULES_DOC', () => {
     expect(row4?.toLowerCase()).toContain('at least one');
     expect(row4?.toLowerCase()).not.toContain('may lower');
   });
+
+  it('row 6 text agrees with the code: the switch resolves (re-stated identity + settled request) but never stops counting as a contradiction', () => {
+    // Guards against RULES_DOC drifting from decide()/resolveIdentitySwitch's actual
+    // behavior (founder decision 2026-09-11, option B): the doc must say the switch can
+    // resolve (so row 6 isn't a permanent trap), AND that resolving it never removes the
+    // switch from the record as a contradiction (so a reader can't conclude a resolved
+    // switch is a clean bill of health that could reach STAGE).
+    const row6 = RULES_DOC.split('\n').find((line) => /^6\./.test(line));
+    expect(row6).toBeDefined();
+    const lower = row6!.toLowerCase();
+    expect(lower).toContain('resolved');
+    expect(lower).toContain('re-states the new identity');
+    expect(lower).toContain('unchanged or re-confirmed');
+    expect(lower).toContain('stays a contradiction');
+    expect(lower).toContain('stage stays permanently out of reach');
+  });
 });
