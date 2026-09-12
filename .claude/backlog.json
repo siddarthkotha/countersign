@@ -1696,10 +1696,11 @@
    "id": "SIM-NEEDS-VOICE",
    "title": "judge-sim method for Sep 18/25: the click-driven judge cannot speak; combine judge (UI, README, replay) with the harness batch bundles for the live axis, or score a founder-recorded live rehearsal",
    "files": [],
-   "status": "held",
-   "held_because": "founder decision before Sep 18; recommendation: judge + harness bundles (no new tooling)",
+   "status": "done",
+   "held_because": "",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "",
+   "lane_note": "founder 9:38 AM: judge + harness bundles; agent definition being updated"
   },
   {
    "id": "CLIENT-DROP-STATE",
@@ -1746,11 +1747,11 @@
     "packages/engine/src/compose.ts",
     "packages/engine/src/evidence/fromTranscript.ts"
    ],
-   "status": "running",
+   "status": "done",
    "held_because": "",
-   "agent_id": "(launched 8:50 AM)",
+   "agent_id": "",
    "started_at": "2026-09-12T13:51:42.995Z",
-   "lane_note": "engine lane 8:50 AM (sonnet, worktree); code done 6b47c67 (latest-pair card, corpus identity-switch-double-freeze.json, 24 files, 1358/1358); review running"
+   "lane_note": "engine lane 8:50 AM (sonnet, worktree); code done 6b47c67 (latest-pair card, corpus identity-switch-double-freeze.json, 24 files, 1358/1358); review running; landed on main 9:44 AM; goes out with the readback cap"
   },
   {
    "id": "LINKLOST-UNDEFINED",
@@ -1802,11 +1803,11 @@
    "files": [
     "packages/engine/src/rules.ts"
    ],
-   "status": "running",
+   "status": "done",
    "held_because": "",
-   "agent_id": "(sonnet 9:29 AM)",
+   "agent_id": "",
    "started_at": "",
-   "lane_note": "founder yes (cap at 3) 9:00 AM; engine lane running"
+   "lane_note": "founder yes (cap at 3) 9:00 AM; engine lane running; code done 08ac8fa 9:45 AM (new row 13, old 13->14, 14->15; corpus readback-reasks-exhausted-escalates.json; 1365/1365); review running incl. renumbering references; landed on main e817ed2 9:52 AM (two additive conflicts resolved with the double-switch commit; engine 516/516)"
   },
   {
    "id": "STRUCTURING-FREEZE-INVESTIGATION",
@@ -1915,9 +1916,73 @@
    "id": "IDSWITCH-DOUBLE-review",
    "title": "review of 6b47c67",
    "files": [],
-   "status": "running",
+   "status": "done",
    "agent_id": "(sonnet 9:29 AM)",
-   "started_at": "2026-09-12T14:31:26.169Z"
+   "started_at": "2026-09-12T14:31:26.169Z",
+   "lane_note": "PASS 9:43 AM; tally cap of 2 pre-existing (rules v2); minor naming nit on first_id"
+  },
+  {
+   "id": "push-24",
+   "title": "push 24: 00a9e65..518a7bf (redaction of hooks/CLAUDE.md, cover pick, Replay de-flake, link-lost undefined verdict, logs)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T14:43:37.135Z",
+   "lane_note": "founder 'push now' 9:38 AM; gate 1345 x3, typecheck, corpus 118; deploy poll running"
+  },
+  {
+   "id": "SIM-METHOD-UPDATE",
+   "title": "judge-sim agent definition: live axis scored from harness reports and bundles; never places calls itself",
+   "files": [
+    "~/.claude/agents/judge-sim.md"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T14:43:37.135Z",
+   "lane_note": "~/.claude/agents/judge-sim.md updated 9:46 AM (178 lines): live axis from harness reports/bundles, never places calls, UNKNOWN if no reports"
+  },
+  {
+   "id": "READBACK-CAP-review",
+   "title": "review of 08ac8fa (counter semantics, FREEZE priority, row renumbering references repo-wide)",
+   "files": [],
+   "status": "done",
+   "agent_id": "(sonnet 9:47 AM)",
+   "started_at": "2026-09-12T14:46:00.460Z",
+   "lane_note": "PASS 9:49 AM; Important: README row 13 -> 14; 9 minor stale comments; corpus has no rule_row field so nothing asserted broke"
+  },
+  {
+   "id": "SIM-ONE-COMMAND",
+   "title": "one command that runs the five sim scenarios, regenerates docs/LATENCY.md, and lists the fresh reports for the judge (wrapper over rehearse:batch)",
+   "files": [
+    "scripts/rehearse",
+    "package.json"
+   ],
+   "status": "held",
+   "held_because": "ambition-pass proposal; build before Sep 18; credits ~10 min per run are the founder's call each Friday",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "ROW-RENUMBER-SWEEP",
+   "title": "fix stale rule-row references after the cap insertion (README row 13->14; call_ended row 14->15 in comments, corpus descriptions, STATE.md)",
+   "files": [
+    "README.md",
+    "docs",
+    "packages"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T14:51:06.587Z",
+   "lane_note": "lane 1b7326a DISCARDED (worktree cut before the cap; it renumbered rule_hit values against the wrong base). Orchestrator applied the 15 prose/comment edits on main directly 9:58 AM; gate 1380 x3, typecheck, corpus 128/128 (25 files)"
+  },
+  {
+   "id": "push-25",
+   "title": "push 25: 518a7bf..HEAD (identity-switch chain, readback re-ask cap row 13, row-reference sweep, logs)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T15:09:10.151Z",
+   "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
   }
  ]
 }
