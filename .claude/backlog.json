@@ -1528,11 +1528,11 @@
    "id": "REHEARSAL-BATCH-30",
    "title": "G5: run 30 rehearsals (six scenarios round-robin) against the deployed site, capped at 60 minutes of credits, then regenerate docs/LATENCY.md",
    "files": [],
-   "status": "running",
+   "status": "done",
    "held_because": "",
-   "agent_id": "(detached batch.sh 9:48 PM + monitor)",
+   "agent_id": "",
    "started_at": "2026-09-12T02:47:22.500Z",
-   "lane_note": "founder 'rehearse' 9:46 PM; nine scenarios round-robin, up to 4 rounds, 60-min wall cap, sequential; socket-drop-resume excluded (needs Render debug flag); log scripts/rehearse/reports/batch-2026-09-11.log"
+   "lane_note": "34 runs, 22 pass, cap 3698 s, ~50 min credits ESTIMATE; summary in the log 10:51 PM; extra barge-in sample ran 10:51 PM"
   },
   {
    "id": "REDACT-DOCS",
@@ -1561,10 +1561,11 @@
    "id": "FRAUD-ESCALATE-INVESTIGATION",
    "title": "batch run 2 (9:50 PM): scenario B ESCALATE via row 14 idle timeout instead of FREEZE; the escrow trap was never asked; likely challenge-order change (RT-9b or seed facts) vs the scripted caller",
    "files": [],
-   "status": "held",
+   "status": "done",
    "agent_id": "",
    "started_at": "2026-09-12T02:52:57.678Z",
-   "held_because": "round 2 fraud run FROZE (63.7 s wall, 10:05 PM): 9:50 PM was one-off variance; n=2 tonight, watch rounds 3-4; if a second ESCALATE appears, run locally with the actions log after the batch"
+   "held_because": "",
+   "lane_note": "undefined; SETTLED 10:48 PM: fraud froze 3 of 4 tonight (63.7, 63.4 s and round 4), the 9:50 PM ESCALATE was a one-off timing variance"
   },
   {
    "id": "BARGEIN-INVESTIGATION",
@@ -1641,7 +1642,7 @@
    "held_because": "",
    "agent_id": "",
    "started_at": "2026-09-12T03:16:36.204Z",
-   "lane_note": "founder chose B 10:15 PM: resolve the switch after re-established identity + request, re-run lookups for the new identity, freeze on failures; contradiction card stays; hand-built corpus recording expected FREEZE; code done 91da7ec 10:34 PM (resolveIdentitySwitch in compose.ts, wired in evaluate.ts, corpus identity-switch-freeze.json, RULES_DOC row 6); lane's honest-handoff test ends FREEZE via a failed context check; review running, must settle the all-pass case; landed on main b56be9e 10:46 PM; gate 1307 x3, typecheck clean, corpus 107/107 (21 files); push 20"
+   "lane_note": "founder chose B 10:15 PM: resolve the switch after re-established identity + request, re-run lookups for the new identity, freeze on failures; contradiction card stays; hand-built corpus recording expected FREEZE; code done 91da7ec 10:34 PM (resolveIdentitySwitch in compose.ts, wired in evaluate.ts, corpus identity-switch-freeze.json, RULES_DOC row 6); lane's honest-handoff test ends FREEZE via a failed context check; review running, must settle the all-pass case; landed on main b56be9e 10:46 PM; gate 1307 x3, typecheck clean, corpus 107/107 (21 files); push 20; PROVEN LIVE 10:44 PM: identity-switch FREEZE 110.3 s on deploy 20"
   },
   {
    "id": "SINGLE-WRONG-ANSWER-INVESTIGATION",
@@ -1762,10 +1763,89 @@
    "id": "push-20",
    "title": "push 20: a4d4f78..b56be9e (identity switch option B, link-lost copy, cover-2-final, logs)",
    "files": [],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "",
+   "lane_note": "pushed 10:48 PM after the round 4 fraud sample (FREEZE); deploy poll running"
+  },
+  {
+   "id": "READBACK-RESTATEMENT",
+   "title": "engine: an exact restatement of the read-back value confirms the readback (caller said 'Meridian Supply.' five times, never accepted); plus correction-cue lookback across a split utterance (structuring run 34)",
+   "files": [
+    "packages/engine/src/ledger.ts"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T03:52:48.258Z",
+   "lane_note": "code done e433670 (exact restatement confirms; corpus readback-bare-restatement-confirms.json STAGE) + d9846d0 (correction-cue lookback across a split turn; corpus structuring-two-wires-split-turn.json); 1329/1329 in worktree, 23 corpus files; review running 11:11 PM; fix round sent 11:17 PM (magnitude gate on the lookback + spoken-number/spaced-digit normalization); fix 45e70b6 11:22 PM (magnitude gate on both paths; spoken-number and spaced-digit restatement); 1334/1334; re-review running; landed on main 4fe3345, e977e75, 89173c5 11:25 PM; gate 1335 x3, typecheck clean, corpus 118/118 (23 files); push 21"
+  },
+  {
+   "id": "SCEN-BENEFICIARY-TRIGGER",
+   "title": "barge-in scenario: beneficiary rule fires on the readback; apply the three-field matcher; audit all scenarios; test that no rule matches the readback sentence",
+   "files": [
+    "scripts/rehearse/scenarios"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T03:52:48.258Z",
+   "lane_note": "landed on main 10:56 PM (69bce76 cherry-picked): 14 rules across 4 scenarios use the three-field matcher; guard test that no rule matches the readback sentence; harness only; rides in push 21"
+  },
+  {
+   "id": "READBACK-REASK-CAP",
+   "title": "engine re-asks an unconfirmed readback indefinitely until idle timeout; consider a deterministic cap (3 re-asks -> ESCALATE) as a rule row",
+   "files": [
+    "packages/engine/src/rules.ts"
+   ],
    "status": "held",
-   "held_because": "gate green 10:46 PM; waits for the batch's round 4 to finish (~10:48 PM) so the deploy does not cut the last fraud sample",
+   "held_because": "rule-table change; the idle timeout already escalates within ~60 s; founder decision at a quiet moment",
    "agent_id": "",
    "started_at": ""
+  },
+  {
+   "id": "STRUCTURING-FREEZE-INVESTIGATION",
+   "title": "batch run 34 structuring-two-wires FREEZE on deploy 20 after 3 ESCALATE; option B regression or variance?",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T03:52:48.258Z",
+   "lane_note": "10:57 PM: STT split the correction across two turns; correction cue not seen by classifyDifferentValue; pre-existing; fix sent to the ledger lane (READBACK-RESTATEMENT) as item 2"
+  },
+  {
+   "id": "LEDGER-review",
+   "title": "review of e433670 + d9846d0 (normalization per field, trap-readback attack surface, lookback bounds, hedge rule)",
+   "files": [],
+   "status": "done",
+   "agent_id": "(launched 11:11 PM)",
+   "started_at": "2026-09-12T04:11:33.344Z",
+   "lane_note": "FAIL 11:16 PM: Critical, cross-turn correction lookback bypasses the hedge magnitude bound (4.8x jump CORRECTED); Important, spoken numbers and spaced digits never match a restatement; trap-readback surface PASS; 1329/1329, 23 corpus"
+  },
+  {
+   "id": "STASH-CLEANUP",
+   "title": "three verification stash entries left by the ledger lane (*-temp-verify-*, *-verify2-*), already applied, safe to drop; git stash drop is rail-blocked on autopilot",
+   "files": [],
+   "status": "held",
+   "held_because": "a delete; drop at close with the founder's word",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "LEDGER-rereview",
+   "title": "re-review of 45e70b6",
+   "files": [],
+   "status": "done",
+   "agent_id": "(sonnet 11:23 PM)",
+   "started_at": "2026-09-12T04:22:59.311Z",
+   "lane_note": "PASS 11:24 PM"
+  },
+  {
+   "id": "push-21",
+   "title": "push 21: 2e2afad..89173c5 (readback restatement confirms, correction-cue lookback with magnitude gate, spoken/spaced restatement, beneficiary trigger fix, logs)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T04:25:46.661Z",
+   "lane_note": "autopilot push 11:25 PM after the full gate + reviews; deploy poll running"
   }
  ]
 }
