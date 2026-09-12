@@ -116,6 +116,17 @@ export function buildLedger(
 ): { claims: Claim[]; request_version: number } {
   const callerUtterances = conversation.filter((u) => u.speaker === 'caller').sort((a, b) => a.t_ms - b.t_ms);
 
+  // fix (run 34, report scripts/rehearse/reports/2026-09-11T22-48-44-structuring-two-wires.md):
+  // AssemblyAI's endpointing can finalize one scripted caller line as two separate
+  // transcript turns with no agent turn between them (real STT/turn-segmentation
+  // variance -- see `classifyDifferentValue` below for the full story). Used to decide
+  // whether a correction-lexicon hit in the PRECEDING caller utterance still counts for
+  // the current one: only when nothing (no agent turn) happened in between.
+  const agentTurnTimes = conversation.filter((u) => u.speaker === 'agent').map((u) => u.t_ms);
+  function hasAgentTurnBetween(fromExclusive: number, toExclusive: number): boolean {
+    return agentTurnTimes.some((t) => t > fromExclusive && t < toExclusive);
+  }
+
   // Only readback_issued/challenge_issued actions matter to the ledger: the former drives
   // CONFIRMED/UNKNOWN and the repair window; both bound how long a readback stays "open for
   // an answer" (§C: the agent has moved on once it asks the next thing).
@@ -169,8 +180,31 @@ export function buildLedger(
     return ratio > bound || ratio < 1 / bound;
   }
 
-  function classifyDifferentValue(field: ClaimField, u: Utterance, current: Claim, value: string | number): ClaimKind {
+  function classifyDifferentValue(
+    field: ClaimField,
+    u: Utterance,
+    current: Claim,
+    value: string | number,
+    precedingCorrectionText: string | undefined,
+  ): ClaimKind {
     if (hasLexiconHit(u.text, seed.correction_lexicon)) return 'CORRECTED'; // (a)
+    // (a2) fix (run 34, report 2026-09-11T22-48-44-structuring-two-wires.md): the
+    // scripted line "Actually, there's a second one too -- $42,300 to the same account,
+    // same vendor." is normally ONE utterance, so "actually" and the new amount land in
+    // the same `u.text` and (a) fires. Live, AssemblyAI split it into two finalized
+    // turns with no agent turn between them; "actually" landed in the PRIOR turn, so the
+    // amount-bearing turn alone had no correction cue and fell through to CONTRADICTED,
+    // which (combined with an already-failing context check) FROZE the call instead of
+    // reaching row 9's structuring ESCALATE. Fix: also credit a correction-lexicon hit
+    // found in the immediately preceding caller utterance, gated on `precedingCorrectionText`
+    // being defined -- callers pass that only when there was no intervening agent turn
+    // (see `hasAgentTurnBetween` above), mirroring the adjacency the readback affirm/
+    // negate resolution loop already relies on. A correction word from further back, or
+    // after the agent has moved on to something else, does not retroactively soften a
+    // later contradiction.
+    if (precedingCorrectionText !== undefined && hasLexiconHit(precedingCorrectionText, seed.correction_lexicon)) {
+      return 'CORRECTED';
+    }
     if (current.kind === 'APPROXIMATE' && !isImplausibleJumpFromApproximate(field, current.value, value)) return 'CORRECTED'; // (b)
     if (hasLexiconHit(u.text, seed.negate_lexicon) && referencesPreviousValue(u.text, current)) return 'CORRECTED'; // (c)
     const repairSince = repairWindowSince[field];
@@ -184,7 +218,14 @@ export function buildLedger(
   // Non-identity fields: first sighting is STATED (or APPROXIMATE); a later different value
   // is classified by `classifyDifferentValue`; a repeated same value is a no-op here (the
   // readback resolution below is the only route to CONFIRMED/UNKNOWN).
-  function processHit(field: ClaimField, rawValue: string | number, quote: string, u: Utterance, approximate: boolean): void {
+  function processHit(
+    field: ClaimField,
+    rawValue: string | number,
+    quote: string,
+    u: Utterance,
+    approximate: boolean,
+    precedingCorrectionText: string | undefined,
+  ): void {
     const value = normalizeValue(field, rawValue);
     const current = currentClaim(claims, field);
     if (!current) {
@@ -192,10 +233,12 @@ export function buildLedger(
       return;
     }
     if (current.value === value) return;
-    const kind = classifyDifferentValue(field, u, current, value);
+    const kind = classifyDifferentValue(field, u, current, value, precedingCorrectionText);
     if (VERSIONED_FIELDS.has(field)) request_version += 1;
     addClaim(field, kind, value, u.id, quote, u.t_ms, current.id);
   }
+
+  let previousCallerUtterance: Utterance | null = null;
 
   for (const entry of timeline) {
     if (entry.kind === 'action') {
@@ -209,6 +252,14 @@ export function buildLedger(
     }
 
     const u = entry.u;
+
+    // See `classifyDifferentValue`'s (a2) comment: defined only when the immediately
+    // preceding caller utterance exists AND no agent turn happened between it and this
+    // one -- the two conditions that make crediting its correction-lexicon word safe.
+    const precedingCorrectionText =
+      previousCallerUtterance && !hasAgentTurnBetween(previousCallerUtterance.t_ms, u.t_ms)
+        ? previousCallerUtterance.text
+        : undefined;
 
     // Resolve any pending readback(s) with this utterance, capped at 2 utterances (§C).
     for (const field of Object.keys(activeReadback) as ClaimField[]) {
@@ -263,18 +314,20 @@ export function buildLedger(
       if (idx === -1) continue;
       const end = idx + amount.quote.length;
       cursor = end;
-      processHit('amount_usd', amount.value_usd, amount.quote, u, isApproximateAt(u.text, idx, end));
+      processHit('amount_usd', amount.value_usd, amount.quote, u, isApproximateAt(u.text, idx, end), precedingCorrectionText);
     }
 
     const account = extractAccountLast4(u.text);
-    if (account) processHit('account_last4', account.value, account.quote, u, false);
+    if (account) processHit('account_last4', account.value, account.quote, u, false, precedingCorrectionText);
 
     const deadline = extractDeadline(u.text);
-    if (deadline) processHit('deadline', deadline.value, deadline.quote, u, false);
+    if (deadline) processHit('deadline', deadline.value, deadline.quote, u, false, precedingCorrectionText);
 
     for (const cued of extractCuedNames(u.text)) {
-      processHit(cued.field, cued.value, cued.quote, u, false);
+      processHit(cued.field, cued.value, cued.quote, u, false, precedingCorrectionText);
     }
+
+    previousCallerUtterance = u;
   }
 
   return { claims, request_version };

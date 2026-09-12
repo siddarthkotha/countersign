@@ -278,4 +278,41 @@ describe('buildLedger', () => {
       expect(utterance!.text.includes(claim.quote.text)).toBe(true);
     }
   });
+
+  it('10. a correction-lexicon word split across two adjacent caller turns (no intervening agent turn) still counts as CORRECTED, not CONTRADICTED', () => {
+    // Live finding, run 34: scripts/rehearse/reports/2026-09-11T22-48-44-structuring-two-wires.md.
+    // The scripted line "Actually, there's a second one too -- $42,300 to the same account,
+    // same vendor." is normally one utterance (correction_lexicon hit "actually" and the new
+    // amount in the same u.text -- condition (a) fires directly). AssemblyAI's endpointing
+    // instead finalized it as two caller turns with no agent turn between them; "actually"
+    // landed in the FIRST turn, leaving the amount-bearing turn with no correction cue of its
+    // own. Before this fix that fell through to CONTRADICTED; three other same-build runs that
+    // night did not split the line and graded CORRECTED, so this was pure STT/turn-segmentation
+    // variance, not a caller behavior difference.
+    const conversation = [
+      u('u1', 'I need to wire $42,250 to the vendor.', 0),
+      u('u2', "Actually, there's a second one too.", 60_000),
+      u('u3', '$42,300 to the same account, same vendor.', 65_000),
+    ];
+    const { claims } = buildLedger(conversation, [], MERIDIAN);
+    const amountClaims = claims.filter((c) => c.field === 'amount_usd');
+    expect(amountClaims).toHaveLength(2);
+    expect(amountClaims[0]).toMatchObject({ kind: 'STATED', value: 42_250 });
+    expect(amountClaims[1]).toMatchObject({ kind: 'CORRECTED', value: 42_300, supersedes: amountClaims[0]!.id });
+  });
+
+  it('10b. ...but NOT when an agent turn intervenes between the two caller utterances (the correction has gone stale)', () => {
+    const conversation: Utterance[] = [
+      u('u1', 'I need to wire $42,250 to the vendor.', 0),
+      u('u2', "Actually, there's a second one too.", 60_000),
+      { id: 'a1', speaker: 'agent', text: 'One moment while I pull that up.', t_ms: 62_000 },
+      u('u3', '$42,300 to the same account, same vendor.', 65_000),
+    ];
+    const { claims } = buildLedger(conversation, [], MERIDIAN);
+    const amountClaims = claims.filter((c) => c.field === 'amount_usd');
+    expect(amountClaims).toHaveLength(2);
+    // The agent's turn means the caller's "Actually" is no longer "the same breath" as the
+    // new figure -- graded exactly as before this fix.
+    expect(amountClaims[1]).toMatchObject({ kind: 'CONTRADICTED', value: 42_300 });
+  });
 });
