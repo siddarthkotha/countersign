@@ -1115,10 +1115,11 @@
    "files": [
     "packages/web"
    ],
-   "status": "held",
-   "held_because": "n=2 now: flaked again in the option B lane's full run 10:34 PM (15/15 standalone); still not seen on main gates; investigate at a quiet moment",
+   "status": "done",
+   "held_because": "",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "2026-09-12T13:51:42.995Z",
+   "lane_note": "read-only investigation 8:50 AM (sonnet); PROVEN cause (findByLabelText resolved before the mount effect set the value); fixed with waitFor on the value, 3 clean runs + 1 under threads; committed 9:35 AM"
   },
   {
    "id": "CORPUS-ONE-WORD",
@@ -1332,10 +1333,11 @@
    "files": [
     "scripts/rehearse"
    ],
-   "status": "held",
-   "held_because": "harness-only nicety, n=1; watch the next runs",
+   "status": "done",
+   "held_because": "",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "2026-09-12T13:51:42.995Z",
+   "lane_note": "8:55 AM: account digits 1/36 misheard, amounts 0/72 (errand's 84,600 hits were scripted); no action, readback echo-confirm covers it"
   },
   {
    "id": "push-14",
@@ -1552,10 +1554,11 @@
     ".claude",
     "CLAUDE.md"
    ],
-   "status": "held",
-   "held_because": ".claude and CLAUDE.md edits prompt on autopilot; founder says 'redact hooks' while present and approves the prompts",
+   "status": "done",
+   "held_because": "",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "",
+   "lane_note": "founder yes 9:00 AM; 8 files redacted to 'an earlier project', zero hits repo-wide; committed 9:35 AM"
   },
   {
    "id": "FRAUD-ESCALATE-INVESTIGATION",
@@ -1582,11 +1585,11 @@
    "files": [
     "docs/design/cover"
    ],
-   "status": "held",
+   "status": "done",
    "agent_id": "",
    "started_at": "2026-09-12T02:57:02.004Z",
-   "held_because": "cover-2-final (frozen) and cover-2-final-staged landed on main c528653 10:28 PM with verbatim transcript lines and real statuses; founder picks the variant ('frozen', 'staged', or 'both')",
-   "lane_note": "founder picked cover 2 but found the placeholder bars incomplete; building cover-2-final with verbatim transcript lines and real evidence labels (fraud FROZEN + honest STAGED variants)"
+   "held_because": "",
+   "lane_note": "founder picked cover 2 but found the placeholder bars incomplete; building cover-2-final with verbatim transcript lines and real evidence labels (fraud FROZEN + honest STAGED variants); founder pick 9:00 AM: FROZEN (cover-2-final.png); recorded in the cover README and the pre-flip checklist"
   },
   {
    "id": "IDSWITCH-INVESTIGATION",
@@ -1743,10 +1746,11 @@
     "packages/engine/src/compose.ts",
     "packages/engine/src/evidence/fromTranscript.ts"
    ],
-   "status": "held",
-   "held_because": "engine follow-up, fail-safe today; do at a quiet moment with review",
-   "agent_id": "",
-   "started_at": ""
+   "status": "running",
+   "held_because": "",
+   "agent_id": "(launched 8:50 AM)",
+   "started_at": "2026-09-12T13:51:42.995Z",
+   "lane_note": "engine lane 8:50 AM (sonnet, worktree); code done 6b47c67 (latest-pair card, corpus identity-switch-double-freeze.json, 24 files, 1358/1358); review running"
   },
   {
    "id": "LINKLOST-UNDEFINED",
@@ -1754,10 +1758,11 @@
    "files": [
     "packages/web/src/screens/Call.tsx"
    ],
-   "status": "held",
-   "held_because": "one-token change; batch with the next web push",
+   "status": "done",
+   "held_because": "",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "2026-09-12T13:51:42.995Z",
+   "lane_note": "web lane 8:50 AM (haiku, worktree); landed on main 80b47b4 9:30 AM (one-token change + test; orchestrator self-reviewed the diff)"
   },
   {
    "id": "push-20",
@@ -1797,10 +1802,11 @@
    "files": [
     "packages/engine/src/rules.ts"
    ],
-   "status": "held",
-   "held_because": "rule-table change; the idle timeout already escalates within ~60 s; founder decision at a quiet moment",
-   "agent_id": "",
-   "started_at": ""
+   "status": "running",
+   "held_because": "",
+   "agent_id": "(sonnet 9:29 AM)",
+   "started_at": "",
+   "lane_note": "founder yes (cap at 3) 9:00 AM; engine lane running"
   },
   {
    "id": "STRUCTURING-FREEZE-INVESTIGATION",
@@ -1904,6 +1910,14 @@
    "agent_id": "",
    "started_at": "2026-09-12T05:03:32.020Z",
    "lane_note": "autopilot push 12:03 AM; deploy poll + one barge-in sample chained; DEPLOY 23 VERIFIED 12:04 AM; barge-in PASS 12:06 AM (interrupted greeting, STAGE 100.3 s)"
+  },
+  {
+   "id": "IDSWITCH-DOUBLE-review",
+   "title": "review of 6b47c67",
+   "files": [],
+   "status": "running",
+   "agent_id": "(sonnet 9:29 AM)",
+   "started_at": "2026-09-12T14:31:26.169Z"
   }
  ]
 }
