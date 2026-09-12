@@ -47,10 +47,11 @@
    "id": "latency-table",
    "title": "latency table n=2 + rehearsals",
    "files": [],
-   "status": "held",
+   "status": "done",
    "held_because": "founder will run it himself (2026-09-09)",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "",
+   "lane_note": "superseded by LATENCY-TABLE-GEN + REHEARSAL-BATCH-30 (harness, no founder mic needed) 9:45 PM"
   },
   {
    "id": "commit-8afaf2a-reword",
@@ -1485,6 +1486,89 @@
    "agent_id": "",
    "started_at": "2026-09-12T02:32:33.576Z",
    "lane_note": "autopilot push 9:32 PM after the full gate; deploy poll pending"
+  },
+  {
+   "id": "PREFLIP-NONFOUNDER",
+   "title": "pre-flip checklist: secrets scan, private-reference scan, synthetic-data disclosure, LICENSE, claims audit, npm audit note; leave flip/form/positioning/reword for the founder",
+   "files": [
+    "docs/PREFLIP_CHECKLIST.md",
+    "README.md",
+    "LICENSE"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T02:44:54.174Z",
+   "lane_note": "landed on main 8daae66 9:50 PM: 6 of 10 items ticked with evidence; README 'immutable' now a quoted patent term; finding: cross-project name in docs/HANDOFF, AUTOPILOT_LOG:82, design scripts (REDACT-DOCS lane), plus 7 .claude hooks and CLAUDE.md:113 (founder, .claude edits)"
+  },
+  {
+   "id": "LATENCY-TABLE-GEN",
+   "title": "npm run latency:table from all bundles on disk -> docs/LATENCY.md (p50/p95, n, method); npm run rehearse:batch runner with minute cap and daily-cap awareness",
+   "files": [
+    "scripts/rehearse",
+    "docs/LATENCY.md"
+   ],
+   "status": "running",
+   "agent_id": "(launched 9:45 PM)",
+   "started_at": "2026-09-12T02:44:54.174Z"
+  },
+  {
+   "id": "VIDEO-PLAN",
+   "title": "docs/VIDEO-RECORDING-PLAN.md: founder-required vs pre-producible shots, run sheet under 45 founder-minutes, pre-production list, risks",
+   "files": [
+    "docs/VIDEO-RECORDING-PLAN.md"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T02:44:54.174Z",
+   "lane_note": "docs/VIDEO-RECORDING-PLAN.md landed on main 9:53 PM (4 founder shots, 7 pre-producible, 35-40 founder-minutes ESTIMATE); not pushed yet"
+  },
+  {
+   "id": "REHEARSAL-BATCH-30",
+   "title": "G5: run 30 rehearsals (six scenarios round-robin) against the deployed site, capped at 60 minutes of credits, then regenerate docs/LATENCY.md",
+   "files": [],
+   "status": "running",
+   "held_because": "",
+   "agent_id": "(detached batch.sh 9:48 PM + monitor)",
+   "started_at": "2026-09-12T02:47:22.500Z",
+   "lane_note": "founder 'rehearse' 9:46 PM; nine scenarios round-robin, up to 4 rounds, 60-min wall cap, sequential; socket-drop-resume excluded (needs Render debug flag); log scripts/rehearse/reports/batch-2026-09-11.log"
+  },
+  {
+   "id": "REDACT-DOCS",
+   "title": "redact the founder's other product name and home paths from docs/HANDOFF, AUTOPILOT_LOG:82, docs/design scripts",
+   "files": [
+    "docs"
+   ],
+   "status": "running",
+   "agent_id": "(haiku 9:51 PM)",
+   "started_at": "2026-09-12T02:52:57.678Z"
+  },
+  {
+   "id": "REDACT-HOOKS-CLAUDEMD",
+   "title": "7 .claude/hooks headers, .claude/statusline.sh and CLAUDE.md:113 name the founder's other product; find-replace before the flip",
+   "files": [
+    ".claude",
+    "CLAUDE.md"
+   ],
+   "status": "held",
+   "held_because": ".claude and CLAUDE.md edits prompt on autopilot; founder says 'redact hooks' while present and approves the prompts",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "FRAUD-ESCALATE-INVESTIGATION",
+   "title": "batch run 2 (9:50 PM): scenario B ESCALATE via row 14 idle timeout instead of FREEZE; the escrow trap was never asked; likely challenge-order change (RT-9b or seed facts) vs the scripted caller",
+   "files": [],
+   "status": "running",
+   "agent_id": "a4ebd3056178d6630",
+   "started_at": "2026-09-12T02:52:57.678Z"
+  },
+  {
+   "id": "BARGEIN-INVESTIGATION",
+   "title": "batch run 3 (9:52 PM) barge-in-interrupt: interrupted trap readback never re-issued (beneficiary never confirmed), model said 'Verification complete. Processing request.' while PENDING, idle timeout -> ESCALATE",
+   "files": [],
+   "status": "running",
+   "agent_id": "(read-only 9:54 PM)",
+   "started_at": "2026-09-12T02:54:00.368Z"
   }
  ]
 }
