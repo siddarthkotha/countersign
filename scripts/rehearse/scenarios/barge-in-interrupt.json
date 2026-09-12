@@ -116,6 +116,18 @@
               "vendor",
               "who is the payment"
             ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "just to confirm"
+            ],
             "say": "Meridian Supply."
           },
           {
@@ -181,6 +193,18 @@
               "beneficiary",
               "vendor",
               "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "just to confirm"
             ],
             "say": "Meridian Supply."
           },
@@ -248,6 +272,18 @@
               "vendor",
               "who is the payment"
             ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "just to confirm"
+            ],
             "say": "Meridian Supply."
           },
           {
@@ -314,6 +350,18 @@
               "vendor",
               "who is the payment"
             ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "just to confirm"
+            ],
             "say": "Meridian Supply."
           },
           {
@@ -379,6 +427,18 @@
               "beneficiary",
               "vendor",
               "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "just to confirm"
             ],
             "say": "Meridian Supply."
           },

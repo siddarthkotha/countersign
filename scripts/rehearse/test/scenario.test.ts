@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { listScenarioNames, loadAllScenarios, loadScenario, validateScenario, ScenarioValidationError } from '../scenario.js';
+import { matchRespondRules } from '../truthEngine.js';
 
 describe('scenario loading (no network)', () => {
   it('lists the required scenario files (the original four, the four adversarial ones from item 16, and the two judge-sim mechanics scenarios from 2026-09-11)', async () => {
@@ -543,5 +544,25 @@ describe('the two judge-sim mechanics scenarios (finding 2026-09-11)', () => {
     expect(s.truth).toBeDefined();
     expect(s.persona).toBeTruthy();
     expect(s.demo_persona).toBe('legitimate');
+  });
+
+  // Fix 2026-09-11: ensure no respond rule matches the engine's own readback opening,
+  // even if it contains topic words from the rule's if_agent_says_any. The fix uses
+  // and_agent_says_any + unless_agent_says_any to exclude "just to confirm" patterns.
+  it('no scenario rule matches the engine readback "Just to confirm, the beneficiary is Meridian Supply. Is that correct?"', async () => {
+    const scenarios = await loadAllScenarios();
+    const targetReadback = 'Just to confirm, the beneficiary is Meridian Supply. Is that correct?';
+
+    for (const scenario of scenarios) {
+      for (const turn of scenario.turns) {
+        if (!turn.respond || !turn.respond.rules) continue;
+
+        const match = matchRespondRules(turn.respond.rules, targetReadback);
+        expect(
+          match,
+          `${scenario.name}, turn ${turn.id}: respond rule wrongly matched the engine readback "${targetReadback}"`
+        ).toBeNull();
+      }
+    }
   });
 });
