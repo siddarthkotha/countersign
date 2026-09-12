@@ -190,3 +190,4 @@ Every completed or parked item, with local time, gates run, confidence, and what
 - 2026-09-12 9:38 AM CDT — FOUNDER: judge sim scores the live axis from the rehearsal harness bundles (no new tooling); push the morning commits now. Gate + PUSH 24 follow.
 - 2026-09-12 9:46 AM CDT — DEPLOY 24 VERIFIED (518a7bf; /health ok). Double-switch change 70f54cb landed on main (review PASS), awaits push 25 with the readback cap.
 - 2026-09-12 9:59 AM CDT — LANDED: 70f54cb identity-switch chain (review PASS), e817ed2 readback re-ask cap (new row 13; old 13->14, 14->15; review PASS), 70e8f91 import tidy, row-reference sweep on main (a lane's sweep was discarded: its worktree predated the cap and it renumbered rule_hit values). Gate 1380/1380 x3, typecheck clean, corpus 128/128 (25 files). PUSH 25.
+- 2026-09-12 10:10 AM CDT — DEPLOY 25 VERIFIED (a04241f; /health ok). Queue empty; every hold is a founder item.
