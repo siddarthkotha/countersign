@@ -5,8 +5,14 @@
 // protected oracle (only test/corpus.test.ts, test/mutants.test.ts, corpus/*.json and the
 // CI workflow are) -- it is a new, freely-appendable unit test file.
 import { describe, expect, it } from 'vitest';
-import { buildConsistencyEvidence, deriveRuleContext, reconstructIssued, resolveIdentitySwitch } from '../src/compose';
-import { buildReadbackEvidence, computeReadbackReaskExhausted, deriveRuleContext, reconstructIssued, resolveIdentitySwitch } from '../src/compose';
+import {
+  buildConsistencyEvidence,
+  buildReadbackEvidence,
+  computeReadbackReaskExhausted,
+  deriveRuleContext,
+  reconstructIssued,
+  resolveIdentitySwitch,
+} from '../src/compose';
 import { evidenceFromTranscript } from '../src/evidence/fromTranscript';
 import { buildLedger } from '../src/ledger';
 import { MERIDIAN } from '../src/seed/meridian';
