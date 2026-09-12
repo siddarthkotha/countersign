@@ -15,14 +15,13 @@ BEFORE the submission form is filed. Every box below gets checked, with evidence
       commit-8afaf2a note below); no new secret-shaped commits since. No Critical finding.
 - [x] **Private-reference scan (2026-09-11):** README.md, docs/SUBMISSION-DRAFT.md, and
       packages/web/src are clean (zero hits for the founder's other product name or
-      employer). Found, NOT judge-facing, left alone per scope (internal logs/scripts):
-      `docs/HANDOFF-2026-08-30.md` and `docs/AUTOPILOT_LOG.md:82` name the founder's other
-      app (ShadePath) and its local path (`~/shadepath-app`) in session-handoff prose;
-      `docs/design/six-looks-2026-08-30/{render,capture-v2,capture-v3,capture-v4}.mjs` and
-      `design-log.md` are internal rendering scripts with hardcoded absolute local paths
-      (`/Users/siddarthkotha/...`, `~/shadepath-app/...`) used to generate design mockups —
-      these are NOT gitignored and WILL be visible once the repo goes public. Needs founder
-      call: move/redact before flip, or accept as internal build-history noise. Git log
+      employer). Found in internal docs and design scripts (handoff prose, one log line, and
+      the six-looks capture scripts with hardcoded home-directory paths): REDACTED 2026-09-11
+      9:55 PM (commit a5a9b24); `git grep` for the other product's name and for home paths now
+      returns zero hits outside `.claude/` and `CLAUDE.md`. STILL OPEN, founder: seven
+      `.claude/hooks/*.sh` headers, `.claude/statusline.sh`, and `CLAUDE.md:113` name the
+      founder's other product in "ported from" comments (edits under `.claude/` prompt on
+      autopilot); a plain find-and-replace to "an earlier project" before the flip. Git log
       authors: single author, `43058091+siddarthkotha@users.noreply.github.com` (GitHub's
       own noreply alias, not a personal address) — no action needed.
 - [x] **Synthetic-data check (2026-09-11):** `packages/engine/src/seed/meridian.ts` opens
