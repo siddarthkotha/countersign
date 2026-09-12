@@ -1,0 +1,115 @@
+<!--
+  Countersign cover candidate 1 -- "verdict banner as hero"
+  1920x1080, self-contained (no network fonts, no images).
+  Tokens copied verbatim from packages/web/src/styles.css :root block (the live UI),
+  not the earlier six-looks exploration. Fonts are the live UI's system stacks only.
+  Text on this image, total: the wordmark "Countersign", one 8-word line, and the
+  banner headline "WIRE FROZEN" -- nothing else. No em-dashes anywhere below.
+-->
+<meta charset="UTF-8">
+<title>Countersign cover -- candidate 1</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+
+  #surround {
+    position: fixed; inset: 0; background: #000;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  #stage {
+    width: 1920px; height: 1080px;
+    position: absolute; left: 50%; top: 50%;
+    background: var(--cs-bg);
+    color: var(--cs-fg);
+    font-family: var(--cs-font-sans);
+    overflow: hidden;
+    --cs-bg: #12151c;
+    --cs-panel: #1c1608;
+    --cs-elevated: #171a22;
+    --cs-fg: #e8ebef;
+    --cs-muted: #9aa3b2;
+    --cs-accent: #ffc72c;
+    --cs-border: #262b36;
+    --cs-row-border: #1c2029;
+    --cs-font-sans: system-ui, -apple-system, "Segoe UI", "Arial Narrow", Helvetica, Arial, sans-serif;
+    --cs-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  /* Decorative instrument-panel chrome: rules and corner ticks only, no icons, no text. */
+  .frame-tick {
+    position: absolute; width: 46px; height: 46px;
+    border: 2px solid var(--cs-border);
+  }
+  .frame-tick.tl { top: 48px; left: 48px; border-right: none; border-bottom: none; }
+  .frame-tick.tr { top: 48px; right: 48px; border-left: none; border-bottom: none; }
+  .frame-tick.bl { bottom: 48px; left: 48px; border-right: none; border-top: none; }
+  .frame-tick.br { bottom: 48px; right: 48px; border-left: none; border-top: none; }
+
+  .bg-grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(var(--cs-row-border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--cs-row-border) 1px, transparent 1px);
+    background-size: 96px 96px;
+    opacity: 0.35;
+    mask-image: radial-gradient(ellipse 900px 620px at 50% 46%, black 0%, transparent 72%);
+    -webkit-mask-image: radial-gradient(ellipse 900px 620px at 50% 46%, black 0%, transparent 72%);
+  }
+
+  .wordmark {
+    position: absolute; top: 84px; left: 50%; transform: translateX(-50%);
+    font-weight: 700; font-size: 34px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--cs-fg);
+  }
+
+  .hero {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -58%);
+    width: 1400px;
+    background: var(--cs-panel);
+    border-top: 8px solid var(--cs-accent);
+    border-bottom: 8px solid var(--cs-accent);
+    padding: 64px 80px 56px;
+    text-align: center;
+  }
+
+  .hero h1 {
+    margin: 0;
+    font-size: 168px;
+    line-height: 1.02;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    color: var(--cs-accent);
+  }
+
+  .tagline {
+    position: absolute; left: 50%; bottom: 150px; transform: translateX(-50%);
+    width: 1200px; text-align: center;
+    font-size: 46px; font-weight: 500; color: var(--cs-fg);
+    letter-spacing: 0.01em;
+  }
+</style>
+<div id="surround">
+  <div id="stage">
+    <div class="bg-grid"></div>
+    <div class="frame-tick tl"></div>
+    <div class="frame-tick tr"></div>
+    <div class="frame-tick bl"></div>
+    <div class="frame-tick br"></div>
+    <div class="wordmark">Countersign</div>
+    <div class="hero">
+      <h1>Wire Frozen</h1>
+    </div>
+    <div class="tagline">A second approval stands between voice and wire.</div>
+  </div>
+</div>
+<script>
+  function fitStage(){
+    var stage = document.getElementById('stage');
+    var scale = Math.min(window.innerWidth/1920, window.innerHeight/1080);
+    stage.style.transform = 'translate(-50%,-50%) scale(' + scale + ')';
+  }
+  window.addEventListener('resize', fitStage);
+  fitStage();
+</script>

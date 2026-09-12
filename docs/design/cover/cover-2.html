@@ -1,0 +1,192 @@
+<!--
+  Countersign cover candidate 2 -- "split-screen silhouette of the demo"
+  1920x1080, self-contained. Left column = transcript-shape silhouette (bar blocks
+  standing in for lines of speech, no invented dialogue). Right column = evidence-
+  row silhouette (mark + label + status + detail bars, no invented findings). Both
+  columns are ABSTRACT SHAPES ONLY -- deliberately no words in either column, so the
+  only text on the whole image is the wordmark, the one-line tagline, and the banner
+  headline, per the cover-image text allowlist.
+  Tokens copied verbatim from packages/web/src/styles.css. No em-dashes below.
+-->
+<meta charset="UTF-8">
+<title>Countersign cover -- candidate 2</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+
+  #surround {
+    position: fixed; inset: 0; background: #000;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  #stage {
+    width: 1920px; height: 1080px;
+    position: absolute; left: 50%; top: 50%;
+    background: var(--cs-bg);
+    color: var(--cs-fg);
+    font-family: var(--cs-font-sans);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    --cs-bg: #12151c;
+    --cs-panel: #1c1608;
+    --cs-elevated: #171a22;
+    --cs-fg: #e8ebef;
+    --cs-muted: #9aa3b2;
+    --cs-accent: #ffc72c;
+    --cs-border: #262b36;
+    --cs-row-border: #1c2029;
+    --cs-font-sans: system-ui, -apple-system, "Segoe UI", "Arial Narrow", Helvetica, Arial, sans-serif;
+    --cs-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  .masthead {
+    flex: none;
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 46px 80px 28px;
+    border-bottom: 6px solid var(--cs-accent);
+  }
+
+  .wordmark {
+    font-weight: 700; font-size: 46px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--cs-fg);
+  }
+
+  .tagline {
+    font-size: 30px; font-weight: 500; color: var(--cs-muted);
+  }
+
+  .split {
+    flex: 1; display: flex; padding: 0 80px; gap: 48px; overflow: hidden;
+  }
+
+  .col {
+    flex: 1; display: flex; flex-direction: column; padding-top: 44px; padding-bottom: 40px;
+  }
+
+  .col-title-bar {
+    width: 260px; height: 14px; background: var(--cs-accent); opacity: 0.9; flex: none;
+  }
+
+  .rows-wrap {
+    flex: 1; display: flex; flex-direction: column; justify-content: space-evenly;
+    margin-top: 34px;
+  }
+
+  /* Transcript-shape silhouette: alternating rows, agent rows carry the accent rule
+     on the left edge (same visual grammar as .turn-agent/.turn-caller in the live
+     UI), caller rows carry the muted rule -- weight/position carries the meaning,
+     never colour alone. */
+  .bar-row { display: flex; align-items: center; gap: 20px; }
+  .bar-row .idx { width: 40px; height: 20px; background: var(--cs-row-border); flex: none; }
+  .bar-row .lines { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  .bar-row .line { height: 20px; border-radius: 2px; background: var(--cs-elevated); }
+  .bar-row.caller { border-left: 4px solid var(--cs-muted); padding-left: 16px; }
+  .bar-row.agent { border-left: 4px solid var(--cs-accent); padding-left: 16px; }
+  .bar-row.agent .line { background: var(--cs-elevated); opacity: 0.9; }
+
+  /* Evidence-row silhouette: mark + label bar + status bar + detail bar, matching
+     the live UI's .checks-row column rhythm without any invented finding text. */
+  .ev-row { display: flex; align-items: center; gap: 18px; padding: 6px 0; border-bottom: 1px solid var(--cs-row-border); }
+  .ev-row .mark { width: 14px; height: 14px; background: var(--cs-accent); flex: none; }
+  .ev-row .label { width: 170px; height: 18px; background: var(--cs-elevated); flex: none; }
+  .ev-row .status { width: 100px; height: 18px; background: var(--cs-accent); opacity: 0.85; flex: none; }
+  .ev-row .detail { flex: 1; height: 18px; background: var(--cs-row-border); }
+
+  .banner {
+    flex: none;
+    margin: 40px 80px 46px;
+    background: var(--cs-panel);
+    border-top: 8px solid var(--cs-accent);
+    border-bottom: 8px solid var(--cs-accent);
+    padding: 34px 0;
+    text-align: center;
+  }
+
+  .banner h2 {
+    margin: 0;
+    font-size: 88px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--cs-accent);
+  }
+</style>
+<div id="surround">
+  <div id="stage">
+    <div class="masthead">
+      <div class="wordmark">Countersign</div>
+      <div class="tagline">A second approval stands between voice and wire.</div>
+    </div>
+    <div class="split">
+      <div class="col">
+        <div class="col-title-bar"></div>
+        <div class="rows-wrap" id="transcript-col"></div>
+      </div>
+      <div class="col">
+        <div class="col-title-bar"></div>
+        <div class="rows-wrap" id="evidence-col"></div>
+      </div>
+    </div>
+    <div class="banner">
+      <h2>Staged for Second Approval</h2>
+    </div>
+  </div>
+</div>
+<script>
+  var transcriptCol = document.getElementById('transcript-col');
+  var pattern = [
+    { role: 'caller', widths: [78] },
+    { role: 'agent', widths: [55, 40] },
+    { role: 'caller', widths: [90] },
+    { role: 'agent', widths: [30] },
+    { role: 'caller', widths: [45] },
+    { role: 'agent', widths: [95, 60] },
+    { role: 'caller', widths: [70] }
+  ];
+  pattern.forEach(function (row, i) {
+    var r = document.createElement('div');
+    r.className = 'bar-row ' + row.role;
+    var idx = document.createElement('div');
+    idx.className = 'idx';
+    r.appendChild(idx);
+    var lines = document.createElement('div');
+    lines.className = 'lines';
+    row.widths.forEach(function (w) {
+      var l = document.createElement('div');
+      l.className = 'line';
+      l.style.width = w + '%';
+      lines.appendChild(l);
+    });
+    r.appendChild(lines);
+    transcriptCol.appendChild(r);
+  });
+
+  var evidenceCol = document.getElementById('evidence-col');
+  var detailWidths = [82, 60, 95, 48, 70, 88];
+  detailWidths.forEach(function (w) {
+    var row = document.createElement('div');
+    row.className = 'ev-row';
+    var mark = document.createElement('div');
+    mark.className = 'mark';
+    row.appendChild(mark);
+    var label = document.createElement('div');
+    label.className = 'label';
+    row.appendChild(label);
+    var status = document.createElement('div');
+    status.className = 'status';
+    row.appendChild(status);
+    var detail = document.createElement('div');
+    detail.className = 'detail';
+    detail.style.maxWidth = w + '%';
+    row.appendChild(detail);
+    evidenceCol.appendChild(row);
+  });
+
+  function fitStage(){
+    var stage = document.getElementById('stage');
+    var scale = Math.min(window.innerWidth/1920, window.innerHeight/1080);
+    stage.style.transform = 'translate(-50%,-50%) scale(' + scale + ')';
+  }
+  window.addEventListener('resize', fitStage);
+  fitStage();
+</script>

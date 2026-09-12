@@ -1,0 +1,117 @@
+<!--
+  Countersign cover candidate 3 -- "typographic only, hash-chain motif in CSS"
+  1920x1080, self-contained. No images anywhere; the chain motif below the tagline
+  is built entirely from CSS shapes (bordered squares + connecting rules) -- no
+  characters inside the nodes, so the only text on the whole image is the wordmark
+  and the one-line tagline, per the cover-image text allowlist. No banner phrase
+  used on this candidate (spec: "product name and one line" only).
+  Tokens copied verbatim from packages/web/src/styles.css. No em-dashes below.
+-->
+<meta charset="UTF-8">
+<title>Countersign cover -- candidate 3</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+
+  #surround {
+    position: fixed; inset: 0; background: #000;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  #stage {
+    width: 1920px; height: 1080px;
+    position: absolute; left: 50%; top: 50%;
+    background: var(--cs-bg);
+    color: var(--cs-fg);
+    font-family: var(--cs-font-sans);
+    overflow: hidden;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    --cs-bg: #12151c;
+    --cs-panel: #1c1608;
+    --cs-elevated: #171a22;
+    --cs-fg: #e8ebef;
+    --cs-muted: #9aa3b2;
+    --cs-accent: #ffc72c;
+    --cs-border: #262b36;
+    --cs-row-border: #1c2029;
+    --cs-font-sans: system-ui, -apple-system, "Segoe UI", "Arial Narrow", Helvetica, Arial, sans-serif;
+    --cs-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  .wordmark {
+    font-weight: 700;
+    font-size: 220px;
+    letter-spacing: 0.01em;
+    line-height: 1;
+    text-transform: uppercase;
+    color: var(--cs-fg);
+    border-bottom: 10px solid var(--cs-accent);
+    padding-bottom: 28px;
+  }
+
+  .tagline {
+    margin-top: 44px;
+    font-size: 52px;
+    font-weight: 500;
+    color: var(--cs-muted);
+    letter-spacing: 0.01em;
+    text-align: center;
+  }
+
+  /* Hash-chain motif: a row of linked nodes, pure CSS shapes, no characters. Each
+     node is a rotated square (diamond) with an accent border; a thin rule connects
+     consecutive nodes, exactly like a chain of countersigned records. */
+  .chain {
+    margin-top: 96px;
+    display: flex;
+    align-items: center;
+  }
+
+  .chain .node {
+    width: 34px; height: 34px;
+    border: 3px solid var(--cs-accent);
+    background: var(--cs-panel);
+    transform: rotate(45deg);
+    flex: none;
+  }
+
+  .chain .node.dim {
+    border-color: var(--cs-border);
+    opacity: 0.7;
+  }
+
+  .chain .link {
+    width: 70px; height: 3px;
+    background: var(--cs-border);
+    flex: none;
+  }
+</style>
+<div id="surround">
+  <div id="stage">
+    <div class="wordmark">Countersign</div>
+    <div class="tagline">A second approval stands between voice and wire.</div>
+    <div class="chain" id="chain"></div>
+  </div>
+</div>
+<script>
+  var chain = document.getElementById('chain');
+  var nodeCount = 9;
+  for (var i = 0; i < nodeCount; i++) {
+    var node = document.createElement('div');
+    node.className = 'node' + (i % 3 === 2 ? ' dim' : '');
+    chain.appendChild(node);
+    if (i < nodeCount - 1) {
+      var link = document.createElement('div');
+      link.className = 'link';
+      chain.appendChild(link);
+    }
+  }
+
+  function fitStage(){
+    var stage = document.getElementById('stage');
+    var scale = Math.min(window.innerWidth/1920, window.innerHeight/1080);
+    stage.style.transform = 'translate(-50%,-50%) scale(' + scale + ')';
+  }
+  window.addEventListener('resize', fitStage);
+  fitStage();
+</script>
