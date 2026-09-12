@@ -1382,11 +1382,11 @@
    "id": "SIM-LIVE-MIC",
    "title": "sim fix 3: re-run the judge sim with a working microphone before the Sep 26 submission sim (the automated Chrome tab's getUserMedia hangs)",
    "files": [],
-   "status": "running",
+   "status": "done",
    "held_because": "",
-   "agent_id": "a65676c1cd6db5939",
+   "agent_id": "",
    "started_at": "2026-09-12T03:21:05.185Z",
-   "lane_note": "founder 'retry sim' 10:20 PM; agent attaches to his open tab (mic granted); report docs/JUDGE-SIM-2026-09-11-live.md"
+   "lane_note": "10:20-10:27 PM: mic worked (fresh tab, same profile), live call started, agent greeted first, but the judge agent cannot produce speech; 62 s live; scores 7/6/6/8; report docs/JUDGE-SIM-2026-09-11-live.md; morning 'flaky clicks' finding retracted as tooling"
   },
   {
    "id": "RECORDER-SESSION-UPDATE",
@@ -1581,10 +1581,10 @@
    "files": [
     "docs/design/cover"
    ],
-   "status": "running",
-   "agent_id": "(design lane 10:20 PM)",
+   "status": "held",
+   "agent_id": "",
    "started_at": "2026-09-12T02:57:02.004Z",
-   "held_because": "",
+   "held_because": "cover-2-final (frozen) and cover-2-final-staged landed on main c528653 10:28 PM with verbatim transcript lines and real statuses; founder picks the variant ('frozen', 'staged', or 'both')",
    "lane_note": "founder picked cover 2 but found the placeholder bars incomplete; building cover-2-final with verbatim transcript lines and real evidence labels (fraud FROZEN + honest STAGED variants)"
   },
   {
@@ -1684,7 +1684,16 @@
    "title": "push 19: c65a4da..ccfe532 (docs: video plan, preflip, redaction, covers, latency table + batch runner; fixes: outcome-announcement rule, RE_ELICIT verbatim, scenario persona, paraphrase-robust matcher)",
    "files": [],
    "status": "held",
-   "held_because": "gate green 10:21 PM (1285 x3, typecheck, corpus 102/102, reviews PASS); deploy waits for the founder's live sim to finish so the restart does not drop his call",
+   "held_because": "founder's live call ended 10:24 PM; pushing now",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "SIM-NEEDS-VOICE",
+   "title": "judge-sim method for Sep 18/25: the click-driven judge cannot speak; combine judge (UI, README, replay) with the harness batch bundles for the live axis, or score a founder-recorded live rehearsal",
+   "files": [],
+   "status": "held",
+   "held_because": "founder decision before Sep 18; recommendation: judge + harness bundles (no new tooling)",
    "agent_id": "",
    "started_at": ""
   }
