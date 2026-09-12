@@ -77,7 +77,20 @@ export interface ScenarioTurn {
    *  instead of waiting for the agent's CURRENT reply to finish, wait for that reply to
    *  START (its first audio frame), then wait this many more ms, then start streaming this
    *  turn's caller audio -- interrupting whatever the live agent is actually saying at that
-   *  moment, same mechanism a human barge-in uses. */
+   *  moment, same mechanism a human barge-in uses.
+   *
+   *  Timing fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T23-28-26-
+   *  barge-in-interrupt.md -- 3 earlier runs the same night DID observe a real interruption,
+   *  this one did not): the wait is ANCHORED to the reply this turn is meant to interrupt,
+   *  not to whenever the harness happens to notice one. Concretely (turnController.ts's
+   *  `waitForBargeIn`): wait for the first NEW audio frame after the caller's OWN previous
+   *  turn ended (that reply's `reply.audio.first`, bounded to 8s so a reply that never comes
+   *  can't wedge the run), then wait `barge_in_after_ms` more from THAT frame's own
+   *  timestamp -- never from "now" -- before speaking. If no reply audio shows up inside the
+   *  8s bound, this falls back to the pre-fix behaviour (sleep `barge_in_after_ms` from
+   *  right now, then speak with no real interruption to reproduce) and records a warning; the
+   *  report's per-turn note says which happened. Field name and value are unchanged from
+   *  before this fix -- no existing scenario needs to change. */
   barge_in_after_ms?: number;
   /** Makes this turn REACTIVE: instead of always speaking `text`, decide what to say from
    *  what the live agent's last line actually was. See truthEngine.ts's `resolveTurnText`

@@ -3,7 +3,7 @@
 // polling loop against a client whose `latestState()` changes over time.
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
-import { computeTurnGaps, maybeDropAai, scriptedCallerShouldStop, waitForGreeting, waitForVerdict } from '../turnController.js';
+import { computeTurnGaps, maybeDropAai, scriptedCallerShouldStop, waitForBargeIn, waitForGreeting, waitForVerdict } from '../turnController.js';
 import type { CallClient } from '../wsClient.js';
 import type { ScenarioTurn } from '../types.js';
 import type { ScreenState } from '@countersign/engine';
@@ -97,6 +97,15 @@ describe('computeTurnGaps', () => {
     const gaps = computeTurnGaps(client, [{ turn_id: 'c1', caller_end_ms: 100, barge_in: false }]);
     expect(gaps[0]!.first_reply_audio_ms).toBeNull();
     expect(gaps[0]!.note).toMatch(/no reply audio/);
+  });
+
+  it("uses a barge-in turn's own carried note (waitForBargeIn's timing explanation) instead of the generic text, when one is given", () => {
+    const client = makeFakeClient();
+    const gaps = computeTurnGaps(client, [
+      { turn_id: 'c2', caller_end_ms: 5000, barge_in: true, note: 'barge-in: spoke 150ms after agent audio started' },
+    ]);
+    expect(gaps[0]!.gap_ms).toBeNull();
+    expect(gaps[0]!.note).toBe('barge-in: spoke 150ms after agent audio started');
   });
 });
 
@@ -218,5 +227,76 @@ describe('maybeDropAai', () => {
     expect(result.ok).toBe(false);
     expect(result.warning).toContain('HTTP 404');
     expect(result.warning).toContain('COUNTERSIGN_DEBUG_HOOKS');
+  });
+});
+
+// Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T23-28-26-
+// barge-in-interrupt.md): three earlier runs the same night (21:52, 22:07, 22:23) DID land
+// their barge-in inside the agent's reply; the 23:28 run on the same "fixed" build did not --
+// `min_interrupted_agent_lines` FAILED even though the verdict reached STAGE. The old code
+// slept `barge_in_after_ms` starting from whenever the harness happened to notice a reply had
+// started, not from that reply's own first-audio timestamp, so anything that delayed the
+// harness noticing (e.g. its OWN synthesis latency for the line about to be spoken, which ran
+// AFTER this sleep) silently added onto the intended offset. These prove `waitForBargeIn`
+// anchors to the reply's own audio-start timestamp instead.
+describe('waitForBargeIn', () => {
+  function bargeInTurn(overrides: Partial<ScenarioTurn> = {}): ScenarioTurn {
+    return { id: 'c2', text: 'Yes, go ahead.', barge_in_after_ms: 150, ...overrides };
+  }
+
+  it("fires barge_in_after_ms after the anchor reply's OWN first audio frame, not from whenever the wait happened to start", async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0; // no reply yet when the wait begins
+    const warnings: string[] = [];
+    const turn = bargeInTurn({ barge_in_after_ms: 150 });
+
+    const resultPromise = waitForBargeIn(client, turn, warnings, 5000);
+    // Simulate real processing delay (network + AAI + a slow harness) BEFORE the targeted
+    // reply's audio actually starts -- under the old bug this delay would have landed on top
+    // of barge_in_after_ms; anchored timing must not care how long this took.
+    await sleep(70);
+    client.audioTimestamps.push(performance.now() - client.startedAt);
+    const anchorWallClockMs = performance.now();
+
+    const timing = await resultPromise;
+    const elapsedSinceAnchor = performance.now() - anchorWallClockMs;
+
+    expect(timing.anchor_ms).not.toBeNull();
+    // ~150ms after the anchor (generous slack for scheduler jitter) -- decisively NOT
+    // ~220ms (150 + the 70ms pre-anchor delay), which is what the old "sleep from wait-start"
+    // bug would have produced.
+    expect(elapsedSinceAnchor).toBeGreaterThanOrEqual(150 - 30);
+    expect(elapsedSinceAnchor).toBeLessThan(150 + 70);
+    expect(warnings).toEqual([]);
+    expect(timing.note(timing.anchor_ms! + 150)).toBe('barge-in: spoke 150ms after agent audio started');
+  });
+
+  it('falls back to the pre-fix "speak barge_in_after_ms from now" behaviour, with a warning, when no reply audio arrives before the anchor timeout', async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0; // no reply ever arrives
+    const warnings: string[] = [];
+    const turn = bargeInTurn({ barge_in_after_ms: 50 });
+
+    const startedAt = performance.now();
+    // A short timeoutMs stands in for the real BARGE_IN_ANCHOR_TIMEOUT_MS (8s) so this test
+    // doesn't have to wait 8 real seconds -- the fallback path is the same code either way
+    // (same pattern as waitForGreeting's own timeout test above).
+    const timing = await waitForBargeIn(client, turn, warnings, 60);
+    const elapsed = performance.now() - startedAt;
+
+    expect(timing.anchor_ms).toBeNull();
+    // Waited out the anchor timeout (60ms) AND the fallback's own barge_in_after_ms (50ms).
+    expect(elapsed).toBeGreaterThanOrEqual(60 + 50 - 20);
+    expect(warnings.some((w) => w.includes('no reply audio started within 60ms'))).toBe(true);
+    expect(timing.note(999)).toContain('unanchored fallback');
+  }, 10_000);
+
+  it('has no effect on a turn without barge_in_after_ms -- it is never called for one (defensive: throws if it is)', async () => {
+    const client = makeFakeClient();
+    const warnings: string[] = [];
+    const plainTurn: ScenarioTurn = { id: 'c1', text: 'This is Dana Whitfield.' };
+
+    await expect(waitForBargeIn(client, plainTurn, warnings)).rejects.toThrow(/no barge_in_after_ms/);
+    expect(warnings).toEqual([]);
   });
 });

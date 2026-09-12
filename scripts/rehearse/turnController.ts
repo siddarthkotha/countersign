@@ -58,8 +58,20 @@ const GREETING_TIMEOUT_MS = 8_000;
 const REPLY_SETTLE_TIMEOUT_MS = 60_000;
 /** Ceiling on waiting for a barge-in target reply to even START before giving up and
  *  speaking anyway (the barge-in line still gets said, just without a real interruption to
- *  reproduce -- recorded as a warning). */
+ *  reproduce -- recorded as a warning). Only `runLlmTurns`' own spontaneous (model-decided)
+ *  barge-in still uses this -- the scripted `barge_in_after_ms` path below uses the tighter
+ *  `BARGE_IN_ANCHOR_TIMEOUT_MS`. */
 const BARGE_IN_REPLY_START_TIMEOUT_MS = 30_000;
+/** Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T23-28-26-
+ *  barge-in-interrupt.md): a `barge_in_after_ms` turn used to sleep that many ms from
+ *  whenever the harness happened to CHECK for a reply, not from when the targeted reply's
+ *  audio actually started -- so the interruption could land after the reply had already
+ *  finished (0 `interrupted` lines, min_interrupted_agent_lines FAIL) even though a real
+ *  reply had started well within any reasonable timeout. `waitForBargeIn` below anchors the
+ *  wait to the reply's own first audio frame instead. 8s (not the LLM path's 30s) is enough
+ *  time for a real reply to start after the caller's previous turn, while still keeping a
+ *  hung/never-replying call from wedging a rehearsal run. */
+const BARGE_IN_ANCHOR_TIMEOUT_MS = 8_000;
 const POLL_MS = 40;
 
 function lastAudioAt(client: CallClient): number | null {
@@ -89,13 +101,17 @@ async function waitForReplySettled(client: CallClient, timeoutMs: number): Promi
   }
 }
 
-/** Resolves true once at least one NEW audio frame has arrived since `markerCount` (i.e. a
- *  reply has started), false on timeout. */
-async function waitForReplyStarted(client: CallClient, markerCount: number, timeoutMs: number): Promise<boolean> {
+/** Resolves once at least one NEW audio frame has arrived since `markerCount` (i.e. a reply
+ *  has started) -- returns that frame's own client-relative timestamp (the `reply.audio.first`
+ *  anchor this module's barge-in and greeting waits key off of), or null on timeout. Reading
+ *  the marker frame's own recorded timestamp, rather than `nowT(client)` at the moment this
+ *  poll notices it, keeps the anchor accurate to within one `POLL_MS` tick instead of drifting
+ *  by however long the polling loop took to wake up. */
+async function waitForReplyStarted(client: CallClient, markerCount: number, timeoutMs: number): Promise<number | null> {
   const deadline = nowT(client) + timeoutMs;
   for (;;) {
-    if (client.audioTimestamps.length > markerCount) return true;
-    if (nowT(client) > deadline) return false;
+    if (client.audioTimestamps.length > markerCount) return client.audioTimestamps[markerCount]!;
+    if (nowT(client) > deadline) return null;
     await sleep(POLL_MS);
   }
 }
@@ -135,8 +151,8 @@ async function waitBeforeSpeaking(client: CallClient, pauseMs: number, warnings:
  *  exercised without a real 8-second wait. */
 export async function waitForGreeting(client: CallClient, warnings: string[], timeoutMs = GREETING_TIMEOUT_MS): Promise<void> {
   const markerCount = client.audioTimestamps.length;
-  const started = await waitForReplyStarted(client, markerCount, timeoutMs);
-  if (!started) {
+  const anchorMs = await waitForReplyStarted(client, markerCount, timeoutMs);
+  if (anchorMs === null) {
     warnings.push(
       `no greeting audio observed within ${timeoutMs}ms; falling back to the ${GREETING_GRACE_MS}ms grace-window check before speaking the opening line`,
     );
@@ -147,11 +163,14 @@ export async function waitForGreeting(client: CallClient, warnings: string[], ti
   if (!settled) warnings.push(`greeting did not settle within ${REPLY_SETTLE_TIMEOUT_MS}ms; speaking the opening line anyway`);
 }
 
-/** Streams one line's synthesized audio in real time (one frame every FRAME_MS, matching the
- *  real capture cadence -- AssemblyAI's own turn detection depends on realistic timing, not a
- *  dumped buffer). Returns the harness-relative ms the line started and finished streaming. */
-async function speakLine(client: CallClient, text: string, voice: string | undefined): Promise<{ startedMs: number; endedMs: number }> {
-  const pcm = await synthesizeLine(text, voice);
+/** Streams already-synthesized PCM in real time (one frame every FRAME_MS, matching the real
+ *  capture cadence -- AssemblyAI's own turn detection depends on realistic timing, not a
+ *  dumped buffer). Returns the harness-relative ms the line started and finished streaming.
+ *  Split out of `speakLine` below so a barge-in turn can synthesize its line CONCURRENTLY with
+ *  waiting out its timing (see `waitForBargeIn`), instead of only starting synthesis once the
+ *  wait is already over -- `say`/`ffmpeg` synthesis (audio.ts) is a real subprocess round trip
+ *  and was itself eating into the intended barge-in offset when it ran after the wait. */
+async function streamPcm(client: CallClient, pcm: Buffer): Promise<{ startedMs: number; endedMs: number }> {
   const frames = chunkToFrames(pcm);
   const startedMs = nowT(client);
   for (const frame of frames) {
@@ -159,6 +178,67 @@ async function speakLine(client: CallClient, text: string, voice: string | undef
     await sleep(FRAME_MS);
   }
   return { startedMs, endedMs: nowT(client) };
+}
+
+/** Synthesizes one caller line and streams it -- the ordinary (non-barge-in) path, where
+ *  synthesis latency landing before the line is spoken is not a determinism concern. */
+async function speakLine(client: CallClient, text: string, voice: string | undefined): Promise<{ startedMs: number; endedMs: number }> {
+  const pcm = await synthesizeLine(text, voice);
+  return streamPcm(client, pcm);
+}
+
+/** How a `barge_in_after_ms` turn's timing was decided, returned by `waitForBargeIn` once it
+ *  is time to speak -- `note` builds this turn's TurnGapRecord.note (report.ts) from the
+ *  actual streaming start time once that's known (after synthesis, which the caller runs
+ *  concurrently with this wait). Kept free of any audio synthesis itself so the anchor/timeout
+ *  logic is unit-testable against a fake CallClient with no real TTS involved. */
+export interface BargeInTiming {
+  /** ms since connect that the targeted reply's first audio frame arrived, or null if none
+   *  arrived within the anchor timeout (the bounded fallback below). */
+  anchor_ms: number | null;
+  note(startedMs: number): string;
+}
+
+/** Waits out one barge-in turn's timing so the interruption lands relative to the AGENT'S OWN
+ *  reply, not to whenever the harness happened to get around to checking for one: waits for
+ *  the first NEW audio frame after the caller's previous turn ended (i.e. `reply.audio.first`
+ *  for the reply being barged into), then waits `turn.barge_in_after_ms` more from THAT anchor
+ *  (not from "now") before returning. Bounded by `timeoutMs` (default
+ *  `BARGE_IN_ANCHOR_TIMEOUT_MS`) -- if no reply audio starts in time, falls back to the
+ *  pre-fix behaviour (sleep `barge_in_after_ms` from right now, then speak with no real
+ *  interruption to reproduce) and records a warning, exactly as a missing greeting does in
+ *  `waitForGreeting` above. Never speaks or synthesizes anything itself -- the caller decides
+ *  what to do with the resolved timing (see `runTurns`, which starts synthesis in parallel
+ *  with this wait so that latency never lands on top of the deterministic offset). */
+export async function waitForBargeIn(
+  client: CallClient,
+  turn: ScenarioTurn,
+  warnings: string[],
+  timeoutMs: number = BARGE_IN_ANCHOR_TIMEOUT_MS,
+): Promise<BargeInTiming> {
+  const bargeInAfterMs = turn.barge_in_after_ms;
+  if (bargeInAfterMs === undefined) {
+    throw new Error(`waitForBargeIn called on turn ${turn.id}, which has no barge_in_after_ms`);
+  }
+  const markerCount = client.audioTimestamps.length;
+  const anchorMs = await waitForReplyStarted(client, markerCount, timeoutMs);
+  if (anchorMs === null) {
+    warnings.push(
+      `turn ${turn.id}: expected a reply to barge into, but no reply audio started within ${timeoutMs}ms; falling back to speaking ${bargeInAfterMs}ms from now with no real interruption to reproduce`,
+    );
+    await sleep(bargeInAfterMs);
+    return {
+      anchor_ms: null,
+      note: () => `barge-in: no agent audio observed within ${timeoutMs}ms; spoke ${bargeInAfterMs}ms after this turn began (unanchored fallback)`,
+    };
+  }
+  const target = anchorMs + bargeInAfterMs;
+  const remaining = target - nowT(client);
+  if (remaining > 0) await sleep(remaining);
+  return {
+    anchor_ms: anchorMs,
+    note: (startedMs: number) => `barge-in: spoke ${Math.round(startedMs - anchorMs)}ms after agent audio started`,
+  };
 }
 
 /** Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T16-35-23-
@@ -179,7 +259,10 @@ export function scriptedCallerShouldStop(endedReason: string | null): { stop: bo
 
 export interface TurnRunOutcome {
   warnings: string[];
-  callerEndTimes: { turn_id: string; caller_end_ms: number; barge_in: boolean }[];
+  /** `note`, when set, is this turn's own TurnGapRecord.note verbatim (currently only set for
+   *  a scripted `barge_in_after_ms` turn -- see `waitForBargeIn`'s `note()` builder); absent
+   *  entries fall back to `computeTurnGaps`' generic per-case text, unchanged. */
+  callerEndTimes: { turn_id: string; caller_end_ms: number; barge_in: boolean; note?: string }[];
   resolvedLines: ResolvedLineRecord[];
 }
 
@@ -248,14 +331,20 @@ export async function runTurns(
     const dropOutcome = await maybeDropAai(turn, deps.dropAai);
     if (dropOutcome.warning) warnings.push(dropOutcome.warning);
     if (turn.barge_in_after_ms !== undefined) {
-      const markerCount = client.audioTimestamps.length;
-      const started = await waitForReplyStarted(client, markerCount, BARGE_IN_REPLY_START_TIMEOUT_MS);
-      if (!started) {
-        warnings.push(
-          `turn ${turn.id}: expected a reply to barge into, but no reply audio started within ${BARGE_IN_REPLY_START_TIMEOUT_MS}ms; speaking the line anyway with no real interruption to reproduce`,
-        );
-      }
-      await sleep(turn.barge_in_after_ms);
+      // Resolved up front (safe: a barge-in turn is documented to carry no `respond` block --
+      // the interruption itself is the point, not a reaction to a still-in-flight reply -- so
+      // `lastAgentText` here is the same value resolving after the wait would see) so synthesis
+      // can start CONCURRENTLY with `waitForBargeIn`'s timing wait below, instead of only after
+      // it -- see `streamPcm`'s doc comment for why that ordering was the actual bug.
+      const lastAgentText = lastAgentTranscriptText(client);
+      const resolved = resolveTurnText(turn, scenario.truth, lastAgentText);
+      resolvedLines.push({ turn_id: turn.id, text: resolved.text, source: resolved.source, reacted_to: lastAgentText });
+      const pcmPromise = synthesizeLine(resolved.text, voice);
+      const timing = await waitForBargeIn(client, turn, warnings);
+      const pcm = await pcmPromise;
+      const { startedMs, endedMs } = await streamPcm(client, pcm);
+      callerEndTimes.push({ turn_id: turn.id, caller_end_ms: endedMs, barge_in: true, note: timing.note(startedMs) });
+      continue;
     } else if (turnIdx === 0) {
       // Founder ruling 2026-09-11: the agent greets first -- wait for that greeting to
       // finish (bounded, never deadlocks) before the caller's opening line.
@@ -268,7 +357,7 @@ export async function runTurns(
     const resolved = resolveTurnText(turn, scenario.truth, lastAgentText);
     resolvedLines.push({ turn_id: turn.id, text: resolved.text, source: resolved.source, reacted_to: lastAgentText });
     const { endedMs } = await speakLine(client, resolved.text, voice);
-    callerEndTimes.push({ turn_id: turn.id, caller_end_ms: endedMs, barge_in: turn.barge_in_after_ms !== undefined });
+    callerEndTimes.push({ turn_id: turn.id, caller_end_ms: endedMs, barge_in: false });
   }
 
   return { warnings, callerEndTimes, resolvedLines };
@@ -352,8 +441,8 @@ export async function runLlmTurns(
 
     if (turnResult.barge_in) {
       const markerCount = client.audioTimestamps.length;
-      const started = await waitForReplyStarted(client, markerCount, BARGE_IN_REPLY_START_TIMEOUT_MS);
-      if (!started) warnings.push(`llm caller turn ${turnIndex}: model asked to barge in, but there was no reply audio to interrupt; speaking anyway`);
+      const anchorMs = await waitForReplyStarted(client, markerCount, BARGE_IN_REPLY_START_TIMEOUT_MS);
+      if (anchorMs === null) warnings.push(`llm caller turn ${turnIndex}: model asked to barge in, but there was no reply audio to interrupt; speaking anyway`);
     }
     const { endedMs } = await speakLine(client, turnResult.text, voice);
 
@@ -372,9 +461,9 @@ export async function runLlmTurns(
  *  deliberately while a reply was already in flight), so it is reported as a note instead. */
 export function computeTurnGaps(client: CallClient, callerEndTimes: TurnRunOutcome['callerEndTimes']): TurnGapRecord[] {
   const audioTimes = client.audioTimestamps;
-  return callerEndTimes.map(({ turn_id, caller_end_ms, barge_in }) => {
+  return callerEndTimes.map(({ turn_id, caller_end_ms, barge_in, note }) => {
     if (barge_in) {
-      return { turn_id, caller_end_ms, first_reply_audio_ms: null, gap_ms: null, note: 'barge-in turn: gap not meaningful' };
+      return { turn_id, caller_end_ms, first_reply_audio_ms: null, gap_ms: null, note: note ?? 'barge-in turn: gap not meaningful' };
     }
     const firstAfter = audioTimes.find((t) => t > caller_end_ms);
     if (firstAfter === undefined) {
