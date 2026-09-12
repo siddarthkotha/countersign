@@ -15,8 +15,10 @@ import type { CorpusFile, EngineInput, ScreenState } from '@countersign/engine';
 import { deriveScreenState } from '@countersign/server/src/screen/state.js';
 import CallView from '../src/components/CallView';
 import scenarioBJson from '../../engine/corpus/scenario-b-miller-fraud.json' with { type: 'json' };
+import judgeOutOfScopeJson from '../../engine/corpus/judge-out-of-scope-no-request.json' with { type: 'json' };
 
 const scenarioB = scenarioBJson as unknown as CorpusFile;
+const judgeOutOfScope = judgeOutOfScopeJson as unknown as CorpusFile;
 
 // Facts that are true in the seed world but never appear in this call's transcript (the
 // real counsel of record, "Calder & Finch" -- the caller answered "Whitmore & Bass"
@@ -45,6 +47,30 @@ function scenarioBFinalState() {
   });
 }
 
+// Judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md, fix 1): the corpus recording of
+// exactly the line a judge tries ("I'm not the CEO, I'm testing this") -- proves fix 1 both
+// live and in replay mode, since replay drives this same CallView with `link: 'replay'`.
+function judgeOutOfScopeFinalState(): ScreenState {
+  const engineInput: EngineInput = {
+    conversation: judgeOutOfScope.conversation,
+    tools: judgeOutOfScope.tools,
+    actions: judgeOutOfScope.actions,
+    call: judgeOutOfScope.call,
+    seed: MERIDIAN,
+  };
+  const output = evaluate(engineInput);
+  return deriveScreenState({
+    session_id: 'sess-judge-1',
+    t_ms: 1000,
+    engineInput,
+    output,
+    speaking: false,
+    export_hash: null,
+    recomputed: false,
+    link: 'replay', // the judge walked replay mode -- this is the path that must show it
+  });
+}
+
 describe('CallView', () => {
   // Fix round 3, item 2: CallView used to render its own copy of the "simulated" banner --
   // on Replay.tsx that produced two copies on screen at once (its own screen-level banner
@@ -59,6 +85,34 @@ describe('CallView', () => {
   it('renders the WIRE FROZEN banner for Scenario B\'s terminal state', () => {
     render(<CallView screen={scenarioBFinalState()} />);
     expect(screen.getByRole('heading', { name: 'WIRE FROZEN' })).toBeInTheDocument();
+  });
+
+  // Judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md, fix 1): NO_ACTION -- the
+  // verdict for an honest "I'm not the CEO, I'm testing this" -- used to render no banner at
+  // all, unlike STAGE/FREEZE above. This locks the fix in: same slot, same section, a
+  // headline plus a plain-English line so the outcome reads as deliberate, not broken. This
+  // also proves replay mode shows it (`judgeOutOfScopeFinalState()` builds the state with
+  // `link: 'replay'`, exactly how Replay.tsx feeds this same component).
+  it('renders a NO ACTION TAKEN banner with a plain-English description for the out-of-scope end state, including in replay mode', () => {
+    render(<CallView screen={judgeOutOfScopeFinalState()} />);
+    const heading = screen.getByRole('heading', { name: 'NO ACTION TAKEN' });
+    expect(heading).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Nothing was at stake on this call. No request was staged, nothing was frozen, and the evidence record is complete.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  // The glyph is decorative (aria-hidden) -- founder is colour-blind, so it must never be the
+  // ONLY thing distinguishing this banner; the heading's accessible name is the word alone.
+  it("gives the NO ACTION TAKEN banner a decorative glyph that doesn't leak into its accessible name", () => {
+    render(<CallView screen={judgeOutOfScopeFinalState()} />);
+    const heading = screen.getByRole('heading', { name: 'NO ACTION TAKEN' });
+    expect(heading.textContent).toContain('○');
+    const glyph = heading.querySelector('.banner-glyph');
+    expect(glyph).not.toBeNull();
+    expect(glyph).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('renders all three gates as FAIL, as text -- never colour-only', () => {

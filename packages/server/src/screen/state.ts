@@ -69,14 +69,34 @@ function shortHash(hash: string | null): string | null {
   return hash ? hash.slice(0, 10) : null;
 }
 
-const BANNER_HEADLINE: Record<'FREEZE' | 'STAGE' | 'ESCALATE', string> = {
+const BANNER_HEADLINE: Record<'FREEZE' | 'STAGE' | 'ESCALATE' | 'NO_ACTION', string> = {
   FREEZE: 'WIRE FROZEN',
   STAGE: 'STAGED FOR SECOND APPROVAL',
   ESCALATE: 'ESCALATED TO A HUMAN',
+  NO_ACTION: 'NO ACTION TAKEN',
 };
 
-function isBannerVerdict(v: Verdict): v is 'FREEZE' | 'STAGE' | 'ESCALATE' {
-  return v === 'FREEZE' || v === 'STAGE' || v === 'ESCALATE';
+// judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md, fix 1): NO_ACTION -- the
+// verdict an honest "I'm not the CEO, I'm just testing this" ends in -- had no banner at
+// all, so a judge who tries that line sees the call just... stop, with nothing on screen
+// saying so. One plain-English sentence, no jargon, so it reads as a deliberate outcome,
+// not a broken demo.
+const BANNER_DESCRIPTION: Partial<Record<'FREEZE' | 'STAGE' | 'ESCALATE' | 'NO_ACTION', string>> = {
+  NO_ACTION:
+    'Nothing was at stake on this call. No request was staged, nothing was frozen, and the evidence record is complete.',
+};
+
+// Decorative only (aria-hidden in CallView.tsx) -- a second, non-colour cue alongside the
+// headline word itself, same pattern as the transcript's "quoted" flag and the checks
+// row's own glyph. FREEZE/STAGE/ESCALATE don't need one: their headline plus subline
+// (approver name / incident id / export hash) already carries plenty; NO_ACTION has no
+// subline content of its own, so its banner gets the extra cue.
+const BANNER_GLYPH: Partial<Record<'FREEZE' | 'STAGE' | 'ESCALATE' | 'NO_ACTION', string>> = {
+  NO_ACTION: '○',
+};
+
+function isBannerVerdict(v: Verdict): v is 'FREEZE' | 'STAGE' | 'ESCALATE' | 'NO_ACTION' {
+  return v === 'FREEZE' || v === 'STAGE' || v === 'ESCALATE' || v === 'NO_ACTION';
 }
 
 export function deriveScreenState(input: ScreenStateInput): ScreenState {
@@ -144,10 +164,15 @@ export function deriveScreenState(input: ScreenStateInput): ScreenState {
     if (output.verdict === 'STAGE') subParts.push(`second approval: ${approverName}`);
     if (hashShort) subParts.push(`export ${hashShort}`);
 
+    const description = BANNER_DESCRIPTION[output.verdict];
+    const glyph = BANNER_GLYPH[output.verdict];
+
     banner = {
       headline: BANNER_HEADLINE[output.verdict],
       reasons: output.reasons.map(plainWords),
       subline: subParts.join(' · '),
+      ...(description ? { description } : {}),
+      ...(glyph ? { glyph } : {}),
     };
   }
 

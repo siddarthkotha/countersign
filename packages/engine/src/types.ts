@@ -419,7 +419,15 @@ export interface ScreenState {
   gates: { context: EvidenceStatus; device: EvidenceStatus; consistency: EvidenceStatus };
   transcript: { id: string; speaker: Speaker; text: string; t_ms: number; interrupted?: boolean; highlighted?: boolean }[];
   agent_status: 'LISTENING' | 'SPEAKING' | 'VERIFYING' | 'AWAITING_OUT_OF_BAND' | 'VERDICT';
-  banner: { headline: string; reasons: string[]; subline: string } | null;
+  // `description` and `glyph` are optional: STAGE/FREEZE/ESCALATE carry their meaning in the
+  // headline plus the reasons/subline already (approver name, incident id, export hash).
+  // NO_ACTION has none of that to show, so it gets one extra plain-English sentence instead,
+  // so the banner never reads as an unexplained blank slot, and a decorative (aria-hidden)
+  // glyph next to its headline -- founder is colour-blind, so colour is never the only cue;
+  // here the word ("NO ACTION TAKEN") already carries the meaning, the glyph is a second,
+  // non-colour cue on top of it, the same pattern as the transcript's "quoted" flag and the
+  // checks-row's own glyph (judge-sim finding, docs/JUDGE-SIM-2026-09-11.md, fix 1).
+  banner: { headline: string; reasons: string[]; subline: string; description?: string; glyph?: string } | null;
   forensic: {
     evidence: Evidence[];
     ledger: Claim[];

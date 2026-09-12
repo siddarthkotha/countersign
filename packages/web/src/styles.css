@@ -740,6 +740,25 @@ input {
   color: var(--cs-muted);
 }
 
+/* Judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md, fix 1): the glyph next to the
+   NO_ACTION headline -- decorative only (aria-hidden in CallView.tsx), never the sole cue
+   for the word it sits beside. Same --cs-accent already used for every other banner
+   headline (one visual metaphor, no new colour), just inline with the glyph's own
+   character instead of the whole heading. */
+.banner-glyph {
+  color: var(--cs-accent);
+}
+
+/* The NO_ACTION (etc.) plain-English sentence -- sans-serif and --cs-fg (both already
+   covered by test/contrast.test.ts on --cs-panel) so it reads as prose, distinct from the
+   monospace reasons/subline either side of it. */
+.banner-terminal .banner-description {
+  font-family: var(--cs-font-sans);
+  font-size: 0.9rem;
+  color: var(--cs-fg);
+  margin: 0 0 0.5rem;
+}
+
 /* --- Forensic: below the fold ----------------------------------------------------------- */
 .forensic-zone {
   display: flex;

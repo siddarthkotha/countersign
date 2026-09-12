@@ -4,12 +4,16 @@ import type { CorpusFile, EngineInput } from '@countersign/engine';
 import { deriveScreenState } from '../src/screen/state.js';
 import scenarioBJson from '../../engine/corpus/scenario-b-miller-fraud.json' with { type: 'json' };
 import scenarioAJson from '../../engine/corpus/scenario-a-dana-legitimate.json' with { type: 'json' };
+import judgeOutOfScopeJson from '../../engine/corpus/judge-out-of-scope-no-request.json' with { type: 'json' };
+import singleWrongAnswerEscalatesJson from '../../engine/corpus/single-wrong-answer-escalates.json' with { type: 'json' };
 
 // `with { type: 'json' }` gives each import site its own structurally-inferred (and
 // therefore mutually "unrelated" per TS) literal type; casting once through the engine's
 // own CorpusFile contract is what makes the two importing test files agree.
 const scenarioB = scenarioBJson as unknown as CorpusFile;
 const scenarioA = scenarioAJson as unknown as CorpusFile;
+const judgeOutOfScope = judgeOutOfScopeJson as unknown as CorpusFile;
+const singleWrongAnswerEscalates = singleWrongAnswerEscalatesJson as unknown as CorpusFile;
 
 function inputFor(corpus: CorpusFile): EngineInput {
   return {
@@ -114,6 +118,62 @@ describe('deriveScreenState — Scenario A end state (STAGE)', () => {
     // trimmed") -- ScreenState surfaces the raw claim value, not a display-cased copy.
     expect(state.request.beneficiary).toBe('meridian supply');
     expect(state.transcript.some((u) => u.highlighted)).toBe(false); // nothing failed or flagged
+  });
+});
+
+describe('deriveScreenState — judge out-of-scope end state (NO_ACTION)', () => {
+  // Judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md, fix 1): a judge who opens
+  // with "I'm not the CEO, I'm testing this" ends the call on NO_ACTION -- before this fix,
+  // that verdict had no banner at all (STAGE/FREEZE had one, NO_ACTION did not).
+  const engineInput = inputFor(judgeOutOfScope);
+  const output = evaluate(engineInput);
+
+  it('produces a NO_ACTION banner with a neutral glyph and a plain-English description', () => {
+    const state = deriveScreenState({
+      session_id: 'sess-judge-1',
+      t_ms: 1000,
+      engineInput,
+      output,
+      speaking: false,
+      export_hash: null,
+      recomputed: false,
+      link: 'live',
+    });
+
+    expect(output.verdict).toBe('NO_ACTION');
+    expect(state.banner).not.toBeNull();
+    expect(state.banner?.headline).toBe('NO ACTION TAKEN');
+    expect(state.banner?.glyph).toBe('○');
+    expect(state.banner?.description).toBe(
+      'Nothing was at stake on this call. No request was staged, nothing was frozen, and the evidence record is complete.',
+    );
+    expect(state.banner?.reasons).toContain('out of scope');
+  });
+});
+
+describe('deriveScreenState — single wrong answer end state (ESCALATE)', () => {
+  const engineInput = inputFor(singleWrongAnswerEscalates);
+  const output = evaluate(engineInput);
+
+  it('already had a banner before this fix -- headline present, no NO_ACTION-only fields', () => {
+    const state = deriveScreenState({
+      session_id: 'sess-5',
+      t_ms: 15000,
+      engineInput,
+      output,
+      speaking: false,
+      export_hash: 'deadbeef00',
+      recomputed: true,
+      link: 'live',
+    });
+
+    expect(output.verdict).toBe('ESCALATE');
+    expect(state.banner).not.toBeNull();
+    expect(state.banner?.headline).toBe('ESCALATED TO A HUMAN');
+    // ESCALATE already carries plenty in its subline (incident id, export hash) -- it does
+    // not get the NO_ACTION-only description/glyph fields.
+    expect(state.banner?.description).toBeUndefined();
+    expect(state.banner?.glyph).toBeUndefined();
   });
 });
 

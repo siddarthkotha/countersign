@@ -445,7 +445,20 @@ export default function CallView({ screen, defaultForensicOpen, timings }: CallV
               order too. */}
           {screen.banner && (
             <section className="banner-terminal" role="alert">
-              <h2>{screen.banner.headline}</h2>
+              <h2>
+                {/* Judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md, fix 1): a
+                    decorative (aria-hidden) glyph next to the headline word, when the banner
+                    carries one (NO_ACTION only, today) -- a second, non-colour cue on top of
+                    the word, same pattern as the transcript's "quoted" flag and the checks
+                    row's own glyph. The word alone already carries the meaning; this is
+                    never the only cue. */}
+                {screen.banner.glyph && (
+                  <span className="banner-glyph" aria-hidden="true">
+                    {screen.banner.glyph}{' '}
+                  </span>
+                )}
+                {screen.banner.headline}
+              </h2>
               {/* Task W5, fix round 3, item 6: list semantics restored -- a real <ul>, the
                   " · " separator is CSS-only (styles.css, ::after on non-last <li>), never
                   string-joined into one text node. */}
@@ -458,6 +471,12 @@ export default function CallView({ screen, defaultForensicOpen, timings }: CallV
                   <li key={r}>{r}</li>
                 ))}
               </ul>
+              {/* Judge-sim finding 2026-09-11, fix 1: NO_ACTION (and any future banner verdict
+                  with nothing of its own to put in the subline -- no approver, no incident, no
+                  export hash) gets one extra plain-English sentence so the banner never reads
+                  as an unexplained blank slot. Omitted entirely when the server doesn't send
+                  one, so STAGE/FREEZE/ESCALATE are unchanged. */}
+              {screen.banner.description && <p className="banner-description">{screen.banner.description}</p>}
               {/* Task W6 (QA walk 2026-09-02, finding 3): the subline already carries the
                   export hash short-form (first 10 characters, `state.ts`'s own `shortHash`)
                   -- the only change here is a `title` so hovering it reveals the full hash
