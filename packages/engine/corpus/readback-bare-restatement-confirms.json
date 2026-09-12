@@ -1,0 +1,171 @@
+{
+  "title": "Dana Whitfield: bare restatement of a readback value confirms it (hand-built, live finding)",
+  "description": "Hand-built from tonight's live barge-in rehearsal (report scripts/rehearse/reports/2026-09-11T22-51-38-barge-in-interrupt.md, deploy 20): the agent read back the beneficiary five times (\"Just to confirm, the beneficiary is Meridian Supply. Is that correct?\") and the caller answered \"Meridian Supply.\" every time -- the exact read-back value, verbatim -- with no affirm/negate lexicon word at all. Before the ledger.ts fix (this branch), that reply resolved nothing: critical_fields_confirmed stayed false and the live call looped until idle timeout (row 14 ESCALATE). This recording is otherwise identical to scenario-a-dana-legitimate.json (same identity, tools, live checks, and challenge -- all already proven to reach STAGE on their own) with only the final caller line changed from \"Yes, that's right.\" to \"Meridian Supply.\", isolating the one behavior this fix changes: a bare exact restatement of a readback value now counts as CONFIRMED. Proves the fix reaches STAGE on the live transcript shape that used to ESCALATE.",
+  "call": {
+    "session_id": "sess-restate",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
+      "t_ms": 1000
+    },
+    {
+      "id": "a1t",
+      "speaker": "agent",
+      "text": "Just to confirm back to you -- this wire is going to Northgate Partners, is that right?",
+      "t_ms": 1200
+    },
+    {
+      "id": "c1t",
+      "speaker": "caller",
+      "text": "No, that's wrong -- it's Meridian Supply, not Northgate Partners.",
+      "t_ms": 1400
+    },
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "To confirm: $84,500 to Meridian Supply, account ending 4471. Is that right?",
+      "t_ms": 2000
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 2500
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "And the account ending 4471, correct?",
+      "t_ms": 3000
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "Yes, correct.",
+      "t_ms": 3500
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "Just to confirm, the beneficiary is Meridian Supply. Is that correct?",
+      "t_ms": 4000
+    },
+    {
+      "id": "c4",
+      "speaker": "caller",
+      "text": "Meridian Supply.",
+      "t_ms": 4500
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 1500,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 1600,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 1700,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "ch1",
+      "kind": "challenge_issued",
+      "t_ms": 1200,
+      "challenge_id": "sess-restate-1"
+    },
+    {
+      "id": "r1",
+      "kind": "readback_issued",
+      "t_ms": 2000,
+      "field": "amount_usd",
+      "value": "84500"
+    },
+    {
+      "id": "r2",
+      "kind": "readback_issued",
+      "t_ms": 3000,
+      "field": "account_last4",
+      "value": "4471"
+    },
+    {
+      "id": "r3",
+      "kind": "readback_issued",
+      "t_ms": 4000,
+      "field": "beneficiary",
+      "value": "Meridian Supply"
+    }
+  ],
+  "expected": {
+    "verdict": "STAGE",
+    "state": "ACTION",
+    "reasons": [],
+    "failure_tally": 0,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": true,
+      "critical_fields_confirmed": true,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": true,
+      "no_injection_attempt": true
+    }
+  }
+}

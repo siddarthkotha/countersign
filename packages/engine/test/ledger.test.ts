@@ -170,6 +170,56 @@ describe('buildLedger', () => {
     expect(isConfirmed(reconfirmed, 'amount_usd')).toBe(true);
   });
 
+  it('5f. bare exact restatement (no affirm/negate lexicon word) confirms: beneficiary', () => {
+    // fix (live barge-in rehearsal, report 2026-09-11T22-51-38-barge-in-interrupt.md):
+    // the caller repeated "Meridian Supply." five times to a beneficiary readback and it
+    // was never treated as an answer at all, because neither "Meridian Supply" nor "."
+    // is an affirm/negate lexicon phrase.
+    const readback: AgentAction = { id: 'a1', kind: 'readback_issued', t_ms: 5000, field: 'beneficiary', value: 'Meridian Supply' };
+    const conversation = [
+      u('u1', 'The beneficiary is Meridian Supply.', 0),
+      u('u2', 'Meridian Supply.', 8000),
+    ];
+    const { claims } = buildLedger(conversation, [readback], MERIDIAN);
+    expect(currentClaim(claims, 'beneficiary')?.kind).toBe('CONFIRMED');
+    expect(isConfirmed(claims, 'beneficiary')).toBe(true);
+  });
+
+  it('5g. bare exact restatement confirms: amount ("It\'s $84,500." with a leading filler word)', () => {
+    const readback: AgentAction = { id: 'a1', kind: 'readback_issued', t_ms: 5000, field: 'amount_usd', value: '84500' };
+    const conversation = [u('u1', 'I need to wire $84,500.', 0), u('u2', "It's $84,500.", 8000)];
+    const { claims } = buildLedger(conversation, [readback], MERIDIAN);
+    expect(currentClaim(claims, 'amount_usd')?.kind).toBe('CONFIRMED');
+  });
+
+  it('5h. bare exact restatement confirms: account last four digits', () => {
+    const readback: AgentAction = { id: 'a1', kind: 'readback_issued', t_ms: 5000, field: 'account_last4', value: '4471' };
+    const conversation = [u('u1', 'The account ending in 4471.', 0), u('u2', '4471.', 8000)];
+    const { claims } = buildLedger(conversation, [readback], MERIDIAN);
+    expect(currentClaim(claims, 'account_last4')?.kind).toBe('CONFIRMED');
+  });
+
+  it('5i. a genuinely different value in reply to a readback is still graded CORRECTED/CONTRADICTED as before (restatement path does not touch it)', () => {
+    const readback: AgentAction = { id: 'a1', kind: 'readback_issued', t_ms: 5000, field: 'amount_usd', value: '84500' };
+    const conversation = [u('u1', 'I need to wire $84,500.', 0), u('u2', 'Actually, make that $90,000.', 8000)];
+    const { claims } = buildLedger(conversation, [readback], MERIDIAN);
+    const amountClaims = claims.filter((c) => c.field === 'amount_usd');
+    expect(amountClaims).toHaveLength(2);
+    // classified via the correction lexicon ("actually"), exactly as before this fix.
+    expect(amountClaims[1]).toMatchObject({ kind: 'CORRECTED', value: 90_000 });
+  });
+
+  it('5j. a SUPERSET of the readback value ("Meridian Supply Inc") does NOT silently confirm -- ruling: stays unresolved', () => {
+    const readback: AgentAction = { id: 'a1', kind: 'readback_issued', t_ms: 5000, field: 'beneficiary', value: 'Meridian Supply' };
+    const conversation = [u('u1', 'The beneficiary is Meridian Supply.', 0), u('u2', 'Meridian Supply Inc.', 8000)];
+    const { claims } = buildLedger(conversation, [readback], MERIDIAN);
+    // Not CONFIRMED (the restatement isn't exact), and no cue phrase in "Meridian Supply
+    // Inc." for extractCuedNames to pick up either, so the original STATED claim is left
+    // untouched -- unresolved, not silently upgraded and not wrongly downgraded.
+    expect(currentClaim(claims, 'beneficiary')?.kind).toBe('STATED');
+    expect(isConfirmed(claims, 'beneficiary')).toBe(false);
+  });
+
   it('6. cued names: approver and counsel, verbatim quotes, normalized values', () => {
     const conversation = [
       u(

@@ -20,7 +20,7 @@
 import { extractAccountLast4, extractCuedNames, extractDeadline } from './extract/claims.js';
 import { extractAmounts } from './extract/amounts.js';
 import { extractIdentityClaim } from './extract/identity.js';
-import { hasLexiconHit, normalizeValue } from './normalize.js';
+import { hasLexiconHit, normalizeText, normalizeValue } from './normalize.js';
 import { escapeRegExp } from './util.js';
 import type { AgentAction, Claim, ClaimField, ClaimKind, SeedConfig, Utterance } from './types.js';
 
@@ -56,6 +56,36 @@ function referencesPreviousValue(text: string, current: Claim): boolean {
     return new RegExp(`\\b${escapeRegExp(String(current.value))}\\b`).test(text);
   }
   return text.toLowerCase().includes(current.quote.text.toLowerCase());
+}
+
+// fix (live barge-in rehearsal, report 2026-09-11T22-51-38-barge-in-interrupt.md): a
+// readback's answer used to resolve ONLY on an affirm/negate lexicon hit ("yes"/"no"/
+// "that's right"/...). A caller who instead just repeats the read-back value verbatim
+// ("Meridian Supply.") hit neither lexicon, so the readback stayed PENDING forever --
+// live, this looped the same readback line 5 times until idle timeout (row 14 ESCALATE,
+// critical_fields_confirmed stayed false even though the caller never once gave a
+// different value). Fix: a bare EXACT restatement of the readback's own value now also
+// resolves it, as CONFIRMED. "Exact" is deliberately strict -- after normalizing case/
+// punctuation and stripping up to one leading filler token ("yes"/"it's"/"that's"/
+// "yeah"/"yep"), the ENTIRE remainder must equal the readback value's normalized form,
+// not merely contain it. "Meridian Supply Inc" (a superset of readback value "Meridian
+// Supply") therefore does NOT confirm -- ruling: treat it as unresolved (falls through
+// to the 2-utterance cap below) rather than guessing whether "Inc" is the same company,
+// since a materially different name is exactly the kind of thing this ledger exists to
+// catch. A genuinely different value is untouched by this path; it is graded exactly as
+// before by `processHit`/`classifyDifferentValue` further down this same utterance loop.
+const RESTATEMENT_FILLER_TOKENS = new Set(['yes', 'yeah', 'yep', 'its', 'thats']);
+
+function isExactRestatement(text: string, expectedValue: string): boolean {
+  const expectedNorm = normalizeText(expectedValue);
+  if (expectedNorm.length === 0) return false;
+  const tokens = normalizeText(text)
+    .split(' ')
+    .filter((w) => w.length > 0);
+  let start = 0;
+  while (start < tokens.length && RESTATEMENT_FILLER_TOKENS.has(tokens[start]!)) start += 1;
+  if (start >= tokens.length) return false;
+  return tokens.slice(start).join(' ') === expectedNorm;
 }
 
 /** The latest (most recently added) claim for `field`, or null. Claims are appended in
@@ -187,7 +217,9 @@ export function buildLedger(
       pending.utterancesSeen += 1;
       const negated = hasLexiconHit(u.text, seed.negate_lexicon);
       const affirmed = hasLexiconHit(u.text, seed.affirm_lexicon);
-      if (negated || affirmed) {
+      const restated =
+        !negated && !affirmed && pending.action.value !== undefined && isExactRestatement(u.text, pending.action.value);
+      if (negated || affirmed || restated) {
         const current = currentClaim(claims, field);
         if (current && pending.action.value !== undefined && normalizeValue(field, pending.action.value) === current.value) {
           if (negated) {
@@ -195,6 +227,8 @@ export function buildLedger(
             claims = claims.map((c) => (c.id === currentId ? { ...c, kind: 'UNKNOWN' as ClaimKind } : c));
             repairWindowSince[field] = pending.action.t_ms;
           } else {
+            // affirmed (lexicon hit) or restated (bare exact repeat of the value) both
+            // resolve the readback the same way.
             const currentId = current.id;
             claims = claims.map((c) => (c.id === currentId ? { ...c, kind: 'CONFIRMED' as ClaimKind } : c));
           }
