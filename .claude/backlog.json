@@ -1874,7 +1874,36 @@
    "status": "done",
    "agent_id": "",
    "started_at": "2026-09-12T04:42:05.622Z",
-   "lane_note": "autopilot push 11:42 PM; deploy poll + one barge-in sample chained"
+   "lane_note": "autopilot push 11:42 PM; deploy poll + one barge-in sample chained; DEPLOY 22 VERIFIED 11:43 PM"
+  },
+  {
+   "id": "BARGEIN-NO-INTERRUPT",
+   "title": "anchored barge-in spoke 1.5 s into the reply but AssemblyAI reported no interrupted reply (STAGE otherwise); compare bundles with the runs that did interrupt",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T04:45:54.435Z",
+   "lane_note": "11:51 PM: AAI onset lag 2.4-3.7 s vs ~4 s readback; barge into the 5.5 s greeting instead"
+  },
+  {
+   "id": "BARGEIN-GREETING",
+   "title": "scenario barges into the greeting (turn 0, ~1200 ms); harness gives a turn-0 barge_in_after_ms precedence over the greeting wait",
+   "files": [
+    "scripts/rehearse"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T04:52:12.611Z",
+   "lane_note": "landed on main d9c6d35 12:02 AM; review PASS; gate 1344 x3, typecheck clean, corpus 118, harness 233; push 23"
+  },
+  {
+   "id": "push-23",
+   "title": "push 23: 160461b..d9c6d35 (barge-in targets the greeting; turn-0 barge-in precedence; logs)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T05:03:32.020Z",
+   "lane_note": "autopilot push 12:03 AM; deploy poll + one barge-in sample chained"
   }
  ]
 }
