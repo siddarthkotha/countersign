@@ -37,7 +37,7 @@ out after the full gate. Gate G2 was then MET on the deployed site at 8:05 PM (S
 
 Rules: no STAGE without one passed question (row 4 floor + checklist item); injection attempt
 adds a full point and blocks STAGE; the last question can no longer go terminal before the
-answer (challenge_answer_window_ms); call ends with open request => ESCALATE by engine row 14.
+answer (challenge_answer_window_ms); call ends with open request => ESCALATE by engine row 14 (now row 15 after the 2026-09-12 readback-cap row was inserted).
 Challenges: every fact scoped to an identity, Dana has three of her own (INV-7734, Marcus Obi,
 quarterly parts restock), trap question can no longer speak another identity's truth, spent
 facts never re-asked, relational grading uses the named beneficiary. Ledger: a hedge that

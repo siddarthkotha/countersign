@@ -806,7 +806,7 @@ describe('CallSession — STALL line anti-repeat is call-scoped (fix round 1, fi
 // Red team item 4 (founder ruling, 2026-09-09): a call that ends by idle timeout, session
 // cap, hangup, or a dropped socket while a request has been stated and the verdict is
 // still PENDING must not leave no incident, no freeze, no export. Fixed in the ENGINE
-// (rules.ts row 14, LAW 3), not the server: end() records a `call_ended` action into the
+// (rules.ts row 15, LAW 3), not the server: end() records a `call_ended` action into the
 // logs and re-runs the real engine through the existing terminal-action path -- it never
 // stamps a verdict itself. See packages/engine/corpus/abandoned-open-request.json for the
 // engine-level proof; these tests prove the server wiring reaches it.
@@ -833,7 +833,7 @@ describe('CallSession — end() reaches the engine\'s call-ended row (RT-4)', ()
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: 'This is Robert Miller, I need $1.8 million wired to the escrow account.' });
 
     // Before ending: a request is on record, no live checks/challenges have run yet, and
-    // the engine itself still reads PENDING -- the exact shape row 14 exists for.
+    // the engine itself still reads PENDING -- the exact shape row 15 exists for.
     expect(session.last?.verdict).toBe('PENDING');
     expect(session.last?.evidence.some((e) => e.kind === 'request_params')).toBe(true);
 
@@ -1180,15 +1180,15 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
   });
 
-  // Row 14 (rules.ts) only ever converts a PENDING verdict on call_ended -- an
+  // Row 15 (rules.ts) only ever converts a PENDING verdict on call_ended -- an
   // already-terminal STAGE/FREEZE/ESCALATE verdict is untouched (proven at the engine level
-  // in packages/engine/test/rules.test.ts's "row 14 never overrides an already-terminal
+  // in packages/engine/test/rules.test.ts's "row 15 never overrides an already-terminal
   // STAGE/ESCALATE/NO_ACTION verdict"). This proves the SERVER-side consequence of that: now
   // that reaching SEALED can itself trigger `end()` (the grace/hard-cap timers above), a
   // call that ends AFTER a terminal verdict is already on record must not re-evaluate to
   // ESCALATE -- `end()` logs one more `call_ended` action and re-runs the real engine, and
   // the verdict it recomputes must still read STAGE.
-  it('end() called after SEALED does not re-evaluate the verdict to ESCALATE (row 14 ignores call_ended once terminal)', async () => {
+  it('end() called after SEALED does not re-evaluate the verdict to ESCALATE (row 15 ignores call_ended once terminal)', async () => {
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];

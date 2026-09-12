@@ -157,7 +157,7 @@ never moves:
 Two more outcomes keep the call moving without staging or freezing anything: **PENDING** holds
 the floor for more evidence (identity, a challenge, a readback, a pending check: rows 3–7, 12);
 **ESCALATE** hands the case to a human callback with nothing moved by voice (structuring across
-amounts, a first-time beneficiary, or the catch-all row 13). An out-of-scope call (a judge
+amounts, a first-time beneficiary, or the catch-all row 14). An out-of-scope call (a judge
 testing the demo, or a dead line with nothing at stake) becomes **NO_ACTION**. Nothing ever
 opens (`fsm.ts` state `OUT_OF_SCOPE`).
 

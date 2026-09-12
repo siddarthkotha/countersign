@@ -1,6 +1,6 @@
 {
   "title": "Single wrong answer escalates",
-  "description": "Dana-shaped legitimate-looking request (a small honest amount drift from the payment on file, not a new beneficiary, every live check passes) where the caller answers the FIRST verification challenge -- restate who approved it -- with the WRONG name. That single slip fails the knowledge check AND contradicts the earlier approver claim, and a contradiction never repairs itself once logged. Every later challenge is answered correctly, but no_contradictions can never read true again, so STAGE (row 11) is permanently out of reach; once the challenge budget is spent nothing else meets the freeze bar either, so it lands on ESCALATE (row 13, human callback) -- not FREEZE, not a second chance.",
+  "description": "Dana-shaped legitimate-looking request (a small honest amount drift from the payment on file, not a new beneficiary, every live check passes) where the caller answers the FIRST verification challenge -- restate who approved it -- with the WRONG name. That single slip fails the knowledge check AND contradicts the earlier approver claim, and a contradiction never repairs itself once logged. Every later challenge is answered correctly, but no_contradictions can never read true again, so STAGE (row 11) is permanently out of reach; once the challenge budget is spent nothing else meets the freeze bar either, so it lands on ESCALATE (row 14, human callback) -- not FREEZE, not a second chance.",
   "call": {
     "session_id": "sess-5",
     "origin_kind": "registered_device",

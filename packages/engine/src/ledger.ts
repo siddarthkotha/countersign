@@ -63,7 +63,7 @@ function referencesPreviousValue(text: string, current: Claim): boolean {
 // readback's answer used to resolve ONLY on an affirm/negate lexicon hit ("yes"/"no"/
 // "that's right"/...). A caller who instead just repeats the read-back value verbatim
 // ("Meridian Supply.") hit neither lexicon, so the readback stayed PENDING forever --
-// live, this looped the same readback line 5 times until idle timeout (row 14 ESCALATE,
+// live, this looped the same readback line 5 times until idle timeout (then row 14, now row 15, ESCALATE,
 // critical_fields_confirmed stayed false even though the caller never once gave a
 // different value). Fix: a bare EXACT restatement of the readback's own value now also
 // resolves it, as CONFIRMED. "Exact" is deliberately strict -- after normalizing case/

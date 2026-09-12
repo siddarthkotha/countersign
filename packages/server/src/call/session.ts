@@ -341,7 +341,7 @@ export class CallSession {
     // this does is append one `call_ended` AgentAction (same shape `link_changed` already
     // uses) and let a normal `tick()` -- the SAME re-evaluate/run-terminal-actions/emit-state
     // sequence every other event in this call already goes through -- react to it. If the
-    // engine's own rules.ts row 14 turns that into ESCALATE or NO_ACTION, this is where the
+    // engine's own rules.ts row 15 turns that into ESCALATE or NO_ACTION, this is where the
     // containment tools (open_incident, alert_principal, seal_evidence_record) actually run
     // and the hash-chained export gets built, through the EXISTING terminal-action path
     // (`runTerminalActionsIfNeeded`) -- nothing new here at all, just one more fact in the

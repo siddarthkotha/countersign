@@ -46,7 +46,7 @@ export interface ToolLogEntry {
  *  idle timeout, session cap, a caller hangup, or a dropped socket -- recorded by the
  *  server (call/session.ts's end()) as a structured fact about the call's lifecycle, same
  *  spirit as `link_changed`. It carries no verdict of its own; `detail` names the end
- *  reason (e.g. "idle_timeout"). rules.ts's row 14 is the ONLY place this fact is ever
+ *  reason (e.g. "idle_timeout"). rules.ts's row 15 is the ONLY place this fact is ever
  *  turned into a verdict (LAW 3: the engine, never the server, decides). */
 export type AgentActionKind = 'challenge_issued' | 'readback_issued' | 'session_config_updated' | 'link_changed' | 'call_ended';
 
@@ -193,7 +193,7 @@ export interface SeedConfig {
     tool_timeout_ms: number; // v2: 45000
     // Ruling C (2026-09-09, item 21): how long, after the most recently issued challenge,
     // a call is still considered "waiting on the answer" rather than abandoned -- keeps
-    // rules.ts row 12 from falling through to row 13 the instant the last allowed
+    // rules.ts row 12 from falling through to the catch-all (row 14) the instant the last allowed
     // challenge is asked, before the caller has had a chance to reply.
     challenge_answer_window_ms: number;
     approximate_jump_ratio: number; // fix-round-2: an APPROXIMATE claim's replacement value is
