@@ -24,17 +24,30 @@ export function evidenceFromTranscript(conversation: Utterance[], seed: SeedConf
   const callerUtterances = conversation.filter((u) => u.speaker === 'caller');
 
   // ---- identity_claim + identity_switch ----
-  let firstIdentity: { identity_id: string; quote: string; utterance: Utterance } | null = null;
-  let switchInfo: { later_id: string; quote: string; utterance: Utterance } | null = null;
+  // Follow-up (option B review, commit b56be9e): a caller can switch identity more than
+  // once in a call (A -> B -> C). `identityChain` records one entry per DISTINCT identity
+  // claimed, in order -- mirroring ledger.ts's own rule that a claim only changes when it
+  // differs from the CURRENT one (a repeat of the already-current identity is a no-op), so
+  // this chain always agrees with the ledger's own sequence of identity claims/switches.
+  // The "Identity" card (below) always names the FIRST entry (who opened the call); the
+  // "Identity switch" card always names the LAST TWO entries -- the LATEST switch -- so a
+  // second (or third...) switch is never invisible behind an earlier one, and
+  // resolveIdentitySwitch (compose.ts) always resolves against the CURRENT identity, never
+  // one abandoned earlier in the chain.
+  const identityChain: { identity_id: string; quote: string; utterance: Utterance }[] = [];
   for (const u of callerUtterances) {
     const hit = extractIdentityClaim(u.text, seed);
     if (!hit) continue;
-    if (!firstIdentity) {
-      firstIdentity = { identity_id: hit.identity_id, quote: hit.quote, utterance: u };
-    } else if (!switchInfo && hit.identity_id !== firstIdentity.identity_id) {
-      switchInfo = { later_id: hit.identity_id, quote: hit.quote, utterance: u };
+    const last = identityChain[identityChain.length - 1];
+    if (!last || hit.identity_id !== last.identity_id) {
+      identityChain.push({ identity_id: hit.identity_id, quote: hit.quote, utterance: u });
     }
   }
+  const firstIdentity = identityChain[0] ?? null;
+  const switchInfo =
+    identityChain.length >= 2
+      ? { prev: identityChain[identityChain.length - 2]!, later: identityChain[identityChain.length - 1]! }
+      : null;
 
   if (firstIdentity) {
     out.push({
@@ -52,19 +65,20 @@ export function evidenceFromTranscript(conversation: Utterance[], seed: SeedConf
     });
   }
 
-  if (firstIdentity && switchInfo) {
+  if (switchInfo) {
+    const { prev, later } = switchInfo;
     const quotes: Quote[] = [
-      { utterance_id: firstIdentity.utterance.id, text: firstIdentity.quote },
-      { utterance_id: switchInfo.utterance.id, text: switchInfo.quote },
+      { utterance_id: prev.utterance.id, text: prev.quote },
+      { utterance_id: later.utterance.id, text: later.quote },
     ];
     out.push({
       id: 'ev-identity-switch',
       kind: 'identity_switch',
-      t_ms: switchInfo.utterance.t_ms,
+      t_ms: later.utterance.t_ms,
       label: 'Identity switch',
       status: 'FLAG',
-      detail: `Caller first claimed ${identityName(seed, firstIdentity.identity_id)}, then claimed ${identityName(seed, switchInfo.later_id)}.`,
-      facts: { first_id: firstIdentity.identity_id, later_id: switchInfo.later_id },
+      detail: `Caller first claimed ${identityName(seed, prev.identity_id)}, then claimed ${identityName(seed, later.identity_id)}.`,
+      facts: { first_id: prev.identity_id, later_id: later.identity_id },
       quotes,
       source: 'transcript',
       provenance: 'CALLER_SAID',

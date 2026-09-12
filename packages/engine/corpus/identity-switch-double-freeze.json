@@ -1,0 +1,155 @@
+{
+  "title": "A double identity switch (Dana -> Elena -> Robert Miller) resolves, then Robert Miller's own checks freeze the transfer (hand-built)",
+  "description": "Hand-built follow-up to corpus/identity-switch-freeze.json (option B review, commit b56be9e): fromTranscript.ts used to lock the 'ev-identity-switch' card to the SECOND identity ever claimed, so a further switch past that point was invisible to the card and to resolveIdentitySwitch, which could only ever check for a re-statement of that second identity. Here the caller switches TWICE in one call -- Dana Whitfield (treasury), then Elena Park (payment desk), then Robert Miller (CEO) -- and the fix must (1) show the switch card as the LATEST pair, Elena -> Robert Miller, quoting c2 and c3, not the original Dana -> Elena pair; (2) resolve it (c4 re-states Robert Miller and repeats the unchanged $84,500-to-Meridian-Supply request, both required); (3) still count EACH switch as its own contradicted identity claim toward the tally (2, capped) even after resolution, so the tally is 5 here versus identity-switch-freeze.json's 4 for a single switch; and (4) still reach FREEZE once resolved, on Robert Miller's own seed record (home_geo Frankfurt, DE against this call's Austin, TX origin -> SSO FAIL; hardcoded oob.response 'no_response' -> OOB FAIL; no known vendors for him -> CONTEXT FAIL and a new beneficiary) -- proving row 6 has an exit for a chain, not just a single switch, and the fraud path is never trapped or silently downgraded by an unresolved-forever card.",
+  "call": {
+    "session_id": "sess-idfz2",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply, $84,500, account ending 4471. Moving today instead of Friday, approved in yesterday's close meeting.",
+      "t_ms": 1000
+    },
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "Just to confirm, the amount is $84,500. Is that correct?",
+      "t_ms": 2000
+    },
+    {
+      "id": "c2a",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 2500
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "Just to confirm, the account ends in 4471. Is that correct?",
+      "t_ms": 3000
+    },
+    {
+      "id": "c3a",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 3500
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "And Meridian Supply is the beneficiary, is that correct?",
+      "t_ms": 4000
+    },
+    {
+      "id": "c4a",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 4500
+    },
+    {
+      "id": "c1sw",
+      "speaker": "caller",
+      "text": "Actually, this is Elena Park speaking, I'll take it from here.",
+      "t_ms": 5000
+    },
+    {
+      "id": "a4",
+      "speaker": "agent",
+      "text": "Who am I speaking with, and what do you need? I need to re-establish that before we continue.",
+      "t_ms": 6000
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "Actually, this is Robert Miller now, I'll take it from here myself.",
+      "t_ms": 9000
+    },
+    {
+      "id": "a5",
+      "speaker": "agent",
+      "text": "Who am I speaking with, and what do you need? I need to re-establish that before we continue.",
+      "t_ms": 9500
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "This is Robert Miller. Send the $84,500 to Meridian Supply now.",
+      "t_ms": 13000
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 1500,
+      "args": { "identity_id": "dana-whitfield", "request_version": 1 },
+      "result": { "session_active": true, "geo": "Austin, TX", "device": "Dell Latitude (managed)", "request_version": 1 }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 1600,
+      "args": { "identity_id": "dana-whitfield", "request_version": 1 },
+      "result": {
+        "known_vendors": ["Meridian Supply"],
+        "matches": [{ "vendor": "Meridian Supply", "amount_usd": 84500, "account_last4": "4471", "due": "2026-09-04" }],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 1700,
+      "args": { "identity_id": "dana-whitfield", "request_version": 1 },
+      "result": { "sent": true, "devices": 1, "response": "confirmed", "latency_ms": 2500, "request_version": 1 }
+    },
+    {
+      "id": "t4",
+      "name": "check_sso_context",
+      "t_ms": 13500,
+      "args": { "identity_id": "robert-miller", "request_version": 3 },
+      "result": { "session_active": true, "geo": "Frankfurt, DE", "device": "MacBook Pro (managed)", "request_version": 3 }
+    },
+    {
+      "id": "t5",
+      "name": "get_request_history",
+      "t_ms": 13600,
+      "args": { "identity_id": "robert-miller", "request_version": 3 },
+      "result": { "known_vendors": [], "matches": [], "request_version": 3 }
+    },
+    {
+      "id": "t6",
+      "name": "verify_out_of_band",
+      "t_ms": 13700,
+      "args": { "identity_id": "robert-miller", "request_version": 3 },
+      "result": { "sent": true, "devices": 2, "response": "no_response", "latency_ms": 8000, "request_version": 3 }
+    }
+  ],
+  "actions": [
+    { "id": "r1", "kind": "readback_issued", "t_ms": 2000, "field": "amount_usd", "value": "84500" },
+    { "id": "r2", "kind": "readback_issued", "t_ms": 3000, "field": "account_last4", "value": "4471" },
+    { "id": "r3", "kind": "readback_issued", "t_ms": 4000, "field": "beneficiary", "value": "Meridian Supply" }
+  ],
+  "expected": {
+    "verdict": "FREEZE",
+    "state": "ACTION",
+    "reasons": ["IDENTITY_UNVERIFIED", "OUT_OF_BAND_NO_RESPONSE", "CONTEXT_FAILURE", "STORY_INCONSISTENCY", "NEW_BENEFICIARY"],
+    "failure_tally": 5,
+    "request_version": 3,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": false,
+      "oob_confirmed_current": false,
+      "context_pass_current": false,
+      "no_contradictions": false,
+      "critical_fields_confirmed": true,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": false,
+      "no_identity_switch": true,
+      "not_new_beneficiary": false
+    }
+  }
+}

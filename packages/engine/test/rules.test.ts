@@ -552,4 +552,18 @@ describe('RULES_DOC', () => {
     expect(lower).toContain('stays a contradiction');
     expect(lower).toContain('stage stays permanently out of reach');
   });
+
+  // Follow-up (option B review, commit b56be9e): row 6's text must also describe a CHAIN of
+  // switches (A -> B -> C), not just a single one -- otherwise the doc would silently drift
+  // from fromTranscript.ts/resolveIdentitySwitch's actual chain-tracking behavior the moment
+  // a second switch happens in the same call.
+  it('row 6 text agrees with the code: a chain of switches tracks only the LATEST pair, and every switch still counts toward the tally', () => {
+    const row6 = RULES_DOC.split('\n').find((line) => /^6\./.test(line));
+    expect(row6).toBeDefined();
+    const lower = row6!.toLowerCase();
+    expect(lower).toContain('more than once');
+    expect(lower).toContain('latest pair');
+    expect(lower).toContain('never resolves it');
+    expect(lower).toContain('every switch in the chain still counts');
+  });
 });

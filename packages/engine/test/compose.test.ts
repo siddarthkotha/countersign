@@ -5,7 +5,7 @@
 // protected oracle (only test/corpus.test.ts, test/mutants.test.ts, corpus/*.json and the
 // CI workflow are) -- it is a new, freely-appendable unit test file.
 import { describe, expect, it } from 'vitest';
-import { deriveRuleContext, reconstructIssued, resolveIdentitySwitch } from '../src/compose';
+import { buildConsistencyEvidence, deriveRuleContext, reconstructIssued, resolveIdentitySwitch } from '../src/compose';
 import { evidenceFromTranscript } from '../src/evidence/fromTranscript';
 import { buildLedger } from '../src/ledger';
 import { MERIDIAN } from '../src/seed/meridian';
@@ -340,5 +340,94 @@ describe('resolveIdentitySwitch (founder decision 2026-09-11 10:15 PM, option B)
     const { claims } = buildLedger(convo, [], MERIDIAN);
     const raw = evidenceFromTranscript(convo, MERIDIAN);
     expect(resolveIdentitySwitch(raw, convo, claims, MERIDIAN)).toEqual(raw);
+  });
+
+  // Follow-up (option B review, commit b56be9e): a chain A -> B -> C (a double switch) used
+  // to be invisible past the first switch -- fromTranscript.ts locked `later_id` to B
+  // forever, so resolveIdentitySwitch could only ever check for a re-statement of B, never
+  // C. These tests prove the chain is tracked correctly end to end (real extraction, real
+  // ledger, same convention as the rest of this describe block).
+  describe('a double switch (chain A -> B -> C)', () => {
+    it('stays FLAG once C is claimed but never restated -- the card tracks B -> C, not A -> B', () => {
+      const convo = [
+        u('c1', 'caller', 'This is Dana Whitfield. Wire $84,500 to Meridian Supply.', 1000), // A
+        u('c2', 'caller', 'Actually, this is Elena Park speaking, I will take it from here.', 5000), // A -> B
+        u('c3', 'caller', 'Actually, this is Robert Miller now, I will take it from here myself.', 9000), // B -> C
+      ];
+      const ev = transcriptEvAfterResolution(convo);
+      const switchCard = ev.find((e) => e.id === 'ev-identity-switch')!;
+      expect(switchCard.facts).toMatchObject({ first_id: 'elena-park', later_id: 'robert-miller' });
+      expect(switchCard.status).toBe('FLAG'); // nobody has restated Robert Miller (C) yet
+    });
+
+    it('does not resolve by reclaiming an EARLIER identity in the chain (B) -- that reopens as a further switch, C -> B', () => {
+      const convo = [
+        u('c1', 'caller', 'This is Dana Whitfield. Wire $84,500 to Meridian Supply.', 1000), // A
+        u('c2', 'caller', 'Actually, this is Elena Park speaking, I will take it from here.', 5000), // A -> B
+        u('c3', 'caller', 'Actually, this is Robert Miller now, I will take it from here myself.', 9000), // B -> C
+        u('c4', 'caller', 'No wait, this is Elena Park again.', 13000), // C -> B (a THIRD, distinct switch)
+      ];
+      const ev = transcriptEvAfterResolution(convo);
+      const switchCard = ev.find((e) => e.id === 'ev-identity-switch')!;
+      // Restating B does not resolve the B -> C switch; it is itself a new, later switch
+      // (C -> B), and the card always tracks the LATEST pair -- proving resolution can
+      // never be satisfied by restating the identity that was abandoned two hops back.
+      expect(switchCard.facts).toMatchObject({ first_id: 'robert-miller', later_id: 'elena-park' });
+      expect(switchCard.status).toBe('FLAG');
+    });
+
+    it('resolves (status INFO) once C is restated and the request is unchanged since the latest switch', () => {
+      const convo = [
+        u('c1', 'caller', 'This is Dana Whitfield. Wire $84,500 to Meridian Supply.', 1000), // A
+        u('c2', 'caller', 'Actually, this is Elena Park speaking, I will take it from here.', 5000), // A -> B
+        u('c3', 'caller', 'Actually, this is Robert Miller now, I will take it from here myself.', 9000), // B -> C
+        u('c4', 'caller', 'This is Robert Miller. Send the $84,500 to Meridian Supply now.', 13000), // restates C
+      ];
+      const ev = transcriptEvAfterResolution(convo);
+      const switchCard = ev.find((e) => e.id === 'ev-identity-switch')!;
+      expect(switchCard.facts).toMatchObject({ first_id: 'elena-park', later_id: 'robert-miller' });
+      expect(switchCard.status).toBe('INFO');
+      // Resolution never erases the switch: facts and quotes (LAW 4) are untouched, and they
+      // name the LATEST pair (Elena, Robert Miller) -- never the original claimant (Dana).
+      expect(switchCard.quotes).toEqual([
+        { utterance_id: 'c2', text: 'Elena Park' },
+        { utterance_id: 'c3', text: 'Robert Miller' },
+      ]);
+    });
+
+    it('stays FLAG when the request changes to a different, still-unconfirmed value after the latest switch', () => {
+      const convo = [
+        u('c1', 'caller', 'This is Dana Whitfield. Wire $84,500 to Meridian Supply.', 1000),
+        u('c2', 'caller', 'Actually, this is Elena Park speaking, I will take it from here.', 5000),
+        u('c3', 'caller', 'Actually, this is Robert Miller now, I will take it from here myself.', 9000),
+        u('c4', 'caller', 'This is Robert Miller. Make it $200,000 to Northgate Partners instead.', 13000),
+      ];
+      const ev = transcriptEvAfterResolution(convo);
+      expect(ev.find((e) => e.id === 'ev-identity-switch')!.status).toBe('FLAG');
+    });
+  });
+});
+
+// Follow-up (option B review, commit b56be9e): the ledger already records EACH distinct
+// identity switch as its own CONTRADICTED claim (buildLedger compares against the CURRENT
+// claim, never just the first one), so buildConsistencyEvidence -- unchanged by this task --
+// already builds one FAIL card per switch. This test makes that existing behavior explicit
+// for a double switch (chain A -> B -> C), since it's exactly the "contradiction weight
+// counts each switch" guarantee the follow-up asked to be proven or documented.
+describe('buildConsistencyEvidence -- a double identity switch counts each switch toward the tally', () => {
+  it('produces one FAIL consistency_flag card per contradicted identity claim in the chain, capped at 2', () => {
+    const convo = [
+      u('c1', 'caller', 'This is Dana Whitfield. Wire $84,500 to Meridian Supply.', 1000),
+      u('c2', 'caller', 'Actually, this is Elena Park speaking, I will take it from here.', 5000), // A -> B
+      u('c3', 'caller', 'Actually, this is Robert Miller now, I will take it from here myself.', 9000), // B -> C
+    ];
+    const { claims, request_version } = buildLedger(convo, [], MERIDIAN);
+    const identityContradictions = claims.filter((c) => c.field === 'identity' && c.kind === 'CONTRADICTED');
+    expect(identityContradictions).toHaveLength(2); // Dana->Elena, Elena->Miller
+
+    const consistencyEv = buildConsistencyEvidence(claims, request_version);
+    const identityCards = consistencyEv.filter((e) => e.kind === 'consistency_flag' && e.id.startsWith('ev-consistency-identity'));
+    expect(identityCards).toHaveLength(2);
+    expect(identityCards.every((e) => e.status === 'FAIL')).toBe(true);
   });
 });
