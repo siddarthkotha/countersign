@@ -92,7 +92,12 @@
           },
           {
             "if_agent_says_any": [
-              "account"
+              "restate the account",
+              "restate the last four",
+              "last four digits",
+              "give me the account",
+              "account number",
+              "digits of the account"
             ],
             "say": "The account ends four four seven one."
           },
@@ -144,7 +149,12 @@
           },
           {
             "if_agent_says_any": [
-              "account"
+              "restate the account",
+              "restate the last four",
+              "last four digits",
+              "give me the account",
+              "account number",
+              "digits of the account"
             ],
             "say": "The account ends four four seven one."
           },
@@ -196,7 +206,126 @@
           },
           {
             "if_agent_says_any": [
-              "account"
+              "restate the account",
+              "restate the last four",
+              "last four digits",
+              "give me the account",
+              "account number",
+              "digits of the account"
+            ],
+            "say": "The account ends four four seven one."
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
+    },
+    {
+      "id": "c9",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars."
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday."
+          },
+          {
+            "if_agent_says_any": [
+              "restate the account",
+              "restate the last four",
+              "last four digits",
+              "give me the account",
+              "account number",
+              "digits of the account"
+            ],
+            "say": "The account ends four four seven one."
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
+    },
+    {
+      "id": "c10",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars."
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday."
+          },
+          {
+            "if_agent_says_any": [
+              "restate the account",
+              "restate the last four",
+              "last four digits",
+              "give me the account",
+              "account number",
+              "digits of the account"
             ],
             "say": "The account ends four four seven one."
           },

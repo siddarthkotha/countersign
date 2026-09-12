@@ -100,7 +100,12 @@
           },
           {
             "if_agent_says_any": [
-              "account"
+              "restate the account",
+              "restate the last four",
+              "last four digits",
+              "give me the account",
+              "account number",
+              "digits of the account"
             ],
             "say": "The account ends four four seven one."
           },
@@ -152,7 +157,12 @@
           },
           {
             "if_agent_says_any": [
-              "account"
+              "restate the account",
+              "restate the last four",
+              "last four digits",
+              "give me the account",
+              "account number",
+              "digits of the account"
             ],
             "say": "The account ends four four seven one."
           },

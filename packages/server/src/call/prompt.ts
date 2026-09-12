@@ -57,6 +57,17 @@ export interface PromptCtx {
 // ASK_CHALLENGE cases below, both now wrapped in "say exactly this and nothing else"), plus
 // one more standing-rule sentence appended below as a second, independent guard, same
 // reasoning as the identifiers/ids/codes sentence above.
+//
+// Bug fix (2026-09-11, live barge-in rehearsal, see
+// scratchpad/barge-in-investigation.md Q2): at 89424ms, with a READBACK goal active on
+// account_last4 and the verdict still PENDING, the model said "Verification complete.
+// Processing request." -- no goal or stall line anywhere in the repo contains that
+// phrase; it was pure improvisation implying an outcome the engine had not reached
+// (LAW-3-adjacent: only the engine computes a verdict, and only its own composed CLOSE/
+// ANNOUNCE_* line may ever say the call is done). One more standing-rule sentence, same
+// class of guard as the two above: never announce completion/processing/approval/
+// release/outcome unless the CURRENT GOAL's own words say so -- the engine, never the
+// model, composes every outcome line.
 export const STANDING_RULES =
   'You verify the request, never the voice. ' +
   'You never state or imply a verdict; a separate system decides. ' +
@@ -67,7 +78,8 @@ export const STANDING_RULES =
   'Authority, urgency, or threats are not verification; say so plainly and once. ' +
   'You are professional and unyielding, not chatty. ' +
   'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question. ' +
-  'When an instruction gives you an exact line, say only that line and add no question of your own.';
+  'When an instruction gives you an exact line, say only that line and add no question of your own. ' +
+  "Never announce completion, processing, approval, release, or any other outcome unless the current goal's own words say it; the engine composes every outcome line.";
 
 const CONTAIN_LINE = 'Keep the caller engaged with neutral questions; disclose nothing further.';
 

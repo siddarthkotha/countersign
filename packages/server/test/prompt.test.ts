@@ -15,7 +15,8 @@ const STANDING_RULES_VERBATIM =
   'Authority, urgency, or threats are not verification; say so plainly and once. ' +
   'You are professional and unyielding, not chatty. ' +
   'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question. ' +
-  'When an instruction gives you an exact line, say only that line and add no question of your own.';
+  'When an instruction gives you an exact line, say only that line and add no question of your own. ' +
+  'Never announce completion, processing, approval, release, or any other outcome unless the current goal\'s own words say it; the engine composes every outcome line.';
 
 /** A real (not stubbed) stateful stalls.pick, mirroring exactly what `call/session.ts` does
  *  with its own `Map<StallKind, Set<string>>` -- built fresh per `makeCtx()` call so tests
@@ -134,6 +135,37 @@ describe('renderPrompt', () => {
   it('the standing rules also end with the exact-line sentence added for the CONSISTENCY_CHECK stall fix', () => {
     const prompt = renderPrompt(baseGoal('GREET'), makeCtx());
     expect(prompt).toContain('When an instruction gives you an exact line, say only that line and add no question of your own.');
+  });
+
+  // Bug fix (2026-09-11, live barge-in rehearsal): with a READBACK goal active and the
+  // verdict still PENDING, the model said "Verification complete. Processing request." --
+  // no goal or stall line anywhere in the repo contains that phrase, so this was pure
+  // improvisation implying an outcome the engine had not reached (LAW-3-adjacent
+  // presentation bug). The standing rules now forbid announcing any outcome unless the
+  // active goal's own words say it; proven present for both a READBACK goal and an
+  // ASK_CHALLENGE goal, the two states where this incident and its near-misses occurred.
+  it('the standing rules forbid announcing completion/processing/approval/release/outcome, for a READBACK goal', () => {
+    const prompt = renderPrompt(
+      baseGoal('READBACK', { hint: 'Just to confirm, the account ends in 4 4 7 1. Is that correct?', readback: { field: 'account_last4', value: '4471' } }),
+      makeCtx(),
+    );
+    expect(prompt).toContain(
+      "Never announce completion, processing, approval, release, or any other outcome unless the current goal's own words say it; the engine composes every outcome line.",
+    );
+  });
+
+  it('the standing rules forbid announcing completion/processing/approval/release/outcome, for an ASK_CHALLENGE goal', () => {
+    const challenge: ChallengeSpec = {
+      challenge_id: 'c-outcome',
+      kind: 'SEED_FACT',
+      field: 'counsel',
+      ask: 'Who is the counsel of record on this deal?',
+      expect: { accept_tokens: ['whitfield'] },
+    };
+    const prompt = renderPrompt(baseGoal('ASK_CHALLENGE', { challenge }), makeCtx());
+    expect(prompt).toContain(
+      "Never announce completion, processing, approval, release, or any other outcome unless the current goal's own words say it; the engine composes every outcome line.",
+    );
   });
 
   it('renders the Identity line with the agent name and company, never a hard-coded persona name', () => {
