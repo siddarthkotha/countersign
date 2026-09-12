@@ -100,12 +100,21 @@
           },
           {
             "if_agent_says_any": [
-              "restate the account",
-              "restate the last four",
-              "last four digits",
-              "give me the account",
-              "account number",
-              "digits of the account"
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "just to confirm"
             ],
             "say": "The account ends four four seven one."
           },
@@ -157,12 +166,21 @@
           },
           {
             "if_agent_says_any": [
-              "restate the account",
-              "restate the last four",
-              "last four digits",
-              "give me the account",
-              "account number",
-              "digits of the account"
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "just to confirm"
             ],
             "say": "The account ends four four seven one."
           },

@@ -22,6 +22,46 @@ describe('matchRespondRules', () => {
     expect(matchRespondRules(rules, 'Everything checks out.')).toBeNull();
     expect(matchRespondRules(rules, null)).toBeNull();
   });
+
+  // Fix (2026-09-11, coordinator review of the barge-in-interrupt.json fix): a bare phrase
+  // list on `if_agent_says_any` (e.g. ["restate the account", "last four digits", ...]) is
+  // not robust to the live model's paraphrase of an ASK_CHALLENGE question -- it can miss a
+  // real restate question ("What account did you mention earlier?") while a plain topic word
+  // ("account") wrongly matches the engine's own verbatim readback confirmation ("Just to
+  // confirm, the account ends in 4 4 7 1. Is that correct?"). `and_agent_says_any` (an
+  // additional required OR-group) and `unless_agent_says_any` (an exclusion OR-group) fix
+  // both problems together without a regex engine.
+  describe('and_agent_says_any / unless_agent_says_any (2026-09-11 paraphrase-robust matcher)', () => {
+    const accountRestateRule = {
+      if_agent_says_any: ['account', 'last four', 'digits'],
+      and_agent_says_any: ['?', 'can you', 'could you', 'what', 'which', 'please restate', 'please state'],
+      unless_agent_says_any: ['just to confirm'],
+      say: 'The account ends four four seven one.',
+    };
+
+    it('matches a paraphrased restate question the old fixed phrase list would have missed', () => {
+      expect(matchRespondRules([accountRestateRule], 'What account did you mention earlier?')).toBe('The account ends four four seven one.');
+      expect(matchRespondRules([accountRestateRule], 'Could you give me the account once more?')).toBe('The account ends four four seven one.');
+    });
+
+    it('does NOT match the engine\'s own verbatim readback confirmation, even though it contains "account"', () => {
+      expect(matchRespondRules([accountRestateRule], 'Just to confirm, the account ends in 4 4 7 1. Is that correct?')).toBeNull();
+    });
+
+    it('does not match the topic word alone with no question shape (and_agent_says_any unmet)', () => {
+      expect(matchRespondRules([accountRestateRule], 'The account is now on file.')).toBeNull();
+    });
+
+    it('and_agent_says_any, when absent, is no constraint (existing rules keep their old behavior)', () => {
+      const rule = { if_agent_says_any: ['Northgate'], say: 'x' };
+      expect(matchRespondRules([rule], 'Northgate Partners, confirmed.')).toBe('x');
+    });
+
+    it('unless_agent_says_any, when absent, is no constraint (existing rules keep their old behavior)', () => {
+      const rule = { if_agent_says_any: ['Northgate'], say: 'x' };
+      expect(matchRespondRules([rule], 'Northgate Partners, confirmed.')).toBe('x');
+    });
+  });
 });
 
 const DANA_TRUTH: ScenarioTruth = {

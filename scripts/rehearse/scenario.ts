@@ -5,7 +5,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Scenario, ScenarioRespond, ScenarioTruth, ScenarioTurn } from './types.js';
+import type { RespondRule, Scenario, ScenarioRespond, ScenarioTruth, ScenarioTurn } from './types.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const SCENARIOS_DIR = join(HERE, 'scenarios');
@@ -18,7 +18,20 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new ScenarioValidationError(msg);
 }
 
-function validateRespondRule(raw: unknown, turnLabel: string, index: number): { if_agent_says_any: string[]; say: string } {
+/** Validates one optional OR-group field (`and_agent_says_any`/`unless_agent_says_any`):
+ *  when present, must be a non-empty array of non-empty strings, same shape as
+ *  `if_agent_says_any` -- both are optional AND-onto-groups (see types.ts's RespondRule
+ *  doc comment), absent entirely on a rule that doesn't need them. */
+function validateOptionalPhraseGroup(r: Record<string, unknown>, field: 'and_agent_says_any' | 'unless_agent_says_any', turnLabel: string, index: number): string[] | undefined {
+  if (r[field] === undefined) return undefined;
+  assert(
+    Array.isArray(r[field]) && (r[field] as unknown[]).length > 0 && (r[field] as unknown[]).every((s) => typeof s === 'string' && s.length > 0),
+    `${turnLabel}.respond.rules[${index}].${field} must be a non-empty array of non-empty strings when present`,
+  );
+  return r[field] as string[];
+}
+
+function validateRespondRule(raw: unknown, turnLabel: string, index: number): RespondRule {
   assert(raw && typeof raw === 'object', `${turnLabel}.respond.rules[${index}] must be an object`);
   const r = raw as Record<string, unknown>;
   assert(
@@ -26,7 +39,12 @@ function validateRespondRule(raw: unknown, turnLabel: string, index: number): { 
     `${turnLabel}.respond.rules[${index}].if_agent_says_any must be a non-empty array of non-empty strings`,
   );
   assert(typeof r.say === 'string' && r.say.trim().length > 0, `${turnLabel}.respond.rules[${index}].say must be a non-empty string`);
-  return { if_agent_says_any: r.if_agent_says_any as string[], say: r.say as string };
+  const rule: RespondRule = { if_agent_says_any: r.if_agent_says_any as string[], say: r.say as string };
+  const andGroup = validateOptionalPhraseGroup(r, 'and_agent_says_any', turnLabel, index);
+  if (andGroup) rule.and_agent_says_any = andGroup;
+  const unlessGroup = validateOptionalPhraseGroup(r, 'unless_agent_says_any', turnLabel, index);
+  if (unlessGroup) rule.unless_agent_says_any = unlessGroup;
+  return rule;
 }
 
 function validateRespond(raw: unknown, turnLabel: string): ScenarioRespond {

@@ -251,6 +251,91 @@ describe('scenario loading (no network)', () => {
     ).toThrow(ScenarioValidationError);
   });
 
+  // Fix (2026-09-11, coordinator review of the barge-in-interrupt.json fix): the minimal
+  // AND/NOT matcher groups added alongside `if_agent_says_any` (see types.ts's RespondRule
+  // doc comment) so a rule can require a question shape and exclude the engine's own
+  // verbatim readback opener, without a regex engine.
+  it('accepts a respond rule with and_agent_says_any and unless_agent_says_any', () => {
+    const s = validateScenario(
+      {
+        name: 'x',
+        title: 'x',
+        description: '',
+        source: '',
+        turns: [
+          {
+            id: 'c2',
+            text: "Yes, that's right.",
+            respond: {
+              rules: [
+                {
+                  if_agent_says_any: ['account', 'last four', 'digits'],
+                  and_agent_says_any: ['?', 'can you', 'what'],
+                  unless_agent_says_any: ['just to confirm'],
+                  say: 'The account ends four four seven one.',
+                },
+              ],
+            },
+          },
+        ],
+        expected: { verdict: 'STAGE', max_wall_ms: 1000 },
+      },
+      'inline',
+    );
+    const rule = s.turns[0]!.respond?.rules[0]!;
+    expect(rule.and_agent_says_any).toEqual(['?', 'can you', 'what']);
+    expect(rule.unless_agent_says_any).toEqual(['just to confirm']);
+  });
+
+  it('rejects an empty and_agent_says_any array when the field is present', () => {
+    expect(() =>
+      validateScenario(
+        {
+          name: 'x',
+          title: 'x',
+          description: '',
+          source: '',
+          turns: [{ id: 'c2', text: 'fallback', respond: { rules: [{ if_agent_says_any: ['account'], and_agent_says_any: [], say: 'x' }] } }],
+          expected: { verdict: 'STAGE', max_wall_ms: 1000 },
+        },
+        'inline',
+      ),
+    ).toThrow(ScenarioValidationError);
+  });
+
+  it('rejects an empty unless_agent_says_any array when the field is present', () => {
+    expect(() =>
+      validateScenario(
+        {
+          name: 'x',
+          title: 'x',
+          description: '',
+          source: '',
+          turns: [{ id: 'c2', text: 'fallback', respond: { rules: [{ if_agent_says_any: ['account'], unless_agent_says_any: [], say: 'x' }] } }],
+          expected: { verdict: 'STAGE', max_wall_ms: 1000 },
+        },
+        'inline',
+      ),
+    ).toThrow(ScenarioValidationError);
+  });
+
+  it('a respond rule with neither optional group still validates exactly as before (backward compatible)', () => {
+    const s = validateScenario(
+      {
+        name: 'x',
+        title: 'x',
+        description: '',
+        source: '',
+        turns: [{ id: 'c2', text: 'fallback', respond: { rules: [{ if_agent_says_any: ['Northgate'], say: 'x' }] } }],
+        expected: { verdict: 'STAGE', max_wall_ms: 1000 },
+      },
+      'inline',
+    );
+    const rule = s.turns[0]!.respond?.rules[0]!;
+    expect(rule.and_agent_says_any).toBeUndefined();
+    expect(rule.unless_agent_says_any).toBeUndefined();
+  });
+
   it('accepts and preserves a "persona" field', () => {
     const s = validateScenario(
       {

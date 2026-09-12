@@ -34,13 +34,27 @@ import type { ScenarioTruth, ScenarioTurn, RespondRule } from './types.js';
 
 // ---------- layer 1: scenario-authored rules ----------
 
-/** First rule whose `if_agent_says_any` list has a case-insensitive substring hit against
- *  the agent's last line wins; null if no rule matches (or there is no agent line yet). */
+/** True if ANY phrase in `group` is a case-insensitive substring of `lower` (already
+ *  lower-cased). An undefined group is "no constraint" -- always true. */
+function anyPhraseHits(group: string[] | undefined, lower: string): boolean {
+  if (group === undefined) return true;
+  return group.some((phrase) => lower.includes(phrase.toLowerCase()));
+}
+
+/** First rule that matches ALL of: at least one `if_agent_says_any` hit; at least one
+ *  `and_agent_says_any` hit if that group is present; and NO `unless_agent_says_any` hit if
+ *  that group is present -- wins. null if no rule matches (or there is no agent line yet).
+ *  See types.ts's RespondRule doc comment (fix 2026-09-11) for why the two extra groups
+ *  exist: a plain phrase list alone is not robust to the live model's paraphrase of
+ *  ASK_CHALLENGE questions. */
 export function matchRespondRules(rules: RespondRule[], lastAgentText: string | null): string | null {
   if (lastAgentText === null) return null;
   const lower = lastAgentText.toLowerCase();
   for (const rule of rules) {
-    if (rule.if_agent_says_any.some((phrase) => lower.includes(phrase.toLowerCase()))) return rule.say;
+    if (!anyPhraseHits(rule.if_agent_says_any, lower)) continue;
+    if (!anyPhraseHits(rule.and_agent_says_any, lower)) continue;
+    if (rule.unless_agent_says_any !== undefined && anyPhraseHits(rule.unless_agent_says_any, lower)) continue;
+    return rule.say;
   }
   return null;
 }

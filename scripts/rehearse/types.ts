@@ -8,9 +8,29 @@ import type { Verdict } from '@countersign/engine';
 
 /** One rule a reactive turn can carry: if the agent's LAST transcript line contains any of
  *  `if_agent_says_any` (case-insensitive substring match), the caller says `say` instead of
- *  its fixed line. Evaluated in list order, first match wins -- see truthEngine.ts. */
+ *  its fixed line. Evaluated in list order, first match wins -- see truthEngine.ts.
+ *
+ *  Fix (2026-09-11, coordinator review of the barge-in-interrupt.json fix): a plain
+ *  `if_agent_says_any` phrase list is not robust to the live model's paraphrase of
+ *  ASK_CHALLENGE questions (prompt.ts's ASK_CHALLENGE case says "in your own words" --
+ *  `goal.challenge.speak` is not wired live), so a hand-picked phrase list like ["restate
+ *  the account", "last four digits", ...] can miss a real paraphrase such as "What account
+ *  did you mention earlier?". Two optional additional match groups, both AND'd onto
+ *  `if_agent_says_any` (still case-insensitive substring, still OR within each group),
+ *  let a rule express "topic AND shape AND NOT this other exact line" without a regex
+ *  engine:
+ *   - `and_agent_says_any`: at least one of these must ALSO be present (e.g. a
+ *     question-shape indicator: "?", "can you", "what", ...).
+ *   - `unless_agent_says_any`: if ANY of these IS present, the rule does NOT fire, even if
+ *     the groups above matched (e.g. the engine's own verbatim readback opener "Just to
+ *     confirm", which is always engine-composed and never paraphrased -- see
+ *     packages/engine/src/fsm.ts's `readbackSentence` -- so excluding it here is safe).
+ *  Both are optional and default to "no constraint" (absent = always satisfied), so every
+ *  existing scenario using only `if_agent_says_any` keeps its exact old behavior. */
 export interface RespondRule {
   if_agent_says_any: string[];
+  and_agent_says_any?: string[];
+  unless_agent_says_any?: string[];
   say: string;
 }
 

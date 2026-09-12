@@ -298,6 +298,22 @@ describe('renderPrompt', () => {
     expect(say).not.toContain('?');
   });
 
+  // Minor (coordinator review, 2026-09-11): proves the new "never announce an outcome"
+  // standing rule and CLOSE's own pre-existing "say exactly this" verbatim wrapper
+  // co-exist without conflict on the SAME rendered prompt -- CLOSE is exactly the one goal
+  // that DOES get to state an outcome, because its hint is itself the engine-composed
+  // outcome line the new standing rule carves out ("unless the current goal's own words
+  // say it").
+  it('the new "never announce an outcome" standing rule and CLOSE\'s verbatim wrapper both render on the same CLOSE prompt', () => {
+    const say = 'Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.';
+    const prompt = renderPrompt(baseGoal('CLOSE', { hint: say }), makeCtx());
+    expect(prompt).toContain(
+      "Never announce completion, processing, approval, release, or any other outcome unless the current goal's own words say it; the engine composes every outcome line.",
+    );
+    const nowSection = prompt.split('\n\n').at(-1);
+    expect(nowSection).toBe(`Say exactly this and nothing else: "${say}"`);
+  });
+
   // Bug fix (2026-09-11, live identity-switch rehearsal, see
   // scratchpad/identity-switch-investigation.md section 3): RE_ELICIT_AFTER_SWITCH had no
   // dedicated case here -- it fell through to `default` and was relayed as a loose prose
