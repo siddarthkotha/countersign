@@ -69,7 +69,7 @@ BEFORE the submission form is filed. Every box below gets checked, with evidence
       irreversible actions." It matters for the Team's Choice vote window (final 24h).
       Needs founder: edits the lablab TEAM IDEA field and the GitHub repo description,
       both outside this worktree.
-- [ ] **Submission form:** repo URL + demo URL + video + deck + cover, per BRIEF §7
+- [ ] **Submission form:** repo URL + demo URL + video + deck + cover, per BRIEF §7 (cover chosen 2026-09-12: docs/design/cover/cover-2-final.png)
       checklist. Target Sep 27–28 (deadline Sep 30, 10:00 AM Central — a MORNING deadline).
       Needs founder: the lablab submission form itself; explicitly out of scope for this lane.
 

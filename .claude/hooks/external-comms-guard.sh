@@ -1,5 +1,5 @@
 #!/bin/bash
-# external-comms-guard.sh — Countersign adaptation (2026-09-01) of ShadePath's SHA-51 rule, per BRIEF §15:
+# external-comms-guard.sh — Countersign adaptation (2026-09-01) of an earlier project's SHA-51 rule, per BRIEF §15:
 # "nothing published or linked without his word." PreToolUse on outbound-capable tools (Artifact publish,
 # email send/reply/forward/draft, social posts). On autopilot: DENY (nothing leaves the building unattended).
 # Off autopilot: ASK — the founder sees exactly what is about to go out. SendUserFile (to the founder himself)

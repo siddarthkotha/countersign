@@ -110,7 +110,7 @@ not swap ideas casually.
 - Founder communication: plain English, one decision at a time with a concrete
   recommendation, questions batched up front.
 
-## Session open / close (ported from ShadePath 2026-09-02; only the parts that apply here)
+## Session open / close (ported from an earlier project 2026-09-02; only the parts that apply here)
 **"open countersign"** → read docs/STATE.md, .claude/backlog.json, the tail of
 docs/AUTOPILOT_LOG.md, the ledgers under .superpowers/sdd; `git status -sb`; curl the live
 /health; run the watchdog (it fires on the prompt); print "Ready. What are we working on?"

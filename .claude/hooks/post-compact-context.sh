@@ -1,5 +1,5 @@
 #!/bin/bash
-# post-compact-context.sh — Countersign adaptation (2026-09-01) of ShadePath's S165 re-grounding injector.
+# post-compact-context.sh — Countersign adaptation (2026-09-01) of an earlier project's S165 re-grounding injector.
 cat <<'JSON'
 {
   "hookSpecificOutput": {

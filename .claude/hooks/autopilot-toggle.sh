@@ -1,5 +1,5 @@
 #!/bin/bash
-# autopilot-toggle.sh — ported from ShadePath (S165) to Countersign 2026-09-01 (founder ask 10:44 PM CDT).
+# autopilot-toggle.sh — ported from an earlier project (S165) to Countersign 2026-09-01 (founder ask 10:44 PM CDT).
 # UserPromptSubmit hook: the founder types "autopilot start" / "autopilot stop" (or "start/stop
 # autopilot") as a standalone clause and this flips the flag file autopilot-guard.sh reads on every
 # tool call. Mechanical; no tool calls.

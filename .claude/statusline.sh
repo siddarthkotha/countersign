@@ -1,5 +1,5 @@
 #!/bin/bash
-# statusline.sh — Countersign orchestration status line (mirrors ShadePath's founder spec v3,
+# statusline.sh — Countersign orchestration status line (mirrors an earlier project's founder spec v3,
 # founder ask 2026-09-01 "i want to see similar structure here"):
 #   dir · branch · MAIN model(effort) out-tokens │ deleg by tier │ Mac/git │ repos: <projects engaged> · gh N │ Ctx bar
 # Reads the standard statusLine stdin payload + the session usage ledger written by

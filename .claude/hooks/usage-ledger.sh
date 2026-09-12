@@ -1,5 +1,5 @@
 #!/bin/bash
-# usage-ledger.sh — per-session delegation + rig ledger (ShadePath pattern, founder ask 2026-07-22;
+# usage-ledger.sh — per-session delegation + rig ledger (an earlier project pattern, founder ask 2026-07-22;
 # brought to Countersign 2026-09-01). PostToolUse on Agent|Task|Workflow: count agents by pinned
 # model tier (+ tokens when the result carries them). PostToolUse on Bash: count Mac runs vs git
 # vs gh, and attribute the GitHub PROJECT engaged (vitest, vite, tsx, typescript, playwright,

@@ -10,7 +10,7 @@
 // covers Call; this file is Replay's half of that same coverage (Replay had no dedicated
 // test file before this round).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { evaluate, MERIDIAN } from '@countersign/engine';
 import type { CorpusFile, EngineInput, ScreenState } from '@countersign/engine';
@@ -165,9 +165,10 @@ describe('Replay', () => {
     });
     render(<Replay />);
 
-    // De-flake (2026-09-09): under full-suite load the blocked-start effect can land after
-    // findBy's default 1 s window; the wait is a "let it settle" wait, not a timing claim.
-    expect(await screen.findByLabelText('Recording', {}, { timeout: 4000 })).toHaveValue(RECORDING);
+    // De-flake (2026-09-12, PROVEN under thread load 2 of 5 runs): the select exists from the
+    // first render, so findByLabelText resolved before the mount effect's setSelected ran and
+    // the synchronous toHaveValue raced it. Poll for the VALUE itself instead of the element.
+    await waitFor(() => expect(screen.getByLabelText('Recording')).toHaveValue(RECORDING), { timeout: 4000 });
     expect(await screen.findByRole('button', { name: 'Play' }, { timeout: 4000 })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();

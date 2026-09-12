@@ -1,5 +1,5 @@
 #!/bin/bash
-# autopilot-guard.sh — ported from ShadePath (S165, Rails 0/1/2) to Countersign 2026-09-01.
+# autopilot-guard.sh — ported from an earlier project (S165, Rails 0/1/2) to Countersign 2026-09-01.
 # PreToolUse on ALL tools.
 #  Rail 0: a mid-turn "autopilot stop" (which never fires UserPromptSubmit) is honored here.
 #  Rail 1: outward/durable actions (push, merge, tag, PR, release, publish, deploy): DENY on

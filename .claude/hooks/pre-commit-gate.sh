@@ -1,5 +1,5 @@
 #!/bin/bash
-# pre-commit-gate.sh — ported from ShadePath pre-commit-review-gate.sh (S141/S164/S168) to Countersign
+# pre-commit-gate.sh — ported from an earlier project pre-commit-review-gate.sh (S141/S164/S168) to Countersign
 # 2026-09-01, adapted for a solo repo that commits on main. PreToolUse on Bash `git commit`.
 # Gates, in order:
 #   0. SECRETS: a staged diff that adds an API key / token / .env content is BLOCKED outright

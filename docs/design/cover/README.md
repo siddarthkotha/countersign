@@ -91,3 +91,7 @@ longer possible once the columns carry real, readable rows. The fraud variant
 (`cover-2-final.html`) is the stronger single cover for the same reason candidate
 1 was flagged as the more dramatic frame; the staged variant is the safer default
 for a judge's very first impression, per the recommendation above.
+
+## Founder pick (2026-09-12, 9:00 AM CDT)
+
+Submission cover image: `cover-2-final.png` (the fraud call, WIRE FROZEN). The staged variant stays in this folder as the README hero if wanted.
