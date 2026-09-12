@@ -12,7 +12,7 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { classifyTarget, computeRunLatencyMetrics, percentile, type RunLatencyMetrics, type TargetKind } from './latencyMath.js';
+import { classifyTarget, computeRunLatencyMetrics, parsePerTurnGapsFromMd, percentile, type ParsedPerTurnGaps, type RunLatencyMetrics, type TargetKind } from './latencyMath.js';
 import type { RehearseDiagnosticBundle } from './types.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -26,6 +26,12 @@ export interface LoadedRun {
   scenario: string;
   date_iso: string;
   metrics: RunLatencyMetrics;
+  /** Parsed from the paired .md report's own "Per-turn gaps" table -- the harness's wall
+   *  clock, not the server diagnostics event stream. See parsePerTurnGapsFromMd's doc
+   *  comment (review finding, 2026-09-11) for why this is the perceived-latency number and
+   *  `metrics.turn_response_gaps_ms` is not. Zeroed out (never null) when the .md is missing
+   *  or has no per-turn table -- reads as n=0, UNKNOWN in every aggregate. */
+  perceived: ParsedPerTurnGaps;
 }
 
 /** Pulls "Target: <url>" and "Scenario: `<name>`" out of the paired .md report -- the same
@@ -82,6 +88,7 @@ export async function loadRuns(reportsDir: string): Promise<LoadedRun[]> {
       scenario,
       date_iso,
       metrics: computeRunLatencyMetrics(bundle),
+      perceived: parsePerTurnGapsFromMd(mdText ?? ''),
     });
   }
   return runs;
@@ -113,10 +120,12 @@ function renderPctTable(rows: PctRow[]): string {
   return lines.join('\n');
 }
 
-/** Groups a flat metric-picking function's non-null values by every (target, scenario) pair
+/** Groups a flat run-picking function's non-null values by every (target, scenario) pair
  *  present, plus one "all scenarios" row per target and one grand-total row. `label` names
- *  the group in the rendered table. */
-function groupedPctRows(runs: LoadedRun[], pick: (m: RunLatencyMetrics) => number | number[] | null): PctRow[] {
+ *  the group in the rendered table. `pick` takes the whole `LoadedRun` (not just its
+ *  `metrics`) so this also covers the perceived-latency column, which lives on
+ *  `run.perceived`, parsed from the paired .md rather than from `metrics`. */
+function groupedPctRows(runs: LoadedRun[], pick: (r: LoadedRun) => number | number[] | null): PctRow[] {
   const flatten = (v: number | number[] | null): number[] => (v === null ? [] : Array.isArray(v) ? v : [v]);
 
   const rows: PctRow[] = [];
@@ -126,13 +135,13 @@ function groupedPctRows(runs: LoadedRun[], pick: (m: RunLatencyMetrics) => numbe
     if (targetRuns.length === 0) continue;
     const scenarios = [...new Set(targetRuns.map((r) => r.scenario))].sort();
     for (const scenario of scenarios) {
-      const values = targetRuns.filter((r) => r.scenario === scenario).flatMap((r) => flatten(pick(r.metrics)));
+      const values = targetRuns.filter((r) => r.scenario === scenario).flatMap((r) => flatten(pick(r)));
       rows.push(pctRow(`${target} / ${scenario}`, values));
     }
-    const allValues = targetRuns.flatMap((r) => flatten(pick(r.metrics)));
+    const allValues = targetRuns.flatMap((r) => flatten(pick(r)));
     rows.push(pctRow(`${target} / all scenarios`, allValues));
   }
-  const grandTotal = runs.flatMap((r) => flatten(pick(r.metrics)));
+  const grandTotal = runs.flatMap((r) => flatten(pick(r)));
   rows.push(pctRow('all targets / all scenarios', grandTotal));
   return rows;
 }
@@ -179,13 +188,13 @@ function greetingLabel(greeting: boolean | null): string {
 
 function renderPerRunTable(runs: LoadedRun[]): string {
   const lines = [
-    '| file | date | target | scenario | connect->ready | ready->first-audio | label | connect->verdict | verdict->end | turns w/ reply |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| file | date | target | scenario | connect->ready | ready->first-audio | label | connect->verdict | verdict->end | relay-gap turns | perceived turns | perceived n/a |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
   ];
   for (const r of runs) {
     const label = greetingLabel(r.metrics.greeting);
     lines.push(
-      `| ${r.source_file} | ${r.date_iso} | ${r.target_kind} | ${r.scenario} | ${fmt(r.metrics.connect_to_ready_ms)} | ${fmt(r.metrics.ready_to_first_audio_ms)} | ${label} | ${fmt(r.metrics.connect_to_verdict_ms)} | ${fmt(r.metrics.verdict_to_end_ms)} | ${r.metrics.turn_response_gaps_ms.length} |`,
+      `| ${r.source_file} | ${r.date_iso} | ${r.target_kind} | ${r.scenario} | ${fmt(r.metrics.connect_to_ready_ms)} | ${fmt(r.metrics.ready_to_first_audio_ms)} | ${label} | ${fmt(r.metrics.connect_to_verdict_ms)} | ${fmt(r.metrics.verdict_to_end_ms)} | ${r.metrics.turn_response_gaps_ms.length} | ${r.perceived.gaps_ms.length} | ${r.perceived.na_count} |`,
     );
   }
   return lines.join('\n');
@@ -217,11 +226,25 @@ export function renderLatencyDoc(runs: LoadedRun[], skippedCount: number): strin
   }
   lines.push('');
 
+  const allPerceivedGaps = runs.flatMap((r) => r.perceived.gaps_ms);
+  const allPerceivedNa = runs.reduce((sum, r) => sum + r.perceived.na_count, 0);
+  const headlineP50 = fmt(percentile(allPerceivedGaps, 0.5));
+  const headlineP95 = fmt(percentile(allPerceivedGaps, 0.95));
+  lines.push(
+    `**Perceived response latency (headline number -- the gap a judge actually feels, ESTIMATE, harness wall clock, all runs/all targets): p50=${headlineP50}, p95=${headlineP95} (n=${allPerceivedGaps.length} turns; ${allPerceivedNa} turn(s) excluded as n/a -- see section 3b for the exact method and the per-target/per-scenario breakdown).**`,
+  );
+  lines.push('');
+
   lines.push('## Method, per column');
   lines.push('');
   lines.push('1. **Socket connect to AssemblyAI ready**: `aai_ready` event minus `aai_connect_start` event (the `aai_ready` event\'s own `ms_since_connect_start` detail is used when present, since that is the server\'s own measurement of the same interval; otherwise the two events\' timestamps are subtracted).');
   lines.push('2. **Ready to first agent audio**: the first `reply.audio.first` event at or after `aai_ready`, minus `aai_ready`. Labeled "greeting" when that run\'s `aai_ready` event carries `greeting_configured: true`; every other row is labeled "first reply" and is NOT a pure agent-latency number -- see the caveat under section 2 below.');
-  lines.push('3. **Response latency (the gap a judge feels)**: per caller turn, the LAST `input.speech.stopped` event before the next `reply.audio.first` event, subtracted from that `reply.audio.first` (falls back to the last `transcript` event with `role: "user"` on a bundle with no `input.speech.stopped` events at all -- none of the runs on disk today needed that fallback). A turn the call ended without ever hearing a reply to contributes nothing to this column (same as a run report\'s own "no reply audio observed after this turn" note) -- it is not counted as 0ms.');
+  lines.push(
+    '3a. **Server relay gap after AssemblyAI\'s end-of-turn event (not perceived latency)**: per caller turn, the LAST `input.speech.stopped` event before the next `reply.audio.first` event, subtracted from that `reply.audio.first` (falls back to the last `transcript` event with `role: "user"` on a bundle with no `input.speech.stopped` events at all -- none of the runs on disk today needed that fallback). Review finding 2026-09-11: this is NOT the gap a judge feels -- `input.speech.stopped` is AssemblyAI\'s own end-of-turn DETECTION event, which lags the caller\'s actual last word by AssemblyAI\'s own (unmeasured by this harness) turn-detection delay, and on at least one turn in the corpus (2026-09-11T17-44-51, turn c4) the server\'s own `reply.started` event fired BEFORE `input.speech.stopped` did -- proof this column can even race backward relative to the real conversation. Kept here as a distinct, separately labeled number (never blended with 3b) because it is still a real, useful diagnostic of AssemblyAI\'s own relay/detection behavior. A turn the call ended without ever hearing a reply contributes nothing to this column (same as a run report\'s own "no reply audio observed after this turn" note) -- it is not counted as 0ms.',
+  );
+  lines.push(
+    '3b. **Perceived response latency (the gap a judge feels) -- ESTIMATE**: parsed from each run\'s own paired `.md` report\'s "Per-turn gaps" table. Method: harness wall clock from the synthetic caller\'s last audio frame to the agent\'s first reply audio; includes AssemblyAI end-of-turn detection; ESTIMATE because the synthetic caller is not a human. A turn whose gap is "n/a" in that table (no reply arrived before the call ended or the next turn started) is EXCLUDED from the p50/p95 sample and COUNTED separately (see the per-run table\'s "perceived n/a" column and each aggregate row\'s own turn count) -- it is never treated as 0ms.',
+  );
   lines.push('4. **Connect to terminal verdict**: the first `terminal_action` event\'s timestamp (baseline: `aai_connect_start` at t=0). A run with no `terminal_action` event (it never reached a verdict -- a FAIL) is UNKNOWN for this column, and excluded from `n`.');
   lines.push('5. **Verdict to call end**: `session_ended` minus that same `terminal_action` event.');
   lines.push('');
@@ -233,7 +256,7 @@ export function renderLatencyDoc(runs: LoadedRun[], skippedCount: number): strin
 
   lines.push('## 1. Socket connect to AssemblyAI ready -- p50/p95 across runs');
   lines.push('');
-  lines.push(renderPctTable(groupedPctRows(runs, (m) => m.connect_to_ready_ms)));
+  lines.push(renderPctTable(groupedPctRows(runs, (r) => r.metrics.connect_to_ready_ms)));
   lines.push('');
 
   lines.push('## 2. Ready to first agent audio -- p50/p95 across runs, split by whether a greeting was configured');
@@ -245,19 +268,32 @@ export function renderLatencyDoc(runs: LoadedRun[], skippedCount: number): strin
   lines.push(renderPctTable(groupedPctRowsForReadyToAudio(runs)));
   lines.push('');
 
-  lines.push('## 3. Response latency (caller speech end -> next agent audio) -- p50/p95 across ALL TURNS, not runs');
+  lines.push('## 3a. Server relay gap after AssemblyAI\'s end-of-turn event (not perceived latency) -- p50/p95 across ALL TURNS, not runs');
   lines.push('');
-  lines.push(renderPctTable(groupedPctRows(runs, (m) => m.turn_response_gaps_ms)));
+  lines.push(
+    '**This is NOT the gap a judge feels.** See method 3a above -- `input.speech.stopped` is AssemblyAI\'s own end-of-turn detection event and can lag (or even race backward against) the agent\'s actual reply. Use section 3b below for the perceived-latency number.',
+  );
+  lines.push('');
+  lines.push(renderPctTable(groupedPctRows(runs, (r) => r.metrics.turn_response_gaps_ms)));
+  lines.push('');
+
+  lines.push('## 3b. Perceived response latency (the gap a judge feels) -- ESTIMATE, p50/p95 across ALL TURNS, not runs');
+  lines.push('');
+  lines.push(
+    'Method: harness wall clock from the synthetic caller\'s last audio frame to the agent\'s first reply audio; includes AssemblyAI end-of-turn detection; ESTIMATE because the synthetic caller is not a human. Source: each run\'s paired `.md` report\'s own "Per-turn gaps" table (parsed by `parsePerTurnGapsFromMd`), not the diagnostics.json event stream. Turns with gap "n/a" are excluded from `n` below and counted separately in the per-run table\'s "perceived n/a" column.',
+  );
+  lines.push('');
+  lines.push(renderPctTable(groupedPctRows(runs, (r) => r.perceived.gaps_ms)));
   lines.push('');
 
   lines.push('## 4. Connect to terminal verdict -- p50/p95 across runs');
   lines.push('');
-  lines.push(renderPctTable(groupedPctRows(runs, (m) => m.connect_to_verdict_ms)));
+  lines.push(renderPctTable(groupedPctRows(runs, (r) => r.metrics.connect_to_verdict_ms)));
   lines.push('');
 
   lines.push('## 5. Verdict to call end -- p50/p95 across runs');
   lines.push('');
-  lines.push(renderPctTable(groupedPctRows(runs, (m) => m.verdict_to_end_ms)));
+  lines.push(renderPctTable(groupedPctRows(runs, (r) => r.metrics.verdict_to_end_ms)));
   lines.push('');
 
   return lines.join('\n');

@@ -74,6 +74,37 @@ describe('loadRuns', () => {
     await writeFile(join(dir, '2026-09-11T12-00-00-broken.diagnostics.json'), '{not valid json', 'utf-8');
     expect(await loadRuns(dir)).toEqual([]);
   });
+
+  it('parses the perceived per-turn gaps from the paired .md report', async () => {
+    const base = '2026-09-11T12-00-00-scenario-a-dana-legitimate';
+    await writeFile(join(dir, `${base}.diagnostics.json`), JSON.stringify(bundle([])), 'utf-8');
+    await writeFile(
+      join(dir, `${base}.md`),
+      [
+        'Scenario: `scenario-a-dana-legitimate`',
+        'Target: http://localhost:8787',
+        '',
+        '| turn | caller ended | first reply audio | gap | note |',
+        '| --- | --- | --- | --- | --- |',
+        '| c1 | 1000ms | 1758ms | 758ms |  |',
+        '| c2 | 2000ms | n/a | n/a | no reply audio observed after this turn |',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const runs = await loadRuns(dir);
+    expect(runs[0]!.perceived.gaps_ms).toEqual([758]);
+    expect(runs[0]!.perceived.na_count).toBe(1);
+    expect(runs[0]!.perceived.total_turns).toBe(2);
+  });
+
+  it('defaults perceived to all-zero when the .md is missing entirely', async () => {
+    const base = '2026-09-11T12-00-00-scenario-b-miller-fraud';
+    await writeFile(join(dir, `${base}.diagnostics.json`), JSON.stringify(bundle([])), 'utf-8');
+
+    const runs = await loadRuns(dir);
+    expect(runs[0]!.perceived).toEqual({ gaps_ms: [], na_count: 0, total_turns: 0 });
+  });
 });
 
 describe('generateLatencyTable', () => {
@@ -117,6 +148,7 @@ describe('renderLatencyDoc', () => {
         connect_to_verdict_ms: 9000,
         verdict_to_end_ms: 1500,
       },
+      perceived: { gaps_ms: [700, 600], na_count: 1, total_turns: 3 },
       ...overrides,
     };
   }
@@ -153,5 +185,46 @@ describe('renderLatencyDoc', () => {
   it('handles the zero-bundle case without throwing', () => {
     const doc = renderLatencyDoc([], 0);
     expect(doc).toContain('No `*.diagnostics.json` bundles found');
+  });
+
+  it('the top headline line reports the PERCEIVED figure (from .md per-turn gaps), not the relay-gap figure', () => {
+    const doc = renderLatencyDoc(
+      [
+        run({ metrics: { ...run({}).metrics, turn_response_gaps_ms: [1, 1] }, perceived: { gaps_ms: [700, 900], na_count: 1, total_turns: 3 } }),
+      ],
+      0,
+    );
+    const headlineLine = doc.split('\n').find((l) => l.startsWith('**Perceived response latency (headline'));
+    expect(headlineLine).toBeDefined();
+    expect(headlineLine).toContain('p50=800ms'); // median of [700,900], not the relay-gap [1,1]
+    expect(headlineLine).toContain('n=2 turns');
+    expect(headlineLine).toContain('1 turn(s) excluded as n/a');
+  });
+
+  it('labels section 3a as a relay gap (not perceived) and section 3b as the perceived/ESTIMATE figure', () => {
+    const doc = renderLatencyDoc([run({})], 0);
+    expect(doc).toContain('## 3a. Server relay gap after AssemblyAI\'s end-of-turn event (not perceived latency)');
+    expect(doc).toContain('## 3b. Perceived response latency (the gap a judge feels) -- ESTIMATE');
+    expect(doc).toContain('harness wall clock from the synthetic caller\'s last audio frame to the agent\'s first reply audio; includes AssemblyAI end-of-turn detection; ESTIMATE because the synthetic caller is not a human');
+  });
+
+  it('section 3a and 3b use independent samples -- a run\'s relay-gap turns never leak into the perceived table', () => {
+    const doc = renderLatencyDoc(
+      [run({ metrics: { ...run({}).metrics, turn_response_gaps_ms: [1, 2, 3] }, perceived: { gaps_ms: [700, 900], na_count: 0, total_turns: 2 } })],
+      0,
+    );
+    const lines = doc.split('\n');
+    const idx3a = lines.findIndex((l) => l.startsWith('## 3a.'));
+    const idx3b = lines.findIndex((l) => l.startsWith('## 3b.'));
+    const idx4 = lines.findIndex((l) => l.startsWith('## 4.'));
+    const section3a = lines.slice(idx3a, idx3b).join('\n');
+    const section3b = lines.slice(idx3b, idx4).join('\n');
+    expect(section3a).toContain('| deployed / scenario-a-dana-legitimate | 3 |'); // n=3 relay-gap turns
+    expect(section3b).toContain('| deployed / scenario-a-dana-legitimate | 2 |'); // n=2 perceived turns
+  });
+
+  it('never writes the string "sub-second" anywhere, even with the new perceived-latency sections', () => {
+    const doc = renderLatencyDoc([run({})], 3);
+    expect(doc.toLowerCase()).not.toContain('sub-second');
   });
 });

@@ -162,6 +162,73 @@ function detailBool(detail: unknown, field: string): boolean | null {
   return typeof v === 'boolean' ? v : null;
 }
 
+export interface ParsedPerTurnGaps {
+  /** One entry per turn whose gap was a real number (not "n/a"), in table order. */
+  gaps_ms: number[];
+  /** How many turns in the table had gap "n/a" (the call ended, or the next turn started,
+   *  before any reply audio was observed) -- excluded from `gaps_ms` but counted here, per
+   *  the review finding: a turn that never got a reply must not silently vanish from `n`. */
+  na_count: number;
+  /** gaps_ms.length + na_count -- every turn row this parser recognized in the table. */
+  total_turns: number;
+}
+
+const MD_MS_OR_NA = /^(?:([\d.]+)ms|n\/a)$/;
+
+/** Parses the "Per-turn gaps (caller line end -> next agent audio)" table report.ts's own
+ *  `renderTurnGaps` writes into every run's markdown report (`| turn | caller ended | first
+ *  reply audio | gap | note |`). This is the harness's OWN wall-clock measurement -- the
+ *  moment the synthetic caller finished streaming a line's audio, to the moment the agent's
+ *  first reply audio frame arrived, both timestamped on the SAME client-side clock
+ *  (turnController.ts/wsClient.ts, relative to the WebSocket handshake).
+ *
+ *  Review finding (2026-09-11, fixing 278d82b): this is NOT the same number as
+ *  `computeTurnResponseGaps`'s `input.speech.stopped -> reply.audio.first` gap over the
+ *  server's diagnostics event stream. Checked directly against
+ *  2026-09-11T17-44-51-scenario-a-dana-legitimate's raw bundle: for turn c4, the server's own
+ *  `reply.started` (t=54569ms) fires BEFORE `input.speech.stopped` (t=54572ms) -- proof that
+ *  `input.speech.stopped` carries AssemblyAI's own end-of-turn detection lag and can even
+ *  race with the reply already starting, making it a server/relay artifact, not the gap a
+ *  judge actually perceives. This table's "caller ended" timestamp is the harness's own
+ *  authoritative "the caller stopped talking" instant (when it stopped streaming audio into
+ *  the socket), which is the honest number.
+ *
+ *  Deliberately structural rather than heading-anchored: matches any markdown table row shaped
+ *  like `| <turn id> | <ms|n/a> | <ms|n/a> | <ms|n/a> | ... |`, which only this table produces
+ *  in a rehearsal report (the transcript table has 3 columns of non-ms text, the caller-line-
+ *  decisions table has 4 columns of text, the state-history table has state/verdict text) --
+ *  so it does not depend on the exact heading text or table position, only the table's shape.
+ *  A malformed/missing table (or no `.md` at all) returns all-zero, never throws. */
+export function parsePerTurnGapsFromMd(mdText: string): ParsedPerTurnGaps {
+  const gaps_ms: number[] = [];
+  let na_count = 0;
+
+  for (const rawLine of mdText.split('\n')) {
+    const line = rawLine.trim();
+    if (!line.startsWith('|') || !line.endsWith('|')) continue;
+    const cells = line
+      .slice(1, -1)
+      .split('|')
+      .map((c) => c.trim());
+    if (cells.length < 4) continue;
+
+    const [turnId, callerEnded, firstReplyAudio, gap] = cells;
+    if (!turnId || turnId === 'turn' || /^-+$/.test(turnId)) continue; // header or separator row
+    if (!callerEnded || !MD_MS_OR_NA.test(callerEnded)) continue;
+    if (!firstReplyAudio || !MD_MS_OR_NA.test(firstReplyAudio)) continue;
+    if (!gap || !MD_MS_OR_NA.test(gap)) continue;
+
+    if (gap === 'n/a') {
+      na_count += 1;
+      continue;
+    }
+    const match = MD_MS_OR_NA.exec(gap);
+    gaps_ms.push(Number(match![1]));
+  }
+
+  return { gaps_ms, na_count, total_turns: gaps_ms.length + na_count };
+}
+
 /** Linear-interpolation percentile (the numpy/R-7 default) over a sample of numbers.
  *  `null` on an empty sample -- callers must show "n=0, UNKNOWN" rather than a fabricated
  *  number. `p` is 0..1 (0.5 for p50, 0.95 for p95). */

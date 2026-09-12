@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyTarget, computeRunLatencyMetrics, computeTurnResponseGaps, percentile } from '../latencyMath.js';
+import { classifyTarget, computeRunLatencyMetrics, computeTurnResponseGaps, parsePerTurnGapsFromMd, percentile } from '../latencyMath.js';
 import type { RehearseDiagnosticBundle, RehearseDiagnosticEvent } from '../types.js';
 
 function bundle(events: RehearseDiagnosticEvent[]): RehearseDiagnosticBundle {
@@ -187,5 +187,79 @@ describe('computeRunLatencyMetrics', () => {
     ]);
     const m = computeRunLatencyMetrics(b);
     expect(m.turn_response_gaps_ms).toEqual([300, 900]);
+  });
+});
+
+describe('parsePerTurnGapsFromMd', () => {
+  // Real shape from scripts/rehearse/reports/2026-09-11T17-44-51-scenario-a-dana-legitimate.md
+  // -- this is the harness's OWN wall-clock measurement (client-side: when the synthetic
+  // caller finished streaming its line, to when the agent's first reply audio frame arrived),
+  // not the server's `input.speech.stopped` event. Review finding 2026-09-11 (fixing the
+  // 278d82b commit): on that exact run's diagnostics bundle, `reply.started` (t=54569ms)
+  // fires BEFORE `input.speech.stopped` (t=54572ms) for turn c4 -- proof the diagnostics-based
+  // gap is a server/AssemblyAI relay artifact, not the perceived latency a judge feels. This
+  // per-turn table is the honest number instead.
+  const sampleTable = [
+    '# Rehearsal report: Dana Whitfield -- the legitimate urgent request',
+    '',
+    'Scenario: `scenario-a-dana-legitimate`',
+    'Target: https://countersign-bf8q.onrender.com',
+    '',
+    '### Per-turn gaps (caller line end -> next agent audio)',
+    '',
+    '| turn | caller ended | first reply audio | gap | note |',
+    '| --- | --- | --- | --- | --- |',
+    '| c1 | 23733ms | 24491ms | 758ms |  |',
+    '| c2 | 35077ms | 36858ms | 1781ms |  |',
+    '| c3 | 39972ms | 39978ms | 6ms |  |',
+    '| c4 | 53946ms | 54573ms | 627ms |  |',
+    '| c5 | 68787ms | 68787ms | 0ms |  |',
+    '| c6 | 82746ms | 83345ms | 599ms |  |',
+    '| c7 | 99878ms | n/a | n/a | no reply audio observed after this turn |',
+    '',
+    '## Caller line decisions (reactive/LLM caller only)',
+    '',
+    '| turn | source | said | reacting to (agent\'s last line) |',
+    '| --- | --- | --- | --- |',
+    '| c1 | fixed | This is Dana Whitfield. | Meridian payments desk. |',
+  ].join('\n');
+
+  it('parses every numeric gap and excludes n/a rows from the sample, while counting them', () => {
+    const parsed = parsePerTurnGapsFromMd(sampleTable);
+    expect(parsed.gaps_ms).toEqual([758, 1781, 6, 627, 0, 599]);
+    expect(parsed.na_count).toBe(1);
+    expect(parsed.total_turns).toBe(7);
+  });
+
+  it('never picks up rows from a different table (e.g. the caller-line-decisions table)', () => {
+    const parsed = parsePerTurnGapsFromMd(sampleTable);
+    // 7 turn-gap rows total, not 8 (which would mean the decisions-table row leaked in)
+    expect(parsed.total_turns).toBe(7);
+  });
+
+  it('returns an empty result for a report with no per-turn gap table at all', () => {
+    const parsed = parsePerTurnGapsFromMd('# Rehearsal report\n\nNo turns here.\n');
+    expect(parsed).toEqual({ gaps_ms: [], na_count: 0, total_turns: 0 });
+  });
+
+  it('returns an empty result for an empty string', () => {
+    expect(parsePerTurnGapsFromMd('')).toEqual({ gaps_ms: [], na_count: 0, total_turns: 0 });
+  });
+
+  it('handles a table where every turn is n/a (call ended before any reply)', () => {
+    const md = [
+      '| turn | caller ended | first reply audio | gap | note |',
+      '| --- | --- | --- | --- | --- |',
+      '| c1 | 1000ms | n/a | n/a | no reply audio observed after this turn |',
+    ].join('\n');
+    const parsed = parsePerTurnGapsFromMd(md);
+    expect(parsed.gaps_ms).toEqual([]);
+    expect(parsed.na_count).toBe(1);
+    expect(parsed.total_turns).toBe(1);
+  });
+
+  it('handles decimal millisecond values', () => {
+    const md = ['| turn | caller ended | first reply audio | gap | note |', '| --- | --- | --- | --- | --- |', '| c1 | 100ms | 150.5ms | 50.5ms |  |'].join('\n');
+    expect(parsePerTurnGapsFromMd(md).gaps_ms).toEqual([50.5]);
   });
 });
