@@ -76,5 +76,5 @@
     "verdict": "ESCALATE",
     "max_wall_ms": 240000
   },
-  "demo_persona": "attacker"
+  "demo_persona": "legitimate"
 }
