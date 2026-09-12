@@ -1360,11 +1360,11 @@
    "id": "SIM1-BIZ-NUMBER",
    "title": "sim fix 2: one labelled business number on the landing hero and README top; three sourced candidates for the founder to pick",
    "files": [],
-   "status": "held",
+   "status": "done",
    "agent_id": "",
-   "started_at": "2026-09-12T01:32:39.864Z",
-   "held_because": "three candidates corrected by the orchestrator 8:38 PM (FBI $30.26M is 'AI-referenced BEC complaints', not voice cloning; speed numbers re-pulled from the reports; cost basis corrected to a 2-minute call); founder picks",
-   "lane_note": "SUBMISSION-DRAFT wording and page fixed in commit (page 42, 'complaints that referenced AI')"
+   "started_at": "2026-09-12T02:27:05.722Z",
+   "held_because": "",
+   "lane_note": "founder picked the 'with explanation' FBI sentence 9:25 PM; landing line + README Business value section (FBI line, AI-referenced figure with context, speed line ESTIMATE); no cost line; landed on main 3870f6d 9:31 PM; review PASS; autopilot gate 1201 x3, typecheck clean, corpus 102/102; push 18"
   },
   {
    "id": "SIM1-ENGINEER-ADDENDUM",
@@ -1476,6 +1476,15 @@
    "agent_id": "",
    "started_at": "2026-09-12T02:02:33.377Z",
    "lane_note": "autopilot push 9:03 PM after the full gate"
+  },
+  {
+   "id": "push-18",
+   "title": "push 18: ec6a235..3870f6d (FBI business-value line on landing + README section, log)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T02:32:33.576Z",
+   "lane_note": "autopilot push 9:32 PM after the full gate; deploy poll pending"
   }
  ]
 }
