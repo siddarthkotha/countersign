@@ -233,7 +233,7 @@ pattern works is PROVEN by the APort Vault CTF (a security contest where attacke
 measured social engineering succeeding 74.6 percent of the time against model-only defenses and
 0 percent against a policy engine, across 879 attempts. Separately, a US Bancorp patent
 (US12562169B1, priority 2025-09-16) covers the same two mechanics, adaptive challenge generation
-and a deterministic engine paired with immutable logging, but built as an assist tool for human
+and a deterministic engine paired with what the patent calls "immutable" logging, but built as an assist tool for human
 call-center staff, not as autonomous voice interrogation. What's new here is the assembled
 application: live conversational interrogation of an inbound caller, feeding a deterministic
 engine whose best possible outcome is staging the request for an independent second human, never
