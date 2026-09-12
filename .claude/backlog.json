@@ -1359,9 +1359,11 @@
    "id": "SIM1-BIZ-NUMBER",
    "title": "sim fix 2: one labelled business number on the landing hero and README top; three sourced candidates for the founder to pick",
    "files": [],
-   "status": "running",
-   "agent_id": "(haiku research 8:35 PM)",
-   "started_at": "2026-09-12T01:32:39.864Z"
+   "status": "held",
+   "agent_id": "",
+   "started_at": "2026-09-12T01:32:39.864Z",
+   "held_because": "three candidates corrected by the orchestrator 8:38 PM (FBI $30.26M is 'AI-referenced BEC complaints', not voice cloning; speed numbers re-pulled from the reports; cost basis corrected to a 2-minute call); founder picks",
+   "lane_note": "SUBMISSION-DRAFT wording and page fixed in commit (page 42, 'complaints that referenced AI')"
   },
   {
    "id": "SIM1-ENGINEER-ADDENDUM",
@@ -1369,9 +1371,10 @@
    "files": [
     "docs/JUDGE-SIM-2026-09-11.md"
    ],
-   "status": "running",
-   "agent_id": "(launched 8:35 PM)",
-   "started_at": "2026-09-12T01:32:39.864Z"
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T01:32:39.864Z",
+   "lane_note": "addendum appended 8:38 PM: keyterms PROVEN 3/4; session.update count, resume, barge-in UNKNOWN (never exercised in bundles); tool.result timing structurally inapplicable (model is offered no tools since 422d750, founder ruling Sep 3)"
   },
   {
    "id": "SIM-LIVE-MIC",
@@ -1379,6 +1382,38 @@
    "files": [],
    "status": "held",
    "held_because": "needs the founder's own mic in a normal Chrome window, or a harness-driven call alongside the sim; environment, not product",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "RECORDER-SESSION-UPDATE",
+   "title": "flight recorder emits session_config_updated as a diag event so bundles count session.update per goal change",
+   "files": [
+    "packages/server/src/call/session.ts"
+   ],
+   "status": "running",
+   "agent_id": "(haiku lane 8:40 PM)",
+   "started_at": "2026-09-12T01:39:36.911Z"
+  },
+  {
+   "id": "SCEN-BARGEIN-RESUME",
+   "title": "harness scenarios barge-in-interrupt and socket-drop-resume (+ env-guarded debug drop hook if needed); written and schema-tested, NOT run",
+   "files": [
+    "scripts/rehearse",
+    "packages/server/src"
+   ],
+   "status": "running",
+   "agent_id": "(sonnet lane 8:40 PM)",
+   "started_at": "2026-09-12T01:39:36.911Z"
+  },
+  {
+   "id": "TOOLS-NOT-OFFERED-JUDGE-RISK",
+   "title": "the voice model is offered no tools (LIVE_SESSION_TOOLS = [], FIX4 ruling Sep 3); an AssemblyAI judge scoring tool.result timing sees the feature unused. README already carries the tools trade-off (D2); decide whether to offer one harmless read-only tool live for the demo",
+   "files": [
+    "packages/server/src/aai/config.ts"
+   ],
+   "status": "held",
+   "held_because": "reopens a Sep 3 founder ruling; bring as one decision with the README paragraph after the barge-in/resume evidence is in",
    "agent_id": "",
    "started_at": ""
   }
