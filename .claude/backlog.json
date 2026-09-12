@@ -1382,10 +1382,11 @@
    "id": "SIM-LIVE-MIC",
    "title": "sim fix 3: re-run the judge sim with a working microphone before the Sep 26 submission sim (the automated Chrome tab's getUserMedia hangs)",
    "files": [],
-   "status": "held",
-   "held_because": "needs the founder's own mic in a normal Chrome window, or a harness-driven call alongside the sim; environment, not product",
-   "agent_id": "",
-   "started_at": ""
+   "status": "running",
+   "held_because": "",
+   "agent_id": "a65676c1cd6db5939",
+   "started_at": "2026-09-12T03:21:05.185Z",
+   "lane_note": "founder 'retry sim' 10:20 PM; agent attaches to his open tab (mic granted); report docs/JUDGE-SIM-2026-09-11-live.md"
   },
   {
    "id": "RECORDER-SESSION-UPDATE",
@@ -1507,9 +1508,10 @@
     "scripts/rehearse",
     "docs/LATENCY.md"
    ],
-   "status": "running",
-   "agent_id": "(launched 9:45 PM)",
-   "started_at": "2026-09-12T02:44:54.174Z"
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T02:44:54.174Z",
+   "lane_note": "code done 278d82b 9:58 PM (latencyMath, latencyTable, rehearseBatch, 47 tests, docs/LATENCY.md from 9 bundles); review running on whether the 9 ms 'response latency' is a relay gap, not perceived latency; fix round sent 10:06 PM: relabel relay column, add perceived column parsed from the .md per-turn tables, regenerate; fix 9aace5d 10:10 PM: perceived column from the .md per-turn tables, deployed n=47 p50 603 ms p95 1769 ms (ESTIMATE); re-review running; landed on main eb3c3f5 + 4b99acc 10:16 PM; headline perceived p50 622 ms / p95 1774 ms (n=76 turns, ESTIMATE); push 19 after the fix-round review"
   },
   {
    "id": "VIDEO-PLAN",
@@ -1538,9 +1540,10 @@
    "files": [
     "docs"
    ],
-   "status": "running",
-   "agent_id": "(haiku 9:51 PM)",
-   "started_at": "2026-09-12T02:52:57.678Z"
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T02:52:57.678Z",
+   "lane_note": "landed a5a9b24 + checklist fix 5f26126 9:56 PM; zero hits outside .claude and CLAUDE.md"
   },
   {
    "id": "REDACT-HOOKS-CLAUDEMD",
@@ -1558,17 +1561,132 @@
    "id": "FRAUD-ESCALATE-INVESTIGATION",
    "title": "batch run 2 (9:50 PM): scenario B ESCALATE via row 14 idle timeout instead of FREEZE; the escrow trap was never asked; likely challenge-order change (RT-9b or seed facts) vs the scripted caller",
    "files": [],
-   "status": "running",
-   "agent_id": "a4ebd3056178d6630",
-   "started_at": "2026-09-12T02:52:57.678Z"
+   "status": "held",
+   "agent_id": "",
+   "started_at": "2026-09-12T02:52:57.678Z",
+   "held_because": "round 2 fraud run FROZE (63.7 s wall, 10:05 PM): 9:50 PM was one-off variance; n=2 tonight, watch rounds 3-4; if a second ESCALATE appears, run locally with the actions log after the batch"
   },
   {
    "id": "BARGEIN-INVESTIGATION",
    "title": "batch run 3 (9:52 PM) barge-in-interrupt: interrupted trap readback never re-issued (beneficiary never confirmed), model said 'Verification complete. Processing request.' while PENDING, idle timeout -> ESCALATE",
    "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T02:54:00.368Z",
+   "lane_note": "10:00 PM: interrupted reply never logs challenge_issued so the caller's yes was not graded (no LAW 4 breach) but the beneficiary trap is lost for the call; 'Verification complete' PROVEN model improvisation with READBACK goal active; scenario bare-word 'account' trigger + only 8 turns"
+  },
+  {
+   "id": "COVER-OPTIONS",
+   "title": "three 16:9 cover candidates (banner hero, split-screen silhouette, typographic hash-chain) as HTML under docs/design/cover with a README table; founder reacts",
+   "files": [
+    "docs/design/cover"
+   ],
    "status": "running",
-   "agent_id": "(read-only 9:54 PM)",
-   "started_at": "2026-09-12T02:54:00.368Z"
+   "agent_id": "(design lane 10:20 PM)",
+   "started_at": "2026-09-12T02:57:02.004Z",
+   "held_because": "",
+   "lane_note": "founder picked cover 2 but found the placeholder bars incomplete; building cover-2-final with verbatim transcript lines and real evidence labels (fraud FROZEN + honest STAGED variants)"
+  },
+  {
+   "id": "IDSWITCH-INVESTIGATION",
+   "title": "batch run 5 (9:56 PM) identity-switch: row 6 reached at 72.8 s, then the model asked four times for the account ending (forbidden), caller silent, idle timeout -> ESCALATE (expected FREEZE)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T02:58:45.645Z",
+   "lane_note": "10:03 PM: PROVEN engine design gap: identity-switch flag never clears (fromTranscript.ts hardcoded FLAG, recomputed every evaluate; row 6 has no exit) so FREEZE is unreachable after any switch; RE_ELICIT_AFTER_SWITCH hint unwrapped (sent to the fix lane); scenario ran out of lines but non-causative"
+  },
+  {
+   "id": "LATENCY-review",
+   "title": "review of 278d82b: perceived vs relay latency, batch runner safety",
+   "files": [],
+   "status": "done",
+   "agent_id": "(launched 10:00 PM)",
+   "started_at": "2026-09-12T03:00:13.067Z",
+   "lane_note": "FAIL 10:03 PM: 9 ms column is a relay gap (AAI end-of-turn event ~600 ms late; reply.started before input.speech.stopped in c4); harness clock gaps 0.6-1.8 s are the honest figure; batch runner PASS"
+  },
+  {
+   "id": "FIX-COMPLETION-GUARD-SCENARIOS",
+   "title": "STANDING_RULES: never announce completion/processing/outcome unless the goal text says it; narrow bare-word triggers in adversarial scenarios; barge-in gets turns 9-10",
+   "files": [
+    "packages/server/src/call/prompt.ts",
+    "scripts/rehearse/scenarios"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T03:00:13.067Z",
+   "lane_note": "three commits af7450a, d685560, 3bcea84 (standing rule, RE_ELICIT_AFTER_SWITCH verbatim, persona fix + trigger narrowing in two scenarios, turns c9/c10); 1205/1205 in worktree; review running; fourth commit requested 10:18 PM (paraphrase-robust trigger: account + question + not 'Just to confirm'; CLOSE test); all four landed on main 11758a7..ccfe532 10:21 PM; gate 1285 x3, typecheck clean, corpus 102/102; push 19 waits for the matcher review and the founder's live sim to finish (a deploy would drop his call)"
+  },
+  {
+   "id": "INTERRUPTED-PROBE-LOST",
+   "title": "an interrupted challenge probe is never logged, so selectChallenge moves on and the trap is lost for the call; consider logging an interrupted attempt so the same probe is re-asked",
+   "files": [
+    "packages/server/src/call/session.ts",
+    "packages/engine/src/challenges.ts"
+   ],
+   "status": "held",
+   "held_because": "engine behaviour change; decide after tonight's batch shows how often interruptions lose a probe",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "IDSWITCH-NO-EXIT",
+   "title": "engine: after an identity switch, row 6 pins the call forever (flag never clears; lookups never re-run for the new identity); FREEZE structurally unreachable. Options: A) switch with an open request is itself terminal FREEZE; B) re-elicit, re-run lookups for the new identity, freeze on their failures (the scenario author's intent)",
+   "files": [
+    "packages/engine/src/evidence/fromTranscript.ts",
+    "packages/engine/src/rules.ts",
+    "packages/server/src/call/session.ts"
+   ],
+   "status": "running",
+   "held_because": "",
+   "agent_id": "(engine lane 10:20 PM)",
+   "started_at": "2026-09-12T03:16:36.204Z",
+   "lane_note": "founder chose B 10:15 PM: resolve the switch after re-established identity + request, re-run lookups for the new identity, freeze on failures; contradiction card stays; hand-built corpus recording expected FREEZE"
+  },
+  {
+   "id": "SINGLE-WRONG-ANSWER-INVESTIGATION",
+   "title": "batch run 9 (10:02 PM) single-wrong-answer: FREEZE (expected ESCALATE); is the freeze threshold harsher than intended after the Sep 9 rules, or did the transcript add points?",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T03:04:27.964Z",
+   "lane_note": "10:09 PM PROVEN scenario defect: demo_persona attacker on an honest narrative forces SSO fail -> row 8b FREEZE; engine correct; fix sent to the scenario lane (persona -> legitimate; audit all scenarios)"
+  },
+  {
+   "id": "FIX-ROUND-review",
+   "title": "review of af7450a, d685560, 3bcea84",
+   "files": [],
+   "status": "done",
+   "agent_id": "(launched 10:13 PM)",
+   "started_at": "2026-09-12T03:10:53.554Z",
+   "lane_note": "PASS 10:14 PM with Important (narrowed trigger can miss a paraphrased restate question) + Minor (no CLOSE-goal test for the new rule); both sent back"
+  },
+  {
+   "id": "LATENCY-rereview",
+   "title": "re-review of 9aace5d",
+   "files": [],
+   "status": "done",
+   "agent_id": "(haiku 10:14 PM)",
+   "started_at": "2026-09-12T03:11:13.419Z",
+   "lane_note": "PASS 10:12 PM"
+  },
+  {
+   "id": "MATCHER-review",
+   "title": "scoped review of ccfe532 (harness matcher fields)",
+   "files": [],
+   "status": "done",
+   "agent_id": "(haiku 10:21 PM)",
+   "started_at": "2026-09-12T03:21:05.185Z",
+   "lane_note": "PASS 10:21 PM"
+  },
+  {
+   "id": "push-19",
+   "title": "push 19: c65a4da..ccfe532 (docs: video plan, preflip, redaction, covers, latency table + batch runner; fixes: outcome-announcement rule, RE_ELICIT verbatim, scenario persona, paraphrase-robust matcher)",
+   "files": [],
+   "status": "held",
+   "held_because": "gate green 10:21 PM (1285 x3, typecheck, corpus 102/102, reviews PASS); deploy waits for the founder's live sim to finish so the restart does not drop his call",
+   "agent_id": "",
+   "started_at": ""
   }
  ]
 }
