@@ -64,12 +64,13 @@ scripted.
 <!-- source: docs/BRIEF.md §4, "Scenario B: THE INTERROGATION" -->
 This mirrors CEO-fraud and deepfake wire losses: a human alone under
 pressure, no second check. PROVEN by the FBI's 2025 Internet Crime Report (ic3.gov):
-Business Email Compromise cost $3,046,598,558 in 2025; $30,256,592 of that was
-AI-involved BEC, including voice cloning.
+Business Email Compromise cost $3,046,598,558 in 2025; $30,256,592 of that came
+from BEC complaints that referenced AI.
 <!-- source: FBI IC3, "2025 IC3 Annual Report," https://www.ic3.gov/AnnualReport/Reports/2025_IC3Report.pdf,
-     page 26 (three-year BEC loss table) and page 40 ("AI References by Complaint Loss"
-     table and surrounding text); fetched and figures independently confirmed
-     2026-09-04 -->
+     page 26 (three-year BEC loss table) and page 42 ("AI References by Complaint Loss"
+     table). Re-verified 2026-09-11: the $30,256,592 figure aggregates all AI-referenced BEC
+     complaints; the report does not break out voice cloning, so the earlier phrase
+     "including voice cloning" was an overreach and is removed. -->
 Countersign's rule is structural: "a call can
 request a privileged action, it can never authorize one."
 <!-- source: docs/BRIEF.md §16, ratified 2026-09-01 language -->
