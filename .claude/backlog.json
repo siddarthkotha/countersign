@@ -1626,7 +1626,7 @@
     "packages/engine/src/challenges.ts"
    ],
    "status": "held",
-   "held_because": "engine behaviour change; decide after tonight's batch shows how often interruptions lose a probe",
+   "held_because": "the interrupted TRAP probe is lost once per barge-in call (seen 21:52, 22:07, 22:23); verdict still STAGE via later readbacks; decide with the readback cap at a quiet moment",
    "agent_id": "",
    "started_at": ""
   },
@@ -1903,7 +1903,7 @@
    "status": "done",
    "agent_id": "",
    "started_at": "2026-09-12T05:03:32.020Z",
-   "lane_note": "autopilot push 12:03 AM; deploy poll + one barge-in sample chained"
+   "lane_note": "autopilot push 12:03 AM; deploy poll + one barge-in sample chained; DEPLOY 23 VERIFIED 12:04 AM; barge-in PASS 12:06 AM (interrupted greeting, STAGE 100.3 s)"
   }
  ]
 }
