@@ -56,9 +56,16 @@ function validateTurn(raw: unknown, index: number): ScenarioTurn {
       `turn[${index}] (${String(t.id)}).barge_in_after_ms must be a non-negative number`,
     );
   }
+  if (t.drop_aai_before !== undefined) {
+    assert(
+      typeof t.drop_aai_before === 'boolean',
+      `turn[${index}] (${String(t.id)}).drop_aai_before must be a boolean when present`,
+    );
+  }
   const turn: ScenarioTurn = { id: t.id as string, text: t.text as string };
   if (typeof t.pause_ms === 'number') turn.pause_ms = t.pause_ms;
   if (typeof t.barge_in_after_ms === 'number') turn.barge_in_after_ms = t.barge_in_after_ms;
+  if (typeof t.drop_aai_before === 'boolean') turn.drop_aai_before = t.drop_aai_before;
   if (t.respond !== undefined) turn.respond = validateRespond(t.respond, `turn[${index}] (${String(t.id)})`);
   return turn;
 }
@@ -106,6 +113,18 @@ export function validateScenario(raw: unknown, sourcePath: string): Scenario {
     typeof expected.max_wall_ms === 'number' && expected.max_wall_ms > 0,
     `${sourcePath}: expected.max_wall_ms must be a positive number`,
   );
+  if (expected.min_interrupted_agent_lines !== undefined) {
+    assert(
+      typeof expected.min_interrupted_agent_lines === 'number' && expected.min_interrupted_agent_lines >= 0,
+      `${sourcePath}: expected.min_interrupted_agent_lines must be a non-negative number when present`,
+    );
+  }
+  if (expected.require_aai_link_restored !== undefined) {
+    assert(
+      typeof expected.require_aai_link_restored === 'boolean',
+      `${sourcePath}: expected.require_aai_link_restored must be a boolean when present`,
+    );
+  }
 
   const scenario: Scenario = {
     name: s.name as string,
@@ -116,6 +135,12 @@ export function validateScenario(raw: unknown, sourcePath: string): Scenario {
     expected: {
       verdict: expected.verdict as Scenario['expected']['verdict'],
       max_wall_ms: expected.max_wall_ms as number,
+      ...(typeof expected.min_interrupted_agent_lines === 'number'
+        ? { min_interrupted_agent_lines: expected.min_interrupted_agent_lines }
+        : {}),
+      ...(typeof expected.require_aai_link_restored === 'boolean'
+        ? { require_aai_link_restored: expected.require_aai_link_restored }
+        : {}),
     },
   };
   if (s.truth !== undefined) scenario.truth = validateTruth(s.truth, sourcePath);

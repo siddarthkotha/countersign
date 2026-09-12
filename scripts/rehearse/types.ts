@@ -64,6 +64,17 @@ export interface ScenarioTurn {
    *  for the exact precedence. Absent entirely on a turn that must always say its fixed line
    *  regardless of the agent's reply (an opening statement, a scripted pressure escalation). */
   respond?: ScenarioRespond;
+  /** Judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md addendum: "zero AssemblyAI
+   *  socket drops occurred -- session.resume never exercised"). When true, the harness POSTs
+   *  to the target server's env-guarded debug hook (`/api/session/:id/debug/drop-aai`,
+   *  packages/server/src/http.ts -- only live when that server has
+   *  COUNTERSIGN_DEBUG_HOOKS=1) BEFORE waiting to speak this turn, forcing a real
+   *  AssemblyAI socket drop so the real bounded resume-on-drop path
+   *  (packages/server/src/aai/session.ts) actually runs mid-call. Never a throw if the hook
+   *  isn't enabled on the target server (a 404) -- a warning is recorded and the scripted
+   *  turns continue; `Scenario.expected.require_aai_link_restored` is what actually fails
+   *  the run if the drop/resume evidence never shows up. */
+  drop_aai_before?: boolean;
 }
 
 export interface ScenarioExpected {
@@ -73,6 +84,24 @@ export interface ScenarioExpected {
    *  it is a FAIL, not a protocol error -- the stack is reachable and responding, it simply
    *  never reached (or took too long to reach) the expected verdict. */
    max_wall_ms: number;
+  /** Judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md addendum: "zero reply.done
+   *  events were interrupted -- barge-in flush never exercised" across three live bundles).
+   *  When set, the run FAILS unless at least this many transcript lines carry
+   *  `interrupted: true` -- ScreenState's own flag for "agent line cut off by caller
+   *  barge-in" (packages/engine/src/types.ts), set from AssemblyAI's real
+   *  `transcript.agent`/`reply.done` "interrupted"/"status" fields (packages/server/src/aai/
+   *  session.ts's `mapServerEvent`), never invented by this harness. Optional -- omitted by
+   *  every scenario that isn't specifically testing barge-in. */
+  min_interrupted_agent_lines?: number;
+  /** Judge-sim finding 2026-09-11 ("zero AssemblyAI socket drops occurred -- session.resume
+   *  never exercised"). When true, the run FAILS unless the flight-recorder bundle shows at
+   *  least one AAI-leg `link` event with state "restored" (packages/server/src/call/
+   *  session.ts's own `diag('link', {leg:'aai', state, attempt})`, sourced from the real
+   *  adapter's bounded resume-on-drop, packages/server/src/aai/session.ts's
+   *  `handleUnexpectedClose`) -- proof the real resume path, including a fresh
+   *  session.resume send, actually completed, not merely attempted. Optional -- omitted by
+   *  every scenario that isn't specifically testing a socket drop. */
+  require_aai_link_restored?: boolean;
 }
 
 export interface Scenario {

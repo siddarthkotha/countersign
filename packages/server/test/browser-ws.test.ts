@@ -47,6 +47,7 @@ describe('ws/browser — /ws/call/:id', () => {
     diagnostics: DiagnosticsState;
     aaiInstances: Map<string, FakeAaiSocket>;
     endCall: (session_id: string, reason: string) => boolean;
+    dropAai: (session_id: string) => boolean;
   }> {
     const ids = ['id-1', 'id-2', 'id-3'];
     let counter = 0;
@@ -98,6 +99,7 @@ describe('ws/browser — /ws/call/:id', () => {
       diagnostics,
       aaiInstances,
       endCall: wsApi.endCall,
+      dropAai: wsApi.dropAai,
     };
   }
 
@@ -356,6 +358,34 @@ describe('ws/browser — /ws/call/:id', () => {
 
     // A second call is a no-op, not an error -- the call already ended.
     expect(endCall(session_id, 'idle_timeout')).toBe(false);
+  });
+
+  // Rehearsal-harness debug hook (judge-sim finding 2026-09-11): this is the wiring test --
+  // `dropAai` finds the live CallEntry and forwards to its CallSession's `debugDropAai()`.
+  // The real resume-on-drop behavior that follows (a fresh token, a new socket,
+  // session.resume, link:lost/restored) only exists on `RealAaiSocket` and is proven against
+  // that real adapter in aai-session.test.ts -- `FakeAaiSocket` has no resume logic to
+  // exercise, so this only asserts the drop reached it.
+  it('dropAai forwards to the live call\'s AAI socket and reports the call still running', async () => {
+    const { base, wsBase, aaiInstances, dropAai } = await start();
+    const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
+    const { session_id, ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
+
+    const { ws, messages } = await connectAndCollect(`${wsBase}${ws_path}`);
+    ws.send(JSON.stringify({ type: 'start' }));
+    await pollUntil(() => messages.some((m) => m.type === 'state'));
+
+    expect(dropAai(session_id)).toBe(true);
+    expect(aaiInstances.get(session_id)!.debugDropCount).toBe(1);
+    // The call itself is untouched by the drop (LAW 3 -- only the transport leg drops; the
+    // engine/verdict/evidence are unaffected) -- no `ended` event follows.
+    expect(messages.some((m) => m.type === 'ended')).toBe(false);
+    ws.close();
+  });
+
+  it('dropAai returns false for an id with no live call', async () => {
+    const { dropAai } = await start();
+    expect(dropAai('never-existed')).toBe(false);
   });
 
   it('CRITICAL 1 (final review): endCall on an id that only ever held a caps reservation (never attached a socket) still frees the slot', async () => {

@@ -19,7 +19,7 @@ import type { CallClient } from './wsClient.js';
 import { synthesizeLine, chunkToFrames, FRAME_MS } from './audio.js';
 import { resolveTurnText } from './truthEngine.js';
 import { requestNextCallerLine } from './llmCaller.js';
-import type { HttpClient, LlmProvider, LlmTurnHistoryEntry, ResolvedLineRecord, Scenario, TurnGapRecord } from './types.js';
+import type { HttpClient, LlmProvider, LlmTurnHistoryEntry, ResolvedLineRecord, Scenario, ScenarioTurn, TurnGapRecord } from './types.js';
 
 /** The live agent's most recently received transcript line's text, or null if the agent
  *  hasn't said anything yet (the reactive engine's "no reply to react to" case -- a turn
@@ -183,13 +183,57 @@ export interface TurnRunOutcome {
   resolvedLines: ResolvedLineRecord[];
 }
 
+/** Injected so `runTurns` never has to know about HTTP/URLs/session ids itself (same shape
+ *  as llmCaller.ts's own `HttpClient` injection) -- run.ts binds this to
+ *  `forceDropAai(url, session.session_id)` (wsClient.ts). Omitted entirely for a run that
+ *  never wires it up (every existing scenario/caller before this feature). */
+export interface TurnRunDeps {
+  dropAai?: () => Promise<{ ok: boolean; status: number }>;
+}
+
+/** Judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md addendum: "zero AssemblyAI
+ *  socket drops occurred -- session.resume never exercised"). Pure and independently
+ *  testable (like `scriptedCallerShouldStop` above) -- decides what, if anything, to do
+ *  about one turn's `drop_aai_before` flag, given whatever `dropAai` hook (if any) this run
+ *  was wired with. Never throws: a scenario with no `dropAai` wired, or a target server with
+ *  the debug hook disabled, both just produce a warning and let the scripted turns continue
+ *  -- `Scenario.expected.require_aai_link_restored` (expectations.ts) is what actually fails
+ *  the run if the drop/resume evidence never shows up. */
+export async function maybeDropAai(
+  turn: ScenarioTurn,
+  dropAai: (() => Promise<{ ok: boolean; status: number }>) | undefined,
+): Promise<{ attempted: boolean; ok: boolean; warning: string | null }> {
+  if (!turn.drop_aai_before) return { attempted: false, ok: true, warning: null };
+  if (!dropAai) {
+    return {
+      attempted: true,
+      ok: false,
+      warning: `turn ${turn.id}: drop_aai_before requested a forced AAI drop, but no dropAai hook was wired into this run -- continuing without forcing a drop`,
+    };
+  }
+  const result = await dropAai();
+  if (!result.ok) {
+    return {
+      attempted: true,
+      ok: false,
+      warning: `turn ${turn.id}: drop_aai_before requested a forced AAI drop, but the debug hook responded HTTP ${result.status} (is COUNTERSIGN_DEBUG_HOOKS=1 set on the target server?) -- continuing without forcing a drop`,
+    };
+  }
+  return { attempted: true, ok: true, warning: null };
+}
+
 /** Plays every scripted caller turn against a live, already-`start`ed call. Does not itself
  *  wait for a verdict -- see `waitForVerdict` below, called separately by run.ts once every
  *  turn has been spoken. Reactive turns (carrying `respond`) have their actual line decided
  *  right before speaking, from whatever the live agent has said so far -- see
  *  truthEngine.ts's `resolveTurnText`, which is why this has to happen turn-by-turn rather
  *  than all up front. */
-export async function runTurns(client: CallClient, scenario: Scenario, voice: string | undefined): Promise<TurnRunOutcome> {
+export async function runTurns(
+  client: CallClient,
+  scenario: Scenario,
+  voice: string | undefined,
+  deps: TurnRunDeps = {},
+): Promise<TurnRunOutcome> {
   const warnings: string[] = [];
   const callerEndTimes: TurnRunOutcome['callerEndTimes'] = [];
   const resolvedLines: ResolvedLineRecord[] = [];
@@ -201,6 +245,8 @@ export async function runTurns(client: CallClient, scenario: Scenario, voice: st
       break;
     }
     const turn = scenario.turns[turnIdx]!;
+    const dropOutcome = await maybeDropAai(turn, deps.dropAai);
+    if (dropOutcome.warning) warnings.push(dropOutcome.warning);
     if (turn.barge_in_after_ms !== undefined) {
       const markerCount = client.audioTimestamps.length;
       const started = await waitForReplyStarted(client, markerCount, BARGE_IN_REPLY_START_TIMEOUT_MS);

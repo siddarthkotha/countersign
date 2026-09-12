@@ -376,6 +376,20 @@ export class CallSession {
     this.opts.onServerEvent({ type: 'ended', reason });
   }
 
+  /** Rehearsal-harness debug hook (aai/types.ts's `debugForceDrop` doc comment has the full
+   *  reasoning: judge-sim finding 2026-09-11, "zero AssemblyAI socket drops occurred" --
+   *  session.resume was never exercised on a live call). Forwards to the live AAI socket's
+   *  own `debugForceDrop`, which is a no-op-returning-false for anything other than a real
+   *  connection (`FakeAaiSocket` records it for tests; a plain `AaiSocket` with neither
+   *  implements it at all, hence the `?.()`). Never touches the engine, the verdict, or any
+   *  evidence -- only the transport leg drops; the resume (or give-up) that follows is
+   *  exactly the same code path a real network blip takes. Only reachable server-side via
+   *  the env-guarded debug route (`COUNTERSIGN_DEBUG_HOOKS=1`, http.ts). */
+  debugDropAai(): boolean {
+    if (this.ended) return false;
+    return this.opts.aai.debugForceDrop?.() ?? false;
+  }
+
   /** IMPORTANT 2 (final review): ws/browser.ts calls this for the browser<->server leg's own
    *  link events (lost on close, restored on reattach) -- the AAI-leg counterpart is logged
    *  internally by `handleAaiEvent`'s own `link` case. Kept as a public method rather than

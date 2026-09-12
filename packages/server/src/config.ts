@@ -35,6 +35,16 @@ export interface ServerConfig {
    *  `ServerConfig` test fixtures that predate this field keep compiling unchanged;
    *  `loadConfig` always sets it. */
   admin_token?: string | null;
+  /** Rehearsal-harness debug hook (judge-sim finding 2026-09-11: barge-in and session.resume
+   *  were never exercised on a live/deployed call, because nothing in the real stack could
+   *  force either on demand). Gates POST /api/session/:id/debug/drop-aai (http.ts) -- same
+   *  "opt-in only, route completely absent otherwise" shape as `admin_token` above: `false`
+   *  (the default -- unset/empty) means the route doesn't exist at all (404, not 401/403),
+   *  so nothing changes for a normal deploy unless an operator explicitly sets
+   *  COUNTERSIGN_DEBUG_HOOKS=1. NEVER set in production. Optional so existing hand-built
+   *  `ServerConfig` test fixtures that predate this field keep compiling unchanged;
+   *  `loadConfig` always sets it. */
+  debug_hooks_enabled?: boolean;
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -78,5 +88,6 @@ export function loadConfig(env: Record<string, string | undefined>): ServerConfi
     browser_grace_ms: intFromEnv(env.COUNTERSIGN_BROWSER_GRACE_MS, 20000),
     live_disabled: env.COUNTERSIGN_LIVE_DISABLED === 'credits' ? 'credits' : null,
     admin_token: env.COUNTERSIGN_ADMIN_TOKEN && env.COUNTERSIGN_ADMIN_TOKEN.length > 0 ? env.COUNTERSIGN_ADMIN_TOKEN : null,
+    debug_hooks_enabled: env.COUNTERSIGN_DEBUG_HOOKS === '1',
   };
 }

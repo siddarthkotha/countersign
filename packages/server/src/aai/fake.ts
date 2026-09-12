@@ -39,4 +39,16 @@ export class FakeAaiSocket implements AaiSocket {
     if (this.closed) return;
     for (const handler of this.handlers) handler(evt);
   }
+
+  /** Wiring-level counterpart to `RealAaiSocket.debugForceDrop` (aai/session.ts) -- this
+   *  fake has no resume-on-drop logic to exercise (that only exists in the real adapter), so
+   *  it just records that the drop reached this far, for ws/browser.ts's own `dropAai` test
+   *  to assert against (the real resume path itself is proven in aai-session.test.ts, against
+   *  `RealAaiSocket`, never here). */
+  debugDropCount = 0;
+  debugForceDrop(): boolean {
+    if (this.closed) return false;
+    this.debugDropCount += 1;
+    return true;
+  }
 }

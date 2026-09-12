@@ -33,6 +33,12 @@ export interface HttpDeps {
    *  the live `CallSession` + AAI socket + browser socket and frees the caps slot together.
    *  Returns `false` for an id that was never active -- routed to 404, same shape as before. */
   endCall: (session_id: string, reason: string) => boolean;
+  /** Rehearsal-harness debug hook (judge-sim finding 2026-09-11). Backs
+   *  POST /api/session/:id/debug/drop-aai, gated on `cfg.debug_hooks_enabled` below. Optional
+   *  so every existing test/caller that predates this hook (and never sets
+   *  COUNTERSIGN_DEBUG_HOOKS=1) keeps compiling and behaving unchanged -- index.ts always
+   *  supplies the real one (ws/browser.ts's `dropAai`). */
+  dropAai?: (session_id: string) => boolean;
   /** Task D1: serves the built web SPA (packages/web/dist) as the LAST fallback, after every
    *  API route has failed to match. Optional -- omitted in tests that only exercise the API
    *  surface, and `available: false` (no build present) makes `handle` always decline, so
@@ -308,6 +314,35 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
       const reason = action === 'end' ? 'caller_ended' : 'reset';
       const ended = deps.endCall(id, reason);
       if (!ended) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    // Rehearsal-harness debug hook (judge-sim finding 2026-09-11, docs/JUDGE-SIM-2026-09-11.md
+    // addendum: zero AssemblyAI socket drops occurred across three live bundles, so
+    // session.resume -- an "Application of technology" mechanic -- had never actually been
+    // exercised on a live call). Same "route completely absent, not just unauthorized" shape
+    // as /api/admin/live-calls/reset below: 404, not 403, unless an operator has explicitly
+    // set COUNTERSIGN_DEBUG_HOOKS=1 -- NEVER set in production. Scoped to one session id (same
+    // UUID check as /reset|/end above), so it can only ever affect a call the caller already
+    // knows the id of, same trust model as every other /api/session/:id/... route.
+    const dropAaiMatch = /^\/api\/session\/([^/]+)\/debug\/drop-aai$/.exec(path);
+    if (req.method === 'POST' && dropAaiMatch) {
+      if (!cfg.debug_hooks_enabled || !deps.dropAai) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      const id = dropAaiMatch[1] as string;
+      if (!UUID_RE.test(id)) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      const dropped = deps.dropAai(id);
+      if (!dropped) {
         sendJson(res, 404, { error: 'not_found' });
         return;
       }

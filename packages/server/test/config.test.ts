@@ -90,3 +90,19 @@ describe('loadConfig — admin_token', () => {
     expect(loadConfig({ COUNTERSIGN_ADMIN_TOKEN: 'secret-admin-token' }).admin_token).toBe('secret-admin-token');
   });
 });
+
+// Rehearsal-harness debug hook (judge-sim finding 2026-09-11): gates
+// POST /api/session/:id/debug/drop-aai (http.ts). Same "opt-in only" shape as kill_switch/
+// admin_token above -- nothing happens unless this is explicitly set to exactly "1".
+describe('loadConfig — debug_hooks_enabled', () => {
+  it('defaults to false when COUNTERSIGN_DEBUG_HOOKS is unset or anything other than "1"', () => {
+    expect(loadConfig({}).debug_hooks_enabled).toBe(false);
+    expect(loadConfig({ COUNTERSIGN_DEBUG_HOOKS: '' }).debug_hooks_enabled).toBe(false);
+    expect(loadConfig({ COUNTERSIGN_DEBUG_HOOKS: 'true' }).debug_hooks_enabled).toBe(false);
+    expect(loadConfig({ COUNTERSIGN_DEBUG_HOOKS: '0' }).debug_hooks_enabled).toBe(false);
+  });
+
+  it('is true only when COUNTERSIGN_DEBUG_HOOKS is exactly "1"', () => {
+    expect(loadConfig({ COUNTERSIGN_DEBUG_HOOKS: '1' }).debug_hooks_enabled).toBe(true);
+  });
+});

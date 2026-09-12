@@ -3,8 +3,9 @@
 // polling loop against a client whose `latestState()` changes over time.
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
-import { computeTurnGaps, scriptedCallerShouldStop, waitForGreeting, waitForVerdict } from '../turnController.js';
+import { computeTurnGaps, maybeDropAai, scriptedCallerShouldStop, waitForGreeting, waitForVerdict } from '../turnController.js';
 import type { CallClient } from '../wsClient.js';
+import type { ScenarioTurn } from '../types.js';
 import type { ScreenState } from '@countersign/engine';
 
 function fakeState(verdict: ScreenState['verdict']): ScreenState {
@@ -178,4 +179,44 @@ describe('waitForGreeting', () => {
 
     expect(warnings.some((w) => w.includes('no greeting audio observed within 50ms'))).toBe(true);
   }, 10_000);
+});
+
+// Judge-sim finding 2026-09-11 ("zero AssemblyAI socket drops occurred -- session.resume
+// never exercised"): `maybeDropAai` is the pure decision function `runTurns` calls once per
+// turn -- no real client, no real HTTP, so this is fully unit-testable (same shape as
+// `scriptedCallerShouldStop` above).
+describe('maybeDropAai', () => {
+  function turn(overrides: Partial<ScenarioTurn> = {}): ScenarioTurn {
+    return { id: 'c2', text: 'hello', ...overrides };
+  }
+
+  it('does nothing for a turn with no drop_aai_before', async () => {
+    const result = await maybeDropAai(turn(), async () => ({ ok: true, status: 204 }));
+    expect(result).toEqual({ attempted: false, ok: true, warning: null });
+  });
+
+  it('warns and does not throw when drop_aai_before is set but no dropAai hook was wired', async () => {
+    const result = await maybeDropAai(turn({ drop_aai_before: true }), undefined);
+    expect(result.attempted).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.warning).toContain('no dropAai hook was wired');
+  });
+
+  it('calls the wired dropAai hook and reports success', async () => {
+    let calls = 0;
+    const result = await maybeDropAai(turn({ drop_aai_before: true }), async () => {
+      calls += 1;
+      return { ok: true, status: 204 };
+    });
+    expect(calls).toBe(1);
+    expect(result).toEqual({ attempted: true, ok: true, warning: null });
+  });
+
+  it('warns with the HTTP status when the wired dropAai hook reports failure (e.g. debug hooks disabled)', async () => {
+    const result = await maybeDropAai(turn({ drop_aai_before: true }), async () => ({ ok: false, status: 404 }));
+    expect(result.attempted).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.warning).toContain('HTTP 404');
+    expect(result.warning).toContain('COUNTERSIGN_DEBUG_HOOKS');
+  });
 });

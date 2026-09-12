@@ -22,10 +22,11 @@
 // ESTIMATE after each call and the total at the end. Defaults to the local server; running
 // against the deployed URL requires spelling it out explicitly with --url (never inferred,
 // never a default).
-import { mintSession, connectCall, fetchDiagnostics } from './wsClient.js';
+import { mintSession, connectCall, fetchDiagnostics, forceDropAai } from './wsClient.js';
 import { loadScenario, loadAllScenarios, ScenarioValidationError } from './scenario.js';
 import { runTurns, runLlmTurns, computeTurnGaps, waitForVerdict, waitForCountersignSettle } from './turnController.js';
 import { summarizeDiagnostics } from './diagnosticsSummary.js';
+import { checkScenarioExpectations } from './expectations.js';
 import { renderRollup, oneLineSummary, rollupFileName } from './report.js';
 import { writeRunArtifacts } from './artifacts.js';
 import { resolveLlmConfig, getApiKey, apiKeyEnvVarFor, nodeFetchHttpClient } from './llmCaller.js';
@@ -182,7 +183,10 @@ async function runOne(
     callerEndTimes = outcome.callerEndTimes;
     resolvedLines = outcome.resolvedLines;
   } else {
-    const outcome = await runTurns(client, scenario, voice);
+    // Judge-sim finding 2026-09-11: always wired (harmless when no turn carries
+    // `drop_aai_before`) so any scenario, present or future, can opt into forcing a real
+    // AAI-leg drop mid-call without run.ts needing scenario-specific branching here.
+    const outcome = await runTurns(client, scenario, voice, { dropAai: () => forceDropAai(url, session.session_id) });
     warnings.push(...outcome.warnings);
     callerEndTimes = outcome.callerEndTimes;
     resolvedLines = outcome.resolvedLines;
@@ -220,7 +224,14 @@ async function runOne(
   const turnGaps = computeTurnGaps(client, callerEndTimes);
 
   const actualVerdict = verdictResult.verdict;
-  const pass = verdictResult.reached && actualVerdict === scenario.expected.verdict;
+  // Judge-sim finding 2026-09-11 (expectations.ts's doc comment has the full reasoning): a
+  // scenario's own opt-in min_interrupted_agent_lines/require_aai_link_restored checks are
+  // ADDITIONAL fail conditions, on top of (never instead of) the base verdict check --
+  // reaching the right verdict without the mechanic the scenario exists to prove is still a
+  // FAIL, not a pass with a hopeful warning.
+  const expectationCheck = checkScenarioExpectations(scenario, transcript, bundle);
+  for (const failure of expectationCheck.failures) warnings.push(failure);
+  const pass = verdictResult.reached && actualVerdict === scenario.expected.verdict && expectationCheck.ok;
 
   const minutesEstimate = totalWallMs / 60000;
 

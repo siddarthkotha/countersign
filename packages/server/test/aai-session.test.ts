@@ -39,6 +39,15 @@ class FakeWs implements WsLike {
     this.closed = true;
   }
 
+  /** Debug-hook counterpart to `close()` -- an abrupt teardown with no closing handshake,
+   *  matching what the real `ws` package's `WebSocket#terminate()` does: the peer sees an
+   *  unsolicited close (code 1006), same as `triggerClose(1006, ...)` below simulates for a
+   *  genuine network drop. */
+  terminate(): void {
+    this.closed = true;
+    this.triggerClose(1006, 'terminated');
+  }
+
   triggerOpen(): void {
     for (const cb of this.listeners.open ?? []) cb();
   }
@@ -303,6 +312,38 @@ describe('connectAai', () => {
     expect(JSON.parse(sockets[1]!.sent[0]!)).toEqual({ type: 'session.resume', session_id: 'sess-1' });
 
     await waitFor(() => expect(received).toContainEqual({ type: 'link', state: 'restored', attempt: 1 }));
+  });
+
+  // Rehearsal-harness debug hook (judge-sim finding 2026-09-11: "zero AssemblyAI socket
+  // drops occurred" across three live bundles -- session.resume had never actually been
+  // exercised on a live call). `debugForceDrop()` must take the SAME code path a real
+  // network drop does (`handleUnexpectedClose`, proven above via `triggerClose(1006, ...)`),
+  // not a separately-faked `link`/`session.resume` pair that would prove nothing about the
+  // real resume logic.
+  it('debugForceDrop() terminates the socket and runs the real resume-on-drop path', async () => {
+    const { deps, sockets } = makeDeps();
+    const aai = await connectAndReady(deps, sockets, 'sess-1');
+
+    const received: AaiEvent[] = [];
+    aai.on((evt) => received.push(evt));
+
+    expect(aai.debugForceDrop?.()).toBe(true);
+    expect(sockets[0]!.closed).toBe(true);
+    expect(received).toContainEqual({ type: 'link', state: 'lost', attempt: 1 });
+
+    await waitFor(() => expect(sockets.length).toBe(2));
+    expect(sockets[1]!.url).toBe('wss://agents.assemblyai.com/v1/ws?token=tok-2');
+    sockets[1]!.triggerOpen();
+    await waitFor(() => expect(sockets[1]!.sent.length).toBe(1));
+    expect(JSON.parse(sockets[1]!.sent[0]!)).toEqual({ type: 'session.resume', session_id: 'sess-1' });
+    await waitFor(() => expect(received).toContainEqual({ type: 'link', state: 'restored', attempt: 1 }));
+  });
+
+  it('debugForceDrop() returns false once the socket is already closed', async () => {
+    const { deps, sockets } = makeDeps();
+    const aai = await connectAndReady(deps, sockets, 'sess-1');
+    aai.close();
+    expect(aai.debugForceDrop?.()).toBe(false);
   });
 
   it('does not attempt a resume on a close the caller itself requested', async () => {

@@ -16,6 +16,17 @@ export interface AaiSocket {
    *  (which never has unmodeled events, since tests only ever emit shapes it knows) need
    *  not implement it. */
   stats?(): { unknown_events: number };
+  /** Rehearsal-harness debug hook (item: judge-sim finding 2026-09-11, "zero AssemblyAI
+   *  socket drops occurred" -- session.resume was never exercised live). Forces the SAME
+   *  unexpected-close path a real network drop takes (`RealAaiSocket.handleUnexpectedClose`
+   *  in `session.ts`), so the real bounded resume-on-drop logic actually runs, instead of
+   *  faking a `link`/`session.resume` event that would prove nothing about the real code
+   *  path. Only ever reachable server-side via an env-guarded debug route
+   *  (`COUNTERSIGN_DEBUG_HOOKS=1`, see `http.ts`) -- never wired to anything a caller can
+   *  reach in production. Returns false if there is nothing live to drop (already closed).
+   *  Optional: `FakeAaiSocket` (dev mode / most tests) has no resume logic to exercise, so
+   *  it need not implement this. */
+  debugForceDrop?(): boolean;
 }
 
 /** Server <- AssemblyAI events actually used by S2 (a strict subset of the full events

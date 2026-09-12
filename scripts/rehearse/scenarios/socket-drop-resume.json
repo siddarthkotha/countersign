@@ -1,0 +1,234 @@
+{
+  "name": "socket-drop-resume",
+  "title": "Dana Whitfield -- the AssemblyAI leg drops and resumes mid-call",
+  "description": "Judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md addendum): across all three live bundles rehearsed so far, zero AssemblyAI socket drops occurred -- the real bounded resume-on-drop path (packages/server/src/aai/session.ts's `handleUnexpectedClose`: a fresh token, a new socket, `session.resume` with the prior session_id, within AssemblyAI's 30s resumable window) had never actually run on a live call. The harness cannot force AssemblyAI itself to drop the connection -- it only ever talks to OUR server -- so this scenario is Dana's own honest script (scenario-a-dana-legitimate.json's turns, verbatim) with ONE addition: turn c4 carries `drop_aai_before: true`, which makes the harness POST to the target server's env-guarded debug hook (POST /api/session/:id/debug/drop-aai, packages/server/src/http.ts, live ONLY when that server has COUNTERSIGN_DEBUG_HOOKS=1 -- never set in production) immediately before speaking that turn. The hook terminates the real AssemblyAI socket with no closing handshake (RealAaiSocket.debugForceDrop, packages/server/src/aai/session.ts), which is exactly what a genuine network drop looks like on the wire -- the resume logic that follows is the SAME code real drops take, not a faked substitute. Expects STAGE (the drop and resume change nothing about the verdict -- LAW 2/3, only the transport leg was ever affected) AND a recorded AAI-leg link:\"restored\" event (expected.require_aai_link_restored) -- proof the resume actually completed, not merely attempted.",
+  "source": "docs/BRIEF.md section 4 \"Scenario A\" + packages/engine/corpus/scenario-a-dana-legitimate.json (caller turns c1-c4, read-only source) + judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md addendum) + packages/server/src/aai/session.ts (resume-on-drop) + packages/server/src/http.ts's env-guarded debug hook",
+  "truth": {
+    "identity": "Dana Whitfield",
+    "beneficiary": "Meridian Supply",
+    "amount_usd": 84500,
+    "account_last4": "4471",
+    "counsel": null,
+    "escrow_institution": null,
+    "approver": null,
+    "deadline": "today"
+  },
+  "persona": "You are Dana Whitfield, corporate treasury at Meridian Dynamics. You are calling to move a real, already-approved wire payment earlier than scheduled: $84,500 to Meridian Supply, account ending 4471, approved in yesterday's close meeting, moving today instead of Friday. You know these facts exactly. Partway through the call the line goes quiet for a few seconds -- you wait patiently rather than hanging up, and once the agent is back, you carry on exactly as before: confirm any readback that matches what you said, or firmly and plainly correct it with the true value if it does not. If asked for something you were never given (an id, a code, a PIN), say plainly that you do not have that and repeat your name. Under 30 words per line.",
+  "turns": [
+    {
+      "id": "c1",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply, $84,500, account ending 4471, moving today instead of Friday, approved in yesterday's close meeting.",
+      "pause_ms": 500
+    },
+    {
+      "id": "c2",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c3",
+      "text": "Yes, correct.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": []
+      }
+    },
+    {
+      "id": "c4",
+      "text": "Yes, that's right. This is Dana Whitfield.",
+      "pause_ms": 400,
+      "drop_aai_before": true,
+      "respond": {
+        "rules": []
+      }
+    },
+    {
+      "id": "c5",
+      "text": "Yes, that's right. This is Dana Whitfield.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": []
+      }
+    },
+    {
+      "id": "c6",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars."
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday."
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one."
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
+    },
+    {
+      "id": "c7",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars."
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday."
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one."
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
+    },
+    {
+      "id": "c8",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars."
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday."
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one."
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
+    }
+  ],
+  "expected": {
+    "verdict": "STAGE",
+    "max_wall_ms": 210000,
+    "require_aai_link_restored": true
+  },
+  "demo_persona": "legitimate"
+}

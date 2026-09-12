@@ -54,6 +54,9 @@ const cfg = useFakeAai && !loadedCfg.assemblyai_api_key
 // an HTTP request somehow arrived before that -- impossible here, since nothing calls
 // `server.listen` until after both are wired).
 let endCallImpl: ((session_id: string, reason: string) => boolean) | null = null;
+// Same forward-reference shape as `endCallImpl` above, for the same circular-dependency
+// reason -- the rehearsal-harness debug hook (COUNTERSIGN_DEBUG_HOOKS=1 only).
+let dropAaiImpl: ((session_id: string) => boolean) | null = null;
 
 // Flight recorder (founder's ask, 2026-09-02): ONE DiagnosticsState for the process's whole
 // life, shared between http.ts's GET/POST .../diagnostics routes and ws/browser.ts's own
@@ -65,6 +68,7 @@ const { server, state } = createHttpServer(cfg, {
   now: () => Date.now(),
   randomId: () => randomUUID(),
   endCall: (id, reason) => (endCallImpl ? endCallImpl(id, reason) : false),
+  dropAai: (id) => (dropAaiImpl ? dropAaiImpl(id) : false),
   // Mounted as the LAST fallback inside http.ts, after every API/WS route -- `available` is
   // false (so this never activates) unless `npm run build:web` has actually produced
   // packages/web/dist, which keeps plain `dev:server` (no build) working exactly as before.
@@ -221,7 +225,7 @@ function createAai(session_id: string): AaiSocket {
   return new PendingAaiSocket(connecting);
 }
 
-const { endCall } = attachWebSocketServer(server, {
+const { endCall, dropAai } = attachWebSocketServer(server, {
   caps: state,
   now: () => Date.now(),
   createAai,
@@ -239,6 +243,7 @@ const { endCall } = attachWebSocketServer(server, {
   session_cap_seconds: cfg.session_cap_seconds,
 });
 endCallImpl = endCall;
+dropAaiImpl = dropAai;
 
 // CRITICAL 1 (final review): `reapIdle`'s returned ids used to be discarded here -- the idle
 // reaper freed the CAPS slot (inside `reapIdle` itself) but never actually ended the live
@@ -251,6 +256,9 @@ setInterval(() => {
 
 if (useFakeAai) {
   console.log('COUNTERSIGN_FAKE_AAI=1 -- call sessions use a scripted fake AssemblyAI socket, no API key required');
+}
+if (cfg.debug_hooks_enabled) {
+  console.warn('countersign: COUNTERSIGN_DEBUG_HOOKS=1 -- POST /api/session/:id/debug/drop-aai is live. NEVER set this in production.');
 }
 
 // Task D1: bind 0.0.0.0 explicitly -- Render (and most PaaS hosts) route inbound traffic to

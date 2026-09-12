@@ -41,6 +41,13 @@ export interface WsLike {
   send(data: string): void;
   close(code?: number, reason?: string): void;
   on(event: 'open' | 'message' | 'close' | 'error', listener: (...args: unknown[]) => void): void;
+  /** Debug-hook support only (`RealAaiSocket.debugForceDrop`, below): an abrupt, no-
+   *  closing-handshake teardown -- what the real `ws` package's `WebSocket#terminate()`
+   *  does, and what actually produces an unsolicited close on the wire (code 1006,
+   *  "abnormal closure") the way a real dropped connection does, as opposed to `close()`'s
+   *  polite handshake. Optional: test fakes that never exercise the debug hook need not
+   *  implement it. */
+  terminate?(): void;
 }
 
 export interface AaiConnectDeps {
@@ -260,6 +267,20 @@ class RealAaiSocket implements AaiSocket {
   send(msg: object): void {
     if (this.closed) return;
     this.ws.send(JSON.stringify(msg));
+  }
+
+  /** Rehearsal-harness debug hook (aai/types.ts's `debugForceDrop` doc comment has the full
+   *  reasoning): terminates the underlying socket WITHOUT setting `expectClose`, so
+   *  `wire()`'s own `ws.on('close', ...)` handler treats it exactly like a real unsolicited
+   *  drop and runs `handleUnexpectedClose()` -- the same bounded resume-on-drop path a real
+   *  network blip takes. Never reachable except through the env-guarded debug route
+   *  (`COUNTERSIGN_DEBUG_HOOKS=1`, http.ts). Returns false if there's nothing live to drop
+   *  (already closed, or this `WsLike` has no `terminate()` -- every real production socket
+   *  does; only a minimal test fake might not). */
+  debugForceDrop(): boolean {
+    if (this.closed || !this.ws.terminate) return false;
+    this.ws.terminate();
+    return true;
   }
 
   on(handler: (evt: AaiEvent) => void): void {

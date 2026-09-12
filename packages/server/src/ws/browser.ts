@@ -423,6 +423,12 @@ export interface BrowserWsApi {
    *  before the browser ever opened its WebSocket) -- there is no live `CallEntry` for
    *  `endCall` to act on in that case, only the caps reservation to release. */
   endCall(session_id: string, reason: string): boolean;
+  /** Rehearsal-harness debug hook (judge-sim finding 2026-09-11: session.resume was never
+   *  exercised on a live call). Forwards to the live `CallEntry`'s own `CallSession.
+   *  debugDropAai()` -- see that method's doc comment. Returns false for an id with no live
+   *  call (never attached, already ended) -- there is nothing to drop. Only ever reached
+   *  through the env-guarded debug route (`COUNTERSIGN_DEBUG_HOOKS=1`, http.ts). */
+  dropAai(session_id: string): boolean;
 }
 
 export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): BrowserWsApi {
@@ -472,6 +478,12 @@ export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): Brow
     return false;
   }
 
+  function dropAai(session_id: string): boolean {
+    const entry = activeCalls.get(session_id);
+    if (!entry) return false;
+    return entry.session.debugDropAai();
+  }
+
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     // CRITICAL (task-origin-review.md): the only origin gate for a WebSocket upgrade at
     // all -- browsers apply no Same-Origin Policy to `new WebSocket(...)`, so without this
@@ -514,5 +526,5 @@ export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): Brow
     wss.handleUpgrade(req, socket, head, (ws) => ws.close(4404, 'not found'));
   });
 
-  return { endCall };
+  return { endCall, dropAai };
 }

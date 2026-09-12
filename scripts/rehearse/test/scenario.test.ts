@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { listScenarioNames, loadAllScenarios, loadScenario, validateScenario, ScenarioValidationError } from '../scenario.js';
 
 describe('scenario loading (no network)', () => {
-  it('lists the required scenario files (the original four plus the four adversarial ones, item 16)', async () => {
+  it('lists the required scenario files (the original four, the four adversarial ones from item 16, and the two judge-sim mechanics scenarios from 2026-09-11)', async () => {
     const names = await listScenarioNames();
     expect(names).toEqual(
       expect.arrayContaining([
@@ -14,13 +14,15 @@ describe('scenario loading (no network)', () => {
         'identity-switch',
         'structuring-two-wires',
         'hangup-after-request',
+        'barge-in-interrupt',
+        'socket-drop-resume',
       ]),
     );
   });
 
   it('loads and validates every scenario file on disk', async () => {
     const scenarios = await loadAllScenarios();
-    expect(scenarios.length).toBeGreaterThanOrEqual(8);
+    expect(scenarios.length).toBeGreaterThanOrEqual(10);
     for (const s of scenarios) {
       expect(s.name.length).toBeGreaterThan(0);
       expect(s.turns.length).toBeGreaterThan(0);
@@ -74,6 +76,37 @@ describe('scenario loading (no network)', () => {
           turns: [{ id: 'c1', text: 'hello' }],
           expected: { verdict: 'STAGE', max_wall_ms: 1000 },
           demo_persona: 'bogus',
+        },
+        'inline',
+      ),
+    ).toThrow(ScenarioValidationError);
+  });
+
+  it('accepts and preserves a turn with drop_aai_before: true', () => {
+    const s = validateScenario(
+      {
+        name: 'x',
+        title: 'x',
+        description: '',
+        source: '',
+        turns: [{ id: 'c1', text: 'hello', drop_aai_before: true }],
+        expected: { verdict: 'STAGE', max_wall_ms: 1000 },
+      },
+      'inline',
+    );
+    expect(s.turns[0]!.drop_aai_before).toBe(true);
+  });
+
+  it('rejects a non-boolean drop_aai_before', () => {
+    expect(() =>
+      validateScenario(
+        {
+          name: 'x',
+          title: 'x',
+          description: '',
+          source: '',
+          turns: [{ id: 'c1', text: 'hello', drop_aai_before: 'yes' }],
+          expected: { verdict: 'STAGE', max_wall_ms: 1000 },
         },
         'inline',
       ),
@@ -234,6 +267,72 @@ describe('scenario loading (no network)', () => {
     expect(s.persona).toBe('You are Dana Whitfield, corporate treasury.');
   });
 
+  // Judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md addendum): the two new optional
+  // `expected` fields the barge-in-interrupt and socket-drop-resume scenarios need.
+  it('accepts and preserves expected.min_interrupted_agent_lines and expected.require_aai_link_restored', () => {
+    const s = validateScenario(
+      {
+        name: 'x',
+        title: 'x',
+        description: '',
+        source: '',
+        turns: [{ id: 'c1', text: 'hello' }],
+        expected: { verdict: 'STAGE', max_wall_ms: 1000, min_interrupted_agent_lines: 1, require_aai_link_restored: true },
+      },
+      'inline',
+    );
+    expect(s.expected.min_interrupted_agent_lines).toBe(1);
+    expect(s.expected.require_aai_link_restored).toBe(true);
+  });
+
+  it('leaves min_interrupted_agent_lines/require_aai_link_restored undefined when absent (every pre-existing scenario)', () => {
+    const s = validateScenario(
+      {
+        name: 'x',
+        title: 'x',
+        description: '',
+        source: '',
+        turns: [{ id: 'c1', text: 'hello' }],
+        expected: { verdict: 'STAGE', max_wall_ms: 1000 },
+      },
+      'inline',
+    );
+    expect(s.expected.min_interrupted_agent_lines).toBeUndefined();
+    expect(s.expected.require_aai_link_restored).toBeUndefined();
+  });
+
+  it('rejects a negative expected.min_interrupted_agent_lines', () => {
+    expect(() =>
+      validateScenario(
+        {
+          name: 'x',
+          title: 'x',
+          description: '',
+          source: '',
+          turns: [{ id: 'c1', text: 'hello' }],
+          expected: { verdict: 'STAGE', max_wall_ms: 1000, min_interrupted_agent_lines: -1 },
+        },
+        'inline',
+      ),
+    ).toThrow(ScenarioValidationError);
+  });
+
+  it('rejects a non-boolean expected.require_aai_link_restored', () => {
+    expect(() =>
+      validateScenario(
+        {
+          name: 'x',
+          title: 'x',
+          description: '',
+          source: '',
+          turns: [{ id: 'c1', text: 'hello' }],
+          expected: { verdict: 'STAGE', max_wall_ms: 1000, require_aai_link_restored: 'yes' },
+        },
+        'inline',
+      ),
+    ).toThrow(ScenarioValidationError);
+  });
+
   it('rejects an empty-string persona', () => {
     expect(() =>
       validateScenario(
@@ -319,5 +418,45 @@ describe('the four adversarial scenarios (founder ruling item 16, 2026-09-09)', 
   it('hangup-after-request has exactly one turn (the caller never speaks again)', async () => {
     const s = await loadScenario('hangup-after-request');
     expect(s.turns).toHaveLength(1);
+  });
+});
+
+describe('the two judge-sim mechanics scenarios (finding 2026-09-11)', () => {
+  it('barge-in-interrupt expects STAGE and at least one interrupted agent line', async () => {
+    const s = await loadScenario('barge-in-interrupt');
+    expect(s.expected.verdict).toBe('STAGE');
+    expect(s.expected.min_interrupted_agent_lines).toBeGreaterThanOrEqual(1);
+  });
+
+  it('barge-in-interrupt carries a barge_in_after_ms turn timed ~1.5s into the agent reply', async () => {
+    const s = await loadScenario('barge-in-interrupt');
+    const bargeInTurn = s.turns.find((t) => t.barge_in_after_ms !== undefined);
+    expect(bargeInTurn, 'barge-in-interrupt should have a barge_in_after_ms turn').toBeDefined();
+    expect(bargeInTurn!.barge_in_after_ms).toBe(1500);
+  });
+
+  it('barge-in-interrupt carries a truth block and a persona (honest caller, Dana-shaped)', async () => {
+    const s = await loadScenario('barge-in-interrupt');
+    expect(s.truth).toBeDefined();
+    expect(s.persona).toBeTruthy();
+    expect(s.demo_persona).toBe('legitimate');
+  });
+
+  it('socket-drop-resume expects STAGE and requires an AAI link:restored event', async () => {
+    const s = await loadScenario('socket-drop-resume');
+    expect(s.expected.verdict).toBe('STAGE');
+    expect(s.expected.require_aai_link_restored).toBe(true);
+  });
+
+  it('socket-drop-resume carries a drop_aai_before turn (the forced drop)', async () => {
+    const s = await loadScenario('socket-drop-resume');
+    expect(s.turns.some((t) => t.drop_aai_before === true)).toBe(true);
+  });
+
+  it('socket-drop-resume carries a truth block and a persona (honest caller, Dana-shaped)', async () => {
+    const s = await loadScenario('socket-drop-resume');
+    expect(s.truth).toBeDefined();
+    expect(s.persona).toBeTruthy();
+    expect(s.demo_persona).toBe('legitimate');
   });
 });

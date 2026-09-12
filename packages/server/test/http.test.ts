@@ -43,7 +43,10 @@ describe('http server', () => {
     }
   });
 
-  function start(cfgOverrides: Partial<ServerConfig> = {}): Promise<{
+  function start(
+    cfgOverrides: Partial<ServerConfig> = {},
+    dropAaiImpl?: (session_id: string) => boolean,
+  ): Promise<{
     server: Server;
     state: CapsState;
     diagnostics: DiagnosticsState;
@@ -75,6 +78,10 @@ describe('http server', () => {
         }
         return false;
       },
+      // Rehearsal-harness debug hook: omitted (undefined) by every existing test here, same
+      // as production behavior when COUNTERSIGN_DEBUG_HOOKS is unset -- only the dedicated
+      // debug-hook describe block below supplies a stub.
+      ...(dropAaiImpl ? { dropAai: dropAaiImpl } : {}),
       diagnostics,
     });
     stateRef = state;
@@ -605,6 +612,51 @@ describe('http server', () => {
       const after = await fetch(`${base}/health`);
       const afterBody = (await after.json()) as { live_calls: { available: boolean; reason: string | null } };
       expect(afterBody.live_calls).toEqual({ available: true, reason: null });
+    });
+  });
+
+  // Rehearsal-harness debug hook (judge-sim finding 2026-09-11, docs/JUDGE-SIM-2026-09-11.md
+  // addendum: zero AssemblyAI socket drops occurred across three live bundles -- the real
+  // session.resume path had never actually been exercised on a live call). Same "route
+  // completely absent, not just unauthorized" shape as /api/admin/live-calls/reset above:
+  // nothing happens unless an operator has explicitly set COUNTERSIGN_DEBUG_HOOKS=1, and
+  // production never sets it.
+  describe('POST /api/session/:id/debug/drop-aai', () => {
+    const UUID = '11111111-1111-1111-1111-111111111111';
+
+    it('404s when debug hooks are not enabled (the default -- disabled even with a wired dropAai)', async () => {
+      const { base } = await start({ debug_hooks_enabled: false }, () => true);
+      const r = await fetch(`${base}/api/session/${UUID}/debug/drop-aai`, { method: 'POST' });
+      expect(r.status).toBe(404);
+    });
+
+    it('404s when enabled but no dropAai was wired (defensive -- should never happen in production)', async () => {
+      const { base } = await start({ debug_hooks_enabled: true });
+      const r = await fetch(`${base}/api/session/${UUID}/debug/drop-aai`, { method: 'POST' });
+      expect(r.status).toBe(404);
+    });
+
+    it('404s for a malformed session id even when enabled', async () => {
+      const { base } = await start({ debug_hooks_enabled: true }, () => true);
+      const r = await fetch(`${base}/api/session/not-a-uuid/debug/drop-aai`, { method: 'POST' });
+      expect(r.status).toBe(404);
+    });
+
+    it('404s when the wired dropAai reports nothing was live to drop', async () => {
+      const { base } = await start({ debug_hooks_enabled: true }, () => false);
+      const r = await fetch(`${base}/api/session/${UUID}/debug/drop-aai`, { method: 'POST' });
+      expect(r.status).toBe(404);
+    });
+
+    it('204s and calls the wired dropAai with the session id when enabled and the drop succeeds', async () => {
+      const calls: string[] = [];
+      const { base } = await start({ debug_hooks_enabled: true }, (id) => {
+        calls.push(id);
+        return true;
+      });
+      const r = await fetch(`${base}/api/session/${UUID}/debug/drop-aai`, { method: 'POST' });
+      expect(r.status).toBe(204);
+      expect(calls).toEqual([UUID]);
     });
   });
 });

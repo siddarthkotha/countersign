@@ -195,6 +195,25 @@ export async function connectCall(baseUrl: string, wsPath: string): Promise<Call
   };
 }
 
+/** Judge-sim finding 2026-09-11 (docs/JUDGE-SIM-2026-09-11.md addendum: "zero AssemblyAI
+ *  socket drops occurred -- session.resume never exercised"). POSTs to the target server's
+ *  env-guarded debug hook (`/api/session/:id/debug/drop-aai`, packages/server/src/http.ts --
+ *  only live when that server has COUNTERSIGN_DEBUG_HOOKS=1) to force a real AssemblyAI
+ *  socket drop mid-call, so the real bounded resume-on-drop path
+ *  (packages/server/src/aai/session.ts's `handleUnexpectedClose`) actually runs. Never
+ *  throws: a 404 (hook not enabled on that server, or the session isn't live) is a normal,
+ *  reportable outcome, not a protocol error -- turnController.ts's `maybeDropAai` decides
+ *  what to do with `ok: false`. */
+export async function forceDropAai(baseUrl: string, sessionId: string): Promise<{ ok: boolean; status: number }> {
+  const url = `${trimTrailingSlash(baseUrl)}/api/session/${sessionId}/debug/drop-aai`;
+  try {
+    const res = await fetch(url, { method: 'POST' });
+    return { ok: res.ok, status: res.status };
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
+
 /** GET /api/session/<id>/diagnostics. Returns null (not a throw) on any failure -- a missing
  *  flight recorder bundle is worth reporting, not worth failing the whole run over. */
 export async function fetchDiagnostics(baseUrl: string, sessionId: string): Promise<RehearseDiagnosticBundle | null> {
