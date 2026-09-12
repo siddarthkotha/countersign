@@ -1,8 +1,7 @@
 # Six looks — design log (2026-08-30)
 
 Written before any HTML was coded. Each plan traces to specific photo files that were
-actually viewed (not guessed) in
-`/Users/siddarthkotha/shadepath-app/_artifacts/countersign-design-sources/<world>/candidates/`.
+actually viewed (not guessed) in a design reference archive.
 Same `content.json` renders on all six — only the look changes.
 
 ---

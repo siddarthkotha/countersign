@@ -1,16 +1,18 @@
 // Proof script for the Countersign "oscilloscope v4" page — live canvas trace + a
 // REAL traced human profile (STATIC/LIPS/JAW segments, replacing v3's hand-drawn
-// silhouette). Run from /Users/siddarthkotha/shadepath-app so playwright resolves.
+// silhouette). Run from a checkout that has playwright installed.
 // Never runs more than 1 Chromium page at a time (RESOURCE ceiling: max 2 pages).
 import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
-// playwright lives in shadepath-app/node_modules, not here — resolve it via NODE_PATH
-// (run with NODE_PATH=/Users/siddarthkotha/shadepath-app/node_modules).
+import { fileURLToPath } from 'node:url';
+// playwright lives in a checked-out project's node_modules — resolve it via NODE_PATH
+// (run with NODE_PATH=<checkout>/node_modules).
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
-const DESIGN_DIR = '/Users/siddarthkotha/countersign/docs/design/six-looks-2026-08-30';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DESIGN_DIR = __dirname;
 const FILE = '4-oscilloscope-v4-talking.html';
 const OUT_DIR = path.join(DESIGN_DIR, 'contact-v4');
 fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -146,31 +148,36 @@ async function lipsD(page) { return page.$eval('#csLips', (elm) => elm.getAttrib
   // ---- PHASE E: source-vs-trace side-by-side (so the orchestrator can see the trace
   // is faithful to the real photo it was walked from) ----
   {
-    const SCRATCH = '/private/tmp/claude-501/-Users-siddarthkotha-shadepath-app/dcff9dfe-cb00-4bda-9bdd-0338126b90ec/scratchpad';
-    const sourceImg = fs.readFileSync(path.join(SCRATCH, 'hubard-source-crop.jpg'));
-    const sourceB64 = 'data:image/jpeg;base64,' + sourceImg.toString('base64');
-    const traceSvg = fs.readFileSync(path.join(DESIGN_DIR, 'profile-trace.svg'), 'utf8');
-    const html = `<!doctype html><html><head><style>
-      html,body{margin:0;background:#111;}
-      .row{display:flex;align-items:flex-start;}
-      .col{width:520px;padding:16px;box-sizing:border-box;}
-      img,svg{width:488px;height:auto;display:block;background:#0a0d0b;}
-      .lbl{color:#9fd;font:14px monospace;margin-bottom:8px;}
-      </style></head><body>
-      <div class="row">
-        <div class="col"><div class="lbl">SOURCE (cropped) — Wikimedia Commons, William James Hubard, Public domain</div><img src="${sourceB64}"></div>
-        <div class="col"><div class="lbl">TRACED OUTLINE (this file's profile-trace.svg)</div>${traceSvg}</div>
-      </div>
-      </body></html>`;
-    const tmpHtml = path.join(OUT_DIR, '_source-and-trace.html');
-    fs.writeFileSync(tmpHtml, html);
-    const ctx = await browser.newContext({ viewport: { width: 1060, height: 900 }, deviceScaleFactor: 2 });
-    const page = await ctx.newPage();
-    await page.goto('file://' + tmpHtml);
-    await page.waitForTimeout(150);
-    await page.screenshot({ path: path.join(OUT_DIR, 'source-and-trace.png') });
-    await ctx.close();
-    fs.unlinkSync(tmpHtml);
+    // hubard-source-crop.jpg should be in the design directory or passed in
+    const sourceImgPath = path.join(DESIGN_DIR, 'hubard-source-crop.jpg');
+    if (fs.existsSync(sourceImgPath)) {
+      const sourceImg = fs.readFileSync(sourceImgPath);
+      const sourceB64 = 'data:image/jpeg;base64,' + sourceImg.toString('base64');
+      const traceSvg = fs.readFileSync(path.join(DESIGN_DIR, 'profile-trace.svg'), 'utf8');
+      const html = `<!doctype html><html><head><style>
+        html,body{margin:0;background:#111;}
+        .row{display:flex;align-items:flex-start;}
+        .col{width:520px;padding:16px;box-sizing:border-box;}
+        img,svg{width:488px;height:auto;display:block;background:#0a0d0b;}
+        .lbl{color:#9fd;font:14px monospace;margin-bottom:8px;}
+        </style></head><body>
+        <div class="row">
+          <div class="col"><div class="lbl">SOURCE (cropped) — Wikimedia Commons, William James Hubard, Public domain</div><img src="${sourceB64}"></div>
+          <div class="col"><div class="lbl">TRACED OUTLINE (this file's profile-trace.svg)</div>${traceSvg}</div>
+        </div>
+        </body></html>`;
+      const tmpHtml = path.join(OUT_DIR, '_source-and-trace.html');
+      fs.writeFileSync(tmpHtml, html);
+      const ctx = await browser.newContext({ viewport: { width: 1060, height: 900 }, deviceScaleFactor: 2 });
+      const page = await ctx.newPage();
+      await page.goto('file://' + tmpHtml);
+      await page.waitForTimeout(150);
+      await page.screenshot({ path: path.join(OUT_DIR, 'source-and-trace.png') });
+      await ctx.close();
+      fs.unlinkSync(tmpHtml);
+    } else {
+      console.warn('Warning: source image not found at', sourceImgPath, '; skipping E phase');
+    }
   }
 
   await browser.close();

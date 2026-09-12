@@ -1,16 +1,16 @@
-// Run from /Users/siddarthkotha/shadepath-app so playwright resolves:
-//   cd /Users/siddarthkotha/shadepath-app
-//   node /Users/siddarthkotha/countersign/docs/design/six-looks-2026-08-30/render.mjs
+// Run from a checkout that has playwright installed:
+//   npm install playwright  (or ensure it is in node_modules)
+//   NODE_PATH=<checkout>/node_modules node <path>/render.mjs
 //
-// (playwright lives in shadepath-app/node_modules; this script resolves it from
-// shadepath-app's package.json explicitly so it works regardless of how it's invoked.)
+// playwright lives in the project's node_modules; this script resolves it
+// via NODE_PATH to work with any checkout.
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const shadepathRequire = createRequire('/Users/siddarthkotha/shadepath-app/package.json');
-const { chromium } = shadepathRequire('playwright');
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
 
 const pages = [
   { file: '1-flight-deck.html', out: '1-flight-deck.png' },

@@ -1,10 +1,12 @@
 // Proof script for the two Countersign "talking profile" v2 pages.
-// Run from /Users/siddarthkotha/shadepath-app so playwright resolves (per task instructions).
+// Run from a checkout that has playwright installed (NODE_PATH pointing at its node_modules).
 import { chromium } from 'playwright';
 import path from 'node:path';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const DESIGN_DIR = '/Users/siddarthkotha/countersign/docs/design/six-looks-2026-08-30';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DESIGN_DIR = __dirname;
 const OUT_DIR = path.join(DESIGN_DIR, 'contact-v2');
 fs.mkdirSync(OUT_DIR, { recursive: true });
 

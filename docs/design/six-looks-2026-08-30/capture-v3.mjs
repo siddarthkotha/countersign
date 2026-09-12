@@ -1,15 +1,17 @@
 // Proof script for the Countersign "oscilloscope v3" page — live canvas trace + real
-// profile. Run from /Users/siddarthkotha/shadepath-app so playwright resolves.
+// profile. Run from a checkout that has playwright installed.
 // Never runs more than 1 Chromium page at a time (RESOURCE ceiling: max 2 pages).
 import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
-// playwright lives in shadepath-app/node_modules, not here — resolve it via NODE_PATH
-// (run with NODE_PATH=/Users/siddarthkotha/shadepath-app/node_modules).
+import { fileURLToPath } from 'node:url';
+// playwright lives in a checked-out project's node_modules — resolve it via NODE_PATH
+// (run with NODE_PATH=<checkout>/node_modules).
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
-const DESIGN_DIR = '/Users/siddarthkotha/countersign/docs/design/six-looks-2026-08-30';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DESIGN_DIR = __dirname;
 const FILE = '4-oscilloscope-v3-talking.html';
 const OUT_DIR = path.join(DESIGN_DIR, 'contact-v3');
 fs.mkdirSync(OUT_DIR, { recursive: true });
