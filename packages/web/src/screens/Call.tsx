@@ -73,7 +73,12 @@ const FULL_ENDED_SENTENCES: Record<string, string> = {
   link_lost: 'The voice service could not be reached again; the call was closed.',
 };
 
-function endedReasonToPlainWords(reason: string): string {
+function endedReasonToPlainWords(reason: string, verdict?: string): string {
+  // When the socket drops mid-call before a terminal verdict is reached, inform the
+  // caller that nothing was staged or frozen and they can try again.
+  if (reason === 'link_lost' && verdict === 'PENDING') {
+    return 'Connection lost. This call was not completed, and nothing was staged or frozen. Start over to try again.';
+  }
   const fullSentence = FULL_ENDED_SENTENCES[reason];
   if (fullSentence) return fullSentence;
   if (reason.startsWith('aai_error')) {
@@ -421,7 +426,7 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
         <p role="status">Voice link lost, security state preserved. Reconnecting…</p>
       )}
 
-      {endedReason && <p role="status">{endedReasonToPlainWords(endedReason)}</p>}
+      {endedReason && <p role="status">{endedReasonToPlainWords(endedReason, screenState?.verdict)}</p>}
 
       {screenState ? (
         <CallView screen={screenState} timings={timings} />

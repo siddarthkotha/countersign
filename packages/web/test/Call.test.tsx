@@ -244,6 +244,45 @@ describe('Call', () => {
     expect(screen.getByRole('button', { name: 'Why?' })).toBeInTheDocument();
   });
 
+  it('shows the PENDING-specific message when link_lost arrives while verdict is still PENDING', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+
+    const state = scenarioBFinalState();
+    // Override the verdict to PENDING to test the specific case where the socket drops
+    // before a terminal verdict is reached
+    const pendingState: ScreenState = { ...state, verdict: 'PENDING' };
+    fake.emitState(pendingState);
+    await screen.findByText(/Claimed identity:/);
+
+    fake.emitEnded('link_lost');
+
+    expect(
+      await screen.findByText('Connection lost. This call was not completed, and nothing was staged or frozen. Start over to try again.'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the standard message when link_lost arrives after a terminal verdict has been reached', async () => {
+    const fake = makeFakeClient();
+    vi.mocked(connect).mockResolvedValue(fake.client as never);
+    const user = userEvent.setup();
+    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Start Call' }));
+
+    const state = scenarioBFinalState();
+    // Scenario B already has a FREEZE verdict (fraud path proven)
+    fake.emitState(state);
+    await screen.findByText(/Claimed identity:/);
+    expect(state.verdict).toBe('FREEZE');
+
+    fake.emitEnded('link_lost');
+
+    expect(await screen.findByText('The voice service could not be reached again; the call was closed.')).toBeInTheDocument();
+  });
+
   it('shows the browser-leg reconnecting status line on link:lost(browser) and clears it on link:restored, without resetting the screen', async () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
