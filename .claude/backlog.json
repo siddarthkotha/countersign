@@ -1846,6 +1846,35 @@
    "agent_id": "",
    "started_at": "2026-09-12T04:25:46.661Z",
    "lane_note": "autopilot push 11:25 PM after the full gate + reviews; deploy poll running"
+  },
+  {
+   "id": "BARGEIN-ANCHOR",
+   "title": "harness: barge_in_after_ms anchored to the agent's reply.audio.first so the talk-over always lands inside the reply",
+   "files": [
+    "scripts/rehearse"
+   ],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T04:29:14.153Z",
+   "lane_note": "deploy 21 barge-in: STAGE 101.8 s, but 0 interrupted lines (timing missed the reply); root cause: TTS synthesis ran after the wait; fix c3a9fb4 anchors to the reply's first-audio timestamp and pre-synthesizes; landed on main 11:41 PM; scoped review running; push 22 after review + gate; review PASS; gate 1339 x3, typecheck, corpus 118, harness 228; push 22"
+  },
+  {
+   "id": "BARGEIN-ANCHOR-review",
+   "title": "scoped review of c3a9fb4",
+   "files": [],
+   "status": "done",
+   "agent_id": "(haiku 11:41 PM)",
+   "started_at": "2026-09-12T04:40:25.167Z",
+   "lane_note": "PASS 11:41 PM"
+  },
+  {
+   "id": "push-22",
+   "title": "push 22: 036b659..ffb8141 (barge-in anchored to reply audio, logs)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-12T04:42:05.622Z",
+   "lane_note": "autopilot push 11:42 PM; deploy poll + one barge-in sample chained"
   }
  ]
 }
