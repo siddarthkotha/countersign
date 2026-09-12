@@ -1149,11 +1149,11 @@
    "files": [
     "docs"
    ],
-   "status": "running",
-   "held_because": "no Chrome browser connected to the session at 4:37 PM; founder must open Chrome with the Claude extension, then 'retry sim' resumes the same agent (a65676c1cd6db5939); agent correctly refused a fabricated walk",
-   "agent_id": "a65676c1cd6db5939",
-   "started_at": "2026-09-11T21:36:27.615Z",
-   "lane_note": "retry sent 5:45 PM: runs only if a Chrome browser is connected, else stops"
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-12T01:21:19.694Z",
+   "lane_note": "RAN 8:21-8:31 PM on e44ff69: Presentation 7, Business value 5, Application of technology 6, Originality 8 (26/40). Automated browser mic hung (getUserMedia), zero live calls; walk done via replay mode; 5 of 6 engineer items UNKNOWN. Report docs/JUDGE-SIM-2026-09-11.md; memory ~/.claude/agent-memory/judge-sim/run-2026-09-11.md"
   },
   {
    "id": "GREET-NO-DOUBLE",
@@ -1230,10 +1230,11 @@
    "files": [
     "scripts/rehearse"
    ],
-   "status": "held",
-   "held_because": "cosmetic; batch with the next harness lane",
+   "status": "done",
+   "held_because": "",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "2026-09-11T22:46:31.678Z",
+   "lane_note": "landed on main e44ff69 5:51 PM (harness only, 9 new tests, worktree had its own install); gate 1155/1155, typecheck clean; push 14"
   },
   {
    "id": "POST-VERDICT-TAIL",
@@ -1303,7 +1304,8 @@
    "status": "held",
    "held_because": "process fix: have the worktree lane prompt or hook run npm install in the worktree first; decide after the judge sim",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "",
+   "lane_note": "memory saved 5:47 PM (feedback-worktree-lanes-need-install); lane prompts now start with npm install + readlink check; hook-level fix still held"
   },
   {
    "id": "push-13",
@@ -1331,6 +1333,52 @@
    ],
    "status": "held",
    "held_because": "harness-only nicety, n=1; watch the next runs",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "push-14",
+   "title": "push 14: 35b5a4b..e44ff69 (harness greeting timing + docs)",
+   "files": [],
+   "status": "done",
+   "agent_id": "",
+   "started_at": "2026-09-11T23:01:06.392Z",
+   "lane_note": "pushed 5:51 PM; gate 1155/1155 + typecheck clean; DEPLOY 14 VERIFIED 6:01 PM (e44ff69, health ok, live_calls available); CI green for pushes 12 and 13, push 14 CI in progress"
+  },
+  {
+   "id": "SIM1-NOACTION-BANNER",
+   "title": "sim fix 1: NO_ACTION (and ESCALATE if missing) verdict banner in the same slot as STAGED / WIRE FROZEN; replay mode too",
+   "files": [
+    "packages/web/src"
+   ],
+   "status": "running",
+   "agent_id": "(launched 8:35 PM)",
+   "started_at": "2026-09-12T01:32:39.864Z"
+  },
+  {
+   "id": "SIM1-BIZ-NUMBER",
+   "title": "sim fix 2: one labelled business number on the landing hero and README top; three sourced candidates for the founder to pick",
+   "files": [],
+   "status": "running",
+   "agent_id": "(haiku research 8:35 PM)",
+   "started_at": "2026-09-12T01:32:39.864Z"
+  },
+  {
+   "id": "SIM1-ENGINEER-ADDENDUM",
+   "title": "grade the judge's engineer checklist from today's flight recorder bundles; addendum to the sim report",
+   "files": [
+    "docs/JUDGE-SIM-2026-09-11.md"
+   ],
+   "status": "running",
+   "agent_id": "(launched 8:35 PM)",
+   "started_at": "2026-09-12T01:32:39.864Z"
+  },
+  {
+   "id": "SIM-LIVE-MIC",
+   "title": "sim fix 3: re-run the judge sim with a working microphone before the Sep 26 submission sim (the automated Chrome tab's getUserMedia hangs)",
+   "files": [],
+   "status": "held",
+   "held_because": "needs the founder's own mic in a normal Chrome window, or a harness-driven call alongside the sim; environment, not product",
    "agent_id": "",
    "started_at": ""
   }
