@@ -128,6 +128,22 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
           itself -- a removed duplicate, not removed content. */}
       <h1>A call can request a privileged action. It can never authorize one.</h1>
 
+      {/* Founder decision 2026-09-11 9:25 PM: the business-value stat that grounds this whole
+          product in a real, sourced number. Reuses `.replay-note` (Replay.tsx's own helper
+          line) so this is the same muted, boxless, colour-free style already on the page --
+          no new class, no new colour (founder is colour blind; meaning is never colour-only). */}
+      <p className="replay-note">
+        In 2025 the FBI logged $3.05 billion in losses to business email compromise, the fraud family where an
+        impersonator talks a payments desk into sending a wire.{' '}
+        <a
+          href="https://www.ic3.gov/AnnualReport/Reports/2025_IC3Report.pdf"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Source: FBI IC3 2025 report
+        </a>
+      </p>
+
       <p>
         You will speak with a treasury desk checkpoint. It verifies the request, not the voice. Nothing you say can
         release money; a verified request is only staged for a second human signature.

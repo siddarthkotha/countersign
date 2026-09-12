@@ -15,6 +15,21 @@ opened, and a tamper-evident evidence record seals every claim, check, and decis
 Built solo, AI-assisted, on the AssemblyAI Voice Agent API for the AssemblyAI Voice Agent
 Hackathon (lablab.ai, September 1–30, 2026).
 
+## Business value
+
+In 2025 the FBI logged $3.05 billion in losses to business email compromise, the fraud family
+where an impersonator talks a payments desk into sending a wire. PROVEN: FBI IC3 2025 Internet
+Crime Report, page 26, https://www.ic3.gov/AnnualReport/Reports/2025_IC3Report.pdf
+
+Of those complaints, $30.3 million came from reports that referenced AI. The report does not
+break out voice cloning, so Countersign makes no claim about how much of that was voice. PROVEN:
+same report, page 42, table titled AI References by Complaint Loss.
+
+On the live demo, the engine reached its verdict in 74 to 92 seconds for an honest caller across
+four rehearsals and froze the wire at 37 seconds on the fraud rehearsal. ESTIMATE: wall clock
+from socket connect to verdict on the deployed site, Sep 9 and Sep 11 2026, four honest runs and
+one fraud run; rehearsal reports are kept locally and are not in the repo.
+
 ## Status
 
 Countersign is built and deployed. PROVEN by `GET /health` on the live demo at

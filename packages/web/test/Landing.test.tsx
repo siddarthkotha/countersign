@@ -52,6 +52,23 @@ describe('Landing', () => {
     expect(screen.getByText('A caller claiming to be the CEO')).toBeInTheDocument();
   });
 
+  // Founder decision 2026-09-11 9:25 PM: the business-value stat and its source link must
+  // render on every load, directly under the tagline, with a real, checkable href.
+  it('renders the FBI business-value sentence with a source link to the IC3 2025 report', () => {
+    render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+    expect(
+      screen.getByText(
+        /In 2025 the FBI logged \$3\.05 billion in losses to business email compromise, the fraud family where an impersonator talks a payments desk into sending a wire\./
+      )
+    ).toBeInTheDocument();
+
+    const sourceLink = screen.getByRole('link', { name: 'Source: FBI IC3 2025 report' });
+    expect(sourceLink).toHaveAttribute('href', 'https://www.ic3.gov/AnnualReport/Reports/2025_IC3Report.pdf');
+    expect(sourceLink).toHaveAttribute('target', '_blank');
+    expect(sourceLink.getAttribute('rel')).toContain('noopener');
+  });
+
   it('never renders any hidden scenario fact', () => {
     render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
     const bodyText = document.body.textContent ?? '';
