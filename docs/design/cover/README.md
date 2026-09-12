@@ -20,9 +20,9 @@ text, a rule, or a border, exactly as the live UI already does.
 
 Files: `cover-1.html`, `cover-2.html`, `cover-3.html` (open directly in a browser,
 1920x1080 fixed stage, auto-scales to fit the window) and their PNG renders
-(`cover-1.png` etc.), rendered via `render.mjs` using the Playwright already
-installed in `~/shadepath-app` (this repo has no Playwright dependency and none was
-installed to produce these).
+(`cover-1.png` etc.), rendered via `render.mjs` using a Playwright install from another
+local checkout, passed in through the `PLAYWRIGHT_PKG_JSON` environment variable (this
+repo has no Playwright dependency and none was installed to produce these).
 
 | Candidate | What it says | What survives at 320px wide | One risk |
 |---|---|---|---|
