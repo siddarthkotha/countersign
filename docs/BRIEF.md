@@ -318,7 +318,7 @@ ACTION → SEALED`.
 ## 8. VIDEO PRODUCTION PLAN (3:00)
 
 Beat sheet (locked, round-4 timing):
-- 0:00–0:12 HOOK: black screen → "Last year, a finance worker wired $25M to a video call
+- 0:00–0:12 HOOK: black screen → "In 2024, a finance worker wired $25M to a video call
   of people who didn't exist." → "The call is the breach." → "Countersign answers first."
 - 0:12–0:25 Scenario A in one beat (staged, second approval — LAW 2 visible).
 - 0:25–1:40 Scenario B, the interrogation (full script §4; the barge-in is the money

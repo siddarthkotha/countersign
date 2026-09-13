@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Countersign: Architecture Beat</title>
+<style>
+  :root {
+    --bg: #0b0f16;
+    --panel: #141b26;
+    --panel-border: #2a3646;
+    --ink: #f5f7fa;
+    --ink-dim: #a9b4c2;
+    --line: #4a5b70;
+
+    /* Every colour below is paired with a word or a glyph in the markup itself.
+       Founder is colour blind: colour is decoration here, never the only signal. */
+    --grey:   #5b6b7d;  /* PENDING / non-terminal */
+    --amber:  #caa23a;  /* STAGE */
+    --red:    #c65a4b;  /* FREEZE */
+    --violet: #8f7bd6;  /* ESCALATE */
+    --slate:  #6b7a8c;  /* NO_ACTION / OUT_OF_SCOPE */
+    --green:  #4f9d6e;  /* engine / deterministic */
+    --blue:   #4a90c4;  /* model / language */
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    overflow: hidden;
+  }
+
+  .artboard {
+    width: 1920px;
+    height: 1080px;
+    padding: 64px 90px 48px;
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+  }
+
+  .eyebrow {
+    font-size: 22px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    font-weight: 600;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 50px;
+    font-weight: 800;
+    line-height: 1.2;
+    max-width: 1650px;
+  }
+
+  .governing {
+    font-size: 25px;
+    line-height: 1.5;
+    color: var(--ink-dim);
+    max-width: 1650px;
+  }
+
+  .governing b { color: var(--ink); font-weight: 700; }
+
+  /* ---------- FSM chain ---------- */
+  .fsm-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+  }
+
+  .state {
+    background: var(--panel);
+    border: 2px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 18px 24px;
+    font-size: 25px;
+    font-weight: 700;
+    white-space: nowrap;
+    text-align: center;
+  }
+
+  .state.loop-group {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 14px 20px;
+    border-style: dashed;
+  }
+
+  .state.loop-group .loop-label {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .state.loop-group .loop-items {
+    display: flex;
+    gap: 9px;
+  }
+
+  .state.loop-group .loop-items span {
+    background: #0f1520;
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 9px 13px;
+    font-size: 20px;
+    font-weight: 600;
+  }
+
+  .arrow {
+    font-size: 30px;
+    color: var(--line);
+    font-weight: 700;
+  }
+
+  .branch-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-left: 260px;
+  }
+
+  .branch-row .dashed-arrow {
+    font-size: 20px;
+    color: var(--ink-dim);
+  }
+
+  .state.out-of-scope {
+    border-color: var(--slate);
+    color: var(--ink);
+    font-size: 19px;
+    padding: 10px 16px;
+  }
+
+  .glyph { font-size: 21px; margin-right: 7px; line-height: 1; display: inline-block; }
+
+  /* ---------- Verdict row ---------- */
+  .verdict-label {
+    font-size: 19px;
+    font-weight: 700;
+    color: var(--ink-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .verdicts {
+    display: flex;
+    align-items: flex-start;
+    gap: 18px;
+    flex-shrink: 0;
+  }
+
+  .verdict {
+    flex: 1 1 0;
+    border-radius: 14px;
+    padding: 22px 20px;
+    border: 3px solid transparent;
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .verdict .name {
+    font-size: 25px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .verdict .desc {
+    font-size: 17px;
+    color: var(--ink-dim);
+    line-height: 1.4;
+  }
+
+  .verdict.pending  { border-color: var(--grey); }
+  .verdict.stage    { border-color: var(--amber); }
+  .verdict.freeze   { border-color: var(--red); }
+  .verdict.escalate { border-color: var(--violet); }
+  .verdict.no-action{ border-color: var(--slate); }
+
+  /* ---------- Bottom law banner ---------- */
+  .law-banner {
+    margin-top: auto;
+    background: linear-gradient(180deg, #171f2b 0%, #10161f 100%);
+    border: 3px solid var(--green);
+    border-radius: 18px;
+    padding: 30px 40px;
+    display: flex;
+    align-items: center;
+    gap: 32px;
+  }
+
+  .law-banner .law-tag {
+    font-size: 19px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: var(--green);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .law-banner .law-text {
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1.4;
+  }
+
+  .law-banner .law-text .no {
+    color: var(--red);
+    font-weight: 800;
+  }
+
+  .law-banner .law-text .yes {
+    color: var(--amber);
+    font-weight: 800;
+  }
+
+  .legend-hint {
+    font-size: 15px;
+    color: var(--ink-dim);
+    text-align: right;
+    margin-top: -6px;
+  }
+</style>
+</head>
+<body>
+  <div class="artboard">
+    <div class="eyebrow">Architecture, 2:35 to 2:50</div>
+    <h1>The engine decides every verdict.<br>The model only phrases it.</h1>
+
+    <div class="governing">
+      <b>🟢 Deterministic policy engine</b> (a finite-state machine) reads structured evidence:
+      quoted transcript facts, confirmed fields, check results. It computes the verdict from
+      that evidence alone. <b>🔵 The language model</b> is handed that state and a phrasing goal;
+      it chooses words for the conversation, and it is never given a verdict to decide or a
+      tool to act with.
+    </div>
+
+    <div class="verdict-label">Engine states</div>
+    <div class="fsm-row">
+      <div class="state">INTAKE</div>
+      <div class="arrow">→</div>
+      <div class="state">CLAIM</div>
+      <div class="arrow">→</div>
+      <div class="state loop-group">
+        <div class="loop-label">verification loop</div>
+        <div class="loop-items">
+          <span>CHALLENGE</span>
+          <span>EVIDENCE</span>
+          <span>CONSISTENCY_CHECK</span>
+        </div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="state">DECISION</div>
+      <div class="arrow">→</div>
+      <div class="state">ACTION</div>
+      <div class="arrow">→</div>
+      <div class="state">SEALED</div>
+    </div>
+    <div class="branch-row">
+      <div class="dashed-arrow">╰─ no request at stake ─▸</div>
+      <div class="state out-of-scope"><span class="glyph">⦸</span>OUT_OF_SCOPE (verdict NO_ACTION)</div>
+    </div>
+
+    <div class="verdict-label" style="margin-top: 10px;">The verdict set, never chosen by the voice model</div>
+    <div class="verdicts">
+      <div class="verdict pending">
+        <div class="name"><span class="glyph">…</span>PENDING</div>
+        <div class="desc">Not enough structured evidence yet. No terminal action.</div>
+      </div>
+      <div class="verdict stage">
+        <div class="name"><span class="glyph">‖</span>STAGE</div>
+        <div class="desc">Verified. Queued for a second, independent human approval. This is the ceiling. Voice never goes further.</div>
+      </div>
+      <div class="verdict freeze">
+        <div class="name"><span class="glyph">⛔</span>FREEZE</div>
+        <div class="desc">Fraud pattern confirmed. Transfer rail frozen, incident opened, nothing moves.</div>
+      </div>
+      <div class="verdict escalate">
+        <div class="name"><span class="glyph">☎</span>ESCALATE</div>
+        <div class="desc">Cannot be resolved by voice at all. Routed to a human callback on a registered number.</div>
+      </div>
+      <div class="verdict no-action">
+        <div class="name"><span class="glyph">⦸</span>NO_ACTION</div>
+        <div class="desc">Out of scope or nothing at stake. Nothing to route, nothing moves.</div>
+      </div>
+    </div>
+
+    <div class="law-banner">
+      <div class="law-tag">Law 2</div>
+      <div class="law-text">
+        A verified request only ever reaches <span class="yes">STAGE</span> plus an independent
+        second approval. Voice alone <span class="no">never</span> releases a transfer. A fraud
+        call only ever reaches <span class="no">FREEZE</span>.
+      </div>
+    </div>
+  </div>
+</body>
+</html>
