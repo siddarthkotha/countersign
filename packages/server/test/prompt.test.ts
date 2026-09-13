@@ -64,6 +64,7 @@ const ALL_GOAL_CODES: GoalCode[] = [
   'RE_ELICIT_AFTER_SWITCH',
   'EXPLAIN_OPEN_REQUEST',
   'CONTAIN_NO_DISCLOSURE',
+  'ELICIT_MISSING_CRITICAL',
 ];
 
 function baseGoal(code: GoalCode, extra: Partial<PhrasingGoal> = {}): PhrasingGoal {
@@ -333,6 +334,20 @@ describe('renderPrompt', () => {
     for (const word of ['account', 'digit', 'id number', 'identity id', 'code', 'pin']) {
       expect(lowerNow).not.toContain(word);
     }
+  });
+
+  // Bug fix (2026-09-13, review of the ELICIT_MISSING_CRITICAL goal added in fsm.ts, commit
+  // 5930450): this code had no dedicated case here either -- it fell through to the
+  // unconstrained `default` branch below, which relays `goal.hint` as a loose hint with
+  // nothing telling the model to say only that and stop, the exact same failure mode
+  // READBACK/CLOSE/RE_ELICIT_AFTER_SWITCH were each fixed for above. fsm.ts's
+  // `elicitMissingSentence` already composes an exact, ready-to-speak sentence into
+  // `goal.hint`; this case must relay it verbatim, same treatment.
+  it('ELICIT_MISSING_CRITICAL says the engine-composed sentence verbatim, wrapped in "say exactly", and asks for no digit/id/code', () => {
+    const say = 'Which account ending should this go to? Please give me the last four digits.';
+    const prompt = renderPrompt(baseGoal('ELICIT_MISSING_CRITICAL', { hint: say }), makeCtx());
+    const nowSection = prompt.split('\n\n').at(-1);
+    expect(nowSection).toBe(`Say exactly this and nothing else: "${say}"`);
   });
 
   describe('STALL', () => {

@@ -47,8 +47,16 @@ export interface ToolLogEntry {
  *  server (call/session.ts's end()) as a structured fact about the call's lifecycle, same
  *  spirit as `link_changed`. It carries no verdict of its own; `detail` names the end
  *  reason (e.g. "idle_timeout"). rules.ts's row 15 is the ONLY place this fact is ever
- *  turned into a verdict (LAW 3: the engine, never the server, decides). */
-export type AgentActionKind = 'challenge_issued' | 'readback_issued' | 'session_config_updated' | 'link_changed' | 'call_ended';
+ *  turned into a verdict (LAW 3: the engine, never the server, decides).
+ *  `elicit_issued` (Important 2, review of commit 5930450, 2026-09-13): written for every
+ *  ELICIT_MISSING_CRITICAL goal completion -- a critical field the caller has never stated
+ *  at all, asked for directly (fsm.ts's `elicitMissingSentence`). Carries `field`, never a
+ *  `value` (there is nothing to log yet: the field has no claim). compose.ts's
+ *  `computeReadbackReaskExhausted` counts these alongside `readback_issued` for the SAME
+ *  field so a caller who never states a field is capped and escalated (rules.ts row 13)
+ *  exactly like one who states it but never confirms a readback -- the two are sequential
+ *  phases of the same "field never got nailed down" story, never concurrent for one field. */
+export type AgentActionKind = 'challenge_issued' | 'readback_issued' | 'session_config_updated' | 'link_changed' | 'call_ended' | 'elicit_issued';
 
 export interface AgentAction {
   id: string;
@@ -62,8 +70,8 @@ export interface AgentAction {
   // question actually asked (e.g. counsel-of-record) rather than whatever the hash-order
   // recomputation would have picked. Absent ⇒ falls back to the existing recomputation.
   spec?: ChallengeSpec; // challenge_issued
-  field?: ClaimField; // readback_issued: what the agent read back
-  value?: string; // readback_issued: what the agent read back
+  field?: ClaimField; // readback_issued: what the agent read back; elicit_issued: what it asked for
+  value?: string; // readback_issued: what the agent read back (elicit_issued carries no value)
   detail?: string; // session_config_updated: e.g. "keyterms+=First Meridian Trust";
   // link_changed: "<leg>:<state>[:attempt]", e.g. "aai:lost:2" or "browser:restored"
 }
@@ -328,6 +336,11 @@ export interface PhrasingGoal {
   hint: string; // plain-English instruction for the LLM, never a verdict
   challenge?: ChallengeSpec; // present when code === 'ASK_CHALLENGE' (v2: was KnowledgeFact)
   readback?: { field: ClaimField; value: string }; // present when code === 'READBACK' (v2)
+  // Important 2 (review of commit 5930450, 2026-09-13): present when code ===
+  // 'ELICIT_MISSING_CRITICAL' -- the field being asked for, so call/session.ts's
+  // recordGoalCompletionAction can log an `elicit_issued` action naming it (no `value`;
+  // nothing has been stated yet to log).
+  elicit?: { field: ClaimField };
   keyterms: string[]; // v2: seed keyterms + every proper noun/amount the caller has stated
   turn_detection_hint: 'default' | 'patient'; // v2: 'patient' in CHALLENGE and READBACK
 }

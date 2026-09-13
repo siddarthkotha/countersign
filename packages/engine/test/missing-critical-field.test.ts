@@ -79,8 +79,79 @@ describe('CONSISTENCY_CHECK never STALLs on a critical field with no claim at al
     expect(out.ledger.some((c) => c.field === 'account_last4')).toBe(false);
     expect(out.assurance.critical_fields_confirmed).toBe(false);
     expect(out.state).toBe('CONSISTENCY_CHECK');
-    expect(out.goal.code).not.toBe('STALL');
+    expect(out.goal.code).toBe('ELICIT_MISSING_CRITICAL');
     expect(out.goal.hint.toLowerCase()).toContain('account');
+  });
+
+  // Important 2 (review of commit 5930450, 2026-09-13): the readback re-ask cap (founder
+  // decision 2026-09-12 9:00 AM, rules.ts row 13 / compose.ts's
+  // computeReadbackReaskExhausted) only ever counted `readback_issued` actions --
+  // ELICIT_MISSING_CRITICAL completions were never logged as anything, so a caller who
+  // never states a critical field at all got re-asked forever with no escalation. Fixed by
+  // logging an `elicit_issued` action (call/session.ts's recordGoalCompletionAction) on
+  // every ELICIT_MISSING_CRITICAL completion and folding its count into the same
+  // per-field cap `computeReadbackReaskExhausted` already enforces for readbacks.
+  describe('ELICIT_MISSING_CRITICAL re-ask cap folds into the same row 13 escalation as an unconfirmed readback', () => {
+    const CAP = MERIDIAN.thresholds.max_readback_reasks; // 3
+
+    function elicitAction(id: string, t_ms: number): AgentAction {
+      return { id, kind: 'elicit_issued', t_ms, field: 'account_last4' };
+    }
+
+    // Same conversation as "missing account_last4" above, on repeat: the caller never once
+    // states an account number, no matter how many times the agent asks.
+    const conversation: Utterance[] = [
+      {
+        id: 'c1',
+        speaker: 'caller',
+        text: 'This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500 — moving today instead of Friday, approved in yesterday\'s close meeting.',
+        t_ms: 1000,
+      },
+      { id: 'c1a', speaker: 'caller', text: 'Calder Finch, like always.', t_ms: 1500 },
+      { id: 'a1', speaker: 'agent', text: 'To confirm: $84,500 to Meridian Supply. Is that right?', t_ms: 2000 },
+      { id: 'c2', speaker: 'caller', text: "Yes, that's right.", t_ms: 2500 },
+      { id: 'a2', speaker: 'agent', text: 'And Meridian Supply is the beneficiary, correct?', t_ms: 3000 },
+      { id: 'c3', speaker: 'caller', text: "Yes, that's right.", t_ms: 3500 },
+    ];
+
+    // Same three live-check tool results the "control" test above uses -- without them
+    // ssoEv/oobEv/contextEv all read PENDING/absent and row 7 holds PENDING regardless of
+    // the re-ask cap, the same way row 5 would; these prove the cap firing specifically,
+    // not a live-check gap.
+    const tools: ToolLogEntry[] = [
+      tool('check_sso_context', 't1', 1500, 'dana-whitfield', 1),
+      tool('get_request_history', 't2', 1500, 'dana-whitfield', 1),
+      tool('verify_out_of_band', 't3', 1600, 'dana-whitfield', 1),
+    ];
+
+    it(`${CAP} logged elicit_issued actions for the missing field -> ESCALATE, naming READBACK_LIMIT_EXCEEDED`, () => {
+      const actions: AgentAction[] = [
+        counselChallenge,
+        { id: 'r1', kind: 'readback_issued', t_ms: 2000, field: 'amount_usd', value: '84500' },
+        { id: 'r2', kind: 'readback_issued', t_ms: 3000, field: 'beneficiary', value: 'Meridian Supply' },
+        ...Array.from({ length: CAP }, (_, i) => elicitAction(`e${i}`, 4000 + i * 1000)),
+      ];
+      const input: EngineInput = { conversation, tools, actions, call: danaCall, seed: MERIDIAN };
+      const out = evaluate(input);
+
+      expect(out.verdict).toBe('ESCALATE');
+      expect(out.reasons).toContain('READBACK_LIMIT_EXCEEDED');
+    });
+
+    it(`${CAP - 1} logged elicit_issued actions (one below the cap) -> still eliciting, not yet escalated`, () => {
+      const actions: AgentAction[] = [
+        counselChallenge,
+        { id: 'r1', kind: 'readback_issued', t_ms: 2000, field: 'amount_usd', value: '84500' },
+        { id: 'r2', kind: 'readback_issued', t_ms: 3000, field: 'beneficiary', value: 'Meridian Supply' },
+        ...Array.from({ length: CAP - 1 }, (_, i) => elicitAction(`e${i}`, 4000 + i * 1000)),
+      ];
+      const input: EngineInput = { conversation, tools: [], actions, call: danaCall, seed: MERIDIAN };
+      const out = evaluate(input);
+
+      expect(out.verdict).toBe('PENDING');
+      expect(out.state).toBe('CONSISTENCY_CHECK');
+      expect(out.goal.code).toBe('ELICIT_MISSING_CRITICAL');
+    });
   });
 
   it('missing beneficiary: never claimed, amount and account confirmed by readback -> not STALL, asks for the beneficiary', () => {
@@ -108,7 +179,7 @@ describe('CONSISTENCY_CHECK never STALLs on a critical field with no claim at al
     expect(out.ledger.some((c) => c.field === 'beneficiary')).toBe(false);
     expect(out.assurance.critical_fields_confirmed).toBe(false);
     expect(out.state).toBe('CONSISTENCY_CHECK');
-    expect(out.goal.code).not.toBe('STALL');
+    expect(out.goal.code).toBe('ELICIT_MISSING_CRITICAL');
     expect(out.goal.hint.toLowerCase()).toContain('beneficiary');
   });
 
