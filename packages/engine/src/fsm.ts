@@ -388,7 +388,11 @@ export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
     // field also happens to be unclaimed.
     const missing = missingCriticalField(ledger);
     if (missing) {
-      return goal('ELICIT_MISSING_CRITICAL', elicitMissingSentence(missing), keyterms, patient);
+      // Important 2 (review of this commit, 2026-09-13): carries `elicit: { field: missing }`
+      // so call/session.ts's recordGoalCompletionAction can log an `elicit_issued` action
+      // naming the field -- the same data channel `readback` already gives READBACK, folded
+      // into the same re-ask cap (compose.ts's computeReadbackReaskExhausted).
+      return goal('ELICIT_MISSING_CRITICAL', elicitMissingSentence(missing), keyterms, patient, { elicit: { field: missing } });
     }
     return goal('STALL', 'Checks are running. Hold the floor with one short neutral line; do not promise an outcome.', keyterms, patient);
   }

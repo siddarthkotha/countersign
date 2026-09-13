@@ -323,21 +323,35 @@ function countReadbackIssued(actions: AgentAction[], field: ClaimField): number 
   return actions.filter((a) => a.kind === 'readback_issued' && a.field === field).length;
 }
 
+/** Important 2 (review of commit 5930450, 2026-09-13): how many `elicit_issued` actions
+ *  have been recorded for `field` -- a critical field the caller has never stated at all,
+ *  asked for directly (fsm.ts's ELICIT_MISSING_CRITICAL/`elicitMissingSentence`). Counted
+ *  separately from `countReadbackIssued` (its own count still drives `buildReadbackEvidence`'s
+ *  "read back N times" wording unchanged -- an elicit never read anything back), but folded
+ *  into the SAME cap below: whichever mix of the two a field accumulates, the two never
+ *  overlap for one field in an honest flow (elicit happens before any claim exists,
+ *  readback only after), so summing them just caps total turns stuck on that field. */
+function countElicitIssued(actions: AgentAction[], field: ClaimField): number {
+  return actions.filter((a) => a.kind === 'elicit_issued' && a.field === field).length;
+}
+
 /** Founder decision 2026-09-12 9:00 AM (background: a live call on 2026-09-11 re-asked the
  *  same beneficiary readback five times while the caller kept answering without ever
  *  confirming, until the 60s idle timeout escalated it -- see
  *  scripts/rehearse/reports/2026-09-11T22-51-38-barge-in-interrupt.md; the restatement fix,
  *  main 4fe3345, closed that ONE caller shape but left the loop itself unbounded for any
- *  other non-confirming reply). Returns the first CRITICAL_FIELDS field whose
- *  `readback_issued` count has reached `seed.thresholds.max_readback_reasks` while it still
- *  has not reached CONFIRMED, or null if none has. Feeds rules.ts's new row 13 (ESCALATE,
- *  naming the field) and, mirrored below, the readback_result evidence card's own FAIL
- *  status -- both read the exact same count, computed once each in this function and in
- *  `buildReadbackEvidence`. */
+ *  other non-confirming reply). Returns the first CRITICAL_FIELDS field whose combined
+ *  `readback_issued` + `elicit_issued` count (Important 2, 2026-09-13: a caller who never
+ *  STATES a field at all is capped and escalated exactly like one who states it but never
+ *  confirms) has reached `seed.thresholds.max_readback_reasks` while it still has not
+ *  reached CONFIRMED, or null if none has. Feeds rules.ts's new row 13 (ESCALATE, naming
+ *  the field) and, mirrored below (readback_issued alone), the readback_result evidence
+ *  card's own FAIL status. */
 export function computeReadbackReaskExhausted(claims: Claim[], actions: AgentAction[], seed: SeedConfig): ClaimField | null {
   for (const field of CRITICAL_FIELDS) {
     if (isConfirmed(claims, field)) continue;
-    if (countReadbackIssued(actions, field) >= seed.thresholds.max_readback_reasks) return field;
+    const count = countReadbackIssued(actions, field) + countElicitIssued(actions, field);
+    if (count >= seed.thresholds.max_readback_reasks) return field;
   }
   return null;
 }

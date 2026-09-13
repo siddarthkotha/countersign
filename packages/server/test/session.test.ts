@@ -1208,3 +1208,82 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'caller_ended' });
   });
 });
+
+// Important 2 (review of commit 5930450, 2026-09-13): recordGoalCompletionAction only ever
+// logged an action for ASK_CHALLENGE/READBACK -- an ELICIT_MISSING_CRITICAL completion was
+// never logged at all, so compose.ts's computeReadbackReaskExhausted (folded to also count
+// `elicit_issued`, see engine/test/missing-critical-field.test.ts) had nothing to count for
+// a caller who never states a critical field. `recordGoalCompletionAction` is invoked
+// directly here (private method, same narrow-precondition technique "rejects garbage tool
+// arguments" above uses for `handleToolCall`) so `session.last`'s forced goal survives
+// unchanged to the assertion -- going through the public `aai.emit` path instead would tick
+// the real engine on the next EngineInput-touching event (transcript.agent/reply.done both
+// do) and overwrite the forced goal with whatever the real (much shorter) conversation
+// actually evaluates to, before this mechanic ever ran. No reachable live scenario can
+// otherwise pin the exact instant this goal is active without a much longer drive, and this
+// test's only subject is the logging mechanic itself, not how CONSISTENCY_CHECK is reached.
+describe('CallSession — ELICIT_MISSING_CRITICAL goal completion logs an elicit_issued action (Important 2, 2026-09-13)', () => {
+  function sessionInternals(session: CallSession) {
+    return session as unknown as { recordGoalCompletionAction: (status: string) => void };
+  }
+
+  it('logs kind elicit_issued naming the field once the agent\'s reply for the goal completes', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-elicit-live', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = newSession(clock, call, aai, sent);
+    session.start(); // INTAKE
+
+    session.last = {
+      ...session.last!,
+      state: 'CONSISTENCY_CHECK',
+      goal: {
+        code: 'ELICIT_MISSING_CRITICAL',
+        hint: 'Which account ending should this go to? Please give me the last four digits.',
+        keyterms: [],
+        turn_detection_hint: 'default',
+        elicit: { field: 'account_last4' },
+      },
+    };
+
+    expect(session.logs.actions.some((a) => a.kind === 'elicit_issued')).toBe(false);
+
+    clock.now = 1000;
+    sessionInternals(session).recordGoalCompletionAction('completed');
+
+    const elicit = session.logs.actions.find((a) => a.kind === 'elicit_issued');
+    expect(elicit).toBeDefined();
+    expect(elicit?.field).toBe('account_last4');
+    expect(elicit?.t_ms).toBe(1000);
+    // No claim exists yet to log a value for -- unlike readback_issued, elicit_issued never
+    // carries one.
+    expect(elicit?.value).toBeUndefined();
+  });
+
+  it('logs nothing when the reply is interrupted, not completed', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-elicit-interrupted', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+
+    session.last = {
+      ...session.last!,
+      state: 'CONSISTENCY_CHECK',
+      goal: {
+        code: 'ELICIT_MISSING_CRITICAL',
+        hint: 'What is the exact amount for this payment?',
+        keyterms: [],
+        turn_detection_hint: 'default',
+        elicit: { field: 'amount_usd' },
+      },
+    };
+
+    clock.now = 1000;
+    sessionInternals(session).recordGoalCompletionAction('interrupted');
+
+    expect(session.logs.actions.some((a) => a.kind === 'elicit_issued')).toBe(false);
+  });
+});

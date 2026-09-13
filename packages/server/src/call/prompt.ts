@@ -144,6 +144,15 @@ function nowSection(goal: PhrasingGoal, ctx: PromptCtx): string {
     // `goal.hint` itself; this case relays it verbatim, the same treatment READBACK/CLOSE get.
     case 'RE_ELICIT_AFTER_SWITCH':
       return `Say exactly this and nothing else: "${goal.hint}"`;
+    // Bug fix (2026-09-13, review of the ELICIT_MISSING_CRITICAL goal added in fsm.ts,
+    // commit 5930450): this code had no dedicated case here either -- it fell through to
+    // the unconstrained `default` branch below, which relays `goal.hint` as a loose hint
+    // with nothing telling the model to say only that and stop, the exact same failure
+    // mode READBACK/CLOSE/RE_ELICIT_AFTER_SWITCH were each fixed for above. fsm.ts's
+    // `elicitMissingSentence` already composes an exact, ready-to-speak sentence into
+    // `goal.hint`; this case relays it verbatim, the same treatment.
+    case 'ELICIT_MISSING_CRITICAL':
+      return `Say exactly this and nothing else: "${goal.hint}"`;
     case 'CLOSE':
       // Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T16-35-23-
       // scenario-a-dana-legitimate.md): CLOSE used to fall through to the `default` branch

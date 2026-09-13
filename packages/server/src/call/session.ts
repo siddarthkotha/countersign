@@ -713,10 +713,16 @@ export class CallSession {
     this.tick();
   }
 
-  /** When the agent's reply for an ASK_CHALLENGE/READBACK goal completes, the server -- not
-   *  the LLM -- writes the record of what was issued (v2 ruling: the LLM never writes
-   *  evidence). `this.last` is still the goal computed BEFORE this reply.done, i.e. the goal
-   *  the reply that just finished was phrased for. */
+  /** When the agent's reply for an ASK_CHALLENGE/READBACK/ELICIT_MISSING_CRITICAL goal
+   *  completes, the server -- not the LLM -- writes the record of what was issued (v2
+   *  ruling: the LLM never writes evidence). `this.last` is still the goal computed BEFORE
+   *  this reply.done, i.e. the goal the reply that just finished was phrased for.
+   *  Important 2 (review of commit 5930450, 2026-09-13): ELICIT_MISSING_CRITICAL used to
+   *  fall through unlogged, so compose.ts's computeReadbackReaskExhausted had nothing to
+   *  count for a caller who never states a critical field at all -- re-asked forever, no
+   *  escalation. Now logs an `elicit_issued` action naming the field (no `value`: nothing
+   *  has been stated yet), which computeReadbackReaskExhausted folds into the same
+   *  per-field cap it already enforces for readback_issued. */
   private recordGoalCompletionAction(status: string): void {
     if (status !== 'completed' || !this.last) return;
     const goal: PhrasingGoal = this.last.goal;
@@ -735,6 +741,13 @@ export class CallSession {
         t_ms: this.nowT(),
         field: goal.readback.field,
         value: goal.readback.value,
+      });
+    } else if (goal.code === 'ELICIT_MISSING_CRITICAL' && goal.elicit) {
+      this.logs.actions.push({
+        id: this.nextActionId(),
+        kind: 'elicit_issued',
+        t_ms: this.nowT(),
+        field: goal.elicit.field,
       });
     }
   }
