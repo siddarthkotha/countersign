@@ -131,6 +131,47 @@ function oldestUnconfirmedCritical(claims: Claim[]): { field: ClaimField; claim:
   return best;
 }
 
+/** Bug fix (2026-09-13, PROVEN defect found by an investigation lane, corroborated by
+ *  rules.test.ts's now-updated "with neither an unconfirmed critical field nor a
+ *  consistency_flag FAIL" case and test/missing-critical-field.test.ts): a caller who never
+ *  states one of the three critical fields at all (e.g. never gives an account number) has
+ *  NO claim for that field -- `oldestUnconfirmedCritical` above only looks at fields that
+ *  HAVE a claim, so it skips a field with no claim at all and returns null. With no
+ *  consistency_flag FAIL either, `phrasingGoal`'s CONSISTENCY_CHECK branch used to fall all
+ *  the way through to STALL ("Checks are running. Hold the floor") on every turn, with
+ *  nothing pending for the server to run: a deadlock (never-deadlock rule, CLAUDE.md LAW 3
+ *  / THE RITUALS) -- the live agent says a holding line forever and the call goes silent
+ *  until the idle cap. `computeCriticalConfirmed` (compose.ts) requires ALL THREE fields
+ *  CONFIRMED, so whenever row 5 (rules.ts) is the reason CONSISTENCY_CHECK was entered,
+ *  `critical_confirmed` is false, which means at least one CRITICAL_FIELDS field is either
+ *  claimed-but-unconfirmed (caught above by `oldestUnconfirmedCritical`) or missing
+ *  entirely (caught here) -- one of the two always fires; the STALL fallback below is kept
+ *  only as a defensive default for a hand-built input that doesn't actually reflect that
+ *  invariant (as the pre-existing rules.test.ts unit test does). */
+function missingCriticalField(claims: Claim[]): ClaimField | null {
+  for (const field of CRITICAL_FIELDS) {
+    if (!currentClaim(claims, field)) return field;
+  }
+  return null;
+}
+
+/** Plain, speakable, ready-to-say sentence asking for a critical field that was never
+ *  stated at all -- same treatment `readbackSentence`/`closeSentence` above already give
+ *  READBACK/CLOSE: one exact sentence, never a system field name, so the model has nothing
+ *  left to improvise. */
+function elicitMissingSentence(field: ClaimField): string {
+  switch (field) {
+    case 'amount_usd':
+      return 'What is the exact amount for this payment?';
+    case 'account_last4':
+      return 'Which account ending should this go to? Please give me the last four digits.';
+    case 'beneficiary':
+      return 'Who is the beneficiary of this payment?';
+    default:
+      return `What is the ${field.replace(/_/g, ' ')} for this payment?`;
+  }
+}
+
 /** Bug fix (2026-09-03 later that night, founder-observed live call + three harness runs --
  *  scripts/rehearse/reports/2026-09-03T23-04-42-, T23-32-42- and T23-39-25-
  *  scenario-a-dana-legitimate.md): the legitimate-caller scenario never reached STAGE. Two
@@ -338,6 +379,16 @@ export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
         keyterms,
         patient,
       );
+    }
+    // Bug fix (2026-09-13, see `missingCriticalField`'s doc comment above): a critical
+    // field with no claim at all -- never caught by `oldestUnconfirmedCritical` -- gets
+    // asked for directly instead of falling through to STALL. Checked after the
+    // consistency_flag FAIL branch above: a live contradiction on a non-critical field
+    // (e.g. a corrected deadline) is worth surfacing to the caller even while a critical
+    // field also happens to be unclaimed.
+    const missing = missingCriticalField(ledger);
+    if (missing) {
+      return goal('ELICIT_MISSING_CRITICAL', elicitMissingSentence(missing), keyterms, patient);
     }
     return goal('STALL', 'Checks are running. Hold the floor with one short neutral line; do not promise an outcome.', keyterms, patient);
   }
