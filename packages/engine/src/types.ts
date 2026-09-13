@@ -317,7 +317,11 @@ export type GoalCode =
   | 'READBACK'
   | 'RE_ELICIT_AFTER_SWITCH'
   | 'EXPLAIN_OPEN_REQUEST'
-  | 'CONTAIN_NO_DISCLOSURE';
+  | 'CONTAIN_NO_DISCLOSURE'
+  // Bug fix (2026-09-13): a critical field (amount_usd/account_last4/beneficiary) that was
+  // never claimed at all, asked for directly instead of falling through to STALL -- see
+  // fsm.ts's `missingCriticalField`/`elicitMissingSentence`.
+  | 'ELICIT_MISSING_CRITICAL';
 
 export interface PhrasingGoal {
   code: GoalCode;

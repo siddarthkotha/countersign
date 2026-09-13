@@ -525,7 +525,17 @@ describe('phrasingGoal (fsm.ts) -- CONSISTENCY_CHECK sub-branches', () => {
     expect(goal.hint).toContain('within the next ten minutes');
   });
 
-  it('with neither an unconfirmed critical field nor a consistency_flag FAIL, CONSISTENCY_CHECK falls through to STALL', () => {
+  // Bug fix (2026-09-13, PROVEN defect found by an investigation lane): this test used to
+  // assert CONSISTENCY_CHECK falls through to STALL here -- but an empty ledger means NO
+  // critical field has a claim at all, which is exactly the founder-observed silent-call
+  // shape (a caller who never states one of the three critical fields, e.g. never gives an
+  // account number, made the engine repeat "Checks are running. Hold the floor" forever
+  // with nothing pending for the server to run -- a deadlock). `missingCriticalField`
+  // (fsm.ts) now catches this and CONSISTENCY_CHECK asks for the first missing field
+  // (CRITICAL_FIELDS order: amount_usd, account_last4, beneficiary) instead of stalling.
+  // See test/missing-critical-field.test.ts for the end-to-end regression coverage (via the
+  // real evaluate()) for each of the three fields.
+  it('with neither an unconfirmed critical field nor a consistency_flag FAIL, CONSISTENCY_CHECK asks for the first missing critical field instead of stalling', () => {
     const goal = phrasingGoal({
       state: 'CONSISTENCY_CHECK',
       decideResult: decideResult(5),
@@ -536,7 +546,9 @@ describe('phrasingGoal (fsm.ts) -- CONSISTENCY_CHECK sub-branches', () => {
       actions: [],
       nextChallenge: null,
     });
-    expect(goal.code).toBe('STALL');
+    expect(goal.code).toBe('ELICIT_MISSING_CRITICAL');
+    expect(goal.code).not.toBe('STALL');
+    expect(goal.hint.toLowerCase()).toContain('amount');
   });
 });
 
