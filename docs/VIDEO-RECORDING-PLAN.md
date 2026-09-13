@@ -67,6 +67,12 @@ out of this lane.) No banner, no call. Budget: 3 short takes.
    amount is $84,500. Is that correct?"* / *"Just to confirm, the account ends in 4471. Is
    that correct?"* / *"Just to confirm, the beneficiary is Meridian Supply. Is that
    correct?"*, answer each "Yes, that's correct."
+3b. Expect up to three KNOWLEDGE questions (PARAPHRASED wording, facts fixed; a wrong
+   answer ESCALATES to a human callback instead of staging, so these must be right; source
+   packages/engine/src/seed/meridian.ts): purpose of the payment, answer *"the quarterly
+   parts restock"*; internal approver who signed off, answer *"Marcus Obi"*; invoice
+   reference, answer *"INV-7734"* said letter by letter and digit by digit. If asked for an
+   identity id or code: *"I don't have an identity id. This is Dana Whitfield."*
 4. Optional authenticity beat: the engine sometimes deliberately reads back a *wrong*
    beneficiary to test correction (paraphrased, content only): expect something like *"Just
    to confirm, this wire is going to Northgate Partners, is that right?"*, correct it:

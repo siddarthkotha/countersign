@@ -2006,6 +2006,17 @@
    "held_because": "founder is recording live calls against the deployed site; a push redeploys Render and drops the call",
    "agent_id": "",
    "started_at": ""
+  },
+  {
+   "id": "HARNESS-DANA-KNOWLEDGE-FACTS",
+   "title": "rehearsal harness: the Dana persona (scenario-a-dana-legitimate.json) has no rules for the three seeded knowledge questions (purpose: quarterly parts restock; approver: Marcus Obi; invoice: INV-7734); runs may pass only when the engine does not ask, and the founder hit the purpose question live 2026-09-13 3:10 PM",
+   "files": [
+    "scripts/rehearse/scenarios/scenario-a-dana-legitimate.json"
+   ],
+   "status": "held",
+   "held_because": "the live server is the founder's for the hour; add the rules and prove with one live Dana run after push 26 (credits ~2 min)",
+   "agent_id": "",
+   "started_at": ""
   }
  ]
 }
