@@ -33,7 +33,8 @@ export function diagnosticsFileName(scenarioName: string, at: Date = new Date())
 export function oneLineSummary(r: RunResult, reportPath: string): string {
   const status = r.pass ? 'PASS' : 'FAIL';
   const wall = (r.timings.total_wall_ms / 1000).toFixed(1);
-  return `[${status}] ${r.scenario.name} verdict=${r.actual_verdict ?? 'none'} (expected ${r.scenario.expected.verdict}) wall=${wall}s exit=${r.exit_code} report=${reportPath}`;
+  const reasonSuffix = r.fail_reason ? ` reason=${r.fail_reason}` : '';
+  return `[${status}] ${r.scenario.name} verdict=${r.actual_verdict ?? 'none'} (expected ${r.scenario.expected.verdict}) wall=${wall}s exit=${r.exit_code}${reasonSuffix} report=${reportPath}`;
 }
 
 function renderTranscript(r: RunResult): string {
@@ -217,6 +218,7 @@ export function renderReport(r: RunResult): string {
   lines.push('');
   lines.push(`- Expected verdict: ${r.scenario.expected.verdict}`);
   lines.push(`- Actual verdict: ${r.actual_verdict ?? 'none reached'}`);
+  if (r.fail_reason) lines.push(`- Fail reason: ${r.fail_reason} (patient-mode caller: a holding line, then silence -- see Warnings)`);
   lines.push(`- Reached a terminal verdict: ${r.verdict_reached ? 'yes' : 'no (timed out)'}`);
   lines.push(`- Expected max wall time: ${r.scenario.expected.max_wall_ms}ms`);
   lines.push(`- Actual wall time: ${Math.round(r.timings.total_wall_ms)}ms`);

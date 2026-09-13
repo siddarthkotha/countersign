@@ -74,6 +74,51 @@ const BARGE_IN_REPLY_START_TIMEOUT_MS = 30_000;
 const BARGE_IN_ANCHOR_TIMEOUT_MS = 8_000;
 const POLL_MS = 40;
 
+/** PROVEN gap (2026-09-13): the deterministic engine's own STALL/lookup-in-flight goals
+ *  (packages/engine/src/prompt.ts) phrase mid-verification holding lines in the model's own
+ *  words, never a fixed sentence -- so this is a small, generic phrase list, not a single
+ *  string match. Case-insensitive. Used only by patient-mode waits (`waitForPatientTurn`
+ *  below) to tell "the agent is stalling for time" apart from a real substantive reply or the
+ *  engine's actual CLOSE line -- never a verdict signal (LAW 3 untouched; this is timing
+ *  logic in a test harness, not the product). */
+export const HOLDING_LINE_PATTERNS: RegExp[] = [
+  /one moment/i,
+  /please hold/i,
+  /hold on/i,
+  /bear with me/i,
+  /checking/i,
+  /verifying/i,
+  /let me verify/i,
+  /while i verify/i,
+];
+
+export function isHoldingLine(text: string): boolean {
+  return HOLDING_LINE_PATTERNS.some((p) => p.test(text));
+}
+
+/** Copied, NOT imported, verbatim from `closeSentence` in packages/engine/src/fsm.ts:207-218
+ *  -- that function is not exported (and this is a test harness, BRIEF LAW 5, so it never
+ *  reaches into product internals). Cites the source so a future edit to fsm.ts's closing
+ *  wording is a merge conflict this file's author has to notice, not a silently stale copy:
+ *  if `closeSentence`'s four return strings ever change, these four must be updated to
+ *  match, or `isClosingLine` below silently stops firing. Used only by patient-mode waits to
+ *  recognize "the agent has reached its real final line" so the caller stops talking instead
+ *  of speaking over the goodbye. */
+export const ENGINE_CLOSE_SENTENCES: readonly string[] = [
+  'Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.',
+  'This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.',
+  'This cannot be completed by voice. A callback on the registered number will follow. Goodbye.',
+  'Thank you for calling. Goodbye.',
+];
+
+export function isClosingLine(text: string): boolean {
+  return ENGINE_CLOSE_SENTENCES.some((s) => text.includes(s));
+}
+
+/** Scenario-level default for `Scenario.agent_silence_fail_ms` (types.ts) when a patient-mode
+ *  turn doesn't specify one. */
+export const DEFAULT_AGENT_SILENCE_FAIL_MS = 12_000;
+
 function lastAudioAt(client: CallClient): number | null {
   const ts = client.audioTimestamps;
   return ts.length > 0 ? ts[ts.length - 1]! : null;
@@ -137,6 +182,68 @@ async function graceWindowThenSettle(client: CallClient, markerCount: number, wa
 async function waitBeforeSpeaking(client: CallClient, pauseMs: number, warnings: string[]): Promise<void> {
   await graceWindowThenSettle(client, client.audioTimestamps.length, warnings);
   await sleep(pauseMs);
+}
+
+/** How a patient-mode wait (`waitForPatientTurn` below) resolved: `'speak'` -- proceed to
+ *  speak this turn's line, exactly as the ordinary caller would; `'stop'` -- the agent's
+ *  reply was an engine CLOSE sentence (`isClosingLine`), so the caller stops talking and lets
+ *  the call end (not a failure); `'fail'` -- the exact bug this feature exists to catch: a
+ *  HOLDING line (`isHoldingLine`), then no further reply started within
+ *  `agent_silence_fail_ms` -- the run FAILS with `agent_silent_after_hold`. */
+export interface PatientWaitResult {
+  outcome: 'speak' | 'stop' | 'fail';
+}
+
+/** PROVEN gap (2026-09-13, see types.ts's ScenarioTurn.wait_for_agent doc comment): the
+ *  patient-caller wait for one non-opening, non-barge-in turn. Unlike `waitBeforeSpeaking`
+ *  (a short grace window, then speak regardless of whether the agent ever replied), this:
+ *
+ *   1. waits for a NEW reply -- one whose first audio frame arrives after this call's current
+ *      `audioTimestamps` marker, i.e. after the caller's own previous line ended -- to fully
+ *      START, then to SETTLE (the same `reply.audio.first`/silence-plus-not-SPEAKING signals
+ *      every other wait in this file already uses);
+ *   2. reads that reply's transcript text (`lastAgentTranscriptText`) and judges it:
+ *      - an engine CLOSE sentence (`isClosingLine`) -> resolves `{outcome:'stop'}` immediately;
+ *      - a HOLDING line (`isHoldingLine`) -> loops back to step 1, waiting up to
+ *        `agentSilenceFailMs` this time for a FURTHER new reply (never assumes a holding line
+ *        is the real answer) -- if none starts within that window, resolves
+ *        `{outcome:'fail'}`, the exact "holding line, then permanent silence" bug this feature
+ *        was built to catch;
+ *      - anything else -> resolves `{outcome:'speak'}`.
+ *
+ *  The very FIRST wait-for-a-reply-to-start in this loop is bounded the same way (by
+ *  `agentSilenceFailMs`) but is NOT preceded by a holding line yet, so a genuinely silent
+ *  agent from turn one -- never having said anything to hold on -- still resolves `speak`
+ *  (with a warning), the same tolerant fallback discipline every other wait in this file
+ *  uses; ONLY "a holding line, then silence" is a hard fail. This is a deliberate design
+ *  choice, not a spec requirement: rather than invent a second, separate timeout for "wait
+ *  for the very first reply to start" (the earlier BRIEF task text names
+ *  `agent_silence_fail_ms` only for the post-hold wait), this reuses the one scenario-level
+ *  knob for every "wait for the agent's next reply to start" step in patient mode -- one
+ *  configurable number, not two, and the same semantics either way: "if the agent goes
+ *  silent for this long while we're waiting on it, something is wrong enough to at least
+ *  warn about, and if it just finished stalling, wrong enough to fail." */
+export async function waitForPatientTurn(client: CallClient, agentSilenceFailMs: number, warnings: string[]): Promise<PatientWaitResult> {
+  let markerCount = client.audioTimestamps.length;
+  let sawHolding = false;
+  for (;;) {
+    const anchorMs = await waitForReplyStarted(client, markerCount, agentSilenceFailMs);
+    if (anchorMs === null) {
+      if (sawHolding) return { outcome: 'fail' };
+      warnings.push(`patient caller: no agent reply started within ${agentSilenceFailMs}ms; speaking the next line anyway`);
+      return { outcome: 'speak' };
+    }
+    const { settled } = await waitForReplySettled(client, REPLY_SETTLE_TIMEOUT_MS);
+    if (!settled) warnings.push(`patient caller: reply did not settle within ${REPLY_SETTLE_TIMEOUT_MS}ms; judging it anyway`);
+    markerCount = client.audioTimestamps.length;
+    const text = lastAgentTranscriptText(client);
+    if (text !== null && isClosingLine(text)) return { outcome: 'stop' };
+    if (text !== null && isHoldingLine(text)) {
+      sawHolding = true;
+      continue;
+    }
+    return { outcome: 'speak' };
+  }
 }
 
 /** FIRST-turn-only wait (founder ruling 2026-09-11): the agent now speaks a fixed greeting
@@ -297,6 +404,12 @@ export interface TurnRunOutcome {
    *  entries fall back to `computeTurnGaps`' generic per-case text, unchanged. */
   callerEndTimes: { turn_id: string; caller_end_ms: number; barge_in: boolean; note?: string }[];
   resolvedLines: ResolvedLineRecord[];
+  /** Set only when a patient-mode turn (`waitForPatientTurn`) resolved `'fail'` -- the caller
+   *  loop stopped speaking further turns immediately, without waiting for any verdict, and
+   *  run.ts must fail this run with this exact reason regardless of whatever verdict the call
+   *  may separately reach. Absent for every ordinary run, including one with no patient-mode
+   *  turn at all. */
+  fail_reason?: 'agent_silent_after_hold';
 }
 
 /** Injected so `runTurns` never has to know about HTTP/URLs/session ids itself (same shape
@@ -405,6 +518,30 @@ export async function runTurns(
       const pcm = await pcmPromise;
       const { startedMs, endedMs } = await streamPcm(client, pcm);
       callerEndTimes.push({ turn_id: turn.id, caller_end_ms: endedMs, barge_in: true, note: timing.note(startedMs) });
+      continue;
+    }
+    // PROVEN gap (2026-09-13, types.ts's ScenarioTurn.wait_for_agent doc comment): a
+    // patient-mode turn (this turn's own `wait_for_agent`, or every turn after the first when
+    // `scenario.caller_style === 'patient'`) replaces the ordinary grace-window wait below
+    // with `waitForPatientTurn`, which can end the run outright (a holding line then silence)
+    // or make the caller stop talking (the engine's own closing line) instead of speaking.
+    const patientMode = turn.wait_for_agent ?? (scenario.caller_style === 'patient' && turnIdx > 0);
+    if (patientMode) {
+      const agentSilenceFailMs = scenario.agent_silence_fail_ms ?? DEFAULT_AGENT_SILENCE_FAIL_MS;
+      const patientResult = await waitForPatientTurn(client, agentSilenceFailMs, warnings);
+      if (patientResult.outcome === 'fail') {
+        warnings.push(
+          `turn ${turn.id}: agent spoke a holding line and then went silent for ${agentSilenceFailMs}ms with no further reply; failing this run (agent_silent_after_hold)`,
+        );
+        return { warnings, callerEndTimes, resolvedLines, fail_reason: 'agent_silent_after_hold' };
+      }
+      if (patientResult.outcome === 'stop') break; // the agent's own closing line -- nothing left to say.
+      await sleep(turn.pause_ms ?? 400);
+      const lastAgentText = lastAgentTranscriptText(client);
+      const resolved = resolveTurnText(turn, scenario.truth, lastAgentText);
+      resolvedLines.push({ turn_id: turn.id, text: resolved.text, source: resolved.source, reacted_to: lastAgentText });
+      const { endedMs } = await speakLine(client, resolved.text, voice);
+      callerEndTimes.push({ turn_id: turn.id, caller_end_ms: endedMs, barge_in: false });
       continue;
     }
     await waitBeforeSpeaking(client, turn.pause_ms ?? 400, warnings);

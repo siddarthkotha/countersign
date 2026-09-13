@@ -167,6 +167,10 @@ async function runOne(
 
   let callerEndTimes: { turn_id: string; caller_end_ms: number; barge_in: boolean }[];
   let resolvedLines: ResolvedLineRecord[];
+  // PROVEN gap (2026-09-13, types.ts's ScenarioTurn.wait_for_agent doc comment): set only by
+  // the reactive (`runTurns`) path, when a patient-mode wait caught a holding line followed
+  // by permanent silence -- the LLM caller path never sets this.
+  let turnsFailReason: 'agent_silent_after_hold' | undefined;
   if (callerMode === 'llm') {
     if (!llm) throw new Error('runOne: --caller llm requires an llm config');
     const outcome = await runLlmTurns(
@@ -190,6 +194,7 @@ async function runOne(
     warnings.push(...outcome.warnings);
     callerEndTimes = outcome.callerEndTimes;
     resolvedLines = outcome.resolvedLines;
+    turnsFailReason = outcome.fail_reason;
   }
 
   const remainingMs = Math.max(1000, scenario.expected.max_wall_ms - (performance.now() - client.startedAt));
@@ -231,7 +236,10 @@ async function runOne(
   // FAIL, not a pass with a hopeful warning.
   const expectationCheck = checkScenarioExpectations(scenario, transcript, bundle);
   for (const failure of expectationCheck.failures) warnings.push(failure);
-  const pass = verdictResult.reached && actualVerdict === scenario.expected.verdict && expectationCheck.ok;
+  // PROVEN gap (2026-09-13): a patient-mode "agent went silent after a holding line" fail is
+  // unconditional -- it overrides whatever verdict the call separately reached (or didn't),
+  // same as any other structural fail condition above.
+  const pass = turnsFailReason === undefined && verdictResult.reached && actualVerdict === scenario.expected.verdict && expectationCheck.ok;
 
   const minutesEstimate = totalWallMs / 60000;
 
@@ -259,6 +267,7 @@ async function runOne(
     minutes_estimate: minutesEstimate,
     resolved_lines: resolvedLines,
     caller_mode: callerMode,
+    ...(turnsFailReason !== undefined ? { fail_reason: turnsFailReason } : {}),
   };
 }
 
