@@ -5,11 +5,15 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
 import {
   computeTurnGaps,
+  ENGINE_CLOSE_SENTENCES,
+  isClosingLine,
+  isHoldingLine,
   maybeDropAai,
   scriptedCallerShouldStop,
   waitForBargeIn,
   waitForGreeting,
   waitForOpeningTurn,
+  waitForPatientTurn,
   waitForVerdict,
 } from '../turnController.js';
 import type { CallClient } from '../wsClient.js';
@@ -53,10 +57,11 @@ function fakeState(verdict: ScreenState['verdict']): ScreenState {
   };
 }
 
-function makeFakeClient(): CallClient & { setState(v: ScreenState['verdict']): void } {
+function makeFakeClient(): CallClient & { setState(v: ScreenState['verdict']): void; setAgentLine(text: string): void } {
   const startedAt = performance.now();
   let state: ScreenState | null = null;
   let ended: string | null = null;
+  let transcript: ScreenState['transcript'] = [];
   return {
     startedAt,
     send() {},
@@ -76,6 +81,15 @@ function makeFakeClient(): CallClient & { setState(v: ScreenState['verdict']): v
     },
     setState(v) {
       state = fakeState(v);
+      state.transcript = transcript;
+    },
+    // Added for waitForPatientTurn's tests (PROVEN gap, 2026-09-13): appends one agent
+    // transcript line, so `lastAgentTranscriptText` (turnController.ts) has something to
+    // judge as holding/closing/ordinary -- additive to the existing fake, every other
+    // describe block above never calls this and keeps seeing transcript: [].
+    setAgentLine(text: string) {
+      transcript = [...transcript, { id: `t${transcript.length}`, speaker: 'agent', text, t_ms: performance.now() - startedAt }];
+      state = { ...(state ?? fakeState('PENDING')), transcript };
     },
   };
 }
@@ -380,5 +394,143 @@ describe('waitForOpeningTurn', () => {
     expect(timing).not.toBeNull();
     expect(timing!.anchor_ms).toBeNull();
     expect(warnings.some((w) => w.includes('no reply audio started within 60ms'))).toBe(true);
+  }, 10_000);
+});
+
+// PROVEN gap (2026-09-13): the rehearsal harness's scripted caller always spoke its next
+// line after a fixed pause, so a live agent that said a holding line ("One moment while I
+// verify...") and then went silent forever (a real hung-call server bug) still got a fresh
+// caller turn and the run passed -- forty green runs masked the bug. These two describe
+// blocks prove the two small matchers `waitForPatientTurn` judges replies with.
+describe('isHoldingLine', () => {
+  it('matches each documented holding phrase, case-insensitively', () => {
+    const phrases = [
+      'One moment please.',
+      'ONE MOMENT PLEASE.',
+      'Please hold.',
+      'Hold on a second.',
+      'Bear with me.',
+      'I am checking that now.',
+      'Verifying your identity.',
+      'Let me verify that.',
+      'While I verify this, please stay on the line.',
+    ];
+    for (const phrase of phrases) {
+      expect(isHoldingLine(phrase), phrase).toBe(true);
+    }
+  });
+
+  it('does not match an ordinary substantive reply', () => {
+    expect(isHoldingLine('Just to confirm, the beneficiary is Meridian Supply. Is that correct?')).toBe(false);
+  });
+
+  it('does not match an engine CLOSE sentence', () => {
+    for (const s of ENGINE_CLOSE_SENTENCES) {
+      expect(isHoldingLine(s), s).toBe(false);
+    }
+  });
+});
+
+describe('isClosingLine', () => {
+  it("matches every one of the engine's four CLOSE sentences verbatim (copied from fsm.ts's closeSentence)", () => {
+    for (const s of ENGINE_CLOSE_SENTENCES) {
+      expect(isClosingLine(s), s).toBe(true);
+    }
+  });
+
+  it('matches when a close sentence is a substring of a longer transcript line', () => {
+    expect(isClosingLine(`Okay. ${ENGINE_CLOSE_SENTENCES[0]}`)).toBe(true);
+  });
+
+  it('does not match a holding line', () => {
+    expect(isClosingLine('One moment while I verify that.')).toBe(false);
+  });
+
+  it('does not match an ordinary mid-call substantive reply', () => {
+    expect(isClosingLine('Just to confirm, the beneficiary is Meridian Supply. Is that correct?')).toBe(false);
+  });
+});
+
+describe('waitForPatientTurn', () => {
+  it("resolves 'speak' once a normal (non-holding, non-closing) reply settles", async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0;
+    const warnings: string[] = [];
+
+    const resultPromise = waitForPatientTurn(client, 5000, warnings);
+    await sleep(20);
+    client.audioTimestamps.push(performance.now() - client.startedAt);
+    client.setAgentLine('Just to confirm, the beneficiary is Meridian Supply. Is that correct?');
+
+    const result = await resultPromise;
+
+    expect(result.outcome).toBe('speak');
+    expect(warnings).toEqual([]);
+  }, 10_000);
+
+  it("resolves 'stop' when the settled reply is one of the engine's CLOSE sentences -- the caller stops talking", async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0;
+    const warnings: string[] = [];
+
+    const resultPromise = waitForPatientTurn(client, 5000, warnings);
+    await sleep(20);
+    client.audioTimestamps.push(performance.now() - client.startedAt);
+    client.setAgentLine(ENGINE_CLOSE_SENTENCES[0]!);
+
+    const result = await resultPromise;
+
+    expect(result.outcome).toBe('stop');
+  }, 10_000);
+
+  it("resolves 'fail' (agent_silent_after_hold, the bug this feature exists to catch) when a holding line is followed by silence past agentSilenceFailMs", async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0;
+    const warnings: string[] = [];
+
+    // Short agentSilenceFailMs (100ms) so this test doesn't wait the real 12s default --
+    // same pattern as every other short-timeoutMs test in this file.
+    const resultPromise = waitForPatientTurn(client, 100, warnings);
+    await sleep(20);
+    client.audioTimestamps.push(performance.now() - client.startedAt);
+    client.setAgentLine('One moment while I verify that.');
+
+    const result = await resultPromise;
+
+    expect(result.outcome).toBe('fail');
+  }, 10_000);
+
+  it('loops past a holding line and resolves speak once a real reply follows and settles (a holding line is never assumed to be the final answer)', async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0;
+    const warnings: string[] = [];
+
+    const resultPromise = waitForPatientTurn(client, 5000, warnings);
+    await sleep(20);
+    client.audioTimestamps.push(performance.now() - client.startedAt);
+    client.setAgentLine('One moment while I verify that.');
+
+    // A further, real reply arrives well after the holding line's own ~700ms settle window,
+    // but comfortably inside the 5000ms agentSilenceFailMs given to this wait.
+    setTimeout(() => {
+      client.audioTimestamps.push(performance.now() - client.startedAt);
+      client.setAgentLine('Yes, verified. The beneficiary is Meridian Supply.');
+    }, 900);
+
+    const result = await resultPromise;
+
+    expect(result.outcome).toBe('speak');
+    expect(warnings).toEqual([]);
+  }, 10_000);
+
+  it('resolves speak with a warning (the ordinary tolerant fallback) when no reply ever starts at all -- never a fail, since no holding line preceded the silence', async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0;
+    const warnings: string[] = [];
+
+    const result = await waitForPatientTurn(client, 60, warnings);
+
+    expect(result.outcome).toBe('speak');
+    expect(warnings.some((w) => w.includes('no agent reply started within 60ms'))).toBe(true);
   }, 10_000);
 });

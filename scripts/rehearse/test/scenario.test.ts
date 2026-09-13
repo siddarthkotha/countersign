@@ -419,6 +419,107 @@ describe('scenario loading (no network)', () => {
     ).toThrow(ScenarioValidationError);
   });
 
+  // PROVEN gap (2026-09-13): the "patient caller" fields -- see types.ts's
+  // ScenarioTurn.wait_for_agent doc comment for the bug this exists to catch.
+  it('accepts and preserves a turn with wait_for_agent: true', () => {
+    const s = validateScenario(
+      {
+        name: 'x',
+        title: 'x',
+        description: '',
+        source: '',
+        turns: [{ id: 'c1', text: 'hello', wait_for_agent: true }],
+        expected: { verdict: 'STAGE', max_wall_ms: 1000 },
+      },
+      'inline',
+    );
+    expect(s.turns[0]!.wait_for_agent).toBe(true);
+  });
+
+  it('rejects a non-boolean wait_for_agent', () => {
+    expect(() =>
+      validateScenario(
+        {
+          name: 'x',
+          title: 'x',
+          description: '',
+          source: '',
+          turns: [{ id: 'c1', text: 'hello', wait_for_agent: 'yes' }],
+          expected: { verdict: 'STAGE', max_wall_ms: 1000 },
+        },
+        'inline',
+      ),
+    ).toThrow(ScenarioValidationError);
+  });
+
+  it('accepts and preserves caller_style: "patient" and a custom agent_silence_fail_ms', () => {
+    const s = validateScenario(
+      {
+        name: 'x',
+        title: 'x',
+        description: '',
+        source: '',
+        turns: [{ id: 'c1', text: 'hello' }],
+        expected: { verdict: 'STAGE', max_wall_ms: 1000 },
+        caller_style: 'patient',
+        agent_silence_fail_ms: 5000,
+      },
+      'inline',
+    );
+    expect(s.caller_style).toBe('patient');
+    expect(s.agent_silence_fail_ms).toBe(5000);
+  });
+
+  it('leaves caller_style/agent_silence_fail_ms undefined when absent (every pre-existing scenario)', () => {
+    const s = validateScenario(
+      {
+        name: 'x',
+        title: 'x',
+        description: '',
+        source: '',
+        turns: [{ id: 'c1', text: 'hello' }],
+        expected: { verdict: 'STAGE', max_wall_ms: 1000 },
+      },
+      'inline',
+    );
+    expect(s.caller_style).toBeUndefined();
+    expect(s.agent_silence_fail_ms).toBeUndefined();
+  });
+
+  it('rejects a caller_style other than "patient"', () => {
+    expect(() =>
+      validateScenario(
+        {
+          name: 'x',
+          title: 'x',
+          description: '',
+          source: '',
+          turns: [{ id: 'c1', text: 'hello' }],
+          expected: { verdict: 'STAGE', max_wall_ms: 1000 },
+          caller_style: 'rude',
+        },
+        'inline',
+      ),
+    ).toThrow(ScenarioValidationError);
+  });
+
+  it('rejects a non-positive agent_silence_fail_ms', () => {
+    expect(() =>
+      validateScenario(
+        {
+          name: 'x',
+          title: 'x',
+          description: '',
+          source: '',
+          turns: [{ id: 'c1', text: 'hello' }],
+          expected: { verdict: 'STAGE', max_wall_ms: 1000 },
+          agent_silence_fail_ms: 0,
+        },
+        'inline',
+      ),
+    ).toThrow(ScenarioValidationError);
+  });
+
   it('rejects an empty-string persona', () => {
     expect(() =>
       validateScenario(
@@ -471,6 +572,55 @@ describe('the four shipped scenarios carry truth + persona (post-fix)', () => {
     const s = await loadScenario('scenario-a-dana-legitimate');
     const reactiveTurn = s.turns.find((t) => t.respond);
     expect(reactiveTurn, 'scenario-a should have at least one reactive turn').toBeDefined();
+  });
+});
+
+describe('the two patient-caller scenarios (PROVEN gap, 2026-09-13)', () => {
+  it('dana-patient and miller-patient both carry caller_style: "patient"', async () => {
+    for (const name of ['dana-patient', 'miller-patient']) {
+      const s = await loadScenario(name);
+      expect(s.caller_style, `${name} should carry caller_style: "patient"`).toBe('patient');
+    }
+  });
+
+  it('dana-patient expects STAGE and carries a truth block, persona, and demo_persona "legitimate", same as scenario-a', async () => {
+    const s = await loadScenario('dana-patient');
+    expect(s.expected.verdict).toBe('STAGE');
+    expect(s.truth).toBeDefined();
+    expect(s.persona).toBeTruthy();
+    expect(s.demo_persona).toBe('legitimate');
+  });
+
+  it('miller-patient expects FREEZE, carries a barge_in_after_ms turn (unaffected by patient mode), and demo_persona "attacker", same as scenario-b', async () => {
+    const s = await loadScenario('miller-patient');
+    expect(s.expected.verdict).toBe('FREEZE');
+    expect(s.turns.some((t) => t.barge_in_after_ms !== undefined)).toBe(true);
+    expect(s.demo_persona).toBe('attacker');
+  });
+
+  it('dana-patient can answer all three of Dana\'s seeded knowledge questions (packages/engine/src/seed/meridian.ts: invoice, approver, purpose)', async () => {
+    const s = await loadScenario('dana-patient');
+    // The knowledge-answer rules were added to the "catch-all further questions" turns (the
+    // ones carrying else_say) -- c2's rules are the unrelated Northgate/identity-id trap
+    // handlers, not these.
+    const reactiveTurn = s.turns.find((t) => t.respond && t.respond.else_say !== undefined);
+    expect(reactiveTurn, 'dana-patient should have a reactive turn with else_say').toBeDefined();
+    expect(matchRespondRules(reactiveTurn!.respond!.rules, 'Can you give me the invoice reference number?')).toBe(
+      'INV 7734, that is I N V seven seven three four.',
+    );
+    expect(matchRespondRules(reactiveTurn!.respond!.rules, 'Which internal approver signed off on this payment?')).toBe('Marcus Obi.');
+    expect(matchRespondRules(reactiveTurn!.respond!.rules, 'What is this payment for?')).toBe("It's the quarterly parts restock.");
+  });
+
+  it('the standard scenario-a-dana-legitimate can also answer the same three knowledge questions (rules-only addition)', async () => {
+    const s = await loadScenario('scenario-a-dana-legitimate');
+    const reactiveTurn = s.turns.find((t) => t.respond && t.respond.else_say !== undefined);
+    expect(reactiveTurn).toBeDefined();
+    expect(matchRespondRules(reactiveTurn!.respond!.rules, 'Can you give me the invoice reference number?')).toBe(
+      'INV 7734, that is I N V seven seven three four.',
+    );
+    expect(matchRespondRules(reactiveTurn!.respond!.rules, 'Which internal approver signed off on this payment?')).toBe('Marcus Obi.');
+    expect(matchRespondRules(reactiveTurn!.respond!.rules, 'What is this payment for?')).toBe("It's the quarterly parts restock.");
   });
 });
 

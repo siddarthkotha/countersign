@@ -1,8 +1,8 @@
 {
-  "name": "scenario-a-dana-legitimate",
-  "title": "Dana Whitfield -- the legitimate urgent request",
-  "description": "BRIEF section 4 golden path, the caller lines verbatim from packages/engine/corpus/scenario-a-dana-legitimate.json's conversation (its own caller-only turns, ids c1-c4, plus two harness-added buffer turns c5/c6 -- not from the corpus -- so the reactive caller has room to answer further live-agent follow-ups, e.g. an identity-id ask, beyond the corpus's original four exchanges). Every critical field is affirmed when the live agent reads it back -- turns c2-c6 are REACTIVE (`respond`): they react to whatever the live agent actually said, using this scenario's `truth` block, instead of blindly confirming. This is the fix for the run recorded in scripts/rehearse/reports/2026-09-03T23-04-42-scenario-a-dana-legitimate.md, where a fixed 'Yes, that's right.' line confirmed a planted TRAP question (the engine's deliberate substitution of a decoy name into its own readback) instead of correcting it, and the call FROZE instead of STAGING. Expects the call to reach STAGE (never higher -- LAW 2, there is no release) with no barge-in.",
-  "source": "docs/BRIEF.md section 4 \"Scenario A\" + packages/engine/corpus/scenario-a-dana-legitimate.json (caller turns c1-c4, read-only source)",
+  "name": "dana-patient",
+  "title": "Dana Whitfield -- the legitimate urgent request (patient caller)",
+  "description": "PROVEN gap (2026-09-13): the rehearsal harness's scripted caller always speaks its next line after a fixed pause, so a live agent that says a holding line (\"One moment while I verify...\") and then goes silent forever (a real hung-call server bug the founder hit) still gets a fresh caller turn and the run passes -- forty green runs masked the bug. This is scenario-a-dana-legitimate with caller_style:\"patient\" so every turn after the first waits for the agent to genuinely finish (and judges what it said, per turnController.ts's waitForPatientTurn) before speaking, instead of the old fixed-pause grace window. Same Dana lines, same truth block and persona, plus respond rules for her three seeded knowledge-check answers (packages/engine/src/seed/meridian.ts: dana_invoice_reference, dana_internal_approver, dana_payment_purpose) so a live knowledge challenge doesn't leave the patient caller stuck. Expects STAGE, same as the original.",
+  "source": "Derived from scripts/rehearse/scenarios/scenario-a-dana-legitimate.json (same source lines) -- see scripts/rehearse/scenarios/miller-patient.json for the patient-mode fraud counterpart.",
   "truth": {
     "identity": "Dana Whitfield",
     "beneficiary": "Meridian Supply",
@@ -433,5 +433,6 @@
     "max_wall_ms": 150000
   },
   "demo_persona": "legitimate",
-  "max_wall_ms": 240000
+  "max_wall_ms": 240000,
+  "caller_style": "patient"
 }

@@ -108,6 +108,19 @@ export interface ScenarioTurn {
    *  turns continue; `Scenario.expected.require_aai_link_restored` is what actually fails
    *  the run if the drop/resume evidence never shows up. */
   drop_aai_before?: boolean;
+  /** PROVEN gap (2026-09-13): the scripted caller always spoke its next line after a fixed
+   *  `pause_ms`, so a live agent that said a holding line ("One moment while I verify...")
+   *  and then went silent forever (a real hung-call server bug the founder hit) still got a
+   *  fresh caller turn and the run passed -- forty green runs masked the bug. When true, this
+   *  turn instead waits for a reply that STARTS after the caller's own previous line ended to
+   *  fully finish (turnController.ts's `waitForPatientTurn`), judges what it said (a holding
+   *  line waits further for a fresh reply and can FAIL the run with `agent_silent_after_hold`;
+   *  an engine CLOSE sentence makes the caller stop talking and let the call end), and only
+   *  then speaks. `Scenario.caller_style: "patient"` sets this true automatically for every
+   *  turn after the first (turn 0 always waits for the greeting, unaffected) -- set here only
+   *  to override that default on an individual turn. Absent (the default) preserves the exact
+   *  old grace-window-then-speak-regardless behavior -- no existing scenario changes. */
+  wait_for_agent?: boolean;
 }
 
 export interface ScenarioExpected {
@@ -161,6 +174,17 @@ export interface Scenario {
    *  as a visitor picks a role card. A scenario expecting STAGE must set "legitimate",
    *  because the fallback context fails the sign-in check by design. */
   demo_persona?: string;
+  /** PROVEN gap (2026-09-13, see ScenarioTurn.wait_for_agent's doc comment for the bug this
+   *  exists to catch). "patient" applies `wait_for_agent: true` to every turn after the first
+   *  automatically -- the only value this field accepts today. Absent (the default) preserves
+   *  the exact old behavior for every existing scenario. */
+  caller_style?: 'patient';
+  /** Ceiling (ms), used only by patient-mode waits, on how long the caller waits AFTER the
+   *  agent finishes a HOLDING line for a fresh reply to start before failing the run with
+   *  `agent_silent_after_hold` -- see turnController.ts's `waitForPatientTurn`. Defaults to
+   *  12000 when `caller_style`/`wait_for_agent` is used and this is omitted. Meaningless
+   *  (never read) on a scenario with no patient-mode turn at all. */
+  agent_silence_fail_ms?: number;
 }
 
 export interface TurnGapRecord {
@@ -282,6 +306,12 @@ export interface RunResult {
   minutes_estimate: number;
   resolved_lines: ResolvedLineRecord[];
   caller_mode: 'reactive' | 'llm';
+  /** Set only when a patient-mode wait (turnController.ts's `waitForPatientTurn`) caught the
+   *  exact bug this feature exists to catch: a holding line spoken, then silence past
+   *  `agent_silence_fail_ms` with no further reply -- a distinct, greppable fail reason
+   *  surfaced in the report's one-line result and its Result section, separate from the
+   *  generic warnings list. Absent for every ordinary pass or fail. */
+  fail_reason?: 'agent_silent_after_hold';
 }
 
 // ---------- LLM-driven caller (llmCaller.ts) ----------

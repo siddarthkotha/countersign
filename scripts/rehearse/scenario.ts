@@ -80,10 +80,17 @@ function validateTurn(raw: unknown, index: number): ScenarioTurn {
       `turn[${index}] (${String(t.id)}).drop_aai_before must be a boolean when present`,
     );
   }
+  if (t.wait_for_agent !== undefined) {
+    assert(
+      typeof t.wait_for_agent === 'boolean',
+      `turn[${index}] (${String(t.id)}).wait_for_agent must be a boolean when present`,
+    );
+  }
   const turn: ScenarioTurn = { id: t.id as string, text: t.text as string };
   if (typeof t.pause_ms === 'number') turn.pause_ms = t.pause_ms;
   if (typeof t.barge_in_after_ms === 'number') turn.barge_in_after_ms = t.barge_in_after_ms;
   if (typeof t.drop_aai_before === 'boolean') turn.drop_aai_before = t.drop_aai_before;
+  if (typeof t.wait_for_agent === 'boolean') turn.wait_for_agent = t.wait_for_agent;
   if (t.respond !== undefined) turn.respond = validateRespond(t.respond, `turn[${index}] (${String(t.id)})`);
   return turn;
 }
@@ -176,6 +183,20 @@ export function validateScenario(raw: unknown, sourcePath: string): Scenario {
       `${sourcePath}: "demo_persona" must be exactly "legitimate" or "attacker" when present`,
     );
     scenario.demo_persona = s.demo_persona;
+  }
+  // PROVEN gap (2026-09-13, see types.ts's ScenarioTurn.wait_for_agent doc comment): the
+  // "patient caller" fields. Both optional, both default to "no change from old behavior"
+  // when absent -- same discipline as demo_persona's strict allowlist above.
+  if (s.caller_style !== undefined) {
+    assert(s.caller_style === 'patient', `${sourcePath}: "caller_style" must be exactly "patient" when present`);
+    scenario.caller_style = s.caller_style;
+  }
+  if (s.agent_silence_fail_ms !== undefined) {
+    assert(
+      typeof s.agent_silence_fail_ms === 'number' && s.agent_silence_fail_ms > 0,
+      `${sourcePath}: "agent_silence_fail_ms" must be a positive number when present`,
+    );
+    scenario.agent_silence_fail_ms = s.agent_silence_fail_ms;
   }
   return scenario;
 }
