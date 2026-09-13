@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Countersign — Business Value</title>
+<title>Countersign: Business Value</title>
 <style>
   :root {
     --bg: #0b0f16;
@@ -23,46 +23,49 @@
   }
   .stage {
     width: 1920px; height: 1080px;
-    padding: 70px 110px 60px;
+    padding: 0 110px;
+    display: grid;
+    grid-template-rows: 1fr 1fr;
+  }
+  .top-half {
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    justify-content: center;
+    gap: 22px;
   }
   .eyebrow {
-    font-size: 22px;
+    font-size: 24px;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--ink-dim);
     font-weight: 600;
   }
-  .figure-block { margin-top: 18px; }
+  .figure-block { }
   .figure {
-    font-size: 148px;
+    font-size: 190px;
     font-weight: 900;
     line-height: 1;
     color: var(--amber);
     letter-spacing: -0.02em;
   }
   .figure-sub {
-    font-size: 30px;
+    font-size: 34px;
     font-weight: 600;
     color: var(--ink-dim);
-    margin-top: 6px;
+    margin-top: 10px;
   }
   .sentence {
-    font-size: 34px;
+    font-size: 38px;
     line-height: 1.5;
-    max-width: 1500px;
-    margin-top: 34px;
+    max-width: 1600px;
     font-weight: 500;
   }
   .citation {
-    font-size: 20px;
+    font-size: 22px;
     color: var(--ink-dim);
-    margin-top: 18px;
     border-left: 4px solid var(--amber);
-    padding-left: 18px;
-    max-width: 1300px;
+    padding-left: 20px;
+    max-width: 1400px;
     line-height: 1.5;
   }
   .citation .label {
@@ -70,26 +73,29 @@
     color: var(--ink);
     letter-spacing: 0.04em;
   }
-  .bottom {
+  .bottom-half {
     border-top: 1px solid var(--panel-border);
-    padding-top: 36px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    align-items: center;
+    justify-content: center;
+    gap: 26px;
+    text-align: center;
   }
   .tagline {
-    font-size: 42px;
+    font-size: 54px;
     font-weight: 800;
     font-style: italic;
+    max-width: 1600px;
   }
   .url-row {
     display: flex;
     align-items: baseline;
-    gap: 14px;
+    gap: 16px;
   }
-  .url-row .glyph { font-size: 30px; }
+  .url-row .glyph { font-size: 36px; }
   .url {
-    font-size: 40px;
+    font-size: 50px;
     font-weight: 700;
     font-family: "SF Mono", Menlo, Consolas, monospace;
     letter-spacing: 0.01em;
@@ -99,16 +105,12 @@
     text-decoration: underline;
     text-underline-offset: 6px;
   }
-  .url-note {
-    font-size: 18px;
-    color: var(--ink-dim);
-  }
 </style>
 </head>
 <body>
   <div class="stage">
-    <div>
-      <div class="eyebrow">Business value — 2:50 to 3:00</div>
+    <div class="top-half">
+      <div class="eyebrow">Business value, 2:50 to 3:00</div>
       <div class="figure-block">
         <div class="figure">$3.05B</div>
         <div class="figure-sub">lost to business email compromise, 2025</div>
@@ -118,18 +120,17 @@
         family where an impersonator talks a payments desk into sending a wire.
       </div>
       <div class="citation">
-        <span class="label">PROVEN:</span> FBI IC3 2025 Internet Crime Report, page 26 —
+        <span class="label">Source:</span> FBI IC3 2025 Internet Crime Report, page 26,
         https://www.ic3.gov/AnnualReport/Reports/2025_IC3Report.pdf
       </div>
     </div>
 
-    <div class="bottom">
+    <div class="bottom-half">
       <div class="tagline">&ldquo;Countersign doesn&rsquo;t guess who&rsquo;s calling. It makes them prove it.&rdquo;</div>
       <div class="url-row">
         <span class="glyph">🔗</span>
         <span class="url">countersign<span class="highlight">-bf8q</span>.onrender.com</span>
       </div>
-      <div class="url-note">Note the -bf8q — the plain countersign.onrender.com is an unrelated product.</div>
     </div>
   </div>
 </body>
