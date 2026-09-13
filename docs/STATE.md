@@ -75,6 +75,15 @@ the base commit; only the re-gate on main is proof.
 `npm run rehearse:batch -- --url <url> --runs 30 --scenarios a,b,c --max-minutes 60`;
 `npm run latency:table` regenerates docs/LATENCY.md from the bundles on disk.
 
+Friday judge-sim morning, one command (SIM-ONE-COMMAND): `npm run sim:friday -- [--url <url>]
+[--runs <n>] [--max-minutes <m>]` runs the five judge-sim scenarios (scenario-a-dana-
+legitimate, scenario-b-miller-fraud, judge-out-of-scope, barge-in-interrupt, identity-switch --
+the exact set ~/.claude/agents/judge-sim.md reads) through rehearse:batch, regenerates
+docs/LATENCY.md, then prints the report files that run produced with each one's scenario and
+verdict, so the judge-sim agent can read them straight off. `--runs` is PER scenario (default
+1); `--max-minutes` defaults to 15. Add `--dry-run` to see the exact plan with no network call,
+no spawned process, and no credits spent.
+
 ## Next session
 
 "Day 6 resume: read docs/STATE.md and the tail of docs/AUTOPILOT_LOG.md. Engine is final for
