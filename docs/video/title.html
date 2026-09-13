@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Countersign — Title Card</title>
+<style>
+  :root {
+    --bg: #0b0f16;
+    --ink: #f5f7fa;
+    --ink-dim: #a9b4c2;
+    --amber: #caa23a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 1920px; height: 1080px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    overflow: hidden;
+  }
+  .stage {
+    width: 1920px; height: 1080px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 30px;
+  }
+  .wordmark {
+    font-size: 150px;
+    font-weight: 900;
+    letter-spacing: 0.02em;
+  }
+  .rule {
+    width: 220px;
+    height: 4px;
+    background: var(--amber);
+  }
+  .description {
+    font-size: 38px;
+    font-weight: 500;
+    color: var(--ink-dim);
+    max-width: 1300px;
+    line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="wordmark">COUNTERSIGN</div>
+    <div class="rule"></div>
+    <div class="description">The conversational security checkpoint that stands between social engineering and irreversible actions.</div>
+  </div>
+</body>
+</html>
