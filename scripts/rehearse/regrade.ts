@@ -35,6 +35,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { checkCloseLineExpectation } from './expectations.js';
+import { computeQuestionAnswerRatio, questionAnswerRatioDisplay, detectQuestionsWithNoChance } from './freePlayGrading.js';
 import type { TranscriptRecord } from './types.js';
 
 export interface ParsedReport {
@@ -45,6 +46,8 @@ export interface ParsedReport {
   original_result: 'PASS' | 'FAIL' | null;
   original_fail_reason: string | null;
   transcript: TranscriptRecord[];
+  is_free_play: boolean;
+  caller_mode: string | null;
 }
 
 function extractLine(md: string, label: string): string | null {
@@ -99,12 +102,17 @@ export function parseTranscriptTable(md: string): TranscriptRecord[] {
 /** Parses the fixed fields `renderReport` always writes out of the Result section, plus the
  *  full transcript table -- everything `checkCloseLineExpectation` needs to re-grade this run.
  *  `ended_reason` mirrors report.ts's own fallback text for "no ended event was ever
- *  observed" back to `null`, matching `RunResult.ended_reason`'s real type. */
+ *  observed" back to `null`, matching `RunResult.ended_reason`'s real type. Also detects
+ *  whether this is a free-play run (which has additional grading rules). */
 export function parseReportMarkdown(md: string): ParsedReport {
   const scenarioMatch = md.match(/^Scenario: `([^`]+)`/m);
   const resultMatch = md.match(/^## Result: (PASS|FAIL)$/m);
   const endedReasonRaw = extractLine(md, 'Call ended reason');
   const failReasonRaw = extractLine(md, 'Fail reason');
+  // Caller mode appears in the header before the Result section, without a leading dash
+  const callerModeMatch = md.match(/^Caller mode: (.+)$/m);
+  const callerModeRaw = callerModeMatch ? callerModeMatch[1]!.trim() : null;
+  const is_free_play = callerModeRaw !== null && callerModeRaw.includes('freeplay');
   return {
     scenario_name: scenarioMatch ? scenarioMatch[1]! : null,
     expected_verdict: extractLine(md, 'Expected verdict'),
@@ -116,6 +124,8 @@ export function parseReportMarkdown(md: string): ParsedReport {
     // actual fail_reason value.
     original_fail_reason: failReasonRaw ? failReasonRaw.split(' ')[0]! : null,
     transcript: parseTranscriptTable(md),
+    is_free_play,
+    caller_mode: callerModeRaw,
   };
 }
 
@@ -123,14 +133,13 @@ export interface RegradeResult {
   parsed: ParsedReport;
   close_line_status: 'spoken' | 'not_spoken' | 'n/a';
   close_line_failure: string | null;
-  /** `original_result && close_line_status !== 'not_spoken'` -- this tool only ever ADDS the
-   *  close-line check on top of whatever the report already recorded; it does not
-   *  re-derive the base verdict-match/expectations checks (those need the scenario's
-   *  `expected` config and the raw diagnostics bundle, only some of which survive in the
-   *  persisted `.md`/`.diagnostics.json` pair -- see this file's header comment). A report
-   *  that was already FAIL for an unrelated reason stays FAIL either way. */
+  /** Regraded result computed from all applicable checks: verdict reached/acceptable,
+   *  close-line (if server-ended), and for free-play the new no-chance question rule.
+   *  This is a fresh computation, not carried forward from the original_result. */
   regraded_result: 'PASS' | 'FAIL' | null;
   changed: boolean;
+  /** Free-play specific regrading: the new question-answer ratio with the refined rules. */
+  free_play_question_answer?: { answered: number; total: number; unanswered: string[]; unanswered_no_chance: string[] };
 }
 
 const TERMINAL_VERDICT_STRINGS = new Set(['PENDING', 'ESCALATE', 'STAGE', 'FREEZE', 'NO_ACTION']);
@@ -150,21 +159,47 @@ function toVerdictOrNull(actualVerdict: string | null): Parameters<typeof checkC
 export function regrade(md: string): RegradeResult {
   const parsed = parseReportMarkdown(md);
   const closeLineCheck = checkCloseLineExpectation(parsed.ended_reason, toVerdictOrNull(parsed.actual_verdict), parsed.transcript);
-  const regradedResult: 'PASS' | 'FAIL' | null =
-    parsed.original_result === null ? null : parsed.original_result === 'FAIL' ? 'FAIL' : closeLineCheck.status === 'not_spoken' ? 'FAIL' : 'PASS';
-  return {
+
+  // Recompute regraded result from scratch using all checks
+  // For free-play reports with unanswered_agent_question failure, re-evaluate with the new rules
+  let regradedResult: 'PASS' | 'FAIL' | null = null;
+
+  if (parsed.is_free_play && parsed.original_fail_reason === 'unanswered_agent_question') {
+    // Re-grade free-play unanswered_agent_question with the new "no-chance" rule
+    const questionsNoChance = detectQuestionsWithNoChance(parsed.transcript);
+    // Only fail if the agent actually gave no chance; otherwise it's just a warning
+    regradedResult = questionsNoChance.length > 0 ? 'FAIL' : 'PASS';
+  } else {
+    // For other cases, start with the original result
+    regradedResult = parsed.original_result;
+  }
+
+  // Check 1: Close line (if server-ended) - can only fail it, never pass
+  if (regradedResult === 'PASS' && closeLineCheck.status === 'not_spoken') {
+    regradedResult = 'FAIL';
+  }
+
+  const result: RegradeResult = {
     parsed,
     close_line_status: closeLineCheck.status,
     close_line_failure: closeLineCheck.failure,
     regraded_result: regradedResult,
     changed: regradedResult !== null && parsed.original_result !== null && regradedResult !== parsed.original_result,
   };
+
+  // For free-play runs, also include the question-answer details
+  if (parsed.is_free_play) {
+    result.free_play_question_answer = computeQuestionAnswerRatio(parsed.transcript);
+  }
+
+  return result;
 }
 
 function printResult(path: string, r: RegradeResult): void {
   const p = r.parsed;
   console.log(`rehearse:regrade -- ${path}`);
   console.log(`  scenario: ${p.scenario_name ?? 'unknown'}`);
+  console.log(`  caller mode: ${p.caller_mode ?? 'unknown'}`);
   console.log(`  expected verdict: ${p.expected_verdict ?? 'unknown'}  actual verdict: ${p.actual_verdict ?? 'unknown'}`);
   console.log(`  call ended reason: ${p.ended_reason ?? 'unknown'}`);
   console.log(`  original recorded result: ${p.original_result ?? 'unknown'}${p.original_fail_reason ? ` (fail_reason=${p.original_fail_reason})` : ''}`);
@@ -172,6 +207,20 @@ function printResult(path: string, r: RegradeResult): void {
     r.close_line_status === 'spoken' ? 'spoken' : r.close_line_status === 'n/a' ? 'n/a (caller ended)' : `NOT spoken -- ${r.close_line_failure}`;
   console.log(`  close line (regraded): ${closeDisplay}`);
   console.log(`  regraded result: ${r.regraded_result ?? 'unknown'}${r.close_line_status === 'not_spoken' ? ' (fail_reason=close_line_not_spoken)' : ''}`);
+
+  // Free-play specific output
+  if (r.free_play_question_answer) {
+    const qa = r.free_play_question_answer;
+    console.log(`  free-play question-answer (regraded): ${questionAnswerRatioDisplay(qa)}`);
+    if (qa.unanswered_no_chance.length > 0) {
+      console.log(`    unanswered (agent gave no chance): ${qa.unanswered_no_chance.map((q) => JSON.stringify(q)).join(', ')}`);
+    }
+    if (qa.unanswered.length > qa.unanswered_no_chance.length) {
+      const with_chance = qa.unanswered.filter((q) => !qa.unanswered_no_chance.includes(q));
+      console.log(`    unanswered (caller chose not to respond): ${with_chance.map((q) => JSON.stringify(q)).join(', ')}`);
+    }
+  }
+
   if (r.changed) {
     console.log(`  REGRADE CHANGED: ${p.original_result} -> ${r.regraded_result}`);
   } else {
