@@ -2119,10 +2119,11 @@
    "files": [
     "scripts/rehearse/**"
    ],
-   "status": "running",
+   "status": "done",
    "held_because": "",
-   "agent_id": "ac109dba301ffc140",
-   "started_at": "2026-09-14T21:03:00Z"
+   "agent_id": "",
+   "started_at": "2026-09-14T21:03:00Z",
+   "lane_note": "on main as 7f4e789 4:10 PM, gated"
   },
   {
    "id": "SERVER-QUESTION-ASSURED",
@@ -2132,9 +2133,9 @@
    ],
    "status": "running",
    "held_because": "",
-   "agent_id": "",
+   "agent_id": "aab9db89827dae9b7",
    "started_at": "2026-09-14T21:05:00Z",
-   "lane_note": "PROVEN from report 2026-09-14T15-47-29-miller-patient"
+   "lane_note": "PROVEN from report 2026-09-14T15-47-29-miller-patient | on main fe56ddc, gate green; review FAIL (re-ask unspaced) 4:30 PM, fix round sent"
   }
  ]
 }
