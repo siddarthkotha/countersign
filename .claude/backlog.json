@@ -2131,11 +2131,22 @@
    "files": [
     "packages/server/**"
    ],
-   "status": "running",
+   "status": "done",
    "held_because": "",
-   "agent_id": "aab9db89827dae9b7",
+   "agent_id": "",
    "started_at": "2026-09-14T21:05:00Z",
-   "lane_note": "PROVEN from report 2026-09-14T15-47-29-miller-patient | on main fe56ddc, gate green; review FAIL (re-ask unspaced) 4:30 PM, fix round sent"
+   "lane_note": "PROVEN from report 2026-09-14T15-47-29-miller-patient | on main fe56ddc, gate green; review FAIL (re-ask unspaced) 4:30 PM, fix round sent | round 2 on main ac6678b, re-check PASS, deployed as push 30; imperative-asks matcher c40aff7 gated + Haiku review PASS, deploys as push 31 after the batch"
+  },
+  {
+   "id": "HARNESS-FREEPLAY-WAIT-HANGUP",
+   "title": "free-play waits for the server hang-up and grades the goodbye",
+   "files": [
+    "scripts/rehearse/**"
+   ],
+   "status": "held",
+   "held_because": "lane f6ec66c done and green (rehearse 431/431); cherry-pick after the batch so grading does not change mid-batch",
+   "agent_id": "",
+   "started_at": ""
   }
  ]
 }

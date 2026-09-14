@@ -59,6 +59,14 @@ if printf '%s' "$LOWER" | grep -qE '"model"[[:space:]]*:[[:space:]]*"sonnet"'; t
       exit 2
     fi
   fi
+  # 3c. HAIKU IS THE DEFAULT LANE MODEL (founder ruling 2026-09-14, Max 5x plan): every
+  # Sonnet pin needs the same SONNET-JUSTIFIED: <reason> marker — reserved for server
+  # timing/state logic and for code reviews. Mechanical lanes (matchers, word lists,
+  # scenario JSON, docs, board, regrades, scripted edits with a test to hit) run on Haiku.
+  if ! printf '%s' "$LOWER" | grep -q 'sonnet-justified:'; then
+    echo "BLOCKED by agent-model-guard: Sonnet pin without SONNET-JUSTIFIED (founder ruling 2026-09-14 — Haiku is the default lane model). Add SONNET-JUSTIFIED: <one-line reason> only for server timing/state logic or a code review; otherwise pin model:'haiku'." >&2
+    exit 2
+  fi
   exit 0
 fi
 
