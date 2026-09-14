@@ -86,3 +86,22 @@ suits ... sensitive workflows like payment authentication. When you send the too
 automatically triggers the agent's next response"; TTS exists only inside the Voice Agent
 pipeline. Price $4.50/hour: not on the docs page, but PROVEN by the founder's dashboard
 (2.9 h used, $13.08 spent).
+
+## Docs answer to "is there a documented way?" (Haiku errand, 6:22 PM CDT, all PROVEN from assemblyai.com/docs)
+- There is NO client event or field that makes the agent say an exact sentence at an exact
+  moment. The events reference: "There is no event that makes the agent speak text
+  verbatim; the agent always generates responses based on its system prompt and
+  conversation context."
+- tool.result is paraphrased by the model, has no speak/say field, and a tool call cannot be
+  forced on every turn. Hold mode mutes the agent while the tool runs and auto-speaks
+  (paraphrased) when the result arrives.
+- conversation.message injects a user or system message into context without speech;
+  reply.create speaks now, with a one-shot instruction, "any time you want the agent to
+  speak without a user utterance triggering it".
+- system_prompt applies on the next turn; greeting is immutable after session.ready.
+- "Connect your own LLM" is mentioned but its page returns 404; no application-driven
+  dialogue guide exists.
+Consequence: the model always phrases; the server can only order the moments and verify the
+transcript. Sequencing without a race (seat 2's E) is the doc-consistent design; the hold-mode
+tool is a documented alternative that removes the automatic reply but depends on the model
+choosing to call the tool each turn, which the docs say cannot be forced.
