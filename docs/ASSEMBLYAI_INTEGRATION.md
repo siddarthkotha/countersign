@@ -113,6 +113,14 @@ differs from the goal that now needs to be spoken (see that file's `sendReplyCre
 `mustForceSpeak` doc comments). Type added at `packages/server/src/aai/types.ts`
 (`ReplyCreateMessage`).
 
+**Trade-off (2026-09-13 review, Minor 6):** an INTERRUPTED CLOSE reply still arms the hang-up
+(`scheduleCloseIfNeeded` does not check `evt.status`) -- if the caller talks over the close
+line, the call still ends on schedule rather than re-requesting a reply.create for CLOSE
+again, on the reasoning that once SEALED there is nothing further to verify and a caller who
+interrupts the close line does not buy the call more time (see LAW 2). The accepted risk:
+a caller who barges in early enough could end the call having heard only a fragment of the
+close sentence, never the whole "nothing has been released" line.
+
 ## VERIFY-AT-BUILD note added 2026-09-09 (transcript dedupe)
 
 The server now ignores a final `transcript.user` / `transcript.agent` event whose `item_id` was

@@ -1269,9 +1269,11 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       expect(session.last?.goal.code).toBe('CLOSE');
 
       // No reply is ever in progress anywhere in this drive ('a4' already completed at c4,
-      // and c5's tick carries the engine all the way to ANNOUNCE_STAGED and then straight on
+      // and c5's tick carries the engine all the way through ANNOUNCE_STAGED and straight on
       // to CLOSE, entirely synchronously, before any reply.started fires for either) --
-      // reply.create goes out immediately, adjacent to the session.update that triggered it.
+      // reply.create goes out immediately, adjacent to the session.update for the tick's
+      // FINAL settled goal (CLOSE -- the intermediate ANNOUNCE_STAGED is coalesced into it,
+      // round 2 design).
       const types = aai.sent.map((m) => (m as { type: string }).type);
       const replyCreateIdx = types.indexOf('reply.create');
       expect(replyCreateIdx).toBeGreaterThan(0);
@@ -1281,7 +1283,8 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       expect(types.slice(0, replyCreateIdx).includes('reply.started')).toBe(false);
     });
 
-    it('(c) no double reply.create when the goal advances twice (ANNOUNCE_FROZEN then CLOSE) before any reply actually starts', () => {
+    it('(c) the ANNOUNCE_FROZEN -> CLOSE cascade (both settling in one server tick) sends exactly one coalesced reply.create, and the reply that follows it is what ends the call (Critical 3 / Important 5, 2026-09-13 review)', () => {
+      vi.useFakeTimers();
       const clock = { now: 0 };
       const aai = new FakeAaiSocket();
       const sent: ServerEvent[] = [];
@@ -1289,28 +1292,137 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       session.start();
       // Reaches FREEZE/SEALED entirely from server-driven lookups/terminal actions, with no
       // reply in progress anywhere in the chain (the helper's own final line starts a reply
-      // only AFTER the chain has already finished) -- ANNOUNCE_FROZEN gets an immediate
-      // reply.create; the very next tick advances straight to CLOSE while that reply.create
-      // is still outstanding (no reply.started for it yet), which must defer rather than
-      // fire a second one -- exactly the shape the PROVEN live bug's own tick took
-      // (FREEZE -> ANNOUNCE_FROZEN -> CLOSE, three session.update in one tick).
+      // -- 'tools-1' -- only AFTER the chain has already finished). FREEZE -> ANNOUNCE_FROZEN
+      // -> CLOSE all settle inside ONE synchronous tick (the PROVEN live bug's own shape) --
+      // round 2 design coalesces the intermediate ANNOUNCE_FROZEN into the tick's FINAL goal
+      // (CLOSE) and sends exactly one reply.create for it, never one for ANNOUNCE_FROZEN
+      // too (CLOSE's own verbatim sentence already carries the outcome; Friday's passing
+      // judge-sim runs spoke under CLOSE, never a separate ANNOUNCE_FROZEN utterance).
       driveScenarioBThroughA4(session, aai, clock);
       expect(session.last?.state).toBe('SEALED');
       expect(session.last?.goal.code).toBe('CLOSE');
+      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1); // (iv)
+      expect(sent.some((e) => e.type === 'ended')).toBe(false); // (ii) not ended before 'tools-1' completes
 
-      const replyCreates = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
-      expect(replyCreates).toHaveLength(1);
+      // Drive 'tools-1' (the reply our one reply.create prompted) to completion. If it were
+      // mislabelled (Critical 1's exact bug: labelling from `this.last` instead of what was
+      // actually requested), `scheduleCloseIfNeeded` would never arm here and the call would
+      // never end -- so this also proves (i), that 'tools-1' was labelled CLOSE, indirectly
+      // but conclusively.
+      clock.now = 51000;
+      aai.emit({ type: 'transcript.agent', item_id: 'a-tools-1', text: session.last!.goal.hint, reply_id: 'tools-1', interrupted: false });
+      clock.now = 51500;
+      aai.emit({ type: 'reply.done', reply_id: 'tools-1', status: 'completed' });
+      expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
+
+      vi.advanceTimersByTime(1500);
+      expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' }); // (iii)
+      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1); // (iv), re-confirmed
     });
 
-    it('(d) never sends reply.create for the initial GREET goal', () => {
+    it("(d) GREET is a real exclusion branch, not a coincidence of nothing else happening yet: zero reply.create before the caller's first turn, one once a genuinely force-spoken goal is reached in the SAME session (Important 5, 2026-09-13 review)", () => {
       const clock = { now: 0 };
       const aai = new FakeAaiSocket();
       const sent: ServerEvent[] = [];
       const call: CallContext = { session_id: 'sess-replycreate-greet', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
       const session = newSession(clock, call, aai, sent);
-      session.start();
+      session.start(); // GREET -- `mustForceSpeak(null, 'GREET')` would otherwise be reachable
+      // (fromCode null, GREET is not in FORCE_SPEAK_GOALS or HOLDING_GOALS either way) were
+      // GREET's own explicit `toCode === 'GREET'` exclusion not there; this pins that a real
+      // caller turn never arrives before this assertion, so a false pass from "nothing has
+      // happened yet" is ruled out by the second half of this same test.
       expect(session.last?.goal.code).toBe('GREET');
       expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(false);
+
+      // Drive the SAME session all the way to a genuinely force-spoken goal (CLOSE) --
+      // proving the GREET exclusion is a real branch, not merely "nothing forced happened".
+      driveScenarioBThroughA4(session, aai, clock);
+      expect(session.last?.goal.code).toBe('CLOSE');
+      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    });
+
+    // Critical 1 (2026-09-13 review, FAIL on round 1 commit 48a0969): round 1 labelled a
+    // reply.started with `this.last.goal.code` UNCONDITIONALLY -- reading whatever the goal
+    // had already become by the time that reply started, not what was actually requested
+    // when its reply.create was sent. Direct-state construction (same technique the existing
+    // ELICIT_MISSING_CRITICAL test above uses) is the only way to pin the exact race: no
+    // reachable live drive can force a SEPARATE, later tick to advance the goal further
+    // while an earlier reply.create is still awaiting its own reply.started (the default
+    // mock always settles a whole cascade inside one synchronous tick -- see test (c)).
+    describe('reply.started labels a reply with the goal actually REQUESTED, never a since-advanced this.last (Critical 1, 2026-09-13 review)', () => {
+      function internalsOf(session: CallSession) {
+        return session as unknown as {
+          maybeSendReplyCreateForTick: (goalAtTickStart: string | null) => void;
+          replyGoalAtStart: Map<string, string>;
+          pendingRequestedGoal: string | null;
+          replyCreateAwaitingStart: boolean;
+        };
+      }
+
+      it('labels the reply with pendingRequestedGoal (ANNOUNCE_FROZEN), not this.last (CLOSE), when this.last advances before that reply.started arrives', () => {
+        const clock = { now: 0 };
+        const aai = new FakeAaiSocket();
+        const sent: ServerEvent[] = [];
+        const call: CallContext = { session_id: 'sess-critical1-label', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+        const session = newSession(clock, call, aai, sent);
+        session.start(); // GREET
+        const internals = internalsOf(session);
+
+        // Simulate a tick landing on ANNOUNCE_FROZEN with nothing speaking -- sends
+        // reply.create immediately for it (this IS that tick's own final goal).
+        session.last = { ...session.last!, goal: { code: 'ANNOUNCE_FROZEN', hint: 'x', keyterms: [], turn_detection_hint: 'default' } };
+        internals.maybeSendReplyCreateForTick('STALL');
+        expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+        expect(internals.pendingRequestedGoal).toBe('ANNOUNCE_FROZEN');
+        expect(internals.replyCreateAwaitingStart).toBe(true);
+
+        // Before AssemblyAI's reply.started for THAT outstanding request ever arrives, a
+        // SEPARATE, later event advances the engine's current goal further, to CLOSE --
+        // the founder's PROVEN race (test (a) above), just isolated to the exact instant
+        // that breaks round 1's labeling.
+        session.last = { ...session.last!, goal: { code: 'CLOSE', hint: 'y', keyterms: [], turn_detection_hint: 'default' } };
+
+        clock.now = 100;
+        aai.emit({ type: 'reply.started', reply_id: 'r1' });
+        // THE FIX: labelled from pendingRequestedGoal (what was asked for), not this.last
+        // (CLOSE) which round 1 used unconditionally and would fail this assertion.
+        expect(internals.replyGoalAtStart.get('r1')).toBe('ANNOUNCE_FROZEN');
+        expect(internals.replyCreateAwaitingStart).toBe(false);
+        expect(internals.pendingRequestedGoal).toBeNull();
+      });
+    });
+
+    // Important 4 (2026-09-13 review): fsm.ts's EVIDENCE-under-pressure response returns
+    // CONTAIN_NO_DISCLOSURE, not plain CONTAIN -- HOLDING_GOALS must include it too, or a
+    // caller pressuring the agent out of disclosure and then being read back a critical
+    // field the instant that pressure resolves would never hear the readback question.
+    describe('CONTAIN_NO_DISCLOSURE is a holding goal (Important 4, 2026-09-13 review)', () => {
+      it('CONTAIN_NO_DISCLOSURE -> READBACK in one server-driven tick sends one reply.create', () => {
+        const clock = { now: 0 };
+        const aai = new FakeAaiSocket();
+        const sent: ServerEvent[] = [];
+        const call: CallContext = { session_id: 'sess-contain-no-disclosure', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+        const session = newSession(clock, call, aai, sent);
+        session.start();
+        const internals = session as unknown as { maybeSendReplyCreateForTick: (g: string | null) => void };
+
+        // Simulate the tick's FINAL settled goal being READBACK, having started the tick at
+        // CONTAIN_NO_DISCLOSURE (the caller's pressure just resolved and a critical field is
+        // now ready to be read back).
+        session.last = {
+          ...session.last!,
+          goal: {
+            code: 'READBACK',
+            hint: 'y',
+            keyterms: [],
+            turn_detection_hint: 'patient',
+            readback: { field: 'amount_usd', value: '84500' },
+          },
+        };
+        internals.maybeSendReplyCreateForTick('CONTAIN_NO_DISCLOSURE');
+
+        expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+      });
     });
 
     it('records a reply_create_sent diag event and a session_config_updated action entry when it sends one', () => {
@@ -1333,14 +1445,17 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       driveToSealedStage(session, aai, clock);
       expect(session.last?.goal.code).toBe('CLOSE');
 
-      // The one reply.create sent in this drive is for ANNOUNCE_STAGED (sent immediately,
-      // reason goal_change_idle) -- CLOSE's own force-speak is still deferred at this point
-      // (no reply has started yet to resolve it against), same shape test (b)/(c) exercise.
+      // Round 2 design: at most one send per TICK, for the tick's FINAL settled goal.
+      // ANNOUNCE_STAGED and CLOSE both settle within the same tick here (c5's transcript
+      // ticks the engine straight through ANNOUNCE_STAGED to CLOSE, synchronously, before
+      // any reply.started ever fires) -- so the intermediate ANNOUNCE_STAGED rendering is
+      // coalesced into CLOSE and never gets its own reply.create; reason 'tick_end' marks
+      // this as the immediate (not-busy) send path, same shape test (b)/(c) exercise.
       const replyCreateDiags = diagEvents.filter((e) => e.kind === 'reply_create_sent');
       expect(replyCreateDiags).toHaveLength(1);
       const detail = replyCreateDiags[0]!.detail as { goal_code: string; reason: string };
-      expect(detail.goal_code).toBe('ANNOUNCE_STAGED');
-      expect(detail.reason).toBe('goal_change_idle');
+      expect(detail.goal_code).toBe('CLOSE');
+      expect(detail.reason).toBe('tick_end');
 
       const actionEntries = session.logs.actions.filter(
         (a) => a.kind === 'session_config_updated' && typeof a.detail === 'string' && a.detail.startsWith('reply_create:'),
