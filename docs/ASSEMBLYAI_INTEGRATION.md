@@ -150,12 +150,75 @@ clause, since TTS/STT can drop or reword that without changing what was actually
 communicated). A reply that finishes -- however it finishes -- without that match is treated
 as "the close line was not spoken": the server asks again, this time passing the exact
 prompt-wrapper text as `reply.create`'s own one-shot `instructions` field rather than relying
-on `system_prompt` alone, bounded at `CLOSE_REPLY_ATTEMPTS = 3` total sends for CLOSE per
-call. Once exhausted, the server stops asking and the existing 15s hard cap
-(`CLOSE_TIMEOUT_MS`) is the sole remaining backstop, ending the call `close_timeout` -- LAW 2
-is unaffected either way (a verdict already reached STAGE/FREEZE/ESCALATE before CLOSE is
-ever rendered; failing to say the closing sentence never changes what was decided, only
-whether the caller heard it said).
+on `system_prompt` alone -- round 3 bounded this at `CLOSE_REPLY_ATTEMPTS = 3` total sends
+for CLOSE per call, then fell back to a 15s hard cap (`CLOSE_TIMEOUT_MS`), ending the call
+`close_timeout`. **Superseded by round 4 below** -- the attempt count is exactly what failed
+next.
+
+## Round 4 (2026-09-14): CLOSE retry is a TIME budget, not an attempt count
+
+PROVEN live failure (`scripts/rehearse/reports/2026-09-14T13-47-07-miller-patient.
+diagnostics.json`, events 46889-61898): CLOSE rendered at 46893; `reply.create` #1 sent
+46893; `reply.started` 46897 was AssemblyAI's OWN turn reply under the PREVIOUS prompt (a
+59-char transcript), `reply.done` completed 48023; `close_retry` #2 sent 48023 in the SAME
+millisecond (round 3 had no spacing rule), `reply.started` 48027, `reply.done` completed
+48091 with NO transcript at all (an empty reply, 64ms); `close_retry` #3 sent 48091 (again no
+gap); `reply.started` 48094, transcript "This transfer is frozen" then interrupted by caller
+speech at 51860 -- `CLOSE_REPLY_ATTEMPTS` (3) was now exhausted, so no further retry was ever
+sent; AssemblyAI's next turn reply started 56656 and the 15s hard cap ended the call
+`close_timeout` at 61898 before the sentence finished. Net: the mechanism was right (round 3
+correctly refused to trust the first two replies), but a fixed attempt count ran out before
+AssemblyAI ever produced a reply that actually said the close line.
+
+**Why a time budget, not a bigger count:** the failure mode isn't "not enough attempts" in
+the abstract -- it's that attempts were spent on things that were never going to work (a
+stale turn-driven reply, an empty reply) as fast as AssemblyAI could produce them, before a
+real one had a chance to land. Three further live bundles the same day (structuring-two-
+wires, dana-patient, identity-switch) showed the SAME pattern PLUS a second failure mode: the
+close_retry reply actually spoke the full sentence, but its `reply.done` never arrived before
+the 15s cap fired anyway -- the goodbye was heard and the call still ended `close_timeout`.
+Round 4 replaces the attempt count with two changes:
+
+1. **`CLOSE_TOTAL_MS = 45_000`** (absolute, from CLOSE render) replaces `CLOSE_TIMEOUT_MS`
+   (15s) as the ONLY thing that can end the call without ever hearing a match. There is no
+   attempt cap anymore -- `sendReplyCreate`'s `attempt` diagnostic field is now a plain,
+   uncapped running counter, purely for observability. Retries are spaced by
+   `CLOSE_RETRY_MIN_GAP_MS = 400ms` (never sent while a reply is in flight) instead of being
+   counted against a limit -- this is what stops a close_retry from landing in the exact
+   window that produces an empty reply, and what lets a genuinely lost `reply.create` (no
+   `reply.started` within `REPLY_CREATE_LOST_MS = 1500ms`) be superseded by a fresh one
+   rather than wedging the call. An empty/whitespace-only reply still triggers a (spaced)
+   retry but does not bump the `attempt` counter -- it wasn't a real attempt.
+2. **The hang-up is armed on the TRANSCRIPT, not only on `reply.done`** (`maybeArmClose
+   OnTranscript`, called from every `transcript.agent` event): the instant the accumulated
+   transcript for the in-flight reply already matches the close sentence, the server starts
+   waiting for THAT reply's own `reply.done` OR `CLOSE_DONE_WAIT_MS = 4000ms`, whichever
+   comes first -- never depending on `reply.done` arriving at all. This directly fixes the
+   "heard but still close_timeout'd" bundles above.
+
+Also folded into round 4: the idle reaper's own `end('idle_timeout')` used to close the call
+immediately the instant `call_ended` turned a still-PENDING verdict terminal (row 15), with
+no goodbye ever spoken for either outcome (ESCALATE with a request on record, or NO_ACTION
+with nothing at stake) -- PROVEN live (founder observation: "single-wrong-answer and
+hangup-after-request ended idle_timeout with verdict ESCALATE and no goodbye"). `end()` now
+defers once for `reason === 'idle_timeout'`: it logs `call_ended` and ticks BEFORE marking
+the call ended, so if the tick reaches an engine-rendered CLOSE goal (ESCALATE/STAGE/FREEZE),
+the same machinery above renders and speaks it, ending as `idle_timeout` (not `agent_closed`)
+via `idleEndReason`. NO_ACTION never reaches an engine-rendered CLOSE goal at all (fsm.ts's
+`deriveState` sends every NO_ACTION verdict to `OUT_OF_SCOPE`, never `SEALED` -- see that
+file's own `closeSentence()` doc comment, which explicitly flagged this as unbuilt) -- for
+that one case, `session.ts`'s `beginIdleNoActionGoodbye` speaks the same literal "Thank you
+for calling. Goodbye." line directly (`closeSentenceOverride`), reusing the identical
+transcript-confirmed hang-up machinery. This is scoped ONLY to the idle-timeout path -- it
+does not change what the engine itself renders for any other ending reason.
+
+`ws/browser.ts`'s `endCall` used to close the browser socket unconditionally, synchronously,
+right after calling `session.end(reason)` -- correct when `end()` was always immediately
+terminal, but a race once `end('idle_timeout')` could defer: the raw socket could close
+before the deferred goodbye (or the eventual `ended` event) ever reached it. The close moved
+into `makeEntrySink`'s own `ended` handler (fires exactly once, whenever the call is
+genuinely done, regardless of what ended it), after `entry.deliver` has actually pushed the
+`ended` event down the wire.
 
 ## VERIFY-AT-BUILD note added 2026-09-09 (transcript dedupe)
 

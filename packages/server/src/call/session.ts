@@ -212,20 +212,64 @@ export class CallSession {
    *  scenario-a-dana-legitimate.md): SEALED (goal CLOSE) used to render a close line the
    *  model could -- and did -- improvise past, and the server never hung up on its own; only
    *  the caller, idle timer, cap, or an error ever ended the call. Once the caller
-   *  disconnected 47 seconds of off-goal turns had already played. Two config values, kept
-   *  local to this class (not `config.ts` -- owned by another lane in this worktree split):
-   *  `CLOSE_GRACE_MS` lets the CLOSE line's own audio actually finish flushing to the wire
-   *  before the socket closes; `CLOSE_TIMEOUT_MS` is the hard cap in case `reply.done` for
-   *  the CLOSE goal never arrives at all (a dropped AAI reply, a model that never speaks).
-   *  Both timers funnel into the existing `end()` path -- nothing new about HOW a call ends,
-   *  only WHEN one more automatic trigger fires it. See this task's report for why this is
-   *  wired to `state === 'SEALED'` (STAGE/FREEZE/ESCALATE, the only verdicts CLOSE is ever
-   *  rendered for today) and deliberately NOT to OUT_OF_SCOPE/NO_ACTION -- a judgment call
-   *  flagged for the founder. */
+   *  disconnected 47 seconds of off-goal turns had already played. `CLOSE_GRACE_MS` lets the
+   *  CLOSE line's own audio actually finish flushing to the wire before the socket closes.
+   *
+   *  Round 4 (2026-09-14, time-budget fix, PROVEN live failure -- scripts/rehearse/reports/
+   *  2026-09-14T13-47-07-miller-patient.diagnostics.json): the hard cap used to be
+   *  CLOSE_TIMEOUT_MS (15s) paired with a fixed CLOSE_REPLY_ATTEMPTS (3) retry count -- the
+   *  attempts ran out (one AssemblyAI turn-driven reply under the stale prompt, one empty
+   *  reply, one interrupted partial) before AssemblyAI ever produced a reply that actually
+   *  said the close line, and the 15s cap ended the call `close_timeout` mid-sentence. The
+   *  fix replaces the attempt count with CLOSE_TOTAL_MS (45s, absolute, from CLOSE render) as
+   *  the ONLY thing that can end the call without ever hearing a match -- retries in between
+   *  are uncapped, spaced by CLOSE_RETRY_MIN_GAP_MS instead of counted (see
+   *  `armCloseRetryTimer`/`sendReplyCreate`). Both timers funnel into the existing `end()`
+   *  path -- nothing new about HOW a call ends, only WHEN one more automatic trigger fires
+   *  it. See this task's report for why this is wired to `state === 'SEALED'`
+   *  (STAGE/FREEZE/ESCALATE, the only verdicts CLOSE is ever rendered for today) and
+   *  deliberately NOT to OUT_OF_SCOPE/NO_ACTION here -- a judgment call flagged for the
+   *  founder (idle timeout's own separate goodbye path, requirement 9 below, DOES cover
+   *  NO_ACTION, but only when the idle reaper itself is what ended the call). */
   private static readonly CLOSE_GRACE_MS = 1500;
-  private static readonly CLOSE_TIMEOUT_MS = 15_000;
+  private static readonly CLOSE_TOTAL_MS = 45_000;
+  /** Round 4: never send a close_retry synchronously off a reply.done -- wait this long
+   *  first (a real timer, cleared on end/match/end-of-call) so a retry is never issued while
+   *  AssemblyAI is still mid-turn from the event that just triggered it, and so two
+   *  back-to-back mismatches (e.g. a3 then a4 in the same tick, PROVEN reachable -- see
+   *  session.test.ts's own round-3/round-4 tests) coalesce into a single pending retry
+   *  instead of stacking. */
+  private static readonly CLOSE_RETRY_MIN_GAP_MS = 400;
+  /** Round 4, requirement 5: a `reply.create` this class sent but never got a `reply.started`
+   *  for within this long is treated as lost (AssemblyAI dropped it, or it was superseded by
+   *  the service's own turn) and `replyCreateAwaitingStart` is cleared so a fresh one can go
+   *  out -- otherwise a single lost request would wedge every later send for the rest of the
+   *  call (see `sendReplyCreate`'s own "at most one outstanding" guard). */
+  private static readonly REPLY_CREATE_LOST_MS = 1500;
+  /** Round 4, requirement 7 (founder correction, 2026-09-14, three further PROVEN live
+   *  bundles -- see `maybeArmCloseOnTranscript`'s own doc comment): how long to wait for the
+   *  in-flight reply's own `reply.done` after its accumulated transcript ALREADY matches the
+   *  close sentence, before giving up on `reply.done` ever arriving and starting the grace
+   *  period anyway -- the words were already heard; a missing `reply.done` must not block the
+   *  hang-up (or worse, let the 45s/close_timeout cap fire on a call that already said
+   *  goodbye). Whichever fires first (`reply.done` or this timeout) wins; the call is never
+   *  ended twice. */
+  private static readonly CLOSE_DONE_WAIT_MS = 4_000;
   private closeGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private closeHardCapTimer: ReturnType<typeof setTimeout> | null = null;
+  private closeRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private replyCreateLostTimer: ReturnType<typeof setTimeout> | null = null;
+  private closeDoneWaitTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Round 4: the reply id `maybeArmCloseOnTranscript` has already started the hang-up
+   *  sequence for, so a second (or third) `transcript.agent` chunk for the SAME reply that
+   *  still matches doesn't re-arm a fresh `CLOSE_DONE_WAIT_MS` timer on top of the one
+   *  already running. */
+  private closeArmedForReplyId: string | null = null;
+  /** Round 4, requirement 8: whether the CLOSE reply that most recently completed (matched or
+   *  not) carried an empty/whitespace-only accumulated transcript -- read once by the retry
+   *  this triggers (`armCloseRetryTimer`/`sendReplyCreate`) so that retry does NOT bump the
+   *  diagnostics `attempt` counter (an empty reply "was not really an attempt"), then reset. */
+  private closeLastReplyWasEmpty = false;
   /** reply.create fix, round 3 (2026-09-13, PROVEN live failure on deploy 26 -- see
    *  closeMatch.ts's own doc comment for the full incident): every transcript.agent chunk
    *  recorded for a given AAI reply id, concatenated in arrival order -- kept in memory only,
@@ -235,14 +279,37 @@ export class CallSession {
    *  from which goal a reply was labelled as having been requested for. Entries are never
    *  pruned -- one call's total transcript volume is small and bounded by the session cap. */
   private readonly replyTranscripts = new Map<string, string>();
-  /** reply.create fix, round 3: bounds how many times `sendReplyCreate` will ask AssemblyAI
-   *  to speak the CLOSE goal for this call -- counts the ordinary tick_end/
-   *  reply_done_goal_diverged sends that first reach for CLOSE plus any close_retry sends
-   *  `scheduleCloseIfNeeded` issues because the close line was not actually heard. Once
-   *  exhausted, `sendReplyCreate` stops asking and the existing 15s hard cap
-   *  (`armClose`/CLOSE_TIMEOUT_MS) is the backstop that ends the call `close_timeout`. */
-  private static readonly CLOSE_REPLY_ATTEMPTS = 3;
+  /** Round 4: an uncapped running counter of how many times `sendReplyCreate` has actually
+   *  asked AssemblyAI to speak the CLOSE goal for this call (the diagnostics `attempt` field)
+   *  -- CLOSE_REPLY_ATTEMPTS (a fixed cap of 3) is GONE (that was the bug: it ran out before
+   *  a real reply ever landed); this number now exists purely for observability, never to
+   *  gate a send. An empty-transcript reply's own retry does not bump it (requirement 8). */
   private closeReplySendCount = 0;
+  /** Round 4, requirement 9 (founder correction, 2026-09-14): when the idle reaper's own
+   *  `end('idle_timeout')` finds a goodbye still owed (see `end()`'s own doc comment), the
+   *  CLOSE hang-up machinery that follows must report the eventual end as `idle_timeout`, not
+   *  its own default `agent_closed`/`close_timeout` -- this is the one piece of state that
+   *  carries that override across to `beginCloseGrace`/`armClose`'s timeout. Null for every
+   *  ordinary (non-idle-deferred) CLOSE. */
+  private idleEndReason: string | null = null;
+  /** Round 4, requirement 9: set only by `beginIdleNoActionGoodbye` -- a literal close
+   *  sentence to speak and match against when the idle reaper ends a call whose verdict is
+   *  NO_ACTION. The engine's own `deriveState` (fsm.ts) sends EVERY NO_ACTION verdict to
+   *  OUT_OF_SCOPE, never SEALED, so `goal.code` is never really `'CLOSE'` for this case (see
+   *  `closeSentence()`'s own doc comment in fsm.ts: NO_ACTION's close line is "kept... for
+   *  whichever future lane wires OUT_OF_SCOPE's own close" -- this is that lane, scoped
+   *  ONLY to the idle-timeout path, never touching the engine's own state/goal derivation).
+   *  `currentCloseSentence()` is the one place this is read; null for every ordinary
+   *  (engine-driven) CLOSE. */
+  private closeSentenceOverride: string | null = null;
+  /** Round 4, requirement 9: `end()` only ever tries the idle-goodbye defer ONCE per call --
+   *  guards against re-entering it when the deferred CLOSE machinery itself later calls
+   *  `end('idle_timeout')` again to actually finish the job. */
+  private idleDeferAttempted = false;
+  /** Round 4, requirement 9: guards the ONE `call_ended` action this class ever logs for a
+   *  given `end()` sequence -- `end()`'s idle-defer path and its immediate-end path both need
+   *  to log this fact, but only the first one to run should actually write it. */
+  private callEndedLogged = false;
   /** reply.create fix, round 2 (2026-09-13 review verdict FAIL on round 1, commit 48a0969 --
    *  PROVEN live bug: session 84ddf47a, Miller fraud scenario; see
    *  docs/ASSEMBLYAI_INTEGRATION.md's "VERIFY-AT-BUILD: reply.create schema" section).
@@ -295,21 +362,162 @@ export class CallSession {
       clearTimeout(this.closeHardCapTimer);
       this.closeHardCapTimer = null;
     }
+    if (this.closeRetryTimer) {
+      clearTimeout(this.closeRetryTimer);
+      this.closeRetryTimer = null;
+    }
+    if (this.replyCreateLostTimer) {
+      clearTimeout(this.replyCreateLostTimer);
+      this.replyCreateLostTimer = null;
+    }
+    if (this.closeDoneWaitTimer) {
+      clearTimeout(this.closeDoneWaitTimer);
+      this.closeDoneWaitTimer = null;
+    }
+  }
+
+  /** The close sentence currently owed, if any -- `closeSentenceOverride` (idle+NO_ACTION,
+   *  requirement 9) when set, else `this.last.goal.hint` whenever the ENGINE itself has
+   *  rendered CLOSE, else null (nothing owed). The one thing every CLOSE-hang-up method
+   *  (`scheduleCloseIfNeeded`, `maybeArmCloseOnTranscript`, `armCloseRetryTimer`) checks
+   *  before doing anything, so neither path needs its own copy of "is a goodbye owed right
+   *  now, and what does it say." */
+  private currentCloseSentence(): string | null {
+    if (this.closeSentenceOverride) return this.closeSentenceOverride;
+    if (this.last?.goal.code === 'CLOSE') return this.last.goal.hint;
+    return null;
+  }
+
+  /** Round 4, requirement 9 (founder correction, 2026-09-14): the idle reaper's own
+   *  `end('idle_timeout')` found the verdict is NO_ACTION once `call_ended` was logged --
+   *  the engine's `deriveState` (fsm.ts) always sends NO_ACTION to OUT_OF_SCOPE, never
+   *  SEALED, so there is no engine-rendered CLOSE goal to piggyback on here (see
+   *  `closeSentenceOverride`'s own doc comment). Speaks the exact same "Thank you for
+   *  calling. Goodbye." line `fsm.ts`'s own `closeSentence()` default case defines for
+   *  NO_ACTION (copied verbatim, grepped 2026-09-14 -- same convention closeMatch.ts's
+   *  `ENGINE_CLOSE_SENTENCES.NO_ACTION` already uses), via the exact same one-shot
+   *  "say exactly this" wrapper every other close_retry uses, then reuses the SAME
+   *  transcript-confirmed hang-up machinery (`scheduleCloseIfNeeded`/
+   *  `maybeArmCloseOnTranscript`/`armCloseRetryTimer`/`beginCloseGrace`) and the SAME
+   *  CLOSE_TOTAL_MS absolute backstop (`armClose`) -- nothing new about HOW the goodbye is
+   *  confirmed or the call ends, only that `closeSentenceOverride` (not an engine-rendered
+   *  CLOSE goal) is what supplies the sentence to match against. */
+  private beginIdleNoActionGoodbye(): void {
+    if (this.ended) return;
+    this.closeSentenceOverride = 'Thank you for calling. Goodbye.';
+    this.armClose();
+    if (this.speaking || this.replyCreateAwaitingStart) return; // the in-flight reply's own reply.done/transcript will pick this up
+    const wrapper = `Say exactly this and nothing else: "${this.closeSentenceOverride}"`;
+    this.sendReplyCreate('CLOSE', 'idle_no_action_close', wrapper);
   }
 
   /** Called once, the first tick the goal becomes CLOSE (from `applyEvaluate`'s goal-changed
-   *  branch): arms the 15s hard cap in case `reply.done` for the real close line never
-   *  arrives at all (a dropped AAI reply, a model that never speaks). Idempotent via the
-   *  hard-cap-timer guard: a second call while one is already pending is a no-op, so a goal
-   *  that briefly changes away from CLOSE and back (not possible today -- SEALED is a
-   *  one-way state -- but defensive regardless) is harmless. */
+   *  branch): arms the CLOSE_TOTAL_MS (45s, round 4) hard cap in case no reply.done for the
+   *  real close line ever arrives AND no transcript match is ever heard either (a dropped AAI
+   *  reply, a model that never speaks at all). Idempotent via the hard-cap-timer guard: a
+   *  second call while one is already pending is a no-op, so a goal that briefly changes away
+   *  from CLOSE and back (not possible today -- SEALED is a one-way state -- but defensive
+   *  regardless) is harmless. Round 4, requirement 9: the eventual end reason reads
+   *  `idleEndReason` when the idle reaper is what set this whole CLOSE sequence in motion. */
   private armClose(): void {
     if (this.closeHardCapTimer || this.ended) return;
     this.closeHardCapTimer = setTimeout(() => {
       this.closeHardCapTimer = null;
-      if (!this.ended) this.end('close_timeout');
-    }, CallSession.CLOSE_TIMEOUT_MS);
+      if (!this.ended) this.end(this.idleEndReason ?? 'close_timeout');
+    }, CallSession.CLOSE_TOTAL_MS);
     this.closeHardCapTimer.unref?.();
+  }
+
+  /** Starts (or no-ops if already started) the final CLOSE_GRACE_MS countdown to actually
+   *  hanging up -- the one place that decides the call is DONE talking, whether that
+   *  conclusion came from a matching `reply.done` (`scheduleCloseIfNeeded`) or from the close
+   *  sentence already being heard mid-reply (`maybeArmCloseOnTranscript`'s
+   *  CLOSE_DONE_WAIT_MS timeout, round 4 requirement 7). Cancels the hard cap (nothing left
+   *  to time out) and any still-pending `closeDoneWaitTimer` (whichever path got here first
+   *  wins; the other's own pending timer, if any, is now moot). The grace-timer guard itself
+   *  makes this safe to call more than once for the same reply. */
+  private beginCloseGrace(): void {
+    if (this.ended) return;
+    if (this.closeGraceTimer) return;
+    if (this.closeHardCapTimer) {
+      clearTimeout(this.closeHardCapTimer);
+      this.closeHardCapTimer = null;
+    }
+    if (this.closeDoneWaitTimer) {
+      clearTimeout(this.closeDoneWaitTimer);
+      this.closeDoneWaitTimer = null;
+    }
+    if (this.closeRetryTimer) {
+      clearTimeout(this.closeRetryTimer);
+      this.closeRetryTimer = null;
+    }
+    this.closeGraceTimer = setTimeout(() => {
+      this.closeGraceTimer = null;
+      if (!this.ended) this.end(this.idleEndReason ?? 'agent_closed');
+    }, CallSession.CLOSE_GRACE_MS);
+    this.closeGraceTimer.unref?.();
+  }
+
+  /** Round 4, requirement 7 (founder correction, 2026-09-14, three further PROVEN live
+   *  bundles -- scripts/rehearse/reports/2026-09-14T13-45-58-dana-patient,
+   *  T13-58-08-structuring-two-wires, T13-49-05-identity-switch .diagnostics.json): in all
+   *  three, the close_retry reply actually SPOKE the full close sentence (Dana: a 127-char
+   *  transcript.agent matching the whole STAGE sentence) but no `reply.done` ever arrived for
+   *  it before the (then-15s) hard cap ended the call `close_timeout` -- the goodbye was
+   *  heard, but the hang-up never armed because the old design only ever armed it from
+   *  `reply.done`. Called from every `transcript.agent` event (see `dispatchAaiEvent`): the
+   *  instant the accumulated transcript for the CURRENTLY in-flight reply already matches the
+   *  close sentence, starts waiting for THAT reply's own `reply.done` OR CLOSE_DONE_WAIT_MS
+   *  (4s), whichever comes first (`beginCloseGrace` is idempotent, so whichever fires first
+   *  wins and the other is a no-op) -- never depends on `reply.done` arriving at all.
+   *  `closeArmedForReplyId` guards against re-arming a second `CLOSE_DONE_WAIT_MS` timer on
+   *  top of one already running for the same reply id as more transcript chunks stream in. */
+  private maybeArmCloseOnTranscript(replyId: string): void {
+    const sentence = this.currentCloseSentence();
+    if (!sentence) return;
+    if (this.ended || this.closeGraceTimer) return;
+    if (this.closeArmedForReplyId === replyId) return;
+
+    const transcript = this.replyTranscripts.get(replyId) ?? '';
+    if (!transcriptMatchesCloseSentence(transcript, sentence)) return;
+
+    this.closeArmedForReplyId = replyId;
+    // The words are already heard -- no further retry is owed for this rendering of CLOSE.
+    if (this.closeRetryTimer) {
+      clearTimeout(this.closeRetryTimer);
+      this.closeRetryTimer = null;
+    }
+    this.closeDoneWaitTimer = setTimeout(() => {
+      this.closeDoneWaitTimer = null;
+      this.beginCloseGrace();
+    }, CallSession.CLOSE_DONE_WAIT_MS);
+    this.closeDoneWaitTimer.unref?.();
+  }
+
+  /** Round 4, requirement 1: arms the CLOSE_RETRY_MIN_GAP_MS spacing timer before the next
+   *  close_retry `reply.create` goes out -- never synchronously off a `reply.done`
+   *  (`scheduleCloseIfNeeded`'s own caller). Idempotent via the timer guard: a second
+   *  mismatch arriving before the first's timer has fired (e.g. two scripted turns in the
+   *  same synchronous tick cascade, PROVEN reachable -- see session.test.ts) coalesces into
+   *  the SAME pending retry rather than stacking a second one. Re-checks every precondition
+   *  at fire time, not just at arm time, since the world can change in the intervening
+   *  400ms: still CLOSE, not ended, and -- requirement 1's "never send while a reply is in
+   *  flight" -- neither speaking nor another `reply.create` already outstanding. If any of
+   *  those fail, this attempt is simply dropped (never rescheduled): whatever reply is
+   *  in flight will produce its own `reply.done`/transcript-match check when it finishes,
+   *  which re-triggers this same mechanism if still needed. */
+  private armCloseRetryTimer(): void {
+    if (this.closeRetryTimer) return;
+    this.closeRetryTimer = setTimeout(() => {
+      this.closeRetryTimer = null;
+      if (this.ended) return;
+      const sentence = this.currentCloseSentence();
+      if (!sentence) return;
+      if (this.speaking || this.replyCreateAwaitingStart) return;
+      const wrapper = `Say exactly this and nothing else: "${sentence}"`;
+      this.sendReplyCreate('CLOSE', 'close_retry', wrapper, { countAttempt: !this.closeLastReplyWasEmpty });
+    }, CallSession.CLOSE_RETRY_MIN_GAP_MS);
+    this.closeRetryTimer.unref?.();
   }
 
   /** Fired from `reply.done`, and ONLY when the generic force-speak machinery
@@ -324,42 +532,36 @@ export class CallSession {
    *  the transcript says was spoken.
    *
    *  Matched (`transcriptMatchesCloseSentence`, leniently -- see that function's own doc
-   *  comment): arms the grace-period hang-up, regardless of `completed` vs `interrupted`
-   *  (rule 3: a close line mostly said before a barge-in still counts -- once SEALED there is
-   *  nothing left for the model to do, so a caller who talks over the close line does not buy
-   *  the call more time). The short grace period lets the close line's own audio frames
-   *  actually reach the wire before the socket shuts.
+   *  comment): begins the grace-period hang-up (`beginCloseGrace`, idempotent -- a match
+   *  already found mid-reply via `maybeArmCloseOnTranscript` may have started this already),
+   *  regardless of `completed` vs `interrupted` (rule 3: a close line mostly said before a
+   *  barge-in still counts -- once SEALED there is nothing left for the model to do, so a
+   *  caller who talks over the close line does not buy the call more time).
    *
    *  Not matched (rule 2/3): the close line was NOT heard in this reply, whether it finished
-   *  cleanly or was interrupted. Ask again with a one-shot `instructions` payload carrying the
-   *  exact wrapper prompt.ts's own CLOSE case uses (`Say exactly this and nothing else: "..."`)
-   *  rather than relying on the standing `system_prompt` alone -- `sendReplyCreate`'s own
-   *  `CLOSE_REPLY_ATTEMPTS` cap bounds how many times this can happen; once exhausted, this
-   *  method does nothing further and the existing 15s hard cap (`armClose`) is the backstop
-   *  that ends the call `close_timeout`. */
+   *  cleanly or was interrupted. Round 4 (requirement 8): records whether this reply's own
+   *  accumulated transcript was empty/whitespace-only (read once by the retry this arms, so
+   *  an empty reply does not bump the diagnostics `attempt` counter -- it still counts as a
+   *  reason to retry, just not as an "attempt"), then arms the spaced retry
+   *  (`armCloseRetryTimer`) with a one-shot `instructions` payload carrying the exact wrapper
+   *  prompt.ts's own CLOSE case uses (`Say exactly this and nothing else: "..."`) rather than
+   *  relying on the standing `system_prompt` alone. There is no attempt cap anymore
+   *  (CLOSE_REPLY_ATTEMPTS is gone) -- retries continue, spaced, until either a match is
+   *  heard or the CLOSE_TOTAL_MS (45s) hard cap (`armClose`) ends the call `close_timeout`. */
   private scheduleCloseIfNeeded(replyId: string): void {
-    if (!this.last || this.last.goal.code !== 'CLOSE') return;
+    const sentence = this.currentCloseSentence();
+    if (!sentence) return;
     if (this.ended) return;
 
-    const sentence = this.last.goal.hint;
     const transcript = this.replyTranscripts.get(replyId) ?? '';
 
     if (transcriptMatchesCloseSentence(transcript, sentence)) {
-      if (this.closeGraceTimer) return;
-      if (this.closeHardCapTimer) {
-        clearTimeout(this.closeHardCapTimer);
-        this.closeHardCapTimer = null;
-      }
-      this.closeGraceTimer = setTimeout(() => {
-        this.closeGraceTimer = null;
-        if (!this.ended) this.end('agent_closed');
-      }, CallSession.CLOSE_GRACE_MS);
-      this.closeGraceTimer.unref?.();
+      this.beginCloseGrace();
       return;
     }
 
-    const wrapper = `Say exactly this and nothing else: "${sentence}"`;
-    this.sendReplyCreate('CLOSE', 'close_retry', wrapper);
+    this.closeLastReplyWasEmpty = transcript.trim().length === 0;
+    this.armCloseRetryTimer();
   }
 
   constructor(opts: CallSessionOpts) {
@@ -392,8 +594,49 @@ export class CallSession {
     }
   }
 
+  /** Round 4, requirement 9 (founder correction, 2026-09-14): today, `end('idle_timeout')`
+   *  could silently hang up on a call whose logged `call_ended` fact had JUST turned a
+   *  still-PENDING verdict terminal (row 15/I4: ESCALATE with a request on record, NO_ACTION
+   *  with nothing at stake) -- the goodbye machinery below was never reached because
+   *  `this.ended` was already `true` by the time `tick()` ran, and every CLOSE-related method
+   *  (`armClose`, `maybeSendReplyCreateForTick`, ...) guards on exactly that flag. PROVEN live
+   *  (founder observation, 2026-09-14): single-wrong-answer and hangup-after-request calls
+   *  both ended `idle_timeout` with verdict ESCALATE and no goodbye ever spoken.
+   *
+   *  Fix: for `reason === 'idle_timeout'` specifically (never any other reason -- a caller
+   *  hangup, an AAI error, the session cap, all still end immediately, same as always), try
+   *  ONCE (`idleDeferAttempted`) to defer: log the `call_ended` fact and run a normal `tick()`
+   *  with `this.ended` still false, so row 15 gets to convert the verdict and, if the
+   *  resulting goal is CLOSE, the SAME `applyEvaluate`/`armClose`/`maybeSendReplyCreateForTick`
+   *  machinery any other terminal verdict uses renders it and asks AssemblyAI to speak it.
+   *  `idleEndReason` then overrides `beginCloseGrace`/`armClose`'s own default end reason so
+   *  the call still finishes as `idle_timeout` (not `agent_closed`/`close_timeout`) once the
+   *  goodbye is confirmed or the close budget expires -- the CLOSE hang-up machinery calls
+   *  back into THIS method to actually finish, at which point `idleDeferAttempted` is already
+   *  true and this whole branch is skipped, falling straight through to the immediate-end
+   *  path below. If the tick above does NOT reach a CLOSE goal (nothing was ever at stake AND
+   *  somehow still not terminal -- should not happen given row 15, but defensive), falls
+   *  through to ending immediately, same as before this fix. */
   end(reason: string): void {
     if (this.ended) return;
+    if (reason === 'idle_timeout' && !this.idleDeferAttempted) {
+      this.idleDeferAttempted = true;
+      this.logCallEnded('idle_timeout');
+      this.tick();
+      if (this.ended) return;
+      if (this.last?.goal.code === 'CLOSE') {
+        this.idleEndReason = 'idle_timeout';
+        return;
+      }
+      // Requirement 9: NO_ACTION never reaches an engine-rendered CLOSE goal (fsm.ts's
+      // deriveState always sends it to OUT_OF_SCOPE) -- speak the goodbye ourselves.
+      if (this.last?.verdict === 'NO_ACTION') {
+        this.idleEndReason = 'idle_timeout';
+        this.beginIdleNoActionGoodbye();
+        return;
+      }
+      // Nothing to say -- fall through to the immediate end below.
+    }
     this.ended = true;
     this.clearCloseTimers();
     // Red team item 4 (founder ruling, 2026-09-09): before anything else about ending the
@@ -413,7 +656,9 @@ export class CallSession {
     // Every ending route funnels through this one method (idle reaper and the per-call cap
     // timer via ws/browser.ts's `endCall`, a caller hangup via `handleBrowser`'s 'end' case,
     // a dropped AAI/browser socket, session.error/session.ended) -- wiring it here alone
-    // covers all of them.
+    // covers all of them. Round 4: for a deferred idle end (above), the `call_ended` fact was
+    // already logged by `logCallEnded` before that tick ran -- `logCallEnded` here is then a
+    // guarded no-op, never a second log entry.
     //
     // `tick()`'s own `emitState()` may push one more 'state' event here (e.g. showing the
     // fresh ESCALATE banner) -- that happens BEFORE the `onServerEvent({type:'ended'})` call
@@ -422,7 +667,7 @@ export class CallSession {
     // `export_computed` unconditionally and checks `this.ended` (true from the line above)
     // before ever calling `emitState()` again, so no websocket event follows 'ended' once
     // the hash resolves.
-    this.logs.actions.push({ id: this.nextActionId(), kind: 'call_ended', t_ms: this.nowT(), detail: reason });
+    this.logCallEnded(reason);
     this.tick();
     // Flight recorder: whatever this AAI adapter never modeled (mapServerEvent's `default`
     // branch, aai/session.ts) surfaced once here, at the one point every ended call passes
@@ -486,6 +731,16 @@ export class CallSession {
   private nextActionId(): string {
     this.actionCounter += 1;
     return `${this.opts.session_id}-action-${this.actionCounter}`;
+  }
+
+  /** Round 4, requirement 9: logs the ONE `call_ended` action this class ever writes for a
+   *  given `end()` sequence -- `end()`'s idle-defer path may log it (with 'idle_timeout')
+   *  well before the call actually finishes, so the later immediate-end path must not log a
+   *  second one. */
+  private logCallEnded(reason: string): void {
+    if (this.callEndedLogged) return;
+    this.callEndedLogged = true;
+    this.logs.actions.push({ id: this.nextActionId(), kind: 'call_ended', t_ms: this.nowT(), detail: reason });
   }
 
   private nextToolId(): string {
@@ -663,6 +918,9 @@ export class CallSession {
         if (evt.type === 'transcript.agent') {
           const existing = this.replyTranscripts.get(evt.reply_id) ?? '';
           this.replyTranscripts.set(evt.reply_id, existing.length > 0 ? `${existing} ${evt.text}` : evt.text);
+          // Round 4, requirement 7: check the instant this chunk arrives, not only at
+          // reply.done -- see `maybeArmCloseOnTranscript`'s own doc comment.
+          this.maybeArmCloseOnTranscript(evt.reply_id);
         }
         // Flight recorder: role + text LENGTH only -- never the transcript text itself
         // (that stays evidence-only, LAW 4; diagnostics is not evidence).
@@ -690,6 +948,9 @@ export class CallSession {
         if (requestedGoal) this.replyGoalAtStart.set(evt.reply_id, requestedGoal);
         this.replyCreateAwaitingStart = false;
         this.pendingRequestedGoal = null;
+        // Round 4, requirement 5: this reply.create (if any was outstanding) is no longer at
+        // risk of being "lost" -- something started.
+        this.clearReplyCreateLostTimer();
         this.diag('reply.started', {});
         break;
 
@@ -718,6 +979,7 @@ export class CallSession {
         // different id than expected), clear it now rather than let it wedge every later
         // `reply.create` send closed for the rest of the call.
         this.replyCreateAwaitingStart = false;
+        this.clearReplyCreateLostTimer();
         this.recordGoalCompletionAction(evt.status);
         this.diag('reply.done', { status: evt.status });
         if (evt.status === 'interrupted') {
@@ -1204,20 +1466,23 @@ export class CallSession {
    *  wrapper prompt.ts's own CLOSE case already uses. Every other call site omits it and
    *  relies on the standing `system_prompt`, unchanged from before this fix.
    *
-   *  CLOSE is bounded separately: `CLOSE_REPLY_ATTEMPTS` caps how many times this method will
-   *  ever ask AssemblyAI to speak the CLOSE goal for one call, counting every send for it
-   *  regardless of `reason` -- once exhausted, this is a silent no-op and the 15s hard cap
-   *  (`armClose`) is the only thing left that can end the call. */
-  private sendReplyCreate(goalCode: GoalCode, reason: string, instructions?: string): void {
+   *  CLOSE is no longer bounded by an attempt count (round 4: CLOSE_REPLY_ATTEMPTS is gone --
+   *  see the class-field doc comment on `closeReplySendCount`/CLOSE_TOTAL_MS for why). Every
+   *  send still records an uncapped, purely-observational `attempt` number in the diag event
+   *  -- `countAttempt` (round 4, requirement 8) lets a caller (only `armCloseRetryTimer`'s
+   *  retry after an empty-transcript reply) suppress bumping it for a send that isn't really
+   *  a fresh attempt. Also arms `armReplyCreateLostTimer` (requirement 5): every send starts
+   *  a fresh watch for its own `reply.started` never showing up. */
+  private sendReplyCreate(goalCode: GoalCode, reason: string, instructions?: string, opts?: { countAttempt?: boolean }): void {
     if (this.ended) return;
-    if (goalCode === 'CLOSE') {
-      if (this.closeReplySendCount >= CallSession.CLOSE_REPLY_ATTEMPTS) return;
+    if (goalCode === 'CLOSE' && (opts?.countAttempt ?? true)) {
       this.closeReplySendCount += 1;
     }
     const msg: ReplyCreateMessage = instructions ? { type: 'reply.create', instructions } : { type: 'reply.create' };
     this.opts.aai.send(msg);
     this.replyCreateAwaitingStart = true;
     this.pendingRequestedGoal = goalCode;
+    this.armReplyCreateLostTimer();
     this.logs.actions.push({
       id: this.nextActionId(),
       kind: 'session_config_updated',
@@ -1229,6 +1494,39 @@ export class CallSession {
       reason,
       ...(goalCode === 'CLOSE' ? { attempt: this.closeReplySendCount } : {}),
     });
+  }
+
+  /** Round 4, requirement 5: watches the `reply.create` just sent for its own `reply.started`
+   *  -- if REPLY_CREATE_LOST_MS elapses with none, treats it as lost (dropped by AssemblyAI,
+   *  or superseded by the service's own turn-driven reply that never labels itself as a
+   *  response to ours) and clears `replyCreateAwaitingStart` so a fresh send is allowed.
+   *  Cleared (never fires) whenever a `reply.started`/`reply.done` actually arrives for the
+   *  outstanding request, or the call ends. If the current goal is still CLOSE once a loss is
+   *  detected, arms a fresh retry via the same spaced path a mismatched reply would (this is
+   *  the ONLY way `CallSession` proactively recovers from a request AssemblyAI never
+   *  acknowledged at all -- reply.done-driven retries can't fire for a reply.started that
+   *  never happened). */
+  private armReplyCreateLostTimer(): void {
+    this.clearReplyCreateLostTimer();
+    this.replyCreateLostTimer = setTimeout(() => {
+      this.replyCreateLostTimer = null;
+      if (this.ended || !this.replyCreateAwaitingStart) return;
+      this.diag('reply_create_lost', {});
+      this.replyCreateAwaitingStart = false;
+      this.pendingRequestedGoal = null;
+      if (this.last?.goal.code === 'CLOSE') {
+        this.closeLastReplyWasEmpty = false;
+        this.armCloseRetryTimer();
+      }
+    }, CallSession.REPLY_CREATE_LOST_MS);
+    this.replyCreateLostTimer.unref?.();
+  }
+
+  private clearReplyCreateLostTimer(): void {
+    if (this.replyCreateLostTimer) {
+      clearTimeout(this.replyCreateLostTimer);
+      this.replyCreateLostTimer = null;
+    }
   }
 
   /** Fired from `reply.done`, after the tool.result flush/discard rule has already run

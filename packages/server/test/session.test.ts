@@ -812,7 +812,20 @@ describe('CallSession — STALL line anti-repeat is call-scoped (fix round 1, fi
 // stamps a verdict itself. See packages/engine/corpus/abandoned-open-request.json for the
 // engine-level proof; these tests prove the server wiring reaches it.
 describe('CallSession — end() reaches the engine\'s call-ended row (RT-4)', () => {
-  it("idle-timeout end() with a request stated escalates: incident/alert/seal run for real, an export_computed diagnostic lands, and the engine's own verdict (session.last) reads ESCALATE, not PENDING", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Round 4, requirement 9 (founder correction, 2026-09-14): these two tests used to assert
+  // that `end('idle_timeout')` closed the socket IMMEDIATELY once row 15 turned the verdict
+  // terminal -- that was itself the PROVEN bug (founder observation, live: "single-wrong-
+  // answer and hangup-after-request ended idle_timeout with verdict ESCALATE and no
+  // goodbye"). Fixed: `end('idle_timeout')` now defers (see `end()`'s own doc comment) and
+  // lets the normal CLOSE machinery render and speak the goodbye for whatever verdict row 15
+  // just computed, THEN ends -- still with reason `idle_timeout` (not `agent_closed`), via
+  // `idleEndReason`. Both tests now use fake timers and drive the goodbye reply through.
+  it("idle-timeout end() with a request stated escalates: incident/alert/seal run for real, an export_computed diagnostic lands, the engine's own verdict (session.last) reads ESCALATE (not PENDING), a goodbye is requested and spoken, and the call ends idle_timeout only after the grace period", async () => {
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -845,21 +858,39 @@ describe('CallSession — end() reaches the engine\'s call-ended row (RT-4)', ()
     // LAW 3: the engine, not the server, decided this -- `session.last` is the real
     // `evaluate()` output computed over the logs (which now include the call_ended action).
     expect(session.last?.verdict).toBe('ESCALATE');
+    expect(session.last?.goal.code).toBe('CLOSE');
 
     const toolNames = session.logs.tools.map((t) => t.name);
     expect(toolNames).toContain('open_incident');
     expect(toolNames).toContain('alert_principal');
     expect(toolNames).toContain('seal_evidence_record');
     expect(session.logs.actions.some((a) => a.kind === 'call_ended')).toBe(true);
+    // Exactly ONE call_ended action -- the idle-defer path and the eventual real end() must
+    // not each log their own (see `logCallEnded`'s own doc comment).
+    expect(session.logs.actions.filter((a) => a.kind === 'call_ended')).toHaveLength(1);
 
     expect(diagEvents.some((e) => e.kind === 'export_computed')).toBe(true);
 
-    // 'ended' remains the LAST websocket event, even though ending this call forced a full
-    // terminal-action pass first.
+    // NOT ended yet -- a goodbye is owed and has just been requested (reply.create), not
+    // hung up on silently.
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(true);
+
+    clock.now = 30100;
+    aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: session.last!.goal.hint, reply_id: 'r1', interrupted: false });
+    clock.now = 30200;
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+
+    expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
+    vi.advanceTimersByTime(1500);
+    // 'ended' remains the LAST websocket event, and reads idle_timeout (not agent_closed) --
+    // the idle reaper, not the caller or a matched close line, is what closed this call out.
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'idle_timeout' });
   });
 
-  it('idle-timeout end() with NO request ever stated forces nothing: verdict stays NO_ACTION, no terminal tools run, matching corpus/hangup-mid-check.json\'s no-request shape', async () => {
+  it('idle-timeout end() with NO request ever stated forces nothing: verdict stays NO_ACTION, no terminal tools run, the plain "Thank you for calling. Goodbye." line is requested and spoken, and the call ends idle_timeout', async () => {
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -871,8 +902,30 @@ describe('CallSession — end() reaches the engine\'s call-ended row (RT-4)', ()
     session.end('idle_timeout');
     await session.whenIdle();
 
+    // The ENGINE's own goal stays EXPLAIN_OUT_OF_SCOPE -- fsm.ts's deriveState always sends
+    // a NO_ACTION verdict to OUT_OF_SCOPE, never SEALED (see closeSentence()'s own doc
+    // comment in fsm.ts). The goodbye is a server-side override (`closeSentenceOverride`,
+    // requirement 9) layered on top for the idle-timeout path specifically -- it does not
+    // change, and must not be confused with, the engine's own state/goal.
     expect(session.last?.verdict).toBe('NO_ACTION');
+    expect(session.last?.goal.code).toBe('EXPLAIN_OUT_OF_SCOPE');
     expect(session.logs.tools).toHaveLength(0);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false); // goodbye owed, not hung up on
+
+    // The reply.create the server sent carries the literal NO_ACTION close sentence as a
+    // one-shot instruction (never the engine's own EXPLAIN_OUT_OF_SCOPE hint).
+    const sentReplyCreate = aai.sent.find((m) => (m as { type?: string }).type === 'reply.create') as
+      | { type: string; instructions?: string }
+      | undefined;
+    expect(sentReplyCreate?.instructions).toContain('Thank you for calling. Goodbye.');
+
+    clock.now = 30100;
+    aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: 'Thank you for calling. Goodbye.', reply_id: 'r1', interrupted: false });
+    clock.now = 30200;
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+
+    vi.advanceTimersByTime(1500);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'idle_timeout' });
   });
 
@@ -1035,7 +1088,9 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
   });
 
-  it('an INTERRUPTED reply.done for CLOSE that was cut off before saying anything close-shaped is treated as NOT spoken and retried, not hung up on', () => {
+  // Round 4 (2026-09-14): the retry no longer goes out synchronously off the reply.done --
+  // it waits CLOSE_RETRY_MIN_GAP_MS (400ms) first (a real timer, advanced explicitly below).
+  it('an INTERRUPTED reply.done for CLOSE that was cut off before saying anything close-shaped is treated as NOT spoken and retried (after the spacing gap), not hung up on', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
@@ -1051,12 +1106,21 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     clock.now = 7700;
     aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'interrupted' });
 
+    // Not sent yet -- waits the spacing gap.
+    expect(aai.sent.at(-1)).not.toMatchObject({ instructions: expect.stringContaining('Say exactly this') });
+    vi.advanceTimersByTime(400);
     // Not matched -- a retry reply.create goes out instead of arming the hang-up.
     expect(aai.sent.at(-1)).toEqual({ type: 'reply.create', instructions: expect.stringContaining('Say exactly this') });
     vi.advanceTimersByTime(1500);
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
   });
 
+  // Round 4 (2026-09-14, time-budget fix): the hard cap moved from CLOSE_TIMEOUT_MS (15s,
+  // paired with a 3-attempt cap) to CLOSE_TOTAL_MS (45s, no attempt cap at all -- retries are
+  // spaced by CLOSE_RETRY_MIN_GAP_MS instead of counted). Nothing ever responds here, so the
+  // server's own reply.create keeps getting superseded by the 1500ms "lost" timeout and
+  // re-sent every ~1900ms (1500 lost + 400 gap) until the 45s absolute budget ends the call --
+  // same observable shape as before (close_timeout, no reply.done ever arrives), just at 45s.
   it('the hard cap ends the call with reason "close_timeout" if no reply.done for CLOSE ever arrives', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
@@ -1068,7 +1132,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     driveToSealedStage(session, aai, clock);
     expect(session.last?.goal.code).toBe('CLOSE');
 
-    vi.advanceTimersByTime(14_999);
+    vi.advanceTimersByTime(44_999);
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
     vi.advanceTimersByTime(1);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
@@ -1187,7 +1251,11 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
   });
 
-  it('if no genuinely new reply ever starts after the stale reply.done, the 15s hard cap still fires close_timeout', () => {
+  // Round 4 (2026-09-14): threshold moved from CLOSE_TIMEOUT_MS (15s) to CLOSE_TOTAL_MS (45s)
+  // -- the a4 reply.done here sends the first real CLOSE reply.create (reply_done_goal_diverged),
+  // and since nothing ever answers it, the new 1500ms "lost" timeout plus the 400ms retry gap
+  // keep re-sending it every ~1900ms (no attempt cap) until the 45s absolute budget fires.
+  it('if no genuinely new reply ever starts after the stale reply.done, the 45s hard cap still fires close_timeout', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
@@ -1205,9 +1273,9 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     clock.now = 6500;
     aai.emit({ type: 'reply.done', reply_id: 'a4', status: 'completed' });
 
-    // ...but no new reply ever starts. The 15s hard cap (armed the instant CLOSE was first
+    // ...but no new reply ever starts. The 45s hard cap (armed the instant CLOSE was first
     // rendered, at the tool.call tick above) is the backstop that still ends the call.
-    vi.advanceTimersByTime(14_999);
+    vi.advanceTimersByTime(44_999);
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
     vi.advanceTimersByTime(1);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
@@ -1316,7 +1384,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       expect(types.slice(0, replyCreateIdx).includes('reply.started')).toBe(false);
     });
 
-    it('(c) the ANNOUNCE_FROZEN -> CLOSE cascade (both settling in one server tick) sends reply.create for CLOSE, and only the reply whose OWN transcript actually says the close line ends the call (Critical 3 / Important 5, 2026-09-13 review; retry behavior updated round 3, 2026-09-13)', () => {
+    it('(c) the ANNOUNCE_FROZEN -> CLOSE cascade (both settling in one server tick) sends reply.create for CLOSE, and only the reply whose OWN transcript actually says the close line ends the call (Critical 3 / Important 5, 2026-09-13 review; retry behavior updated round 4, 2026-09-14: time-budgeted, not attempt-capped)', () => {
       vi.useFakeTimers();
       const clock = { now: 0 };
       const aai = new FakeAaiSocket();
@@ -1325,37 +1393,37 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       session.start();
       // Reaches FREEZE/SEALED from server-driven lookups/terminal actions partway through
       // this replay (before `driveScenarioBThroughA4` even reaches its own last two scripted
-      // turns, a3/a4 -- recorded from the ORIGINAL, pre-fix corpus). Round 3 design (this
-      // task): every reply that completes while the goal is CLOSE is checked against what it
-      // ACTUALLY said, never trusted just because it happened to be labelled CLOSE by the
-      // (known-unreliable, see closeMatch.ts) `pendingRequestedGoal` consumption -- so a3 and
-      // a4, both genuine scripted conversation turns unrelated to the close line, each fail
-      // the match and each cost one close_retry, exactly the behavior a real call exhibits
-      // when AssemblyAI's own turn-driven replies keep landing instead of the requested one
-      // (the PROVEN production bug this whole fix exists for). `tools-1` is the reply that
-      // finally lands the match.
+      // turns, a3/a4 -- recorded from the ORIGINAL, pre-fix corpus). Round 4 design (this
+      // task, 2026-09-14): a mismatch no longer sends its retry synchronously -- it arms a
+      // CLOSE_RETRY_MIN_GAP_MS (400ms) timer instead, and a second mismatch arriving before
+      // that timer fires (a3 then a4, both here, with no `vi.advanceTimersByTime` between
+      // them -- this whole drive is synchronous) coalesces into the SAME pending timer rather
+      // than stacking a second one. Since 'tools-1' (the reply that actually lands the close
+      // line) starts and completes before that single pending retry ever fires, the retry is
+      // superseded and cancelled the moment the match is found -- so this drive costs exactly
+      // ONE reply.create for the whole call (the original tick_end send), not three: the old
+      // "cap reached at 3" framing no longer applies (there is no cap), and coalescing +
+      // supersession are what actually decide the count here, not exhaustion.
       driveScenarioBThroughA4(session, aai, clock);
       expect(session.last?.state).toBe('SEALED');
       expect(session.last?.goal.code).toBe('CLOSE');
-      // tick_end (from the tick that first reached CLOSE) + close_retry for a3 (mismatch) +
-      // close_retry for a4 (mismatch) = 3, exactly CLOSE_REPLY_ATTEMPTS -- the cap is reached
-      // by the time 'tools-1' starts, so 'tools-1' itself never costs a fourth send; it was
-      // already prompted by the third.
-      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(3);
+      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
       expect(sent.some((e) => e.type === 'ended')).toBe(false); // not ended before 'tools-1' completes
 
-      // Drive 'tools-1' (the reply the third reply.create prompted) to completion, this time
-      // with a transcript that actually says the close line -- the match arms the hang-up.
+      // Drive 'tools-1' (already speaking, started inside the helper) to completion, this
+      // time with a transcript that actually says the close line -- the match arms the
+      // hang-up and cancels the still-pending (never fired) a3/a4 retry.
       clock.now = 51000;
       aai.emit({ type: 'transcript.agent', item_id: 'a-tools-1', text: session.last!.goal.hint, reply_id: 'tools-1', interrupted: false });
       clock.now = 51500;
       aai.emit({ type: 'reply.done', reply_id: 'tools-1', status: 'completed' });
       expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
 
+      // Advancing past the retry gap (400ms) proves the coalesced a3/a4 retry was actually
+      // cancelled, not merely not-yet-due: it does not fire a spurious extra send here.
       vi.advanceTimersByTime(1500);
       expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
-      // No fourth reply.create was sent (the cap held, and the match meant none was needed).
-      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(3);
+      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
     });
 
     it("(d) GREET is a real exclusion branch, not a coincidence of nothing else happening yet: zero reply.create before the caller's first turn, one once a genuinely force-spoken goal is reached in the SAME session (Important 5, 2026-09-13 review)", () => {
@@ -1376,12 +1444,15 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       // proving the GREET exclusion is a real branch, not merely "nothing forced happened".
       driveScenarioBThroughA4(session, aai, clock);
       expect(session.last?.goal.code).toBe('CLOSE');
-      // See test (c) above for why this replay costs 3 sends, not 1, under the round 3
-      // transcript-confirmed design (a3/a4 are genuine scripted turns that don't match the
-      // close line and each cost one close_retry) -- this test's own subject (GREET is a real
+      // Round 4 (2026-09-14): this test uses REAL timers (no `vi.useFakeTimers()`), and a
+      // mismatch's retry now waits behind a CLOSE_RETRY_MIN_GAP_MS (400ms) timer instead of
+      // sending synchronously -- see test (c) above for the full mechanism. Since this whole
+      // drive runs synchronously with no real wall-clock delay, that retry timer never
+      // actually fires within the test, so only the ORIGINAL tick_end send has gone out by
+      // the time `driveScenarioBThroughA4` returns. This test's own subject (GREET is a real
       // exclusion, not a false pass from nothing having happened yet) only needs "more than
-      // zero", which the exact count already proves.
-      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(3);
+      // zero", which this still proves.
+      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
     });
 
     // Critical 1 (2026-09-13 review, FAIL on round 1 commit 48a0969): round 1 labelled a
@@ -1556,7 +1627,10 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     // (reason tick_end) goes out for real.
   }
 
-  it('(a) reproduces the PROVEN live sequence: a reply carrying AssemblyAI\'s own unrelated text does NOT end the call -- it costs one close_retry, and only the reply that actually says the close line ends it', () => {
+  // Round 4 (2026-09-14, time-budget fix): the retry no longer fires synchronously off
+  // reply.done -- it waits CLOSE_RETRY_MIN_GAP_MS (400ms) first (a real setTimeout, advanced
+  // explicitly below). Everything else about the reproduction is unchanged.
+  it('(a) reproduces the PROVEN live sequence: a reply carrying AssemblyAI\'s own unrelated text does NOT end the call -- it costs one close_retry (sent after the 400ms spacing gap), and only the reply that actually says the close line ends it', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
@@ -1593,6 +1667,11 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
 
     // NOT ended: the close line was never heard.
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    // The retry does not go out immediately -- it waits the spacing gap.
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    vi.advanceTimersByTime(399);
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    vi.advanceTimersByTime(1);
     // A second reply.create went out, reason close_retry, this being CLOSE's 2nd attempt.
     const closeRetryDiags = diagEvents.filter((e) => e.kind === 'reply_create_sent' && (e.detail as { reason: string }).reason === 'close_retry');
     expect(closeRetryDiags).toHaveLength(1);
@@ -1639,7 +1718,12 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
   });
 
-  it('(c) three non-matching replies exhaust CLOSE_REPLY_ATTEMPTS -- no fourth reply.create is ever sent, and the 15s hard cap ends the call close_timeout', () => {
+  // Round 4 (2026-09-14, time-budget fix): CLOSE_REPLY_ATTEMPTS (a fixed cap of 3) is gone --
+  // retries are now spaced by CLOSE_RETRY_MIN_GAP_MS (400ms) and keep going, uncapped, until
+  // either a match is heard or the CLOSE_TOTAL_MS (45s) absolute budget ends the call. This
+  // test's old premise ("no fourth ever sent") is exactly backwards under the new design: a
+  // fourth (and more) DOES go out once each retry is given its 400ms gap to actually fire.
+  it('three non-matching replies do not exhaust anything -- a fourth (and more) reply.create is sent, spaced >=400ms, until the 45s absolute budget ends the call close_timeout', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
@@ -1647,30 +1731,279 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     const session = newSession(clock, CALL_B, aai, sent);
     session.start();
     driveToFreezeCloseWithFirstSend(session, aai, clock); // attempt 1 (tick_end), hard cap armed for real
+    const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    expect(replyCreates()).toHaveLength(1);
 
     clock.now = 4100;
     aai.emit({ type: 'reply.started', reply_id: 'r1' });
     aai.emit({ type: 'transcript.agent', item_id: 'x1', text: 'Please provide the', reply_id: 'r1', interrupted: false });
     clock.now = 4200;
-    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' }); // -> attempt 2 (close_retry)
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+    // Not sent yet -- waits the spacing gap.
+    expect(replyCreates()).toHaveLength(1);
+    vi.advanceTimersByTime(400);
+    expect(replyCreates()).toHaveLength(2); // attempt 2 (close_retry)
 
     clock.now = 4300;
     aai.emit({ type: 'reply.started', reply_id: 'r2' });
     aai.emit({ type: 'transcript.agent', item_id: 'x2', text: 'One moment please', reply_id: 'r2', interrupted: false });
     clock.now = 4400;
-    aai.emit({ type: 'reply.done', reply_id: 'r2', status: 'completed' }); // -> attempt 3 (close_retry, cap reached)
+    aai.emit({ type: 'reply.done', reply_id: 'r2', status: 'completed' });
+    vi.advanceTimersByTime(400);
+    expect(replyCreates()).toHaveLength(3); // attempt 3 (close_retry) -- still no cap
 
     clock.now = 4500;
     aai.emit({ type: 'reply.started', reply_id: 'r3' });
     aai.emit({ type: 'transcript.agent', item_id: 'x3', text: 'Still not the close line', reply_id: 'r3', interrupted: false });
     clock.now = 4600;
-    aai.emit({ type: 'reply.done', reply_id: 'r3', status: 'completed' }); // no 4th send -- capped
-
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(3);
+    aai.emit({ type: 'reply.done', reply_id: 'r3', status: 'completed' });
+    vi.advanceTimersByTime(400);
+    // A FOURTH reply.create goes out -- proof there is no attempt cap anymore.
+    expect(replyCreates()).toHaveLength(4);
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
 
-    vi.advanceTimersByTime(15_000); // CLOSE_TIMEOUT_MS, armed the instant CLOSE was first reached
+    // Nothing ever answers the outstanding (4th) request again -- the "lost" reply.create
+    // timeout (1500ms) and the retry gap (400ms) keep re-sending it roughly every 1900ms,
+    // but only the 45s absolute budget (armed the instant CLOSE was first reached) ends the
+    // call. 400+400+400 = 1200ms already elapsed above; the remaining 43,800ms closes the gap
+    // to exactly CLOSE_TOTAL_MS.
+    vi.advanceTimersByTime(43_799);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    vi.advanceTimersByTime(1);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // Round 4 (2026-09-14, PROVEN live failure -- scripts/rehearse/reports/2026-09-14T13-47-07-
+  // miller-patient.diagnostics.json, events 46889-61898): CLOSE rendered at 46893, reply.create
+  // #1 sent at 46893; reply.started 46897 was AssemblyAI's OWN turn reply under the PREVIOUS
+  // prompt (a 59-char transcript), reply.done completed 48023; close_retry #2 sent 48023 (no
+  // gap under round 3's design), reply.started 48027, reply.done completed 48091 with NO
+  // transcript at all (an empty reply, 64ms); close_retry #3 sent 48091 (again no gap);
+  // reply.started 48094, transcript "This transfer is frozen" then interrupted by caller
+  // speech at 51860; CLOSE_REPLY_ATTEMPTS (3) was exhausted, so no further retry was ever
+  // sent; AssemblyAI's next turn reply started 56656 and the 15s hard cap (CLOSE_TIMEOUT_MS)
+  // ended the call at 61898 before the sentence finished. Net: the mechanism was right but
+  // the goodbye was never completed, because a fixed attempt count ran out before AssemblyAI
+  // ever produced a reply that actually said it.
+  //
+  // The fix replaces the attempt-count budget with a TIME budget: CLOSE_TOTAL_MS (45s,
+  // absolute, from CLOSE render) is the only thing that can end the call without a match; in
+  // between, `attempt` in the diagnostics is an uncapped running counter, and retries are
+  // spaced by CLOSE_RETRY_MIN_GAP_MS (400ms, never while a reply is in flight) instead of
+  // being counted against a cap. A reply.create that never gets its own reply.started within
+  // 1500ms is treated as lost and superseded by a fresh one.
+  describe('reply.create fix, round 4: CLOSE retry is time-budgeted, not attempt-capped (2026-09-14, PROVEN live failure)', () => {
+    it('(a) keeps retrying past the OLD 15s/3-attempt cap -- spaced >=400ms, never while a reply is in flight, an empty reply does not stop retries (and does not count as an attempt), the call is not ended at the old 15s mark, and only the reply that actually says the close line ends it', () => {
+      vi.useFakeTimers();
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const diagEvents: { kind: string; detail: unknown }[] = [];
+      const session = new CallSession({
+        session_id: CALL_B.session_id,
+        seed: MERIDIAN,
+        call: CALL_B,
+        aai,
+        now: () => clock.now,
+        onServerEvent: (e) => sent.push(e),
+        mock: mockToolResult,
+        onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+      });
+      session.start();
+      driveToFreezeCloseWithFirstSend(session, aai, clock);
+      expect(session.last?.goal.code).toBe('CLOSE');
+      const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+      const closeRetryDiags = () => diagEvents.filter((e) => e.kind === 'reply_create_sent' && (e.detail as { reason: string }).reason === 'close_retry');
+      expect(replyCreates()).toHaveLength(1); // attempt 1, tick_end
+
+      // AssemblyAI's own turn-driven reply, under the previous prompt -- mismatched, non-empty.
+      aai.emit({ type: 'reply.started', reply_id: 'r1' });
+      aai.emit({ type: 'transcript.agent', item_id: 'x1', text: 'Please provide the', reply_id: 'r1', interrupted: false });
+      aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+      // Never sends immediately -- must wait the spacing gap.
+      expect(replyCreates()).toHaveLength(1);
+      vi.advanceTimersByTime(399);
+      expect(replyCreates()).toHaveLength(1);
+      vi.advanceTimersByTime(1);
+      expect(replyCreates()).toHaveLength(2); // attempt 2
+      expect(closeRetryDiags().at(-1)!.detail).toMatchObject({ attempt: 2 });
+
+      // An empty reply (no transcript.agent at all) -- must not stop retries, and must not
+      // itself count as an attempt for diagnostics.
+      aai.emit({ type: 'reply.started', reply_id: 'r2' });
+      aai.emit({ type: 'reply.done', reply_id: 'r2', status: 'completed' });
+      vi.advanceTimersByTime(400);
+      expect(replyCreates()).toHaveLength(3);
+      expect(closeRetryDiags().at(-1)!.detail).toMatchObject({ attempt: 2 }); // reused, not bumped
+
+      // A partial, interrupted reply that starts toward the close line but is cut off before
+      // its content clause -- not matched (closeMatch requires the content clause AND
+      // "goodbye"), so it is retried -- and this one DOES count (non-empty).
+      aai.emit({ type: 'reply.started', reply_id: 'r3' });
+      aai.emit({ type: 'transcript.agent', item_id: 'x3', text: 'This transfer is frozen', reply_id: 'r3', interrupted: true });
+      aai.emit({ type: 'input.speech.started' });
+      aai.emit({ type: 'reply.done', reply_id: 'r3', status: 'interrupted' });
+      vi.advanceTimersByTime(400);
+      expect(replyCreates()).toHaveLength(4); // a 4th send -- the old design would have refused this
+      expect(closeRetryDiags().at(-1)!.detail).toMatchObject({ attempt: 3 });
+
+      // Nothing else responds for a while -- well past the OLD 15s/3-attempt cap. The call
+      // must still be open: only the 45s absolute budget (round 4) can end it without a match.
+      vi.advanceTimersByTime(14_000);
+      expect(sent.some((e) => e.type === 'ended')).toBe(false);
+
+      // The reply that finally says the full close sentence completes here -- comfortably
+      // inside the 45s budget.
+      aai.emit({ type: 'reply.started', reply_id: 'r4' });
+      aai.emit({ type: 'transcript.agent', item_id: 'x4', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r4', interrupted: false });
+      aai.emit({ type: 'reply.done', reply_id: 'r4', status: 'completed' });
+
+      expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
+      vi.advanceTimersByTime(1500);
+      expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+    });
+
+    it('(b) no matching reply ever arrives -- the call ends close_timeout at the 45s absolute budget, and the number of reply.create sent is bounded by the retry spacing', () => {
+      vi.useFakeTimers();
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const session = newSession(clock, CALL_B, aai, sent);
+      session.start();
+      driveToFreezeCloseWithFirstSend(session, aai, clock);
+      expect(session.last?.goal.code).toBe('CLOSE');
+
+      vi.advanceTimersByTime(44_999);
+      expect(sent.some((e) => e.type === 'ended')).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
+
+      // Bounded sanity check: even with nothing ever answering, the retry spacing (>=400ms
+      // between sends, via the reply-lost timeout + retry gap) means far fewer than one send
+      // per 400ms could ever have gone out across the 45s budget.
+      const replyCreateCount = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+      expect(replyCreateCount).toBeGreaterThan(0);
+      expect(replyCreateCount).toBeLessThan(45_000 / 400);
+    });
+
+    it('(c) a lost reply.create (no reply.started within 1500ms) is superseded by a fresh one', () => {
+      vi.useFakeTimers();
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const diagEvents: { kind: string; detail: unknown }[] = [];
+      const session = new CallSession({
+        session_id: CALL_B.session_id,
+        seed: MERIDIAN,
+        call: CALL_B,
+        aai,
+        now: () => clock.now,
+        onServerEvent: (e) => sent.push(e),
+        mock: mockToolResult,
+        onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+      });
+      session.start();
+      driveToFreezeCloseWithFirstSend(session, aai, clock);
+      const internals = session as unknown as { replyCreateAwaitingStart: boolean };
+      expect(internals.replyCreateAwaitingStart).toBe(true); // the first (tick_end) send is outstanding
+
+      vi.advanceTimersByTime(1499);
+      expect(internals.replyCreateAwaitingStart).toBe(true); // not lost yet
+      expect(diagEvents.some((e) => e.kind === 'reply_create_lost')).toBe(false);
+
+      vi.advanceTimersByTime(1); // 1500ms since the send with no reply.started -- lost
+      expect(internals.replyCreateAwaitingStart).toBe(false);
+      expect(diagEvents.some((e) => e.kind === 'reply_create_lost')).toBe(true);
+
+      // A fresh reply.create supersedes it, after the retry gap.
+      const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+      expect(replyCreates()).toHaveLength(1);
+      vi.advanceTimersByTime(400);
+      expect(replyCreates()).toHaveLength(2);
+
+      // The reply.started that eventually arrives (for the superseding request) is accepted
+      // normally, and a matching close line still ends the call.
+      aai.emit({ type: 'reply.started', reply_id: 'late' });
+      aai.emit({ type: 'transcript.agent', item_id: 'x', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'late', interrupted: false });
+      aai.emit({ type: 'reply.done', reply_id: 'late', status: 'completed' });
+      vi.advanceTimersByTime(1500);
+      expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+    });
+
+    // ---------------------------------------------------------------------------------------
+    // Requirement 7 (founder correction, 2026-09-14, three further PROVEN live bundles --
+    // scripts/rehearse/reports/2026-09-14T13-45-58-dana-patient, T13-58-08-structuring-two-
+    // wires, T13-49-05-identity-switch .diagnostics.json): in all three, the close_retry reply
+    // actually SPOKE the full close sentence (Dana: reply.done and 127-char transcript.agent
+    // matching the whole STAGE sentence) but NO reply.done ever arrived for it before the
+    // (then-15s) hard cap ended the call close_timeout, 2.3-5s after the transcript itself
+    // completed. The old design only ever armed the hang-up from reply.done -- a dropped/
+    // missing reply.done for an otherwise-successful close meant the goodbye was heard but the
+    // call still ended on the wrong path (close_timeout, not agent_closed) or not at all before
+    // the cap. Fix: arm the hang-up the INSTANT the accumulated transcript.agent text for the
+    // in-flight reply matches the close sentence -- wait for that reply's own reply.done OR
+    // CLOSE_DONE_WAIT_MS (4s), whichever comes first, then the unchanged CLOSE_GRACE_MS, then
+    // end agent_closed. reply.done remains a valid (and typically faster) path; whichever
+    // fires first wins, and the call is never ended twice.
+    it('(d) transcript-armed close: a reply.done that never arrives for an otherwise-matching reply does not block the hang-up -- it fires after CLOSE_DONE_WAIT_MS + CLOSE_GRACE_MS from the transcript match', () => {
+      vi.useFakeTimers();
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const session = newSession(clock, CALL_B, aai, sent);
+      session.start();
+      driveToFreezeCloseWithFirstSend(session, aai, clock);
+      expect(session.last?.goal.code).toBe('CLOSE');
+
+      aai.emit({ type: 'reply.started', reply_id: 'r1' });
+      // The transcript arrives (matches the full close sentence) but reply.done for 'r1' is
+      // deliberately never emitted -- reproducing the PROVEN bundles above.
+      aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
+
+      // Not ended yet -- still inside the CLOSE_DONE_WAIT_MS window.
+      expect(sent.some((e) => e.type === 'ended')).toBe(false);
+      vi.advanceTimersByTime(3999);
+      expect(sent.some((e) => e.type === 'ended')).toBe(false);
+      // CLOSE_DONE_WAIT_MS (4000ms) elapses with no reply.done -- the grace timer starts now.
+      vi.advanceTimersByTime(1);
+      expect(sent.some((e) => e.type === 'ended')).toBe(false);
+      vi.advanceTimersByTime(1499);
+      expect(sent.some((e) => e.type === 'ended')).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+
+      // A very late reply.done for the same reply must not end the call a second time or
+      // throw.
+      aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+      expect(sent.filter((e) => e.type === 'ended')).toHaveLength(1);
+    });
+
+    it('(e) transcript-armed close: reply.done arriving before CLOSE_DONE_WAIT_MS elapses wins the race -- the grace period starts at reply.done, not 4s later', () => {
+      vi.useFakeTimers();
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const session = newSession(clock, CALL_B, aai, sent);
+      session.start();
+      driveToFreezeCloseWithFirstSend(session, aai, clock);
+      expect(session.last?.goal.code).toBe('CLOSE');
+
+      aai.emit({ type: 'reply.started', reply_id: 'r1' });
+      aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
+      vi.advanceTimersByTime(500); // well inside the 4s CLOSE_DONE_WAIT_MS window
+      aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+
+      // Grace period starts NOW (from reply.done), not 4s after the transcript match.
+      expect(sent.some((e) => e.type === 'ended')).toBe(false);
+      vi.advanceTimersByTime(1499);
+      expect(sent.some((e) => e.type === 'ended')).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+      // Ended well before the 4s CLOSE_DONE_WAIT_MS + grace would have elapsed (500+1+1500 <<
+      // 4000+1500), proving reply.done -- not the timeout -- decided the timing.
+      expect(sent.filter((e) => e.type === 'ended')).toHaveLength(1);
+    });
   });
 });
 
