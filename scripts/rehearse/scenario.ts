@@ -5,7 +5,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { RespondRule, Scenario, ScenarioRespond, ScenarioTruth, ScenarioTurn } from './types.js';
+import type { RespondRule, Scenario, ScenarioFreePlay, ScenarioRespond, ScenarioTruth, ScenarioTurn } from './types.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const SCENARIOS_DIR = join(HERE, 'scenarios');
@@ -157,6 +157,17 @@ export function validateScenario(raw: unknown, sourcePath: string): Scenario {
       `${sourcePath}: expected.require_aai_link_restored must be a boolean when present`,
     );
   }
+  // Free-play addition (2026-09-14): an improvising caller can legitimately land on more
+  // than one acceptable terminal verdict -- see types.ts's ScenarioExpected.verdicts doc
+  // comment. Optional; when present, must be a non-empty array of valid verdict strings.
+  if (expected.verdicts !== undefined) {
+    assert(
+      Array.isArray(expected.verdicts) &&
+        expected.verdicts.length > 0 &&
+        expected.verdicts.every((v) => typeof v === 'string' && VALID_VERDICTS.has(v)),
+      `${sourcePath}: expected.verdicts must be a non-empty array, each one of ${[...VALID_VERDICTS].join(', ')}, when present`,
+    );
+  }
 
   const scenario: Scenario = {
     name: s.name as string,
@@ -173,6 +184,7 @@ export function validateScenario(raw: unknown, sourcePath: string): Scenario {
       ...(typeof expected.require_aai_link_restored === 'boolean'
         ? { require_aai_link_restored: expected.require_aai_link_restored }
         : {}),
+      ...(Array.isArray(expected.verdicts) ? { verdicts: expected.verdicts as Scenario['expected']['verdict'][] } : {}),
     },
   };
   if (s.truth !== undefined) scenario.truth = validateTruth(s.truth, sourcePath);
@@ -204,6 +216,29 @@ export function validateScenario(raw: unknown, sourcePath: string): Scenario {
       `${sourcePath}: "agent_silence_fail_ms" must be a positive number when present`,
     );
     scenario.agent_silence_fail_ms = s.agent_silence_fail_ms;
+  }
+  // Free-play addition (2026-09-14): see types.ts's ScenarioFreePlay doc comment. All fields
+  // optional, absent entirely preserves "use the harness-wide defaults" behavior.
+  if (s.free_play !== undefined) {
+    assert(s.free_play && typeof s.free_play === 'object', `${sourcePath}: "free_play" must be an object when present`);
+    const fp = s.free_play as Record<string, unknown>;
+    const freePlay: ScenarioFreePlay = {};
+    if (fp.pause_min_ms !== undefined) {
+      assert(typeof fp.pause_min_ms === 'number' && fp.pause_min_ms >= 0, `${sourcePath}: free_play.pause_min_ms must be a non-negative number when present`);
+      freePlay.pause_min_ms = fp.pause_min_ms;
+    }
+    if (fp.pause_max_ms !== undefined) {
+      assert(typeof fp.pause_max_ms === 'number' && fp.pause_max_ms >= 0, `${sourcePath}: free_play.pause_max_ms must be a non-negative number when present`);
+      freePlay.pause_max_ms = fp.pause_max_ms;
+    }
+    if (freePlay.pause_min_ms !== undefined && freePlay.pause_max_ms !== undefined) {
+      assert(freePlay.pause_min_ms <= freePlay.pause_max_ms, `${sourcePath}: free_play.pause_min_ms must be <= free_play.pause_max_ms`);
+    }
+    if (fp.barge_in !== undefined) {
+      assert(typeof fp.barge_in === 'boolean', `${sourcePath}: free_play.barge_in must be a boolean when present`);
+      freePlay.barge_in = fp.barge_in;
+    }
+    scenario.free_play = freePlay;
   }
   return scenario;
 }

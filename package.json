@@ -28,6 +28,7 @@
     "rehearse:test": "vitest run --config scripts/rehearse/vitest.config.ts",
     "latency:table": "tsx scripts/rehearse/latencyTable.ts",
     "sim:friday": "tsx scripts/rehearse/simFriday.ts",
+    "sim:freeplay": "tsx scripts/rehearse/simFreeplay.ts",
     "rehearse:regrade": "tsx scripts/rehearse/regrade.ts"
   },
   "dependencies": {},

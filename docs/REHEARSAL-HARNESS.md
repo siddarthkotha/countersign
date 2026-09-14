@@ -95,6 +95,81 @@ request failure (bad key, rate limit, malformed response) stops the LLM caller f
 with a warning - the harness still waits to see whatever verdict the call reached before that
 point, rather than failing the whole run outright.
 
+### Free-play (`--free-play --model <id>`)
+
+Founder's definition of done (2026-09-14): "a judge speaking in their own words, with any
+pauses and pronunciation, must be understood and get the right outcome in every case. A
+scripted pass is not done." Free play is the harness's answer to that: instead of reading a
+fixed script, or even the scripted-turn-list LLM caller above, the model IMPROVISES every
+line from the scenario's `persona` and `truth` alone - `--free-play` requires `--model`
+(same OpenRouter/`gemini/<id>` shape as `--caller llm`), and it is its own mode, not a third
+value of `--caller`.
+
+What is different from the ordinary `--caller llm` mode:
+
+- **Natural variation.** The model is told, explicitly, to vary its wording every run
+  (sometimes "$84,500", sometimes "eighty-four five"), sometimes hesitate, and never recite a
+  memorized line - the exact opposite instruction from a scripted caller.
+- **Random pauses, but reproducible ones.** Before every non-opening line, the caller waits a
+  random amount of time, drawn uniformly from a range (600-6000ms by default; a scenario can
+  narrow this with its own `free_play.pause_min_ms`/`pause_max_ms`). The randomness is seeded
+  (`--seed N`, or a seed derived from the current time when omitted) so a run can be replayed
+  by eye later - the report records the exact pause sequence it drew and the seed it used.
+- **Patient waiting, reused, not reinvented.** Free play waits for the agent's reply the exact
+  same way the scripted "patient caller" scenarios already do (`waitForPatientTurn`): a
+  holding line ("one moment while I verify...") is never mistaken for the real answer, an
+  engine CLOSE sentence stops the caller from speaking again, and a holding line followed by
+  permanent silence fails the run the same way it already does for a scripted patient caller.
+- **Programmatic barge-in, on the opening line only.** A scenario can set
+  `"free_play": {"barge_in": true}` (only `barge-in-interrupt.json` does, among the ten judge
+  cases below) to let the model talk over the agent's own greeting, the same interruption the
+  scripted barge-in scenario reproduces. Every turn after the first always waits patiently,
+  regardless of this flag - a genuine mid-reply barge-in decision on an arbitrary later turn
+  isn't exercised by any scenario in this repo yet.
+- **A real "go silent forever" signal.** Two scenarios (`hangup-after-request`,
+  `miller-silent-after-amount`) need the caller to stop talking at a defined point and never
+  speak again. The model's JSON reply carries a third field for this - `{"text": "...",
+  "barge_in": false, "silent": false}` - and once it says `"silent": true`, the harness never
+  asks it for another line for the rest of that call. Any agent question asked AFTER that
+  point is excluded from the "every question answered" check below (see
+  `scripts/rehearse/freePlayGrading.ts`'s `computeQuestionAnswerRatio`) - a caller who was
+  told to go silent was never supposed to keep answering.
+- **Extra grading on top of the base verdict/close-line checks:**
+  - the actual verdict must be in `expected.verdicts` (a new, optional list a scenario can
+    carry for cases where an improvising caller could reasonably tip a borderline outcome
+    either way) or fall back to the single `expected.verdict` every scenario already has;
+  - the agent must never go silent longer than `agent_silence_fail_ms` (default 12s) after a
+    caller line while the caller is still waiting on it;
+  - every agent question (a transcript line from the agent ending in "?") must get a caller
+    reply before the agent speaks again, UNLESS the caller has already gone silent by design
+    (above). The report's "Free play" section shows the ratio (e.g. "4/5") and lists any
+    question that went unanswered.
+- **Its own report section**: "Mode: free-play (model X, seed N)", the pause sequence drawn,
+  and the question-answer ratio - see "What each run produces" below.
+
+Every scenario used with `--free-play` needs a `persona` field, same requirement as
+`--caller llm`.
+
+### One command for the ten judge cases: `npm run sim:freeplay`
+
+```
+npm run sim:freeplay -- --url http://localhost:8787 --model openai/gpt-4o-mini --runs 1 --dry-run
+npm run sim:freeplay -- --url http://localhost:8787 --model openai/gpt-4o-mini --runs 3 --seed 42
+```
+
+Runs the ten judge-facing scenarios - `dana-patient`, `miller-patient`, `judge-out-of-scope`,
+`identity-switch`, `barge-in-interrupt`, `single-wrong-answer`, `hangup-after-request`,
+`prompt-injection-midcall`, `structuring-two-wires`, `miller-silent-after-amount` - through
+free-play mode, one at a time (never two calls at once - the server only allows one live call
+at a time), `--runs` times each. Every run gets its own seed, derived from the one base
+`--seed` you pass (or one derived from the current time if you don't), so repeated runs of the
+same case never replay the identical pause sequence, yet the whole batch is still
+reproducible from that one number. `--dry-run` prints the exact plan (every run's case, seed,
+and the `run.ts` command line it would spawn) with no network call, no spawned process, no
+credits spent. Prints a pass table at the end - case, runs, passes, fail reasons, report
+paths - and writes a roll-up markdown to `scripts/rehearse/reports/` (same gitignored
+directory as every other report). Exits non-zero if any case had a failing run.
+
 ## Why this exists
 
 Before this, every rehearsal needed a person on a real microphone, reading the scripts out
@@ -154,6 +229,10 @@ Flags:
 - `--max-calls N` - refuses to start ANY call if the scenarios/repeat combination you typed
   would make more than `N` live calls. A safety rail for `--scenario all --repeat N`, where
   it is easy to type a repeat count that spends far more credits than intended.
+- `--free-play` - the caller improvises every line from the scenario's `persona`/`truth`
+  instead of any scripted turn list. Requires `--model`. See "Free-play" above.
+- `--seed N` - seeds free play's pause sequence for reproducibility (default: derived from
+  the current time; every report records the seed it actually used either way).
 
 The one thing this script refuses to do on its own is guess that you meant the deployed site.
 Everything else about a run is visible up front in the command you typed.
@@ -241,7 +320,9 @@ warning in the report, and speaks the next line anyway rather than hanging forev
   reply), a table of how each caller line was actually decided (fixed / an explicit rule /
   `else_say` / the generic truth engine / the LLM caller - and what agent line, if any, it was
   reacting to), and a summary of the flight-recorder record fetched from the server afterward
-  (`GET /api/session/<id>/diagnostics`).
+  (`GET /api/session/<id>/diagnostics`). For a `--free-play` run, ALSO a "Free play" section:
+  "Mode: free-play (model X, seed N)", the exact pause sequence drawn (ms, in draw order), and
+  the question-answer ratio with every unanswered question listed verbatim.
 - Next to that report, same basename, one raw diagnostics file: `<timestamp>-<scenario>.diagnostics.json`
   - the exact bundle `GET /api/session/<id>/diagnostics` returned for that call (`server_events`,
   `client_events`, `deployed_commit`, `end_reason`, every timestamp), written verbatim, not the
@@ -306,6 +387,10 @@ scripts/rehearse/reports/
   character and reply as strict JSON, but nothing here enforces it; a model that ignores the
   instruction is recorded (best-effort raw-text fallback, or a warning on a hard failure), not
   silently corrected.
+- **A mid-reply barge-in on an arbitrary turn, in free-play mode.** Free play's programmatic
+  barge-in only fires on the OPENING turn (talking over the agent's greeting) - a later turn
+  always waits patiently, regardless of a scenario's `free_play.barge_in` flag. See "Free-play"
+  above for why.
 
 ## How this was verified before the founder ever sees it
 
@@ -318,15 +403,21 @@ scripts/rehearse/reports/
   rendering, and writing a run's on-disk artifacts (the markdown report plus the raw
   diagnostics JSON, same basename, built from a FAKE in-memory bundle -
   `test/artifacts.test.ts`) - all with no server and no AssemblyAI connection, so this suite
-  costs nothing to run as often as needed.
+  costs nothing to run as often as needed. Free play's own pieces are covered the same way,
+  all with mocked HTTP and no network: the natural-variation prompt builder and the strict-JSON
+  contract extended with `silent` (`test/freePlayPrompt.test.ts`), the seeded pause generator
+  and its per-run seed derivation (`test/seededPause.test.ts`), the unanswered-question grader
+  and the silence/verdict-acceptance checks (`test/freePlayGrading.test.ts`), and the
+  `sim:freeplay` planner - argument parsing, the deterministic run plan, output parsing, the
+  pass table (`test/simFreeplay.test.ts`).
 - Real local runs against a real server and a real AssemblyAI connection are recorded in
   `scripts/rehearse/reports/` from the days this was built and extended; see those reports for
   what actually happened, including anywhere a run stalled or the live agent asked for
   something a scenario's `truth` block didn't yet cover (that is itself a finding worth
   recording, not a reason to hide the report).
 
-Root `vitest.workspace.ts` only globs `packages/*`, so `scripts/rehearse/test/` is not picked
-up by the root `npm test`. It has its own config (`scripts/rehearse/vitest.config.ts`) and its
-own script (`npm run rehearse:test`) instead. Whoever owns `vitest.workspace.ts` could add
-`'scripts/rehearse'` to that glob if they want it folded into the root `npm test` run; that
-file is outside this work's file lane too.
+`scripts/rehearse/test/` has its own config (`scripts/rehearse/vitest.config.ts`) and its own
+script (`npm run rehearse:test`), and (review finding 2026-09-09) is also listed in the root
+`vitest.workspace.ts`, so it runs under the root `npm test` and CI too - `npm run
+rehearse:test` is the fast, scoped way to run just this harness's own suite while working on
+it.

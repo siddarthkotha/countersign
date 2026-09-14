@@ -16,6 +16,10 @@ function failReasonDescription(reason: NonNullable<RunResult['fail_reason']>): s
       return "the server ended the call, but the agent's transcript never contains the closing sentence for the actual verdict -- see Warnings";
     case 'server_never_hung_up':
       return 'the harness waited for the server to end the call on its own and it never did -- the harness ended it itself -- see Warnings';
+    case 'agent_silence_exceeded':
+      return 'free-play: the agent went silent longer than the allowed gap while the caller was waiting on it -- see Warnings';
+    case 'unanswered_agent_question':
+      return 'free-play: the agent asked at least one question the caller never got a chance to answer -- see Warnings';
   }
 }
 
@@ -92,6 +96,29 @@ function renderTurnGaps(r: RunResult): string {
  *  legible without having to cross-reference the raw transcript by hand -- e.g. seeing
  *  `source: generic` next to "No, that's wrong, it's Meridian Supply." on the exact turn
  *  that corrected a planted trap. */
+/** Free-play addition (2026-09-14), item 3 of the spec: "Mode: free-play (model X, seed N)",
+ *  the pause sequence actually drawn (seededPause.ts -- reproducible from the seed), and the
+ *  question-answer ratio (freePlayGrading.ts's `computeQuestionAnswerRatio`, run once per
+ *  call by `freePlay.ts`'s `runFreePlayOne` and carried on `RunResult.free_play`). Renders
+ *  nothing (empty string) for every non-free-play run -- `renderReport` only calls this when
+ *  `r.free_play` is present. */
+function renderFreePlaySection(r: RunResult): string {
+  const fp = r.free_play;
+  if (!fp) return '';
+  const qa = fp.question_answer;
+  const unanswered = qa.unanswered.length > 0 ? qa.unanswered.map((q) => `  - ${JSON.stringify(q)}`).join('\n') : '  _none_';
+  return [
+    '## Free play',
+    '',
+    `- Mode: free-play (model ${fp.model}, seed ${fp.seed})`,
+    `- Pause sequence (ms, in draw order): [${fp.pause_sequence_ms.join(', ')}]`,
+    `- Agent questions answered: ${qa.answered}/${qa.total}${qa.total === 0 ? ' (the agent asked no questions)' : ''}`,
+    '- Unanswered agent questions:',
+    unanswered,
+    '',
+  ].join('\n');
+}
+
 function renderResolvedLines(r: RunResult): string {
   if (r.resolved_lines.length === 0) return '_No caller lines recorded._';
   const rows = r.resolved_lines.map(
@@ -279,6 +306,9 @@ export function renderReport(r: RunResult): string {
   lines.push('');
   lines.push(renderResolvedLines(r));
   lines.push('');
+  if (r.free_play) {
+    lines.push(renderFreePlaySection(r));
+  }
   lines.push('## Full transcript (as received from the server)');
   lines.push('');
   lines.push(renderTranscript(r));

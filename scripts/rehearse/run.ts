@@ -30,6 +30,10 @@ import { checkScenarioExpectations, checkCloseLineExpectation } from './expectat
 import { renderRollup, oneLineSummary, rollupFileName } from './report.js';
 import { writeRunArtifacts } from './artifacts.js';
 import { resolveLlmConfig, getApiKey, apiKeyEnvVarFor, nodeFetchHttpClient } from './llmCaller.js';
+// Free-play addition (2026-09-14): `--free-play` is handled entirely by freePlay.ts's own
+// `runFreePlayOne` (a parallel, self-contained path -- see that file's doc comment for why),
+// so this file's only job is to parse the two extra flags and route to it instead of `runOne`.
+import { runFreePlayOne } from './freePlay.js';
 import type { LlmProvider, ResolvedLineRecord, RollupResult, RollupRow, RunResult, Scenario, StateHistoryRecord, TranscriptRecord } from './types.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -58,10 +62,18 @@ interface CliArgs {
   caller: 'reactive' | 'llm';
   model?: string;
   maxCalls?: number;
+  /** Free-play addition (2026-09-14): improvises every caller line from the scenario's
+   *  persona/truth instead of any scripted turn list -- see freePlay.ts. Requires --model,
+   *  independent of --caller (free play is its own caller mode, not a third value of
+   *  --caller). */
+  freePlay: boolean;
+  /** Seeds free play's pause sequence (scripts/rehearse/seededPause.ts) for reproducibility.
+   *  Defaults to the current time when omitted -- still recorded in the report either way. */
+  seed?: number;
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { url: DEFAULT_URL, scenario: 'all', repeat: 1, caller: 'reactive' };
+  const args: CliArgs = { url: DEFAULT_URL, scenario: 'all', repeat: 1, caller: 'reactive', freePlay: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--url') args.url = argv[++i] ?? args.url;
@@ -86,6 +98,14 @@ function parseArgs(argv: string[]): CliArgs {
         console.error('rehearse: --max-calls must be a positive number');
         process.exit(2);
       }
+    } else if (a === '--free-play') {
+      args.freePlay = true;
+    } else if (a === '--seed') {
+      args.seed = Number(argv[++i] ?? '');
+      if (!Number.isFinite(args.seed)) {
+        console.error('rehearse: --seed must be a number');
+        process.exit(2);
+      }
     } else if (a === '--help' || a === '-h') {
       printHelp();
       process.exit(0);
@@ -104,6 +124,7 @@ function printHelp(): void {
       '',
       'Usage: npm run rehearse -- [--url URL] [--scenario NAME|all] [--repeat N] [--voice NAME]',
       '                           [--caller reactive|llm] [--model MODEL_ID] [--max-calls N]',
+      '                           [--free-play [--seed N]]',
       '',
       `  --url URL        target server (default ${DEFAULT_URL}). Must be spelled out explicitly to hit the deployed site.`,
       '  --scenario NAME  a scenario file name under scripts/rehearse/scenarios/ (without .json), or "all" (default).',
@@ -112,6 +133,8 @@ function printHelp(): void {
       '  --caller MODE    "reactive" (default, no network beyond our own server) or "llm" (an external model plays the caller live).',
       '  --model ID       required with --caller llm. An OpenRouter model id (needs OPENROUTER_API_KEY), or "gemini/<id>" for Gemini (needs GEMINI_API_KEY).',
       '  --max-calls N    hard cap on the number of live calls this invocation will make (guards --scenario all --repeat N from an unbounded credit spend).',
+      '  --free-play      the caller improvises every line from the scenario\'s persona/truth instead of any scripted turn list. Requires --model (an OpenRouter or "gemini/<id>" model, same as --caller llm).',
+      '  --seed N         seeds free play\'s pause sequence for reproducibility (default: derived from the current time; every report records the seed it actually used either way).',
       '',
       'Exit codes: 0 every run passed; 1 at least one run failed its expected verdict/timing; 2 a protocol/connection error occurred (including a missing API key for --caller llm).',
     ].join('\n'),
@@ -354,16 +377,17 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
   let llm: { provider: LlmProvider; model: string; apiKey: string } | undefined;
-  if (args.caller === 'llm') {
+  if (args.caller === 'llm' || args.freePlay) {
+    const flagName = args.freePlay ? '--free-play' : '--caller llm';
     if (!args.model) {
-      console.error('rehearse: --caller llm requires --model <id> (an OpenRouter model id, or "gemini/<id>" for Gemini)');
+      console.error(`rehearse: ${flagName} requires --model <id> (an OpenRouter model id, or "gemini/<id>" for Gemini)`);
       process.exitCode = 2;
       return;
     }
     const { provider, model } = resolveLlmConfig(args.model);
     const apiKey = getApiKey(provider);
     if (!apiKey) {
-      console.error(`rehearse: --caller llm needs ${apiKeyEnvVarFor(provider)} set in the environment (export it from .env first: set -a; source .env; set +a). No key found -- not making any network call.`);
+      console.error(`rehearse: ${flagName} needs ${apiKeyEnvVarFor(provider)} set in the environment (export it from .env first: set -a; source .env; set +a). No key found -- not making any network call.`);
       process.exitCode = 2;
       return;
     }
@@ -382,10 +406,11 @@ async function main(): Promise<void> {
     throw err;
   }
 
-  if (args.caller === 'llm') {
+  if (args.caller === 'llm' || args.freePlay) {
+    const flagName = args.freePlay ? '--free-play' : '--caller llm';
     const missingPersona = scenarios.filter((s) => !s.persona);
     if (missingPersona.length > 0) {
-      console.error(`rehearse: --caller llm requires a "persona" field on every selected scenario; missing on: ${missingPersona.map((s) => s.name).join(', ')}`);
+      console.error(`rehearse: ${flagName} requires a "persona" field on every selected scenario; missing on: ${missingPersona.map((s) => s.name).join(', ')}`);
       process.exitCode = 2;
       return;
     }
@@ -416,7 +441,9 @@ async function main(): Promise<void> {
     for (let i = 0; i < args.repeat; i++) {
       runCount += 1;
       if (args.repeat > 1) console.log(`rehearse: ${scenario.name} run ${i + 1}/${args.repeat}`);
-      const result = await runOne(scenario, args.url, args.voice, args.caller, llm);
+      const result = args.freePlay
+        ? await runFreePlayOne(scenario, args.url, args.voice, { ...llm!, seed: args.seed ?? Date.now() })
+        : await runOne(scenario, args.url, args.voice, args.caller, llm);
       totalMinutes += result.minutes_estimate;
       worstExit = Math.max(worstExit, result.exit_code) as 0 | 1 | 2;
 

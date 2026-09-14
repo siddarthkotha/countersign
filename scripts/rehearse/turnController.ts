@@ -26,7 +26,7 @@ import type { HttpClient, LlmProvider, LlmTurnHistoryEntry, ResolvedLineRecord, 
  *  with `respond` just speaks its fixed `text` then). Reads straight off the latest
  *  ScreenState (packages/engine/src/types.ts:371's `transcript` array, chronological, never
  *  reordered by the server), rather than tracking it separately -- one source of truth. */
-function lastAgentTranscriptText(client: CallClient): string | null {
+export function lastAgentTranscriptText(client: CallClient): string | null {
   const state = client.latestState();
   if (!state) return null;
   for (let i = state.transcript.length - 1; i >= 0; i--) {
@@ -277,7 +277,11 @@ export const MIN_SPOKEN_MS = 700;
  *  the marker frame's own recorded timestamp, rather than `nowT(client)` at the moment this
  *  poll notices it, keeps the anchor accurate to within one `POLL_MS` tick instead of drifting
  *  by however long the polling loop took to wake up. */
-async function waitForReplyStarted(client: CallClient, markerCount: number, timeoutMs: number): Promise<number | null> {
+/** Exported (2026-09-14, free-play addition) so scripts/rehearse/freePlay.ts can anchor an
+ *  improvised barge-in to a reply's own first audio frame the same way `waitForBargeIn`
+ *  does, without duplicating this polling loop. Every other caller in this file is
+ *  unaffected -- this is a visibility change only. */
+export async function waitForReplyStarted(client: CallClient, markerCount: number, timeoutMs: number): Promise<number | null> {
   const deadline = nowT(client) + timeoutMs;
   for (;;) {
     if (client.audioTimestamps.length > markerCount) return client.audioTimestamps[markerCount]!;

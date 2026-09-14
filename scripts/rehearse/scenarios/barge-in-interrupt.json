@@ -460,5 +460,8 @@
     "max_wall_ms": 180000,
     "min_interrupted_agent_lines": 1
   },
-  "demo_persona": "legitimate"
+  "demo_persona": "legitimate",
+  "free_play": {
+    "barge_in": true
+  }
 }

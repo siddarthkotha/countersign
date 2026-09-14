@@ -138,6 +138,16 @@ export interface ScenarioTurn {
 
 export interface ScenarioExpected {
   verdict: Verdict;
+  /** Founder-directed free-play addition (2026-09-14): a scenario played by an improvising
+   *  LLM caller can legitimately land on more than one acceptable terminal verdict (a judge's
+   *  own ad-libbed wording can tip a borderline case either way) -- when present, a free-play
+   *  run's grader (freePlayGrading.ts's `acceptableVerdicts`) accepts ANY verdict in this
+   *  list instead of requiring an exact match against `verdict` above. `verdict` above is
+   *  still required on every scenario (it stays the single expected outcome for the
+   *  scripted/reactive/LLM-turn-list callers, and is the fallback acceptable set of one when
+   *  this is absent). Optional -- omitted by every scenario that only has one acceptable
+   *  outcome (the default, and every scenario written before this addition). */
+  verdicts?: Verdict[];
   /** Wall-clock ceiling (ms), measured from this scenario's WebSocket connect, that the
    *  whole run (every turn plus reaching a terminal verdict) must finish inside. Exceeding
    *  it is a FAIL, not a protocol error -- the stack is reachable and responding, it simply
@@ -198,6 +208,28 @@ export interface Scenario {
    *  12000 when `caller_style`/`wait_for_agent` is used and this is omitted. Meaningless
    *  (never read) on a scenario with no patient-mode turn at all. */
   agent_silence_fail_ms?: number;
+  /** Founder-directed free-play addition (2026-09-14, scripts/rehearse/freePlay.ts): tuning
+   *  knobs for `--free-play` mode ONLY -- meaningless (never read) by the reactive or
+   *  scripted-turn-list LLM caller. All optional; every field defaults independently. */
+  free_play?: ScenarioFreePlay;
+}
+
+/** Founder-directed free-play addition (2026-09-14): tuning knobs for one scenario's
+ *  `--free-play` improvised run (scripts/rehearse/freePlay.ts). All optional -- a scenario
+ *  with no `free_play` block at all gets the harness-wide defaults (pause 600-6000ms, no
+ *  barge-in). */
+export interface ScenarioFreePlay {
+  /** Lower bound (ms), inclusive, of the uniform range a free-play pause is drawn from
+   *  before each caller line. Default 600. */
+  pause_min_ms?: number;
+  /** Upper bound (ms), inclusive, of the uniform range a free-play pause is drawn from
+   *  before each caller line. Default 6000. */
+  pause_max_ms?: number;
+  /** When true, the free-play caller is allowed to act on the model's own `barge_in: true`
+   *  decision (talking over the agent, including over its opening greeting) instead of
+   *  always waiting patiently for the agent to finish. Default false (patient waiting only,
+   *  matching every scenario this field was not written for). */
+  barge_in?: boolean;
 }
 
 export interface TurnGapRecord {
@@ -318,12 +350,19 @@ export interface RunResult {
   exit_code: 0 | 1 | 2;
   minutes_estimate: number;
   resolved_lines: ResolvedLineRecord[];
-  caller_mode: 'reactive' | 'llm';
+  caller_mode: 'reactive' | 'llm' | 'freeplay';
   /** Set only when a patient-mode wait (turnController.ts's `waitForPatientTurn`) caught the
    *  exact bug this feature exists to catch: a holding line spoken, then silence past
    *  `agent_silence_fail_ms` with no further reply; OR (PROVEN gap, 2026-09-13,
    *  expectations.ts's `checkCloseLineExpectation` doc comment) the server ended the call
    *  itself but the agent transcript never contains the closing sentence matching the actual
+   *  verdict -- `close_line_not_spoken`; OR (free-play addition, 2026-09-14,
+   *  freePlayGrading.ts) the agent went silent longer than `agent_silence_fail_ms` while the
+   *  free-play caller was waiting on it (`agent_silence_exceeded`), or the agent asked at
+   *  least one question that the free-play caller never got a chance to answer before the
+   *  agent spoke again (`unanswered_agent_question`). Either way: a distinct, greppable fail
+   *  reason surfaced in the report's one-line result and its Result section, separate from
+   *  the generic warnings list. Absent for every ordinary pass or fail. */
    *  verdict -- `close_line_not_spoken`. Either way: a distinct, greppable fail reason
    *  surfaced in the report's one-line result and its Result section, separate from the
    *  generic warnings list. Absent for every ordinary pass or fail. */
@@ -334,13 +373,23 @@ export interface RunResult {
    *  run could still be reported, but this is always a bug worth surfacing: the server never
    *  hangs up on its own is either a hung CLOSE state or a genuinely broken close path,
    *  neither of which a judge should ever hit live. */
-  fail_reason?: 'agent_silent_after_hold' | 'close_line_not_spoken' | 'server_never_hung_up';
+  fail_reason?: 'agent_silent_after_hold' | 'close_line_not_spoken' | 'server_never_hung_up' | 'agent_silence_exceeded' | 'unanswered_agent_question';
   /** expectations.ts's `checkCloseLineExpectation` result -- `'n/a'` when the check didn't
    *  apply (the caller/harness ended the call first, or no verdict was ever reached),
    *  `'spoken'`/`'not_spoken'` when it did. Rendered near "Call ended reason" in the report
    *  regardless of pass/fail, so every report says plainly whether a judge would have heard
    *  the agent's own goodbye. */
   close_line_status: 'spoken' | 'not_spoken' | 'n/a';
+  /** Free-play addition (2026-09-14) -- present only when `caller_mode === 'freeplay'`.
+   *  Everything a report needs to show "Mode: free-play (model X, seed N)", the pause
+   *  sequence actually drawn, and the question-answer ratio (freePlayGrading.ts's
+   *  `computeQuestionAnswerRatio`). */
+  free_play?: {
+    model: string;
+    seed: number;
+    pause_sequence_ms: number[];
+    question_answer: { answered: number; total: number; unanswered: string[] };
+  };
 }
 
 // ---------- LLM-driven caller (llmCaller.ts) ----------
