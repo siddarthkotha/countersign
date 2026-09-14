@@ -985,6 +985,22 @@ export class CallSession {
           });
           return;
         }
+        // Round 5 review fix (2026-09-14, Important): a reply whose audio was already
+        // dropped (`suppressPostGoodbyeReplyAudio` -- see the `goodbyeConfirmed` class-field
+        // doc comment) must not have its transcript logged as a spoken agent utterance
+        // either -- the caller never heard it, so the evidence record must not say it was
+        // said. Checked BEFORE the push below (never after): nothing from this text may reach
+        // `logs.conversation` (evidence, export, screen state, engine input all read from
+        // there), `replyTranscripts` (dead data for an id `scheduleCloseIfNeeded`/
+        // `maybeArmCloseOnTranscript` already refuse to act on once `goodbyeConfirmed` is set
+        // for a DIFFERENT reply id -- see their own guards), or the ordinary `transcript` diag
+        // (which would otherwise record this text's length as agent speech). One diag event
+        // instead, length only (LAW 4: never the text itself), and no `tick()` -- nothing in
+        // EngineInput changed, same reasoning as the `transcript_duplicate_ignored` case above.
+        if (evt.type === 'transcript.agent' && this.goodbyeConfirmed && evt.reply_id !== this.goodbyeConfirmedReplyId) {
+          this.diag('post_goodbye_transcript_dropped', { reply_id: evt.reply_id, length: evt.text.length });
+          return;
+        }
         // Changes `conversation`, part of EngineInput -- must tick.
         this.logs.conversation.push(utteranceFromTranscript(evt, this.nowT()));
         this.opts.onActivity?.();

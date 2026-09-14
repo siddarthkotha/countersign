@@ -2264,6 +2264,95 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
     expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(replyCreateCountBefore);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
   });
+
+  // Review fix (2026-09-14, Important, round 5 re-review): a suppressed reply's transcript
+  // was still being pushed to `logs.conversation` as a spoken agent utterance, even though
+  // its audio was dropped and the caller never heard it -- the evidence record must not say
+  // something was said that was not heard. PROVEN shape: scripts/rehearse/reports/2026-09-13
+  // T22-57-34-miller-patient.md's own stray reply, "(interrupted) Checking the transaction
+  // history. Please hold."
+  it('(d) a post-goodbye reply\'s transcript is NOT logged to conversation, is NOT fed to the engine, and logs post_goodbye_transcript_dropped {reply_id, length} once instead -- the call still ends agent_closed on the unchanged schedule', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = new CallSession({
+      session_id: CALL_B.session_id,
+      seed: MERIDIAN,
+      call: CALL_B,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+    });
+    session.start();
+    driveToFreezeCloseWithFirstSend(session, aai, clock);
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+
+    const conversationLengthBefore = session.logs.conversation.length;
+    const strayText = '(interrupted) Checking the transaction history. Please hold.';
+
+    // The exact PROVEN stray-reply shape: a new reply, its own transcript, then cut off.
+    aai.emit({ type: 'reply.started', reply_id: 'r2' });
+    aai.emit({ type: 'transcript.agent', item_id: 'x2', text: strayText, reply_id: 'r2', interrupted: true });
+    aai.emit({ type: 'reply.done', reply_id: 'r2', status: 'interrupted' });
+
+    // Not logged as a spoken agent utterance -- the caller never heard it.
+    expect(session.logs.conversation).toHaveLength(conversationLengthBefore);
+    expect(session.logs.conversation.some((u) => u.text === strayText)).toBe(false);
+
+    // No ordinary `transcript` diag for this dropped text (would otherwise record its length
+    // as agent speech) -- exactly one drop diagnostic instead, naming the reply id and length,
+    // never the text (LAW 4).
+    const dropped = diagEvents.filter((e) => e.kind === 'post_goodbye_transcript_dropped');
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]!.detail).toEqual({ reply_id: 'r2', length: strayText.length });
+
+    // The hang-up still fires on the unchanged schedule.
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    vi.advanceTimersByTime(1500);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+  });
+
+  it('(e) negative: the confirmed goodbye reply\'s OWN transcript IS logged to conversation normally', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = new CallSession({
+      session_id: CALL_B.session_id,
+      seed: MERIDIAN,
+      call: CALL_B,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+    });
+    session.start();
+    driveToFreezeCloseWithFirstSend(session, aai, clock);
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    const conversationLengthBefore = session.logs.conversation.length;
+
+    aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
+
+    expect(session.logs.conversation).toHaveLength(conversationLengthBefore + 1);
+    expect(session.logs.conversation.some((u) => u.id === 'x1' && u.text === ENGINE_CLOSE_SENTENCES.FREEZE)).toBe(true);
+    expect(diagEvents.some((e) => e.kind === 'post_goodbye_transcript_dropped')).toBe(false);
+
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+    vi.advanceTimersByTime(1500);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+  });
 });
 
 // Important 2 (review of commit 5930450, 2026-09-13): recordGoalCompletionAction only ever
