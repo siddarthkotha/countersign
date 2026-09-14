@@ -20,6 +20,18 @@
 //
 // This is a TEST HARNESS (BRIEF LAW 5 scope fence): it never calls AssemblyAI, never touches
 // a live server, and is never imported by product code under packages/.
+//
+// CANNOT re-grade the two specific reports this file's transcript-snapshot-timing fix (run.ts's
+// `waitForVerdictAndHangup`) concerns -- 2026-09-14T15-49-25-structuring-two-wires.md and
+// 2026-09-14T15-47-29-miller-patient.md, both written by the PRE-FIX code -- back to "spoken".
+// PROVEN (both bundles' server_events): the goodbye reply IS there as a
+// `transcript {role: agent, length: 92}` event, 92 being the exact length of the ESCALATE close
+// sentence, but the sibling `.diagnostics.json` never carries the actual words (see this file's
+// header above), and the `.md` report's transcript table -- the only artifact that ever could
+// -- was itself rendered from the pre-fix, goodbye-less snapshot, so the words were never
+// written to disk anywhere. There is no stored artifact this tool (or any tool) can regrade
+// those two runs from; the only way to get a "spoken" report for them is to RE-RUN those
+// scenarios live against the fixed harness.
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { checkCloseLineExpectation } from './expectations.js';

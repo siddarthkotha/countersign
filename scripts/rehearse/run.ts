@@ -23,6 +23,7 @@
 // against the deployed URL requires spelling it out explicitly with --url (never inferred,
 // never a default).
 import { mintSession, connectCall, fetchDiagnostics, forceDropAai } from './wsClient.js';
+import type { CallClient } from './wsClient.js';
 import { loadScenario, loadAllScenarios, ScenarioValidationError } from './scenario.js';
 import { runTurns, runLlmTurns, computeTurnGaps, waitForVerdict, waitForCountersignSettle, waitForServerHangup, CLOSE_WAIT_MS } from './turnController.js';
 import { summarizeDiagnostics } from './diagnosticsSummary.js';
@@ -35,6 +36,7 @@ import { resolveLlmConfig, getApiKey, apiKeyEnvVarFor, nodeFetchHttpClient } fro
 // so this file's only job is to parse the two extra flags and route to it instead of `runOne`.
 import { runFreePlayOne } from './freePlay.js';
 import type { LlmProvider, ResolvedLineRecord, RollupResult, RollupRow, RunResult, Scenario, StateHistoryRecord, TranscriptRecord } from './types.js';
+import type { Verdict } from '@countersign/engine';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -141,6 +143,99 @@ function printHelp(): void {
   );
 }
 
+export interface CallEndOutcome {
+  transcript: TranscriptRecord[];
+  stateHistory: StateHistoryRecord[];
+  endedReason: string | null;
+  hangupFailReason: 'server_never_hung_up' | undefined;
+  verdictReached: boolean;
+  actualVerdict: Verdict | 'PENDING' | null;
+  warnings: string[];
+}
+
+/** PROVEN gap (2026-09-14, reports 2026-09-14T15-49-25-structuring-two-wires and
+ *  2026-09-14T15-47-29-miller-patient, read together with their .diagnostics.json server_events):
+ *  `runOne` used to snapshot `client.latestState()`/`client.stateHistory` into `transcript`/
+ *  `stateHistory` BEFORE the hang-up wait below (the block that calls `waitForServerHangup`,
+ *  landed 630a0b1) -- so any agent transcript/state events that arrive WHILE the harness is
+ *  waiting for the server's own hang-up (including the goodbye reply itself: both bundles show
+ *  a `transcript {role: agent, length: 92}` event, 92 being the exact length of the ESCALATE
+ *  close sentence, landing AFTER the caller's last scripted turn and BEFORE `session_ended`)
+ *  were captured by the live WebSocket listener (`wsClient.ts`'s `latest`/`stateHistory`
+ *  closures, which are never torn down mid-call) but then silently dropped from the report,
+ *  because the report's `transcript`/`state_history` fields were already frozen from an EARLIER
+ *  read of those same closures. The close-line grader (`checkCloseLineExpectation`) then
+ *  graded "NOT spoken" against that stale, goodbye-less transcript even though the server said
+ *  it. Fix: this function takes the snapshot AFTER the hang-up wait resolves (server-initiated
+ *  or self-ended), so every agent line up to the `ended` event is included, exactly as it would
+ *  be for a line spoken during an ordinary scripted turn. Split out of `runOne` so it can be
+ *  unit-tested directly against a fake `CallClient` (no network) -- see test/run.test.ts. */
+export async function waitForVerdictAndHangup(
+  client: CallClient,
+  scenario: Scenario,
+  callerHungUp: boolean,
+  endedTimeoutMs: number = ENDED_TIMEOUT_MS,
+): Promise<CallEndOutcome> {
+  const warnings: string[] = [];
+
+  const remainingMs = Math.max(1000, scenario.expected.max_wall_ms - (performance.now() - client.startedAt));
+  const verdictResult = await waitForVerdict(client, remainingMs);
+  if (!verdictResult.reached) {
+    warnings.push(`no terminal verdict within the scenario's max_wall_ms (${scenario.expected.max_wall_ms}ms)`);
+  } else {
+    await waitForCountersignSettle(client);
+  }
+
+  // PROVEN gap (2026-09-14, types.ts's ScenarioTurn.hang_up doc comment): the harness used to
+  // send its own `end` unconditionally right here, racing the server's own CLOSE hang-up and
+  // its goodbye -- six of today's reports show "caller_ended" with no goodbye in the agent
+  // transcript, graded PASS on verdict alone. Now: a scenario whose LAST spoken turn carried
+  // `hang_up: true` keeps the old immediate-hangup behavior (the caller deliberately walks
+  // away); every other scenario waits for the server's own `ended` event instead
+  // (`waitForServerHangup`), only ending the call itself if that wait expires.
+  let endedReason: string | null;
+  let hangupFailReason: 'server_never_hung_up' | undefined;
+  if (callerHungUp) {
+    client.send({ type: 'end' });
+    endedReason = await client.waitForEnded(endedTimeoutMs);
+    if (endedReason === null) warnings.push(`no "ended" event within ${endedTimeoutMs}ms of sending end; closing the socket anyway`);
+  } else {
+    const closeWaitMs = Math.max(scenario.expected.max_wall_ms, CLOSE_WAIT_MS);
+    const hangup = await waitForServerHangup(client, closeWaitMs, () => client.send({ type: 'end' }), endedTimeoutMs);
+    endedReason = hangup.ended_reason;
+    if (hangup.self_ended) {
+      hangupFailReason = 'server_never_hung_up';
+      warnings.push(
+        `the server never ended this call on its own within ${closeWaitMs}ms after the last scripted turn; the harness ended it itself (reason: ${endedReason ?? 'none observed even after ending it itself'})`,
+      );
+    }
+  }
+
+  // Snapshot taken HERE -- after the hang-up wait has resolved -- so every agent transcript/
+  // state event received up to (and including) the `ended` event is captured, not just
+  // whatever had arrived by the time the verdict/settle wait finished.
+  const finalState = client.latestState();
+  const transcript: TranscriptRecord[] = finalState
+    ? finalState.transcript.map((l) => ({ speaker: l.speaker, text: l.text, t_ms: l.t_ms, ...(l.interrupted ? { interrupted: true } : {}) }))
+    : [];
+  const stateHistory: StateHistoryRecord[] = client.stateHistory.map((s) => ({
+    t_ms: s.t_ms,
+    state: s.state.state,
+    verdict: s.state.verdict,
+    agent_status: s.state.agent_status,
+  }));
+
+  return {
+    transcript,
+    stateHistory,
+    endedReason,
+    hangupFailReason,
+    verdictReached: verdictResult.reached,
+    actualVerdict: verdictResult.verdict,
+    warnings,
+  };
+}
+
 async function runOne(
   scenario: Scenario,
   url: string,
@@ -227,49 +322,14 @@ async function runOne(
     callerHungUp = outcome.caller_hung_up;
   }
 
-  const remainingMs = Math.max(1000, scenario.expected.max_wall_ms - (performance.now() - client.startedAt));
-  const verdictResult = await waitForVerdict(client, remainingMs);
-  if (!verdictResult.reached) {
-    warnings.push(`no terminal verdict within the scenario's max_wall_ms (${scenario.expected.max_wall_ms}ms)`);
-  } else {
-    await waitForCountersignSettle(client);
-  }
-
-  const finalState = client.latestState();
-  const transcript: TranscriptRecord[] = finalState
-    ? finalState.transcript.map((l) => ({ speaker: l.speaker, text: l.text, t_ms: l.t_ms, ...(l.interrupted ? { interrupted: true } : {}) }))
-    : [];
-  const stateHistory: StateHistoryRecord[] = client.stateHistory.map((s) => ({
-    t_ms: s.t_ms,
-    state: s.state.state,
-    verdict: s.state.verdict,
-    agent_status: s.state.agent_status,
-  }));
-
-  // PROVEN gap (2026-09-14, types.ts's ScenarioTurn.hang_up doc comment): the harness used to
-  // send its own `end` unconditionally right here, racing the server's own CLOSE hang-up and
-  // its goodbye -- six of today's reports show "caller_ended" with no goodbye in the agent
-  // transcript, graded PASS on verdict alone. Now: a scenario whose LAST spoken turn carried
-  // `hang_up: true` keeps the old immediate-hangup behavior (the caller deliberately walks
-  // away); every other scenario waits for the server's own `ended` event instead
-  // (`waitForServerHangup`), only ending the call itself if that wait expires.
-  let endedReason: string | null;
-  let hangupFailReason: 'server_never_hung_up' | undefined;
-  if (callerHungUp) {
-    client.send({ type: 'end' });
-    endedReason = await client.waitForEnded(ENDED_TIMEOUT_MS);
-    if (endedReason === null) warnings.push(`no "ended" event within ${ENDED_TIMEOUT_MS}ms of sending end; closing the socket anyway`);
-  } else {
-    const closeWaitMs = Math.max(scenario.expected.max_wall_ms, CLOSE_WAIT_MS);
-    const hangup = await waitForServerHangup(client, closeWaitMs, () => client.send({ type: 'end' }), ENDED_TIMEOUT_MS);
-    endedReason = hangup.ended_reason;
-    if (hangup.self_ended) {
-      hangupFailReason = 'server_never_hung_up';
-      warnings.push(
-        `the server never ended this call on its own within ${closeWaitMs}ms after the last scripted turn; the harness ended it itself (reason: ${endedReason ?? 'none observed even after ending it itself'})`,
-      );
-    }
-  }
+  // PROVEN gap (2026-09-14, reports 2026-09-14T15-49-25-structuring-two-wires and
+  // 2026-09-14T15-47-29-miller-patient): this used to be inlined here, with the
+  // transcript/stateHistory snapshot taken BEFORE the hang-up wait below -- see
+  // `waitForVerdictAndHangup`'s own doc comment for the full PROVEN gap and fix. Extracted so
+  // it can be unit-tested directly against a fake CallClient (test/run.test.ts).
+  const endOutcome = await waitForVerdictAndHangup(client, scenario, callerHungUp, ENDED_TIMEOUT_MS);
+  warnings.push(...endOutcome.warnings);
+  const { transcript, stateHistory, endedReason, hangupFailReason } = endOutcome;
   client.close();
 
   const totalWallMs = performance.now() - client.startedAt;
@@ -279,7 +339,7 @@ async function runOne(
 
   const turnGaps = computeTurnGaps(client, callerEndTimes);
 
-  const actualVerdict = verdictResult.verdict;
+  const actualVerdict = endOutcome.actualVerdict;
   // Judge-sim finding 2026-09-11 (expectations.ts's doc comment has the full reasoning): a
   // scenario's own opt-in min_interrupted_agent_lines/require_aai_link_restored checks are
   // ADDITIONAL fail conditions, on top of (never instead of) the base verdict check --
@@ -300,7 +360,7 @@ async function runOne(
   const pass =
     turnsFailReason === undefined &&
     hangupFailReason === undefined &&
-    verdictResult.reached &&
+    endOutcome.verdictReached &&
     actualVerdict === scenario.expected.verdict &&
     expectationCheck.ok &&
     closeLineCheck.status !== 'not_spoken';
@@ -313,7 +373,7 @@ async function runOne(
     session_id: session.session_id,
     started_at_iso: startedAtIso,
     ended_reason: endedReason,
-    verdict_reached: verdictResult.reached,
+    verdict_reached: endOutcome.verdictReached,
     actual_verdict: actualVerdict,
     pass,
     timings: {
@@ -485,4 +545,12 @@ async function main(): Promise<void> {
   process.exitCode = worstExit;
 }
 
-void main();
+// PROVEN gap (2026-09-14, found while adding test/run.test.ts): `main()` used to be called
+// unconditionally at module load, so simply IMPORTING run.ts (e.g. to unit-test
+// `waitForVerdictAndHangup`) ran the whole real CLI -- minting real sessions, hitting the
+// network, and writing report files into scripts/rehearse/reports/ as a test side effect. Same
+// "only run main() when this file is the actual entry point" guard rehearseBatch.ts already
+// uses, so `npx tsx scripts/rehearse/run.ts` (and `npm run rehearse`) behave identically to
+// before -- only an import from another module (a test) is now side-effect-free.
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMain) void main();
