@@ -115,7 +115,7 @@
   },
   {
    "id": "REH1",
-   "title": "rehearsal 1 report (founder ran Scenario B live 2026-09-03 ~10 PM CDT; deadlock found) — docs/REHEARSAL-REPORT-2026-09-03.md",
+   "title": "rehearsal 1 report (founder ran Scenario B live 2026-09-03 ~10 PM CDT; deadlock found) \u2014 docs/REHEARSAL-REPORT-2026-09-03.md",
    "files": [
     "docs/REHEARSAL-*.md"
    ],
@@ -126,7 +126,7 @@
   },
   {
    "id": "FIX1",
-   "title": "FIX1 live-call deadlock: server runs the three lookups itself (row 7 stall forever) — landed 422d750",
+   "title": "FIX1 live-call deadlock: server runs the three lookups itself (row 7 stall forever) \u2014 landed 422d750",
    "files": [
     "packages/server/src/call/session.ts",
     "packages/server/test/**"
@@ -138,7 +138,7 @@
   },
   {
    "id": "FIX2",
-   "title": "FIX2 evaluate storm: no engine tick on reply.audio frames (worktree lane) — patch saved; merge after FIX1 lands — landed b6e5ba7",
+   "title": "FIX2 evaluate storm: no engine tick on reply.audio frames (worktree lane) \u2014 patch saved; merge after FIX1 lands \u2014 landed b6e5ba7",
    "files": [
     "packages/server/src/call/session.ts",
     "packages/server/test/**"
@@ -159,7 +159,7 @@
   },
   {
    "id": "FIX3",
-   "title": "FIX3 recorder timing events (AAI ready, reply start/first audio/done, transcripts) + evaluate dedupe (worktree lane) — patch saved; merge after FIX1+FIX2 — landed b6e5ba7",
+   "title": "FIX3 recorder timing events (AAI ready, reply start/first audio/done, transcripts) + evaluate dedupe (worktree lane) \u2014 patch saved; merge after FIX1+FIX2 \u2014 landed b6e5ba7",
    "files": [
     "packages/server/src/call/session.ts",
     "packages/server/src/diagnostics.ts",
@@ -172,7 +172,7 @@
   },
   {
    "id": "FIX2-review",
-   "title": "FIX2 patch review (read-only) — PASS, 1 minor (lookup delay during a reply; accepted)",
+   "title": "FIX2 patch review (read-only) \u2014 PASS, 1 minor (lookup delay during a reply; accepted)",
    "files": [],
    "status": "done",
    "held_because": "",
@@ -181,7 +181,7 @@
   },
   {
    "id": "FIX3-review",
-   "title": "FIX3 patch review (read-only) — PASS w/ findings (dedupe scope accepted; merge conflict with FIX2 confirmed)",
+   "title": "FIX3 patch review (read-only) \u2014 PASS w/ findings (dedupe scope accepted; merge conflict with FIX2 confirmed)",
    "files": [],
    "status": "done",
    "held_because": "",
@@ -190,7 +190,7 @@
   },
   {
    "id": "MERGE23",
-   "title": "MERGE23 combine FIX2+FIX3 into one patch on base, hand-resolved, green (worktree) — fix23.patch 519 lines, 691/691, typecheck clean",
+   "title": "MERGE23 combine FIX2+FIX3 into one patch on base, hand-resolved, green (worktree) \u2014 fix23.patch 519 lines, 691/691, typecheck clean",
    "files": [],
    "status": "done",
    "held_because": "",
@@ -199,7 +199,7 @@
   },
   {
    "id": "H2",
-   "title": "H2 worktree-gate hook: same file = worktree lane, never serialize (founder ruling 10:38 PM) — landed e4474ec, 18/18 hook tests",
+   "title": "H2 worktree-gate hook: same file = worktree lane, never serialize (founder ruling 10:38 PM) \u2014 landed e4474ec, 18/18 hook tests",
    "files": [
     ".claude/hooks/**",
     ".claude/settings.json",
@@ -212,7 +212,7 @@
   },
   {
    "id": "REVIEW-LAND",
-   "title": "combined review of 422d750+b6e5ba7+e4474ec on one tree (read-only) — 2 Important + 1 Minor, all fixed in 71d57a4",
+   "title": "combined review of 422d750+b6e5ba7+e4474ec on one tree (read-only) \u2014 2 Important + 1 Minor, all fixed in 71d57a4",
    "files": [],
    "status": "done",
    "held_because": "",
@@ -221,7 +221,7 @@
   },
   {
    "id": "R2",
-   "title": "R2 synthetic-caller rehearsal harness (scripts/rehearse, macOS say → live stack) — landed uncommitted; first real run: harness works, Dana FAIL is a scripted-caller limitation (trap question)",
+   "title": "R2 synthetic-caller rehearsal harness (scripts/rehearse, macOS say \u2192 live stack) \u2014 landed uncommitted; first real run: harness works, Dana FAIL is a scripted-caller limitation (trap question)",
    "files": [
     "scripts/rehearse/**",
     "docs/REHEARSAL-HARNESS.md",
@@ -234,7 +234,7 @@
   },
   {
    "id": "PUSH5",
-   "title": "push 5: deadlock fix + recorder + hook (needs the founder's push word) — pushed 10:59 PM (9466de6..e62a39e)",
+   "title": "push 5: deadlock fix + recorder + hook (needs the founder's push word) \u2014 pushed 10:59 PM (9466de6..e62a39e)",
    "files": [],
    "status": "done",
    "held_because": "founder said 'push when green' 10:53 PM; autopilot rail denies push: needs 'autopilot stop' or the founder's own `! git push origin main`; re-review must pass first",
@@ -243,7 +243,7 @@
   },
   {
    "id": "REVIEW-LAND-2",
-   "title": "scoped re-review of 71d57a4 (haiku, read-only) — PASS",
+   "title": "scoped re-review of 71d57a4 (haiku, read-only) \u2014 PASS",
    "files": [],
    "status": "done",
    "held_because": "",
@@ -252,7 +252,7 @@
   },
   {
    "id": "FIX4",
-   "title": "FIX4 voice model offered no tools; standing rule: never ask for ids — committed 42d720f",
+   "title": "FIX4 voice model offered no tools; standing rule: never ask for ids \u2014 committed 42d720f",
    "files": [
     "packages/server/src/index.ts",
     "packages/server/src/call/prompt.ts",
@@ -290,7 +290,7 @@
   },
   {
    "id": "FIX4-review",
-   "title": "FIX4 review (read-only) — PASS, no critical/important",
+   "title": "FIX4 review (read-only) \u2014 PASS, no critical/important",
    "files": [],
    "status": "done",
    "held_because": "",
@@ -299,7 +299,7 @@
   },
   {
    "id": "DEPLOY-VERIFY",
-   "title": "verify Render auto-deploy via GET /version after next push — PROVEN live at de6c796, auto-deploy healthy (~5 min)",
+   "title": "verify Render auto-deploy via GET /version after next push \u2014 PROVEN live at de6c796, auto-deploy healthy (~5 min)",
    "files": [],
    "status": "done",
    "held_because": "needs /version pushed and live first",
@@ -308,7 +308,7 @@
   },
   {
    "id": "gitignore-critique",
-   "title": "add scripts/critique/reports and scripts/rehearse output dirs to .gitignore — d757568",
+   "title": "add scripts/critique/reports and scripts/rehearse output dirs to .gitignore \u2014 d757568",
    "files": [
     ".gitignore"
    ],
@@ -1987,7 +1987,7 @@
   },
   {
    "id": "VIDEO-PREPROD-ASSETS",
-   "title": "video pre-production: architecture, business and title artboards under docs/video/ plus BRIEF §8 year fix",
+   "title": "video pre-production: architecture, business and title artboards under docs/video/ plus BRIEF \u00a78 year fix",
    "files": [
     "docs/video/**",
     "docs/BRIEF.md"
@@ -2002,10 +2002,11 @@
    "id": "PUSH-26",
    "title": "push 26: sim:friday + video assets + engine STALL fixes + patient-caller harness + server reply.create fix",
    "files": [],
-   "status": "running",
+   "status": "done",
    "held_because": "founder ruling 8:11 PM: push once the server fix is gated on main",
    "agent_id": "",
-   "started_at": ""
+   "started_at": "",
+   "lane_note": "pushed 10:20 PM (8b44d44..71efeff); deploy 26 verified 10:22 PM"
   },
   {
    "id": "HARNESS-DANA-KNOWLEDGE-FACTS",
@@ -2027,9 +2028,9 @@
    ],
    "status": "running",
    "held_because": "",
-   "agent_id": "a026629853513216e",
+   "agent_id": "a8ae3068ccc4c98c6",
    "started_at": "2026-09-13T20:25:00Z",
-   "lane_note": "engine replay of the scripted turns does NOT stall (lane, 5/5); root cause needs the call bundle: GET /api/session/<uuid>/diagnostics, ids only in the Render log (countersign_diag lines) -> founder asked 3:40 PM. NO PUSH until captured (redeploy wipes the 50-bundle ring). Reproduction scenario written: scripts/rehearse/scenarios/miller-silent-after-amount.json (live run blocked by the auto-mode classifier). | ROOT CAUSE PROVEN 4:17 PM from the founder recording (session 84ddf47a): agent spoke a hold line, engine froze in the same tick, close line never spoken, server hung up as agent_closed. Two causes: server never sends AAI reply.create after a mid-turn prompt change (docs PROVEN); armClose stale-reply guard treats a reply composed under the old prompt as the CLOSE reply. Fix lane running. | first fix lane hung 3 h with no commit, stopped 8:12 PM; re-dispatched off 8213dbc with commit-early rule. Founder 8:11 PM: push once the server fix is gated. | retry lane df373c4 (red) + 4ffa283 merged as 48a0969 9:02 PM; gate on main 1447/1447 (79 files), typecheck clean, corpus 128/128, rehearse 285/285; review running; push 26 right after | fix round 8c9bb62 merged as 29de83b; gate 1449/1449, typecheck clean, corpus 128/128, rehearse 285/285; RE-REVIEW PASS 10:20 PM (reviewer re-ran its own Scenario B reproduction: one reply.create for CLOSE, close-labelled reply, agent_closed only after it). Push 26 now; live proof pending."
+   "lane_note": "engine replay of the scripted turns does NOT stall (lane, 5/5); root cause needs the call bundle: GET /api/session/<uuid>/diagnostics, ids only in the Render log (countersign_diag lines) -> founder asked 3:40 PM. NO PUSH until captured (redeploy wipes the 50-bundle ring). Reproduction scenario written: scripts/rehearse/scenarios/miller-silent-after-amount.json (live run blocked by the auto-mode classifier). | ROOT CAUSE PROVEN 4:17 PM from the founder recording (session 84ddf47a): agent spoke a hold line, engine froze in the same tick, close line never spoken, server hung up as agent_closed. Two causes: server never sends AAI reply.create after a mid-turn prompt change (docs PROVEN); armClose stale-reply guard treats a reply composed under the old prompt as the CLOSE reply. Fix lane running. | first fix lane hung 3 h with no commit, stopped 8:12 PM; re-dispatched off 8213dbc with commit-early rule. Founder 8:11 PM: push once the server fix is gated. | retry lane df373c4 (red) + 4ffa283 merged as 48a0969 9:02 PM; gate on main 1447/1447 (79 files), typecheck clean, corpus 128/128, rehearse 285/285; review running; push 26 right after | fix round 8c9bb62 merged as 29de83b; gate 1449/1449, typecheck clean, corpus 128/128, rehearse 285/285; RE-REVIEW PASS 10:20 PM (reviewer re-ran its own Scenario B reproduction: one reply.create for CLOSE, close-labelled reply, agent_closed only after it). Push 26 now; live proof pending. | LIVE RUN 1 on deploy 26: close line NOT spoken (AAI turn reply mislabelled as ours; interrupted; agent_closed). Third attempt, changed mechanism: transcript-confirmed close + bounded close_retry. Lane running 10:27 PM."
   },
   {
    "id": "ENGINE-MISSING-CRITICAL-FIELD-STALL",
@@ -2054,6 +2055,18 @@
    "agent_id": "",
    "started_at": "2026-09-13T21:22:06.727Z",
    "lane_note": "launched 4:23 PM; also folds HARNESS-DANA-KNOWLEDGE-FACTS answers into scenario-a; lane b4bb1ad (cut from the OLD tip 8b44d44 despite its report) merged as 8213dbc 4:38 PM; gate on main rehearse 285/285, full 1442/1442 (79 files), typecheck clean"
+  },
+  {
+   "id": "HARNESS-CLOSE-LINE-GRADE",
+   "title": "harness: FAIL close_line_not_spoken when the call is server-closed without the verbatim close sentence in the agent transcript; report line; rehearse:regrade utility",
+   "files": [
+    "scripts/rehearse/**"
+   ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-14T03:25:33.704Z",
+   "lane_note": "launched 10:27 PM; lane 5724a45 cherry-picked to main as ea294d8 + 8120377 (npm script) 10:43 PM; gate running. FINDING: no FREEZE run ever spoke its close line (12 reports Sep 3-13); only STAGE did."
   }
  ]
 }
