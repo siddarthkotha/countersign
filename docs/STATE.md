@@ -1,70 +1,60 @@
 # Countersign, session snapshot (overwritten at every close; never appended)
 
-Last write: Sunday 2026-09-13, 11:05 PM CDT (Day 6, which ran 2:34 PM to 11:05 PM; autopilot ON
-from 10:21 PM by founder word; this snapshot written on autopilot, founder has not said close).
+Last write: Monday 2026-09-14, 6:43 PM CDT (Day 7; founder present; autopilot toggled on and
+off during the day). Three fix lanes may still be in flight when the next session opens: see
+"Lanes in flight" below and check them FIRST.
 
 ## The one-paragraph version
 
-Day 6 was the day the founder's own hour exposed what forty green rehearsals had hidden. His
-Dana call hit a question the run sheet did not carry; his Miller call heard "one moment while I
-verify" and then silence, then a hang-up. His screen recording proved the closing sentence was
-never spoken. Root cause: the server changed the agent's instructions mid-turn but never asked
-AssemblyAI to speak (their API needs a separate reply.create), and the hang-up guard mistook the
-holding line for the goodbye. A harness sweep then proved NO fraud-path run since Sep 3 had ever
-spoken its goodbye; only the honest path had. Three server attempts: the first two labelled
-replies and failed review or failed live; the third confirms the goodbye by reading the agent's
-own transcript for the verbatim close sentence, re-requests it up to three times, and only then
-hangs up. Deploy 27 carries it. Live proof under the new grading: Miller 3 of 3, Dana 1 of 1,
-goodbye spoken every time. The harness now fails any server-closed call without the goodbye and
-has a patient-caller mode that waits like a person. Also landed: the one-command Friday sim
-runner, three video artboards, two engine deadlock fixes (a never-stated critical field now gets
-asked for, capped and escalated), and the Dana knowledge answers in the run sheet and harness.
+Day 7 turned the goodbye bug into a way of working. Rounds 4 and 5 of the server close path
+landed (time-budgeted retries, transcript-armed hang-up, idle-timeout goodbye, no speech after
+the goodbye), then the question path got the same treatment (re-ask when the model swapped a
+holding line for the question; imperative questions count; an issued action follows the
+transcript). The harness grew free-play mode (an improvising caller with random pauses), waits
+for the server's own hang-up, grades the goodbye, dedupes repeated questions and can regrade
+stored reports. The founder set the definition of done (a judge in their own words, any pauses,
+any pronunciation, every case), killed the simulator idea with two external panel seats, ruled
+live tests only, and approved about five hours of credit. The AssemblyAI docs were fetched and
+settle the design: no verbatim-speech primitive exists; the server orders the moments and
+verifies the transcript; the next design step (E) is to let the automatic reply be a holding
+beat and send one instructed reply.create for the engine's line. The first free-play batch
+(deploy 30) scored 21 of 30 on verdict after regrade; three product defects and six harness
+defects were classified and handed to lanes. Push 31 is live (7e24cf4).
 
-## PROVEN (checked against real sources at this write)
+## PROVEN at this write
+- Live: 7e24cf4 served 6:34 PM, /health ok. Pushes 26 to 31 today.
+- Gate on main at 4014872 (last code tip before docs): rehearse 437/437, full 1674/1674 (88
+  files), typecheck clean, corpus 128/128.
+- Credits (founder dashboard 5:34 PM): 2.9 h used, $86.92 left, about $4.50 per hour. The
+  free-play batch used about 35 min (harness wall clock).
+- The standing plan: docs/TEST-PLAN.md (rulings, docs quotes, design E, milestones, pass
+  criteria, cases incl. case 11, commands, findings, next-session order).
+- Panel record: docs/PANEL-2026-09-14-TEST-PLAN.md.
 
-- Live: 1befbb2 served at 10:55 PM, /health ok. Pushes 26 (10:20 PM, 21 commits) and 27.
-- Gate on main at 0e3ce23 (code tip): 1508 tests across 81 files, typecheck clean, corpus
-  128/128, server 395/395, rehearse 329/329. Commits after it are docs and one scenario file.
-- Live proof on deploy 27: scripts/rehearse/reports/2026-09-13T22-56-35, T22-57-34, T22-58-41
-  (miller-patient, FREEZE, Close line: spoken) and T23-00-15 (dana-patient, STAGE, spoken).
-- Regrade sweep (npm run rehearse:regrade over every stored report): 24 former passes across
-  seven fraud-path scenarios flip to close_line_not_spoken; Dana and out-of-scope hold. The G5
-  "40 rehearsals" count is therefore void and must be rebuilt.
-- Founder's recording evidence: session 84ddf47a frames at 75 s and 105 s (scratchpad only).
-- Credits tonight ESTIMATE ~5 min (harness wall clock).
-
-## What is on main and live since Day 5 (all gated; reviewed where code)
-
-sim:friday runner (--dry-run); docs/video artboards + BRIEF "In 2024"; engine
-ELICIT_MISSING_CRITICAL (spoken verbatim, counts toward the row-13 cap); harness patient-caller
-mode, close-line grading, regrade tool, miller-patient / dana-patient / miller-silent-after-
-amount scenarios, Dana knowledge answers; server reply.create at tick end and after reply.done,
-CONTAIN_NO_DISCLOSURE as a holding goal, transcript-confirmed CLOSE with bounded close_retry.
+## Lanes in flight at this write (check with git branch --list 'worktree-agent-*' and the log)
+- P1 server (Sonnet): sealed verdict must never move; goodbye is the sealed verdict's sentence;
+  idle end must not precede the goodbye. Evidence: reports T18-22-25 structuring, T17-58-23
+  barge-in.
+- P2+P3 engine (Sonnet): corrected value wins in readbacks and knowledge checks (case 11);
+  verbatim elicit for a request missing its amount or vendor. Evidence: T18-05-49, T18-06-55.
+- Harness (Haiku): holding prefix + question is a question; hang-up and silent personas state
+  the request first; injection persona says the injection line.
+If a lane's commit exists on its worktree branch: cherry-pick onto main (merge is rail-denied
+on autopilot), gate (npm test, typecheck, corpus), scoped review for server/engine changes,
+then push and verify /version.
 
 ## Open, in the order to take them
-
-1. Founder: re-record the two calls (docs/VIDEO-RECORDING-PLAN.md, Shot B now carries the
-   knowledge answers, Shot C step 6 rewritten). Estimate 30 founder-minutes, not 60.
-2. G5 rebuild (founder credits call): `npm run sim:friday -- --runs 6 --max-minutes 45`.
-3. POST-GOODBYE-STRAY-LINE (cosmetic; proposal in the log 11:02 PM).
-4. Sep 18 judge sim; pre-flip founder items; Render env items; the "after the sim" holds.
+See docs/TEST-PLAN.md "Next session, in this order". Founder items unchanged: re-record (with
+docs/PLAY-SHEET.md), Render env items, pre-flip items, the Sep 18 judge sim.
 
 ## Lessons written to memory today
-
-Prove the script through the harness with the founder's exact words, with a caller that pauses,
-the same day, before any founder-time block. Lanes must state their base commit and only the
-re-gate on main is proof (two lanes tonight claimed a newer base than they had). A lane silent
-for an hour is hung: stop and re-dispatch. Merges are rail-denied on autopilot: cherry-pick.
-
-## How to test without being the tester
-
-`npm run rehearse -- --scenario miller-patient --url https://countersign-bf8q.onrender.com`
-(credits, ~1 min); `npm run rehearse:regrade -- <report.md>` re-grades a stored run for free;
-`npm run sim:friday -- --dry-run` prints the Friday plan without spending anything.
+Done means any judge (feedback-done-means-any-judge). Prove the script before founder time.
+Lanes claim newer bases than they have; only the re-gate on main is proof. Haiku is the default
+lane model (hook enforces SONNET-JUSTIFIED). Live is the only ground truth for speech; the
+AssemblyAI docs settle the primitives (see the panel record).
 
 ## Next session
-
-"Day 7 resume: read docs/STATE.md and the tail of docs/AUTOPILOT_LOG.md. The goodbye bug is fixed
-and proven live on deploy 27; the founder's re-record is the first founder item; the G5 count must
-be rebuilt with the close-line grading; do not trust any rehearsal report older than 2026-09-13
-10:43 PM as a pass."
+"Day 8 resume: read docs/TEST-PLAN.md first, then docs/STATE.md and the tail of
+docs/AUTOPILOT_LOG.md. Land any evening lane still on its branch, gate, review, push, verify.
+Then design E test-first, then the 30 min live confirmation, then the 45 min free-play batch.
+Live tests only; log every minute; a fix that fails twice live is parked."
