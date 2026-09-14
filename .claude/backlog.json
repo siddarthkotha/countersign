@@ -2147,6 +2147,17 @@
    "held_because": "lane f6ec66c done and green (rehearse 431/431); cherry-pick after the batch so grading does not change mid-batch",
    "agent_id": "",
    "started_at": ""
+  },
+  {
+   "id": "HARNESS-GRADER-DEDUPE",
+   "title": "free-play grader: consecutive identical questions count once, post-verdict questions ignored, unanswered questions fail only when the agent gave no chance (<1.5 s); regrade recomputes",
+   "files": [
+    "scripts/rehearse/**"
+   ],
+   "status": "held",
+   "held_because": "lane b29597d done and green (Haiku); cherry-pick with the free-play wait-hangup fix after the batch, then regrade the whole batch",
+   "agent_id": "",
+   "started_at": ""
   }
  ]
 }
