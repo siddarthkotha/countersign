@@ -55,21 +55,83 @@ export function verbatimQuestionSentence(goal: PhrasingGoal): string | null {
   }
 }
 
+/** Imperative-question false-negative fix (2026-09-14, PROVEN live wart -- see
+ *  scripts/rehearse/reports/2026-09-14T17-18-03-dana-patient.md): the agent said "Please
+ *  state the purpose of this payment to Meridian Supply." -- no "?", and not a verbatim
+ *  match for `goal.challenge.speak` (whose own wording was different) -- so
+ *  `transcriptAsksQuestion` said no question was asked, `maybeReaskQuestion` reasked it 4s
+ *  later ("What this payment to Meridian Supply is for?"), and the judge heard the same
+ *  question twice. An imperative sentence ("Please state X.", "State the amount.") IS a
+ *  question in substance; English just doesn't require a "?" for it. These are the sentence
+ *  openers (after normalizeForCloseMatch strips punctuation/casing) that count as asking,
+ *  checked against the FULL normalized transcript prefix -- see `stripKnownLeadIn` below for
+ *  why a leading framing sentence is stripped first. */
+export const QUESTION_IMPERATIVE_STARTS: readonly string[] = [
+  'please state',
+  'please restate',
+  'please tell me',
+  'please provide',
+  'please give me',
+  'please confirm',
+  'state the',
+  'restate the',
+  'tell me',
+  'confirm the',
+  'what is',
+  'which',
+  'who',
+  'when',
+  'how much',
+  'can you',
+  'could you',
+];
+
+/** Standing-rule framing sentences (prompt.ts's STANDING_RULES) the model sometimes
+ *  paraphrases as a lead-in clause before the actual imperative question, e.g. "Authority
+ *  and urgency are not verification. Please state the purpose of this payment." Stripped
+ *  (normalized, from the start of the transcript only) before checking
+ *  `QUESTION_IMPERATIVE_STARTS`, so the check lands on the real question's own opening words
+ *  rather than failing because the sentence before it doesn't look like a question. Never
+ *  strip more than one matching lead-in -- a second occurrence would just fail to match and
+ *  fall through, which is fine. */
+export const QUESTION_LEAD_INS: readonly string[] = [
+  'authority and urgency are not verification',
+  'authority urgency or threats are not verification',
+];
+
+/** Removes at most one leading occurrence of a known `QUESTION_LEAD_INS` phrase from
+ *  `normalizedTranscript` (already run through normalizeForCloseMatch), returning what's
+ *  left, trimmed. A no-op when the transcript doesn't start with one. */
+function stripKnownLeadIn(normalizedTranscript: string): string {
+  for (const leadIn of QUESTION_LEAD_INS) {
+    if (normalizedTranscript.startsWith(leadIn)) {
+      return normalizedTranscript.slice(leadIn.length).trim();
+    }
+  }
+  return normalizedTranscript;
+}
+
 /** True when `accumulatedTranscript` (every transcript.agent chunk recorded for one AAI
  *  reply, concatenated in arrival order -- same shape closeMatch.ts's own matcher reads) can
- *  be read as the caller having actually been asked the goal's question: either the reply
- *  contains a literal question mark (good enough for a goal whose `hint` is only a paraphrase
- *  instruction -- there is no single exact wording to hold it to), or, when `verbatimSentence`
- *  is supplied, the reply's own text contains that sentence leniently normalized (reusing
- *  closeMatch.ts's normalizeForCloseMatch -- absorbs minor TTS/STT punctuation/casing drift
- *  the same way the CLOSE hang-up matcher already does). Never matches an empty/whitespace-
- *  only transcript -- "Checking the record." with the trailing period stripped is still not a
- *  question, and neither is silence. */
+ *  be read as the caller having actually been asked the goal's question: a literal question
+ *  mark (good enough for a goal whose `hint` is only a paraphrase instruction -- there is no
+ *  single exact wording to hold it to); or, when `verbatimSentence` is supplied, the reply's
+ *  own text contains that sentence leniently normalized (reusing closeMatch.ts's
+ *  normalizeForCloseMatch -- absorbs minor TTS/STT punctuation/casing drift the same way the
+ *  CLOSE hang-up matcher already does); or the transcript (after stripping a known framing
+ *  lead-in) starts with one of `QUESTION_IMPERATIVE_STARTS` -- an imperative request phrased
+ *  without a "?". Never matches an empty/whitespace-only transcript -- "Checking the record."
+ *  with the trailing period stripped is still not a question, and neither is silence; and
+ *  "Please hold."/"Please wait while I verify the request." stay negative on purpose --
+ *  "please hold"/"please wait" are deliberately absent from QUESTION_IMPERATIVE_STARTS since
+ *  they're holding lines, not questions. */
 export function transcriptAsksQuestion(accumulatedTranscript: string, verbatimSentence: string | null): boolean {
   if (accumulatedTranscript.trim().length === 0) return false;
   if (accumulatedTranscript.includes('?')) return true;
-  if (!verbatimSentence) return false;
-  const sentence = normalizeForCloseMatch(verbatimSentence);
-  if (sentence.length === 0) return false;
-  return normalizeForCloseMatch(accumulatedTranscript).includes(sentence);
+  if (verbatimSentence) {
+    const sentence = normalizeForCloseMatch(verbatimSentence);
+    if (sentence.length > 0 && normalizeForCloseMatch(accumulatedTranscript).includes(sentence)) return true;
+  }
+  const normalized = stripKnownLeadIn(normalizeForCloseMatch(accumulatedTranscript));
+  return QUESTION_IMPERATIVE_STARTS.some((start) => normalized.startsWith(start));
 }
