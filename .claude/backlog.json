@@ -1105,7 +1105,7 @@
     "packages/server/src/call/prompt.ts"
    ],
    "status": "held",
-   "held_because": "orchestrator recommendation 3:58 PM: NOT now; revisit only if the judge sim flags question phrasing. Founder asked to simplify; this is the simplified call",
+   "held_because": "orchestrator recommendation 3:58 PM: NOT now; revisit only if the judge sim flags question phrasing. Founder asked to simplify; this is the simplified call | NEW EVIDENCE 2026-09-14 3:47 PM: with the paraphrased challenge prompt the model substituted a holding line for the question (miller-patient T15-47-29); the server-side re-ask covers it without reopening the ruling; bring the flip as one decision with that report",
    "agent_id": "",
    "started_at": ""
   },
@@ -2083,11 +2083,11 @@
    "files": [
     "packages/server/**"
    ],
-   "status": "running",
+   "status": "done",
    "held_because": "",
-   "agent_id": "aff2d1035104464c3",
+   "agent_id": "",
    "started_at": "2026-09-14T20:28:00Z",
-   "lane_note": "launched 3:28 PM"
+   "lane_note": "launched 3:28 PM; on main and gated (630a0b1 / 2f23302 / e4b26c3+bf27a81)"
   },
   {
    "id": "HARNESS-FREE-PLAY",
@@ -2095,11 +2095,11 @@
    "files": [
     "scripts/rehearse/**"
    ],
-   "status": "running",
+   "status": "done",
    "held_because": "",
-   "agent_id": "a7899aaf32e15ea0f",
+   "agent_id": "",
    "started_at": "2026-09-14T20:26:00Z",
-   "lane_note": "launched 3:26 PM; merge after the hang-up fix"
+   "lane_note": "launched 3:26 PM; merge after the hang-up fix; on main and gated (630a0b1 / 2f23302 / e4b26c3+bf27a81)"
   },
   {
    "id": "HARNESS-WAIT-FOR-SERVER-HANGUP",
@@ -2107,11 +2107,34 @@
    "files": [
     "scripts/rehearse/**"
    ],
+   "status": "done",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-14T20:22:00Z",
+   "lane_note": "launched 3:22 PM; on main and gated (630a0b1 / 2f23302 / e4b26c3+bf27a81)"
+  },
+  {
+   "id": "HARNESS-RECORD-WHILE-WAITING",
+   "title": "harness: keep recording agent transcript lines during waitForServerHangup (goodbye graded NOT spoken although the server bundle shows it)",
+   "files": [
+    "scripts/rehearse/**"
+   ],
    "status": "running",
    "held_because": "",
-   "agent_id": "a2d9878feff51e1f1",
-   "started_at": "2026-09-14T20:22:00Z",
-   "lane_note": "launched 3:22 PM"
+   "agent_id": "ac109dba301ffc140",
+   "started_at": "2026-09-14T21:03:00Z"
+  },
+  {
+   "id": "SERVER-QUESTION-ASSURED",
+   "title": "server: verify a question goal's reply actually asked the question; one-shot re-ask (question_not_asked) capped at 2; model said 'Checking the record.' instead of the challenge and the caller idled out",
+   "files": [
+    "packages/server/**"
+   ],
+   "status": "running",
+   "held_because": "",
+   "agent_id": "",
+   "started_at": "2026-09-14T21:05:00Z",
+   "lane_note": "PROVEN from report 2026-09-14T15-47-29-miller-patient"
   }
  ]
 }
