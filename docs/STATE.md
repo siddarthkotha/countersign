@@ -1,92 +1,70 @@
 # Countersign, session snapshot (overwritten at every close; never appended)
 
-Last close: Saturday 2026-09-12, 10:27 AM CDT (Day 5, which ran Friday 3:21 PM to Saturday
-10:27 AM with autopilot from 8:48 PM to 12:08 AM). Autopilot is OFF.
+Last write: Sunday 2026-09-13, 11:05 PM CDT (Day 6, which ran 2:34 PM to 11:05 PM; autopilot ON
+from 10:21 PM by founder word; this snapshot written on autopilot, founder has not said close).
 
 ## The one-paragraph version
 
-Day 5 turned the demo from "proven twice" into "proven across nine scenarios": 25 pushes, all
-gated on main (three test runs, typecheck, corpus replay, separate review) and verified live.
-The agent now greets first, asks its questions, says one exact closing sentence per outcome and
-hangs up itself. Fraud froze 3 of 4 times in a 34-run batch; identity switches now resolve and
-freeze (founder option B, then a double-switch follow-up); one wrong answer escalates instead of
-freezing; a readback is re-asked at most three times before a human callback; an exact
-restatement confirms a readback; a stray "actually" cannot launder a doubled amount; barge-in
-passes end to end with a real interrupted line. The credits-exhausted replay mode the brief
-required now exists, with a token-gated admin reset. Judge sim 1 ran twice (click-driven judge
-cannot speak; scores 7/5/6/8 then 7/6/6/8) and its three fixes are done or decided. Business
-line (FBI 2025 report) is on the landing page and README; cover chosen (frozen variant, real
-transcript lines). Pre-flip checklist 6 of 10 done; every cross-project reference is gone.
+Day 6 was the day the founder's own hour exposed what forty green rehearsals had hidden. His
+Dana call hit a question the run sheet did not carry; his Miller call heard "one moment while I
+verify" and then silence, then a hang-up. His screen recording proved the closing sentence was
+never spoken. Root cause: the server changed the agent's instructions mid-turn but never asked
+AssemblyAI to speak (their API needs a separate reply.create), and the hang-up guard mistook the
+holding line for the goodbye. A harness sweep then proved NO fraud-path run since Sep 3 had ever
+spoken its goodbye; only the honest path had. Three server attempts: the first two labelled
+replies and failed review or failed live; the third confirms the goodbye by reading the agent's
+own transcript for the verbatim close sentence, re-requests it up to three times, and only then
+hangs up. Deploy 27 carries it. Live proof under the new grading: Miller 3 of 3, Dana 1 of 1,
+goodbye spoken every time. The harness now fails any server-closed call without the goodbye and
+has a patient-caller mode that waits like a person. Also landed: the one-command Friday sim
+runner, three video artboards, two engine deadlock fixes (a never-stated critical field now gets
+asked for, capped and escalated), and the Dana knowledge answers in the run sheet and harness.
 
-## PROVEN (checked against real sources at close)
+## PROVEN (checked against real sources at this write)
 
-- Live: a04241f served at 10:10 AM, /health ok, live_calls available. 70 commits since the Day
-  4 close; pushes 10 to 25 today, each with CI green.
-- Close gate 10:26 AM: 1380 tests across 77 files, typecheck clean.
-- Corpus: 25 recordings replay exactly (128 assertions); five are hand-built and labelled so.
-- Batch 2026-09-11 (scripts/rehearse/reports/batch-2026-09-11.log): 34 runs, 22 pass, 62 min;
-  per scenario in docs/AUTOPILOT_LOG.md 10:51 PM. After the fixes: barge-in PASS (12:06 AM,
-  interrupted greeting, STAGE 100.3 s), identity-switch FREEZE 110 s (10:44 PM), single-wrong-
-  answer ESCALATE (10:35 PM). 59 rehearsal reports on disk.
-- Latency (docs/LATENCY.md, ESTIMATE, synthetic caller, harness wall clock): perceived caller-
-  to-agent gap p50 622 ms, p95 1774 ms, n=76 turns. The "9 ms" relay column is labelled as such.
-- STT mishears across ~45 reports: account digits 1/36, amounts 0/72.
-- Gates: G1, G2 met; G3 (25 corpus replays) met; G4 by test; G5 partial (40 rehearsals on the
-  deployed site, latency table exists; needs 10+ more incl. socket-drop); G6 not started (plan
-  in docs/VIDEO-RECORDING-PLAN.md, 35 to 40 founder-minutes).
+- Live: 1befbb2 served at 10:55 PM, /health ok. Pushes 26 (10:20 PM, 21 commits) and 27.
+- Gate on main at 0e3ce23 (code tip): 1508 tests across 81 files, typecheck clean, corpus
+  128/128, server 395/395, rehearse 329/329. Commits after it are docs and one scenario file.
+- Live proof on deploy 27: scripts/rehearse/reports/2026-09-13T22-56-35, T22-57-34, T22-58-41
+  (miller-patient, FREEZE, Close line: spoken) and T23-00-15 (dana-patient, STAGE, spoken).
+- Regrade sweep (npm run rehearse:regrade over every stored report): 24 former passes across
+  seven fraud-path scenarios flip to close_line_not_spoken; Dana and out-of-scope hold. The G5
+  "40 rehearsals" count is therefore void and must be rebuilt.
+- Founder's recording evidence: session 84ddf47a frames at 75 s and 105 s (scratchpad only).
+- Credits tonight ESTIMATE ~5 min (harness wall clock).
 
-## What is on main and live (highlights, all reviewed)
+## What is on main and live since Day 5 (all gated; reviewed where code)
 
-Greeting first + GREET no-double; CLOSE verbatim + server hang-up (reply_id gated); standing
-rule: never announce an outcome; RE_ELICIT_AFTER_SWITCH verbatim; identity switch option B +
-chain; readback exact restatement (spoken numbers, spaced digits); correction-cue lookback with
-the magnitude gate; readback re-ask cap (new row 13; old 13 is 14, old 14 is 15); RT-9b escrow
-scoping; speakable challenge sentences (engine only, prompt still paraphrases); Marcus/Elena
-seed facts; seed-budget guard; credits-exhausted mode (402/keyword, 3-in-10-min counter,
-COUNTERSIGN_ADMIN_TOKEN reset, COUNTERSIGN_DEBUG_HOOKS drop route); NO_ACTION banner; link-lost
-"nothing staged or frozen" message; jargon rewrites; FBI business line; covers; latency table +
-batch runner; barge-in anchored to reply audio and retargeted at the greeting; scenario matcher
-with and/unless groups; recorder logs session_config_updated and greeting_configured; Replay
-test de-flaked (proven cause); hooks and CLAUDE.md redacted.
+sim:friday runner (--dry-run); docs/video artboards + BRIEF "In 2024"; engine
+ELICIT_MISSING_CRITICAL (spoken verbatim, counts toward the row-13 cap); harness patient-caller
+mode, close-line grading, regrade tool, miller-patient / dana-patient / miller-silent-after-
+amount scenarios, Dana knowledge answers; server reply.create at tick end and after reply.done,
+CONTAIN_NO_DISCLOSURE as a holding goal, transcript-confirmed CLOSE with bounded close_retry.
 
 ## Open, in the order to take them
 
-1. Video (G6): founder session, docs/VIDEO-RECORDING-PLAN.md. Engine is final for the take.
-2. Sep 18 judge sim: agent definition now scores the live axis from harness reports; build
-   SIM-ONE-COMMAND (batch + latency table + report list) first; run the batch that morning.
-3. G5: 10+ more rehearsals incl. socket-drop-resume (needs COUNTERSIGN_DEBUG_HOOKS=1 on Render
-   for the window) and story-shift/pressure variants.
-4. Pre-flip founder items: positioning line, submission form (cover: cover-2-final.png), commit
-   8afaf2a reword, .env.example COUNTERSIGN_DEBUG_HOOKS line (pre-commit hook blocks .env*).
-5. Founder access items: COUNTERSIGN_ADMIN_TOKEN in Render; decide TOOLS-NOT-OFFERED (an
-   AssemblyAI judge sees the tool feature unused; README carries the trade-off).
-6. Quiet-moment follow-ups: INTERRUPTED-PROBE-LOST, WORKTREE-INSTALL hook, CHALLENGE-VERBATIM-
-   FLIP (ruled not now), REPLAY-TRUE-RESUME, CRIT-partial-tool-failure banner (visual).
+1. Founder: re-record the two calls (docs/VIDEO-RECORDING-PLAN.md, Shot B now carries the
+   knowledge answers, Shot C step 6 rewritten). Estimate 30 founder-minutes, not 60.
+2. G5 rebuild (founder credits call): `npm run sim:friday -- --runs 6 --max-minutes 45`.
+3. POST-GOODBYE-STRAY-LINE (cosmetic; proposal in the log 11:02 PM).
+4. Sep 18 judge sim; pre-flip founder items; Render env items; the "after the sim" holds.
 
-## Housekeeping
+## Lessons written to memory today
 
-62 git worktrees and 4 stash entries (all already applied) await the founder's delete word.
-Lane rules learned this session (memory): lanes must npm install in their worktree and confirm
-the base commit; only the re-gate on main is proof.
+Prove the script through the harness with the founder's exact words, with a caller that pauses,
+the same day, before any founder-time block. Lanes must state their base commit and only the
+re-gate on main is proof (two lanes tonight claimed a newer base than they had). A lane silent
+for an hour is hung: stop and re-dispatch. Merges are rail-denied on autopilot: cherry-pick.
 
 ## How to test without being the tester
 
-`npm run rehearse -- --scenario <name> --url https://countersign-bf8q.onrender.com` (credits);
-`npm run rehearse:batch -- --url <url> --runs 30 --scenarios a,b,c --max-minutes 60`;
-`npm run latency:table` regenerates docs/LATENCY.md from the bundles on disk.
-
-Friday judge-sim morning, one command (SIM-ONE-COMMAND): `npm run sim:friday -- [--url <url>]
-[--runs <n>] [--max-minutes <m>]` runs the five judge-sim scenarios (scenario-a-dana-
-legitimate, scenario-b-miller-fraud, judge-out-of-scope, barge-in-interrupt, identity-switch --
-the exact set ~/.claude/agents/judge-sim.md reads) through rehearse:batch, regenerates
-docs/LATENCY.md, then prints the report files that run produced with each one's scenario and
-verdict, so the judge-sim agent can read them straight off. `--runs` is PER scenario (default
-1); `--max-minutes` defaults to 15. Add `--dry-run` to see the exact plan with no network call,
-no spawned process, and no credits spent.
+`npm run rehearse -- --scenario miller-patient --url https://countersign-bf8q.onrender.com`
+(credits, ~1 min); `npm run rehearse:regrade -- <report.md>` re-grades a stored run for free;
+`npm run sim:friday -- --dry-run` prints the Friday plan without spending anything.
 
 ## Next session
 
-"Day 6 resume: read docs/STATE.md and the tail of docs/AUTOPILOT_LOG.md. Engine is final for
-the video; first job is SIM-ONE-COMMAND and the G5 rehearsal top-up, then the founder's video
-session from docs/VIDEO-RECORDING-PLAN.md. Do not re-prove what the 2026-09-11 batch and
-reports already prove."
+"Day 7 resume: read docs/STATE.md and the tail of docs/AUTOPILOT_LOG.md. The goodbye bug is fixed
+and proven live on deploy 27; the founder's re-record is the first founder item; the G5 count must
+be rebuilt with the close-line grading; do not trust any rehearsal report older than 2026-09-13
+10:43 PM as a pass."
