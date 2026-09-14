@@ -1509,17 +1509,24 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       // than stacking a second one. Since 'tools-1' (the reply that actually lands the close
       // line) starts and completes before that single pending retry ever fires, the retry is
       // superseded and cancelled the moment the match is found -- so this drive costs exactly
-      // TWO reply.create for the whole call: the question-reask fix's own send (2026-09-14 --
-      // this same corpus text needs a SECOND SEED_FACT challenge that the scripted a2 line
-      // never actually asks, so ONE `question_not_asked` reply.create goes out before CLOSE is
-      // ever reached -- see call/session.ts's `maybeReaskQuestion`) plus the original CLOSE
-      // tick_end send, not three: the old "cap reached at 3" framing no longer applies (there
-      // is no cap), and coalescing + supersession are what actually decide the count here, not
-      // exhaustion.
+      // ONE reply.create for the whole call (the original tick_end send), not three: the old
+      // "cap reached at 3" framing no longer applies (there is no cap), and coalescing +
+      // supersession are what actually decide the count here, not exhaustion.
+      //
+      // Question-reask fix (2026-09-14, spaced round): a2's own scripted line ("Pulling the
+      // Hartwell file now…") never actually asks the SECOND SEED_FACT challenge the engine
+      // has already advanced to by the time a2 completes -- `maybeReaskQuestion` DOES arm a
+      // reask timer for it (call/session.ts), but that timer needs a real
+      // CLOSE_RETRY_MIN_GAP_MS (400ms) of (fake) elapsed time to fire, and nothing in this
+      // synchronous drive ever calls `vi.advanceTimersByTime` before c3 pushes the call all
+      // the way to FREEZE/SEALED/CLOSE -- so the armed-but-never-fired reask timer contributes
+      // zero reply.create here (see `armQuestionReaskTimer`'s own doc comment: a stale-goal
+      // check at fire time would have cancelled it anyway, since CLOSE is nowhere near a
+      // QUESTION_GOAL). The count below is therefore unaffected by the reask fix entirely.
       driveScenarioBThroughA4(session, aai, clock);
       expect(session.last?.state).toBe('SEALED');
       expect(session.last?.goal.code).toBe('CLOSE');
-      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(2);
+      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
       expect(sent.some((e) => e.type === 'ended')).toBe(false); // not ended before 'tools-1' completes
 
       // Drive 'tools-1' (already speaking, started inside the helper) to completion, this
@@ -1532,10 +1539,13 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
 
       // Advancing past the retry gap (400ms) proves the coalesced a3/a4 retry was actually
-      // cancelled, not merely not-yet-due: it does not fire a spurious extra send here.
+      // cancelled, not merely not-yet-due: it does not fire a spurious extra send here. It
+      // also elapses the (never-refreshed) reask timer armed above -- its own fire-time check
+      // finds the goal no longer matches (CLOSE, not the ASK_CHALLENGE rendering it was armed
+      // for) and cancels silently, contributing nothing here either.
       vi.advanceTimersByTime(1500);
       expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
-      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(2);
+      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
     });
 
     it("(d) GREET is a real exclusion branch, not a coincidence of nothing else happening yet: zero reply.create before the caller's first turn, one once a genuinely force-spoken goal is reached in the SAME session (Important 5, 2026-09-13 review)", () => {
@@ -1558,12 +1568,12 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       expect(session.last?.goal.code).toBe('CLOSE');
       // Round 4 (2026-09-14): this test uses REAL timers (no `vi.useFakeTimers()`), and a
       // mismatch's retry now waits behind a CLOSE_RETRY_MIN_GAP_MS (400ms) timer instead of
-      // sending synchronously -- see test (c) above for the full mechanism. Since this whole
-      // drive runs synchronously with no real wall-clock delay, that retry timer never
-      // actually fires within the test, so only the ORIGINAL tick_end send (plus, since the
-      // question-reask fix, 2026-09-14: one earlier `question_not_asked` send mid-drive, for
-      // the SAME corpus gap test (c) above documents -- a second SEED_FACT challenge this
-      // scripted corpus text never actually asks) has gone out by the time
+      // sending synchronously -- see test (c) above for the full mechanism. The question-reask
+      // fix's own spaced timer (call/session.ts's `armQuestionReaskTimer`, same 400ms gap) is
+      // armed mid-drive for the same reason test (c) above documents (a2's scripted line never
+      // asks the engine's second SEED_FACT challenge), but neither timer gets a real 400ms of
+      // elapsed wall-clock time within this synchronous drive, so neither ever actually fires.
+      // Only the ORIGINAL tick_end send for CLOSE has gone out by the time
       // `driveScenarioBThroughA4` returns. This test's own subject (GREET is a real exclusion,
       // not a false pass from nothing having happened yet) only needs "more than zero", which
       // this still proves regardless of the exact count.
@@ -2478,7 +2488,18 @@ describe('CallSession — ELICIT_MISSING_CRITICAL goal completion logs an elicit
 // `recordGoalCompletionAction` is above -- this isolates the reask mechanism itself, not how
 // CHALLENGE/CONSISTENCY_CHECK is reached live (already proven by the Scenario A/B live tests
 // at the top of this file).
+// Review fix (2026-09-15, Important -- FAIL on the first cut of this feature): every test
+// below now drives fake timers past CLOSE_RETRY_MIN_GAP_MS (400ms) to see a reask actually
+// sent -- `maybeReaskQuestion` no longer sends synchronously (see its own doc comment and
+// `armQuestionReaskTimer`'s for why: an instant reply.create right after reply.done is
+// PROVEN, from the round-4 CLOSE-retry live bundles, to sometimes land on AssemblyAI still
+// mid-turn and come back empty, and a reask has only 2 attempts total to spend, unlike
+// CLOSE's uncapped retries).
 describe('CallSession — question-reask: a completed reply that never asked the goal\'s question gets one more chance (PROVEN live failure, 2026-09-14T15-47-29-miller-patient)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   function sessionInternals(session: CallSession) {
     return session as unknown as {
       maybeReaskQuestion: (replyId: string, status: string) => void;
@@ -2486,8 +2507,11 @@ describe('CallSession — question-reask: a completed reply that never asked the
       replyTranscripts: Map<string, string>;
       replyCreateAwaitingStart: boolean;
       goodbyeConfirmed: boolean;
+      questionReaskCount: number;
     };
   }
+
+  const REASK_GAP_MS = 400; // CallSession.CLOSE_RETRY_MIN_GAP_MS, reused for the reask timer
 
   const CHALLENGE_SPEAK = 'Just to confirm, this transfer goes to Northgate Partners. Is that correct?';
 
@@ -2566,7 +2590,8 @@ describe('CallSession — question-reask: a completed reply that never asked the
     };
   }
 
-  it('(a) ASK_CHALLENGE: a non-question reply gets one reask carrying the challenge\'s speakable sentence verbatim; a later reply containing "?" sends nothing further', () => {
+  it('(a) ASK_CHALLENGE: a non-question reply gets one reask carrying the challenge\'s speakable sentence verbatim, spaced 400ms after reply.done (never synchronous); a later reply containing "?" sends nothing further', () => {
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -2581,7 +2606,18 @@ describe('CallSession — question-reask: a completed reply that never asked the
     clock.now = 33741;
     internals.maybeReaskQuestion('a1', 'completed');
 
+    // Review requirement (a): nothing sent synchronously at reply.done -- not even one tick
+    // before the spacing gap elapses.
     let replyCreateMsgs = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    expect(replyCreateMsgs).toHaveLength(0);
+    expect(diagEvents.some((e) => e.kind === 'question_reask_sent')).toBe(false);
+    vi.advanceTimersByTime(REASK_GAP_MS - 1);
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+
+    // The gap elapses -- exactly one reply.create, carrying the engine's own composed
+    // sentence verbatim.
+    vi.advanceTimersByTime(1);
+    replyCreateMsgs = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
     expect(replyCreateMsgs).toHaveLength(1);
     const msg = replyCreateMsgs[0] as { type: string; instructions?: string };
     expect(msg.instructions).toBe(`Say exactly this and nothing else: "${CHALLENGE_SPEAK}"`);
@@ -2597,6 +2633,7 @@ describe('CallSession — question-reask: a completed reply that never asked the
 
     clock.now = 37041;
     internals.maybeReaskQuestion('a2', 'completed');
+    vi.advanceTimersByTime(REASK_GAP_MS);
 
     replyCreateMsgs = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
     expect(replyCreateMsgs).toHaveLength(1); // nothing further sent
@@ -2604,7 +2641,103 @@ describe('CallSession — question-reask: a completed reply that never asked the
     expect(reaskDiags).toHaveLength(1);
   });
 
-  it('(b) READBACK: a reply that actually says the readback sentence sends nothing', () => {
+  it('an empty reply after the reask does not consume the attempt counter, and a further spaced reask follows once a real (non-empty) reply is also non-question', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newQuestionSession(clock, aai, sent, diagEvents);
+    const internals = sessionInternals(session);
+    const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    const reaskDiags = () => diagEvents.filter((e) => e.kind === 'question_reask_sent');
+
+    forceAskChallenge(session);
+
+    // a1: non-question, non-empty -- the first reask fires normally, attempt 1.
+    internals.replyGoalAtStart.set('a1', 'ASK_CHALLENGE');
+    internals.replyTranscripts.set('a1', 'Checking the record.');
+    internals.maybeReaskQuestion('a1', 'completed');
+    vi.advanceTimersByTime(REASK_GAP_MS);
+    expect(replyCreates()).toHaveLength(1);
+    expect(reaskDiags().map((e) => (e.detail as { attempt: number }).attempt)).toEqual([1]);
+    expect(internals.questionReaskCount).toBe(1);
+
+    // a2: an EMPTY reply (no transcript.agent chunk ever arrived for it) -- must still be
+    // retried (it might simply never have been generated), but must NOT burn one of the two
+    // total attempts.
+    internals.replyCreateAwaitingStart = false;
+    internals.replyGoalAtStart.set('a2', 'ASK_CHALLENGE');
+    // No `replyTranscripts.set('a2', ...)` at all -- `replyTranscripts.get('a2') ?? ''` is ''.
+    internals.maybeReaskQuestion('a2', 'completed');
+    vi.advanceTimersByTime(REASK_GAP_MS);
+    expect(replyCreates()).toHaveLength(2); // still retried
+    expect(reaskDiags().map((e) => (e.detail as { attempt: number }).attempt)).toEqual([1, 1]); // NOT bumped
+    expect(internals.questionReaskCount).toBe(1); // the counter itself is untouched
+
+    // a3: a real (non-empty), still non-question reply -- the budget was never actually
+    // spent by a2, so this reask still fires, now genuinely consuming attempt 2.
+    internals.replyCreateAwaitingStart = false;
+    internals.replyGoalAtStart.set('a3', 'ASK_CHALLENGE');
+    internals.replyTranscripts.set('a3', 'One moment please.');
+    internals.maybeReaskQuestion('a3', 'completed');
+    vi.advanceTimersByTime(REASK_GAP_MS);
+    expect(replyCreates()).toHaveLength(3);
+    expect(reaskDiags().map((e) => (e.detail as { attempt: number }).attempt)).toEqual([1, 1, 2]);
+    expect(internals.questionReaskCount).toBe(2);
+  });
+
+  it('end() during the pending reask timer sends nothing after end', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newQuestionSession(clock, aai, sent, diagEvents);
+    const internals = sessionInternals(session);
+
+    forceAskChallenge(session);
+    internals.replyGoalAtStart.set('a1', 'ASK_CHALLENGE');
+    internals.replyTranscripts.set('a1', 'Checking the record.');
+    internals.maybeReaskQuestion('a1', 'completed');
+
+    // The timer is pending (armed, not yet fired) -- the call ends now, same as a caller
+    // hangup or the idle/cap reaper firing mid-gap.
+    session.end('caller_ended');
+
+    vi.advanceTimersByTime(REASK_GAP_MS + 1000);
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+    expect(diagEvents.some((e) => e.kind === 'question_reask_sent')).toBe(false);
+  });
+
+  it('a goal change during the pending reask timer cancels the reask -- nothing is sent for the stale question', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newQuestionSession(clock, aai, sent, diagEvents);
+    const internals = sessionInternals(session);
+
+    forceAskChallenge(session);
+    internals.replyGoalAtStart.set('a1', 'ASK_CHALLENGE');
+    internals.replyTranscripts.set('a1', 'Checking the record.');
+    internals.maybeReaskQuestion('a1', 'completed');
+
+    // The caller resolves the challenge (or the engine otherwise moves on) before the 400ms
+    // gap elapses -- a fresh goal rendering, still ASK_CHALLENGE's own code even, but a
+    // DIFFERENT challenge (a real live tick would never re-render the identical goal object
+    // unchanged and call it "new", so any content difference at all counts).
+    forceReadback(session);
+
+    vi.advanceTimersByTime(REASK_GAP_MS + 1000);
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+    expect(diagEvents.some((e) => e.kind === 'question_reask_sent')).toBe(false);
+    expect(internals.questionReaskCount).toBe(0);
+  });
+
+  it('(b) READBACK: a reply that actually says the readback sentence sends nothing (no timer is even armed)', () => {
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -2617,12 +2750,14 @@ describe('CallSession — question-reask: a completed reply that never asked the
     internals.replyTranscripts.set('a1', READBACK_SENTENCE);
 
     internals.maybeReaskQuestion('a1', 'completed');
+    vi.advanceTimersByTime(REASK_GAP_MS + 1000);
 
     expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
     expect(diagEvents.some((e) => e.kind === 'question_reask_sent')).toBe(false);
   });
 
-  it('(c) caps at QUESTION_REASK_MAX (2) reasks per goal rendering: two non-question replies send, a third sends nothing', () => {
+  it('(c) caps at QUESTION_REASK_MAX (2) reasks per goal rendering: two non-question replies send (each spaced 400ms), a third sends nothing', () => {
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -2637,6 +2772,9 @@ describe('CallSession — question-reask: a completed reply that never asked the
       internals.replyGoalAtStart.set(replyId, 'ASK_CHALLENGE');
       internals.replyTranscripts.set(replyId, 'One moment please.');
       internals.maybeReaskQuestion(replyId, 'completed');
+      // Each reply's own reask (if any) is spaced 400ms behind ITS OWN reply.done -- settle
+      // it before driving the next reply, same as a real call's own turn-by-turn cadence.
+      vi.advanceTimersByTime(REASK_GAP_MS);
     }
 
     const replyCreateMsgs = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
@@ -2645,7 +2783,8 @@ describe('CallSession — question-reask: a completed reply that never asked the
     expect(reaskDiags.map((e) => (e.detail as { attempt: number }).attempt)).toEqual([1, 2]);
   });
 
-  it('(d) sends nothing when the goal changed between reply.started and reply.done', () => {
+  it('(d) sends nothing when the goal changed between reply.started and reply.done (no timer is even armed)', () => {
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -2662,12 +2801,14 @@ describe('CallSession — question-reask: a completed reply that never asked the
     internals.replyTranscripts.set('a1', 'Checking the record.');
 
     internals.maybeReaskQuestion('a1', 'completed');
+    vi.advanceTimersByTime(REASK_GAP_MS + 1000);
 
     expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
     expect(diagEvents.some((e) => e.kind === 'question_reask_sent')).toBe(false);
   });
 
-  it('(e) sends nothing once the goodbye is transcript-confirmed', () => {
+  it('(e) sends nothing once the goodbye is transcript-confirmed (no timer is even armed)', () => {
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -2681,12 +2822,14 @@ describe('CallSession — question-reask: a completed reply that never asked the
     internals.goodbyeConfirmed = true;
 
     internals.maybeReaskQuestion('a1', 'completed');
+    vi.advanceTimersByTime(REASK_GAP_MS + 1000);
 
     expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
     expect(diagEvents.some((e) => e.kind === 'question_reask_sent')).toBe(false);
   });
 
-  it('never reasks a holding goal (STALL is not a QUESTION_GOAL)', () => {
+  it('never reasks a holding goal (STALL is not a QUESTION_GOAL); no timer is even armed', () => {
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -2703,12 +2846,14 @@ describe('CallSession — question-reask: a completed reply that never asked the
     internals.replyTranscripts.set('a1', 'One moment while I check that.');
 
     internals.maybeReaskQuestion('a1', 'completed');
+    vi.advanceTimersByTime(REASK_GAP_MS + 1000);
 
     expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
     expect(diagEvents.some((e) => e.kind === 'question_reask_sent')).toBe(false);
   });
 
-  it('ELICIT_IDENTITY (paraphrase-instruction goal, no verbatim sentence): any question mark satisfies it, otherwise the reask instructs the model to ask the hint as one question', () => {
+  it('ELICIT_IDENTITY (paraphrase-instruction goal, no verbatim sentence): any question mark satisfies it, otherwise the spaced reask instructs the model to ask the hint as one question', () => {
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -2721,6 +2866,8 @@ describe('CallSession — question-reask: a completed reply that never asked the
     internals.replyTranscripts.set('a1', 'One moment.'); // no question mark
 
     internals.maybeReaskQuestion('a1', 'completed');
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0); // spaced, not synchronous
+    vi.advanceTimersByTime(REASK_GAP_MS);
 
     const replyCreateMsgs = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
     expect(replyCreateMsgs).toHaveLength(1);
@@ -2728,7 +2875,8 @@ describe('CallSession — question-reask: a completed reply that never asked the
     expect(msg.instructions).toBe('Ask the caller this question now, in one sentence: Ask who is calling.');
   });
 
-  it('does not reask when status is interrupted, only when completed', () => {
+  it('does not reask when status is interrupted, only when completed; no timer is even armed', () => {
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -2741,6 +2889,7 @@ describe('CallSession — question-reask: a completed reply that never asked the
     internals.replyTranscripts.set('a1', 'Checking the record.');
 
     internals.maybeReaskQuestion('a1', 'interrupted');
+    vi.advanceTimersByTime(REASK_GAP_MS + 1000);
 
     expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
   });

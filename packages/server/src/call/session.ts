@@ -412,6 +412,42 @@ export class CallSession {
   private questionReaskGoalKey: string | null = null;
   private questionReaskCount = 0;
   private static readonly QUESTION_REASK_MAX = 2;
+  /** Review fix (2026-09-15, Important -- FAIL on the first cut): the reask used to call
+   *  `sendReplyCreate` SYNCHRONOUSLY at `reply.done`, with none of the spacing round 4 gave
+   *  the CLOSE retry (`CLOSE_RETRY_MIN_GAP_MS`/`armCloseRetryTimer` above) for exactly the
+   *  same reason that spacing exists: an instant `reply.create` right after `reply.done` is
+   *  PROVEN (the round-4 live bundles `armCloseRetryTimer`'s own doc comment cites) to
+   *  sometimes land on AssemblyAI still mid-turn and come back EMPTY -- and unlike CLOSE's
+   *  now-uncapped retries, a reask has only QUESTION_REASK_MAX (2) attempts total, so one
+   *  burned on an empty reply is a real loss, not just a wasted round-trip. Fix: reuse the
+   *  exact same spacing shape as `armCloseRetryTimer` -- one idempotent timer
+   *  (`questionReaskTimer`), armed from `maybeReaskQuestion` instead of sending there
+   *  directly, that re-checks every precondition at fire time (not just arm time) and never
+   *  bumps `questionReaskCount` for a reply whose accumulated transcript was empty/
+   *  whitespace-only (`questionReaskLastReplyWasEmpty`, same convention as CLOSE's own
+   *  `closeLastReplyWasEmpty`/`countAttempt`) -- an empty reply still gets retried, spaced,
+   *  but for free. `questionReaskArmedGoalKey`/`Code`/`Instructions` snapshot exactly what
+   *  was decided at arm time (the goal object, as `JSON.stringify`, plus the already-composed
+   *  instructions) so the timer callback can (a) detect a goal change in the interim and
+   *  cancel outright -- reasking a STALE question once the caller has moved on would only
+   *  confuse them further, same reasoning `maybeReaskQuestion`'s own `replyGoalAtStart` check
+   *  already uses -- and (b) send the SAME instructions it decided on, not something
+   *  re-derived from a `this.last` that may have changed shape by then. Never two timers
+   *  armed at once for the reask itself (the same idempotent-guard shape `armCloseRetryTimer`
+   *  uses); a second completed reply arriving before the first's timer fires updates the
+   *  snapshot in place (latest reply wins) rather than stacking a second timer, mirroring how
+   *  `scheduleCloseIfNeeded` unconditionally refreshes `closeLastReplyWasEmpty` even when
+   *  `armCloseRetryTimer` itself is a no-op. A CLOSE retry and a question reask can never be
+   *  simultaneously pending in practice -- `armCloseRetryTimer` only ever arms for
+   *  `goal.code === 'CLOSE'`, `armQuestionReaskTimer` only for a `QUESTION_GOALS` code
+   *  (questionMatch.ts), and the two sets are disjoint by construction -- so this is not a
+   *  second guard against the SAME timer slot, just the same spacing shape applied to a
+   *  goal-code family CLOSE's own timer never touches. */
+  private questionReaskTimer: ReturnType<typeof setTimeout> | null = null;
+  private questionReaskArmedGoalKey: string | null = null;
+  private questionReaskArmedGoalCode: GoalCode | null = null;
+  private questionReaskArmedInstructions: string | null = null;
+  private questionReaskLastReplyWasEmpty = false;
 
   private clearCloseTimers(): void {
     if (this.closeGraceTimer) {
@@ -433,6 +469,13 @@ export class CallSession {
     if (this.closeDoneWaitTimer) {
       clearTimeout(this.closeDoneWaitTimer);
       this.closeDoneWaitTimer = null;
+    }
+    // Review fix (2026-09-15): the question-reask spacing timer is not CLOSE-specific, but
+    // this is the one method every ending path (`end()`) already funnels through to clear
+    // every other pending send timer -- same reasoning as `replyCreateLostTimer` above.
+    if (this.questionReaskTimer) {
+      clearTimeout(this.questionReaskTimer);
+      this.questionReaskTimer = null;
     }
   }
 
@@ -1262,9 +1305,12 @@ export class CallSession {
    *
    *  The per-rendering cap (`questionReaskGoalKey`/`questionReaskCount`) resets the moment the
    *  goal object itself changes (a fresh challenge, a fresh readback field, ...); a rendering
-   *  gets at most QUESTION_REASK_MAX (2) reasks before this gives up on it silently (the next
-   *  goal change, or the call's own idle/cap timers, take over from there -- no new escalation
-   *  path is added here). */
+   *  gets at most QUESTION_REASK_MAX (2) counted reasks before this gives up on it silently
+   *  (the next goal change, or the call's own idle/cap timers, take over from there -- no new
+   *  escalation path is added here). Review fix (2026-09-15): does not send here at all any
+   *  more -- decides WHETHER a reask is owed and, if so, snapshots what to say and hands off
+   *  to `armQuestionReaskTimer` for the actual (spaced) send. See that method's own doc
+   *  comment, and the class-field doc comment on `questionReaskTimer`, for why. */
   private maybeReaskQuestion(replyId: string, status: string): void {
     if (status !== 'completed') return;
     if (this.ended || this.goodbyeConfirmed) return;
@@ -1288,12 +1334,57 @@ export class CallSession {
     const sentence = verbatimQuestionSentence(goal);
     if (transcriptAsksQuestion(transcript, sentence)) return;
 
-    this.questionReaskCount += 1;
     const instructions = sentence
       ? `Say exactly this and nothing else: "${sentence}"`
       : `Ask the caller this question now, in one sentence: ${goal.hint}`;
-    this.sendReplyCreate(goal.code, 'question_not_asked', instructions);
-    this.diag('question_reask_sent', { goal_code: goal.code, attempt: this.questionReaskCount });
+    // Unconditionally refreshed even when `armQuestionReaskTimer` below turns out to be a
+    // no-op (a timer from an earlier reply of this SAME rendering is already pending) -- the
+    // latest reply's own emptiness/instructions are what should fire, same convention
+    // `scheduleCloseIfNeeded` already uses for `closeLastReplyWasEmpty`.
+    this.questionReaskLastReplyWasEmpty = transcript.trim().length === 0;
+    this.questionReaskArmedGoalKey = goalKey;
+    this.questionReaskArmedGoalCode = goal.code;
+    this.questionReaskArmedInstructions = instructions;
+    this.armQuestionReaskTimer();
+  }
+
+  /** Review fix (2026-09-15): the spaced-send counterpart to `armCloseRetryTimer` above, same
+   *  CLOSE_RETRY_MIN_GAP_MS (400ms) gap, same idempotent single-timer shape, same
+   *  "re-check everything at fire time, not just arm time" philosophy -- the world (a goal
+   *  change, the call ending, another reply.create landing) can change in the 400ms between
+   *  `maybeReaskQuestion` deciding a reask is owed and this actually sending it. Fires at
+   *  most once per arm; a second `maybeReaskQuestion` call before this fires updates the
+   *  snapshot fields in place (read here) and reuses this SAME pending timer.
+   *
+   *  Goal-change cancellation (review requirement (d)): compares the CURRENT
+   *  `this.last.goal`, freshly stringified, against `questionReaskArmedGoalKey` (the snapshot
+   *  taken at arm time) -- any difference at all (a different code, a different challenge, a
+   *  fresh readback value, ...) means the caller has moved on and this reask is stale; it is
+   *  silently dropped, never sent. `maybeReaskQuestion` itself will already have started a
+   *  fresh cycle for whatever the new goal is, if that new goal also needs one.
+   *
+   *  Empty-reply forgiveness (review requirement (b)): `questionReaskLastReplyWasEmpty`,
+   *  snapshotted at arm time, decides whether THIS send bumps `questionReaskCount` -- an
+   *  empty/whitespace-only reply still gets retried (the words were plausibly never even
+   *  generated, not refused), but for free, exactly as `armCloseRetryTimer`'s own
+   *  `countAttempt`/`closeLastReplyWasEmpty` already treat an empty CLOSE reply. */
+  private armQuestionReaskTimer(): void {
+    if (this.questionReaskTimer) return;
+    this.questionReaskTimer = setTimeout(() => {
+      this.questionReaskTimer = null;
+      if (this.ended || this.goodbyeConfirmed) return;
+      if (!this.last) return;
+      if (JSON.stringify(this.last.goal) !== this.questionReaskArmedGoalKey) return; // goal moved on -- cancel
+      if (this.speaking || this.replyCreateAwaitingStart) return;
+      if (this.questionReaskCount >= CallSession.QUESTION_REASK_MAX) return;
+
+      const goalCode = this.questionReaskArmedGoalCode!;
+      const instructions = this.questionReaskArmedInstructions!;
+      if (!this.questionReaskLastReplyWasEmpty) this.questionReaskCount += 1;
+      this.sendReplyCreate(goalCode, 'question_not_asked', instructions);
+      this.diag('question_reask_sent', { goal_code: goalCode, attempt: this.questionReaskCount });
+    }, CallSession.CLOSE_RETRY_MIN_GAP_MS);
+    this.questionReaskTimer.unref?.();
   }
 
   private handleToolCall(evt: Extract<AaiEvent, { type: 'tool.call' }>): void {
