@@ -34,6 +34,7 @@ import { deriveScreenState } from '../screen/state.js';
 import { validateToolArgs } from './validate.js';
 import { stallKindFor, stallLineFor, type StallKind } from './stalls.js';
 import { argsForTerminalTool } from './terminalActions.js';
+import { transcriptMatchesCloseSentence } from './closeMatch.js';
 
 export interface CallSessionOpts {
   session_id: string;
@@ -225,6 +226,23 @@ export class CallSession {
   private static readonly CLOSE_TIMEOUT_MS = 15_000;
   private closeGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private closeHardCapTimer: ReturnType<typeof setTimeout> | null = null;
+  /** reply.create fix, round 3 (2026-09-13, PROVEN live failure on deploy 26 -- see
+   *  closeMatch.ts's own doc comment for the full incident): every transcript.agent chunk
+   *  recorded for a given AAI reply id, concatenated in arrival order -- kept in memory only,
+   *  never written to diagnostics (LAW 4: exact-transcript text is evidence-adjacent, not a
+   *  fact this class's flight recorder is allowed to carry). `scheduleCloseIfNeeded` is the
+   *  only reader: it decides whether the CLOSE sentence was actually spoken from this, never
+   *  from which goal a reply was labelled as having been requested for. Entries are never
+   *  pruned -- one call's total transcript volume is small and bounded by the session cap. */
+  private readonly replyTranscripts = new Map<string, string>();
+  /** reply.create fix, round 3: bounds how many times `sendReplyCreate` will ask AssemblyAI
+   *  to speak the CLOSE goal for this call -- counts the ordinary tick_end/
+   *  reply_done_goal_diverged sends that first reach for CLOSE plus any close_retry sends
+   *  `scheduleCloseIfNeeded` issues because the close line was not actually heard. Once
+   *  exhausted, `sendReplyCreate` stops asking and the existing 15s hard cap
+   *  (`armClose`/CLOSE_TIMEOUT_MS) is the backstop that ends the call `close_timeout`. */
+  private static readonly CLOSE_REPLY_ATTEMPTS = 3;
+  private closeReplySendCount = 0;
   /** reply.create fix, round 2 (2026-09-13 review verdict FAIL on round 1, commit 48a0969 --
    *  PROVEN live bug: session 84ddf47a, Miller fraud scenario; see
    *  docs/ASSEMBLYAI_INTEGRATION.md's "VERIFY-AT-BUILD: reply.create schema" section).
@@ -246,7 +264,14 @@ export class CallSession {
    *  separate ANNOUNCE_FROZEN utterance, so this loses nothing a caller would notice).
    *  `pendingRequestedGoal` records exactly what was asked for at send time, and
    *  `reply.started` labels the reply from THAT (not `this.last`) whenever one is
-   *  outstanding -- see that case's own comment. */
+   *  outstanding -- see that case's own comment.
+   *
+   *  reply.create fix, round 3 (2026-09-13): `scheduleCloseIfNeeded` (the CLOSE hang-up
+   *  decision) no longer reads this map at all -- PROVEN live (see closeMatch.ts's own doc
+   *  comment), a label only proves a reply.create was SENT, never that AssemblyAI's own reply
+   *  actually said what was asked for. This map still backs `maybeSendReplyCreateAfterReplyDone`
+   *  (deciding whether a genuinely NEW goal still needs to be spoken at all, e.g. CLOSE was
+   *  never yet requested) -- kept for that bookkeeping only. */
   private readonly replyGoalAtStart = new Map<string, GoalCode>();
   /** Set by `sendReplyCreate` to the goal it just asked AssemblyAI to speak, and consumed
    *  (read then cleared) by the very next `reply.started` to label that reply -- see
@@ -287,34 +312,54 @@ export class CallSession {
     this.closeHardCapTimer.unref?.();
   }
 
-  /** Fired from `reply.done`, while `this.last` is still the goal that reply was phrased
-   *  for (see `recordGoalCompletionAction`'s own doc comment on that ordering). reply.create
-   *  fix (2026-09-13), point 2: only a reply whose OWN recorded phrasing goal (`
-   *  replyGoalAtStart`, set at that reply's `reply.started`) was CLOSE can arm the hang-up
-   *  -- a reply already in flight when CLOSE was first rendered was phrased under an
-   *  earlier goal and finishes on its own schedule; its `reply.done` says nothing about
-   *  whether the close line has actually been spoken (that reply's recorded goal will not
-   *  be `'CLOSE'`). Such a reply.done is still handled completely normally by every other
-   *  branch of the `reply.done` case (flush/discard, `recordGoalCompletionAction`, the
-   *  diagnostics event, `maybeSendReplyCreateAfterReplyDone`); only the arming of the grace
-   *  timer is skipped here. Any reply recorded as phrased under CLOSE -- completed or interrupted
-   *  -- schedules the hang-up: once SEALED, there is nothing left for the model to do, so a
-   *  caller who talks over the close line does not buy the call more time. The short grace
-   *  period lets the close line's own audio frames actually reach the wire before the
-   *  socket shuts. */
+  /** Fired from `reply.done`, and ONLY when the generic force-speak machinery
+   *  (`maybeSendReplyCreateAfterReplyDone`) did NOT itself just send a fresh `reply.create`
+   *  for this same event -- see that case's own comment for why. reply.create fix, round 3
+   *  (2026-09-13, PROVEN live failure -- see closeMatch.ts's own doc comment for the full
+   *  incident): reply LABELLING (`replyGoalAtStart`/`pendingRequestedGoal`) is deliberately
+   *  no longer consulted here for the hang-up decision -- the PROVEN bug is exactly a
+   *  reply.started arriving right after our own `reply.create` yet carrying AssemblyAI's own
+   *  turn-driven text, never our close line. A label proves a request was SENT, never that it
+   *  was HONOURED. The only thing that can prove the close line was actually spoken is what
+   *  the transcript says was spoken.
+   *
+   *  Matched (`transcriptMatchesCloseSentence`, leniently -- see that function's own doc
+   *  comment): arms the grace-period hang-up, regardless of `completed` vs `interrupted`
+   *  (rule 3: a close line mostly said before a barge-in still counts -- once SEALED there is
+   *  nothing left for the model to do, so a caller who talks over the close line does not buy
+   *  the call more time). The short grace period lets the close line's own audio frames
+   *  actually reach the wire before the socket shuts.
+   *
+   *  Not matched (rule 2/3): the close line was NOT heard in this reply, whether it finished
+   *  cleanly or was interrupted. Ask again with a one-shot `instructions` payload carrying the
+   *  exact wrapper prompt.ts's own CLOSE case uses (`Say exactly this and nothing else: "..."`)
+   *  rather than relying on the standing `system_prompt` alone -- `sendReplyCreate`'s own
+   *  `CLOSE_REPLY_ATTEMPTS` cap bounds how many times this can happen; once exhausted, this
+   *  method does nothing further and the existing 15s hard cap (`armClose`) is the backstop
+   *  that ends the call `close_timeout`. */
   private scheduleCloseIfNeeded(replyId: string): void {
     if (!this.last || this.last.goal.code !== 'CLOSE') return;
-    if (this.replyGoalAtStart.get(replyId) !== 'CLOSE') return;
-    if (this.closeGraceTimer || this.ended) return;
-    if (this.closeHardCapTimer) {
-      clearTimeout(this.closeHardCapTimer);
-      this.closeHardCapTimer = null;
+    if (this.ended) return;
+
+    const sentence = this.last.goal.hint;
+    const transcript = this.replyTranscripts.get(replyId) ?? '';
+
+    if (transcriptMatchesCloseSentence(transcript, sentence)) {
+      if (this.closeGraceTimer) return;
+      if (this.closeHardCapTimer) {
+        clearTimeout(this.closeHardCapTimer);
+        this.closeHardCapTimer = null;
+      }
+      this.closeGraceTimer = setTimeout(() => {
+        this.closeGraceTimer = null;
+        if (!this.ended) this.end('agent_closed');
+      }, CallSession.CLOSE_GRACE_MS);
+      this.closeGraceTimer.unref?.();
+      return;
     }
-    this.closeGraceTimer = setTimeout(() => {
-      this.closeGraceTimer = null;
-      if (!this.ended) this.end('agent_closed');
-    }, CallSession.CLOSE_GRACE_MS);
-    this.closeGraceTimer.unref?.();
+
+    const wrapper = `Say exactly this and nothing else: "${sentence}"`;
+    this.sendReplyCreate('CLOSE', 'close_retry', wrapper);
   }
 
   constructor(opts: CallSessionOpts) {
@@ -611,6 +656,14 @@ export class CallSession {
         // Changes `conversation`, part of EngineInput -- must tick.
         this.logs.conversation.push(utteranceFromTranscript(evt, this.nowT()));
         this.opts.onActivity?.();
+        // reply.create fix, round 3 (2026-09-13): accumulate this AAI reply's own spoken
+        // text, in memory only (never diagnostics -- LAW 4) -- `scheduleCloseIfNeeded` reads
+        // this at the reply's own `reply.done` to decide whether the CLOSE sentence was
+        // actually heard. See `replyTranscripts`'s own doc comment.
+        if (evt.type === 'transcript.agent') {
+          const existing = this.replyTranscripts.get(evt.reply_id) ?? '';
+          this.replyTranscripts.set(evt.reply_id, existing.length > 0 ? `${existing} ${evt.text}` : evt.text);
+        }
         // Flight recorder: role + text LENGTH only -- never the transcript text itself
         // (that stays evidence-only, LAW 4; diagnostics is not evidence).
         this.diag('transcript', { role: evt.type === 'transcript.user' ? 'user' : 'agent', length: evt.text.length });
@@ -659,16 +712,14 @@ export class CallSession {
 
       case 'reply.done':
         this.speaking = false;
+        // reply.create fix, round 3 (2026-09-13, requirement 4): a reply.done always means
+        // AssemblyAI is not currently generating anything for us -- if `replyCreateAwaitingStart`
+        // is somehow still true here (its own `reply.started` never fired, or fired for a
+        // different id than expected), clear it now rather than let it wedge every later
+        // `reply.create` send closed for the rest of the call.
+        this.replyCreateAwaitingStart = false;
         this.recordGoalCompletionAction(evt.status);
         this.diag('reply.done', { status: evt.status });
-        // Bug fix (2026-09-11): `this.last` here is still the goal this reply was phrased
-        // for (recordGoalCompletionAction's own doc comment) -- if it was CLOSE, the call
-        // is done saying what it needs to say and the server hangs up itself. Checked
-        // regardless of `evt.status`: an interrupted close still means nothing more is
-        // owed (see `scheduleCloseIfNeeded`'s own doc comment). `evt.reply_id` is what lets
-        // it reject a stale reply.done for a reply that was already in flight when CLOSE
-        // was sent (fix round 2, review finding).
-        this.scheduleCloseIfNeeded(evt.reply_id);
         if (evt.status === 'interrupted') {
           this.opts.onServerEvent({ type: 'flush' });
           // docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md: "If reply.done.status == 'interrupted'
@@ -683,6 +734,15 @@ export class CallSession {
         // reply.create fix, round 2 -- requirement 3 unchanged: the tool.result flush rule
         // stays first (immediately above); this only ever sends AFTER that.
         this.maybeSendReplyCreateAfterReplyDone(evt.reply_id);
+        // reply.create fix, round 3: only when NOTHING was just sent above (the generic
+        // force-speak machinery found no new goal to speak at all) does the CLOSE-specific,
+        // transcript-confirmed check get to decide whether to arm the hang-up or retry --
+        // otherwise a reply.create the line above just sent (e.g. a stale in-flight reply
+        // whose OWN recorded goal differs from the now-current CLOSE) would race a second,
+        // redundant one from `scheduleCloseIfNeeded`'s own retry path. Checked regardless of
+        // `evt.status`: an interrupted close still means nothing more is owed if the close
+        // line was already heard (see `scheduleCloseIfNeeded`'s own doc comment).
+        if (!this.replyCreateAwaitingStart) this.scheduleCloseIfNeeded(evt.reply_id);
         break;
 
       case 'input.speech.started':
@@ -1135,10 +1195,26 @@ export class CallSession {
    *  `this.ended` for the same reason every other outbound send in this class is: a call
    *  that has already ended must never produce one more websocket message. Records
    *  `pendingRequestedGoal` so the very next `reply.started` labels itself correctly (see
-   *  that case's own comment and the class-field doc comment on `replyGoalAtStart`). */
-  private sendReplyCreate(goalCode: GoalCode, reason: string): void {
+   *  that case's own comment and the class-field doc comment on `replyGoalAtStart`).
+   *
+   *  `instructions` (reply.create fix, round 3): a one-shot payload passed straight through
+   *  to AssemblyAI's own `reply.create.instructions` field (VERIFY-AT-BUILD, docs/
+   *  ASSEMBLYAI_INTEGRATION.md -- "does not modify system_prompt") -- only
+   *  `scheduleCloseIfNeeded`'s close_retry path supplies one today, carrying the exact
+   *  wrapper prompt.ts's own CLOSE case already uses. Every other call site omits it and
+   *  relies on the standing `system_prompt`, unchanged from before this fix.
+   *
+   *  CLOSE is bounded separately: `CLOSE_REPLY_ATTEMPTS` caps how many times this method will
+   *  ever ask AssemblyAI to speak the CLOSE goal for one call, counting every send for it
+   *  regardless of `reason` -- once exhausted, this is a silent no-op and the 15s hard cap
+   *  (`armClose`) is the only thing left that can end the call. */
+  private sendReplyCreate(goalCode: GoalCode, reason: string, instructions?: string): void {
     if (this.ended) return;
-    const msg: ReplyCreateMessage = { type: 'reply.create' };
+    if (goalCode === 'CLOSE') {
+      if (this.closeReplySendCount >= CallSession.CLOSE_REPLY_ATTEMPTS) return;
+      this.closeReplySendCount += 1;
+    }
+    const msg: ReplyCreateMessage = instructions ? { type: 'reply.create', instructions } : { type: 'reply.create' };
     this.opts.aai.send(msg);
     this.replyCreateAwaitingStart = true;
     this.pendingRequestedGoal = goalCode;
@@ -1148,7 +1224,11 @@ export class CallSession {
       t_ms: this.nowT(),
       detail: `reply_create:${goalCode}:${reason}`,
     });
-    this.diag('reply_create_sent', { goal_code: goalCode, reason });
+    this.diag('reply_create_sent', {
+      goal_code: goalCode,
+      reason,
+      ...(goalCode === 'CLOSE' ? { attempt: this.closeReplySendCount } : {}),
+    });
   }
 
   /** Fired from `reply.done`, after the tool.result flush/discard rule has already run

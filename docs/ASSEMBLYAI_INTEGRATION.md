@@ -113,13 +113,49 @@ differs from the goal that now needs to be spoken (see that file's `sendReplyCre
 `mustForceSpeak` doc comments). Type added at `packages/server/src/aai/types.ts`
 (`ReplyCreateMessage`).
 
-**Trade-off (2026-09-13 review, Minor 6):** an INTERRUPTED CLOSE reply still arms the hang-up
-(`scheduleCloseIfNeeded` does not check `evt.status`) -- if the caller talks over the close
-line, the call still ends on schedule rather than re-requesting a reply.create for CLOSE
-again, on the reasoning that once SEALED there is nothing further to verify and a caller who
-interrupts the close line does not buy the call more time (see LAW 2). The accepted risk:
-a caller who barges in early enough could end the call having heard only a fragment of the
-close sentence, never the whole "nothing has been released" line.
+**Trade-off (2026-09-13 review, Minor 6) -- SUPERSEDED by round 3 below:** an INTERRUPTED
+CLOSE reply used to arm the hang-up unconditionally (`scheduleCloseIfNeeded` never checked
+`evt.status`, only which goal the reply was labelled under) -- the accepted risk at the time
+was a caller barging in early enough to end the call having heard only a fragment of the
+close sentence. Round 3 replaces the whole labelling-based decision (see immediately below);
+an interrupted reply now only arms the hang-up when its own transcript already said enough
+of the close line, leniently matched.
+
+## Round 3 (2026-09-13): CLOSE is transcript-confirmed, not reply-labelled
+
+PROVEN live failure on deploy 26 (`scripts/rehearse/reports/2026-09-13T22-23-50-miller-
+patient.diagnostics.json`): CLOSE rendered at t=47567; the server sent `reply.create` at
+47569 (reason `tick_end`); `reply.started` arrived at 47573, only 4 ms later -- too fast to
+be a reply actually generated from that request. Its own transcript was "Please provide the"
+-- AssemblyAI's OWN turn-driven reply, composed under the PREVIOUS prompt, not the close
+line. The server labelled it CLOSE anyway (a `reply.create` was outstanding when it started)
+and, under the round-2 design, would have armed the hang-up on it regardless of what it
+actually said. The caller spoke, that bogus reply reported `interrupted`, the hang-up armed
+on schedule, and the closing sentence was never spoken -- the call ended with the caller
+having heard nothing after the holding line, again.
+
+The lesson: **the server cannot tell AssemblyAI's own turn-driven reply from the reply it
+explicitly requested.** A `reply.started` arriving after a `reply.create` proves a request
+was SENT; it proves nothing about what gets said in reply. Labelling therefore cannot be the
+mechanism that decides whether the close line was actually spoken.
+
+Round 3's fix (`packages/server/src/call/closeMatch.ts`, wired into `session.ts`'s
+`scheduleCloseIfNeeded`): the server now accumulates every `transcript.agent` chunk for each
+reply id, and only arms the hang-up once a reply completes (`completed` or `interrupted`)
+whose OWN accumulated transcript actually contains the CLOSE sentence for the current
+verdict -- matched leniently (case/punctuation/whitespace-insensitive; "Good bye" and
+"Goodbye" treated the same; a reply that lands the sentence's own content clause, e.g.
+"nothing has moved", plus the word "goodbye" counts even without the connective opening
+clause, since TTS/STT can drop or reword that without changing what was actually
+communicated). A reply that finishes -- however it finishes -- without that match is treated
+as "the close line was not spoken": the server asks again, this time passing the exact
+prompt-wrapper text as `reply.create`'s own one-shot `instructions` field rather than relying
+on `system_prompt` alone, bounded at `CLOSE_REPLY_ATTEMPTS = 3` total sends for CLOSE per
+call. Once exhausted, the server stops asking and the existing 15s hard cap
+(`CLOSE_TIMEOUT_MS`) is the sole remaining backstop, ending the call `close_timeout` -- LAW 2
+is unaffected either way (a verdict already reached STAGE/FREEZE/ESCALATE before CLOSE is
+ever rendered; failing to say the closing sentence never changes what was decided, only
+whether the caller heard it said).
 
 ## VERIFY-AT-BUILD note added 2026-09-09 (transcript dedupe)
 
