@@ -36,6 +36,20 @@ function lastAgentTranscriptText(client: CallClient): string | null {
   return null;
 }
 
+/** Count of agent transcript lines recorded so far -- used only by `waitForPatientTurn`
+ *  (2026-09-14 fix) to tell whether a reply it just waited out actually produced a NEW
+ *  transcript line, as opposed to `lastAgentTranscriptText` still returning a STALE line left
+ *  over from an earlier reply that produced no transcript of its own. */
+function agentTranscriptCount(client: CallClient): number {
+  const state = client.latestState();
+  if (!state) return 0;
+  let count = 0;
+  for (const line of state.transcript) {
+    if (line.speaker === 'agent') count++;
+  }
+  return count;
+}
+
 /** No new audio frame for this long => the current reply's TTS has stopped. */
 const SILENCE_MS = 700;
 /** How long to wait, before speaking a non-FIRST, non-barge-in turn, to see whether the
@@ -137,6 +151,29 @@ function normalizeForCloseMatch(text: string): string {
     .trim();
 }
 
+/** Shortest normalized prefix `isClosingLineStart` will act on -- long enough to clear the
+ *  four close sentences' shared opening words (FREEZE and ESCALATE both start "this ", 5
+ *  chars) so a generic partial like "This" or "This is" never counts as the start of a close
+ *  sentence, short enough to fire well before a real close sentence would ever finish. */
+const MIN_CLOSE_PREFIX_CHARS = 10;
+
+/** PROVEN gap (2026-09-14, scripts/rehearse/reports/2026-09-14T13-47-07-miller-patient
+ *  .diagnostics.json): the run's actual FREEZE close reply was interrupted mid-sentence --
+ *  the only transcript line it ever produced was "This transfer is frozen", never the full
+ *  `CLOSE_SENTENCE_BY_VERDICT.FREEZE` text -- because the caller (see `waitForPatientTurn`'s
+ *  fix below) spoke its next scripted line over it. `isClosingLine` above requires the WHOLE
+ *  sentence and so can never catch this in time; this instead asks "does any close sentence
+ *  START WITH this (possibly partial, possibly interrupted) transcript text" -- true the
+ *  moment the agent has clearly begun a close sentence, whether or not it ever gets to
+ *  finish. A full close sentence trivially matches too (it is its own prefix). Guarded by
+ *  `MIN_CLOSE_PREFIX_CHARS` so a one- or two-word fragment shared by more than one close
+ *  sentence (or by ordinary conversation) never false-positives. */
+export function isClosingLineStart(text: string): boolean {
+  const partial = normalizeForCloseMatch(text);
+  if (partial.length < MIN_CLOSE_PREFIX_CHARS) return false;
+  return ENGINE_CLOSE_SENTENCES.some((s) => normalizeForCloseMatch(s).startsWith(partial));
+}
+
 /** The close sentence's own final substantive clause -- e.g. "Nothing has moved" for FREEZE,
  *  "The evidence record is complete" for STAGE -- with the trailing "Goodbye." clause
  *  dropped. Used as the lenient fallback match: a transcript that got the closing "Goodbye"
@@ -197,6 +234,42 @@ async function waitForReplySettled(client: CallClient, timeoutMs: number): Promi
     await sleep(POLL_MS);
   }
 }
+
+/** PROVEN gap (2026-09-14, same report as `MIN_SPOKEN_MS` above): the run's real close reply
+ *  ("This transfer is frozen...") was interrupted by the caller's next scripted line before
+ *  it, or the ordinary `waitForReplySettled` silence check, ever finished -- patient mode must
+ *  never let that happen. Same polling shape as `waitForReplySettled`, but on EVERY tick also
+ *  checks whether the agent's latest transcript line has already begun a close sentence
+ *  (`isClosingLineStart`, which matches a partial/interrupted line, unlike `isClosingLine`);
+ *  if so, returns immediately with `closingDetected: true` -- `waitForPatientTurn` treats that
+ *  as an immediate `{outcome:'stop'}`, without waiting out the rest of this function's own
+ *  settle logic. Used only by `waitForPatientTurn`; every other wait in this file keeps using
+ *  the plain `waitForReplySettled` (this scenario is patient-mode-specific: an ordinary or
+ *  barge-in turn's caller line is already scripted for a fixed cadence). */
+async function waitForReplySettledOrClose(client: CallClient, timeoutMs: number): Promise<{ settled: boolean; closingDetected: boolean }> {
+  const deadline = nowT(client) + timeoutMs;
+  for (;;) {
+    const text = lastAgentTranscriptText(client);
+    if (text !== null && isClosingLineStart(text)) return { settled: true, closingDetected: true };
+    const t = nowT(client);
+    const la = lastAudioAt(client);
+    const silentEnough = la === null || t - la >= SILENCE_MS;
+    const state = client.latestState();
+    const notSpeaking = !state || state.agent_status !== 'SPEAKING';
+    if (silentEnough && notSpeaking) return { settled: true, closingDetected: false };
+    if (t > deadline) return { settled: false, closingDetected: false };
+    await sleep(POLL_MS);
+  }
+}
+
+/** PROVEN gap (2026-09-14, scripts/rehearse/reports/2026-09-14T13-47-07-miller-patient
+ *  .diagnostics.json): a reply whose `reply.started`/`reply.done` landed 64ms apart with no
+ *  transcript.agent text at all -- a real CLOSE-goal retry the server sent and then abandoned
+ *  -- must never count as "the agent spoke". Used only by `waitForPatientTurn` (below): a
+ *  reply counts as spoken once it has produced a non-empty transcript line, OR, failing that
+ *  (transcript not observed yet), at least this many ms of audio between its first frame and
+ *  its last. A person does not answer a reply that said nothing and played for a blink. */
+export const MIN_SPOKEN_MS = 700;
 
 /** Resolves once at least one NEW audio frame has arrived since `markerCount` (i.e. a reply
  *  has started) -- returns that frame's own client-relative timestamp (the `reply.audio.first`
@@ -274,9 +347,31 @@ export interface PatientWaitResult {
  *  knob for every "wait for the agent's next reply to start" step in patient mode -- one
  *  configurable number, not two, and the same semantics either way: "if the agent goes
  *  silent for this long while we're waiting on it, something is wrong enough to at least
- *  warn about, and if it just finished stalling, wrong enough to fail." */
+ *  warn about, and if it just finished stalling, wrong enough to fail."
+ *
+ *  Two further fixes, both PROVEN gaps from 2026-09-14 (scripts/rehearse/reports/
+ *  2026-09-14T13-47-07-miller-patient.md and its .diagnostics.json -- read together):
+ *
+ *   1. A reply only counts as "the agent spoke" if it produced a non-empty transcript.agent
+ *      line, or (transcript not observed yet) at least `MIN_SPOKEN_MS` of audio between its
+ *      first and last frame. The deployed server retried its CLOSE-goal reply three times in
+ *      a row; the MIDDLE attempt's `reply.started`/`reply.done` landed 64ms apart with no
+ *      transcript at all. The old code judged the turn by whatever `lastAgentTranscriptText`
+ *      returned regardless -- here, a STALE line left over from the first attempt -- and fell
+ *      through to `speak`. Such a reply is now ignored outright: the loop goes back to
+ *      waiting for a further new reply, still bounded by `agentSilenceFailMs`, without
+ *      touching `sawHolding` either way (an empty reply is neither a hold nor an answer).
+ *   2. The moment the agent's latest transcript line has BEGUN a close sentence
+ *      (`isClosingLineStart`, which matches a partial/interrupted line -- unlike `isClosingLine`
+ *      below, which needs the whole sentence), this resolves `{outcome:'stop'}` immediately,
+ *      without waiting for that reply to fully settle. The THIRD retry attempt above actually
+ *      began "This transfer is frozen" but never finished it: the caller (still mis-timed by
+ *      bug #1) spoke its next scripted line first and talked over the goodbye. A scripted
+ *      caller must never do that in patient mode -- deliberate talk-over is what the separate
+ *      barge-in scenario is for, not this one. */
 export async function waitForPatientTurn(client: CallClient, agentSilenceFailMs: number, warnings: string[]): Promise<PatientWaitResult> {
   let markerCount = client.audioTimestamps.length;
+  let agentLineCount = agentTranscriptCount(client);
   let sawHolding = false;
   for (;;) {
     const anchorMs = await waitForReplyStarted(client, markerCount, agentSilenceFailMs);
@@ -285,9 +380,19 @@ export async function waitForPatientTurn(client: CallClient, agentSilenceFailMs:
       warnings.push(`patient caller: no agent reply started within ${agentSilenceFailMs}ms; speaking the next line anyway`);
       return { outcome: 'speak' };
     }
-    const { settled } = await waitForReplySettled(client, REPLY_SETTLE_TIMEOUT_MS);
+    const { settled, closingDetected } = await waitForReplySettledOrClose(client, REPLY_SETTLE_TIMEOUT_MS);
+    if (closingDetected) return { outcome: 'stop' };
     if (!settled) warnings.push(`patient caller: reply did not settle within ${REPLY_SETTLE_TIMEOUT_MS}ms; judging it anyway`);
     markerCount = client.audioTimestamps.length;
+    const newAgentLineCount = agentTranscriptCount(client);
+    const audioSpanMs = (lastAudioAt(client) ?? anchorMs) - anchorMs;
+    const spoke = newAgentLineCount > agentLineCount || audioSpanMs >= MIN_SPOKEN_MS;
+    if (!spoke) {
+      // Empty or sub-threshold reply (bug #1 above): nothing was actually said -- keep
+      // waiting for a further reply rather than judging stale earlier text.
+      continue;
+    }
+    agentLineCount = newAgentLineCount;
     const text = lastAgentTranscriptText(client);
     if (text !== null && isClosingLine(text)) return { outcome: 'stop' };
     if (text !== null && isHoldingLine(text)) {

@@ -9,8 +9,10 @@ import {
   computeTurnGaps,
   ENGINE_CLOSE_SENTENCES,
   isClosingLine,
+  isClosingLineStart,
   isHoldingLine,
   maybeDropAai,
+  MIN_SPOKEN_MS,
   scriptedCallerShouldStop,
   waitForBargeIn,
   waitForGreeting,
@@ -453,6 +455,44 @@ describe('isClosingLine', () => {
   });
 });
 
+// PROVEN gap (2026-09-14, see scripts/rehearse/reports/2026-09-14T13-47-07-miller-patient.md
+// and its .diagnostics.json): the deployed CLOSE-goal reply pipeline retried three times in a
+// row (goal_code CLOSE, reasons tick_end / close_retry / close_retry); the caller correctly
+// waited out the FIRST attempt, but the SECOND attempt (reply.started 48027, reply.done 48091
+// -- 64ms, no transcript.agent line at all) fell through as an ordinary reply, and the THIRD
+// attempt -- the one that actually said "This transfer is frozen" -- got talked over by the
+// caller's next scripted line before the sentence finished. `isClosingLineStart` is the
+// matcher `waitForPatientTurn` now uses to notice "the agent has begun a close sentence" from
+// a PARTIAL (possibly interrupted, never-finished) transcript line, so the caller can stop
+// before the sentence is even complete -- `isClosingLine` above still requires the FULL
+// sentence and is unchanged.
+describe('isClosingLineStart', () => {
+  it('matches a partial transcript that is the opening of one of the four close sentences', () => {
+    expect(isClosingLineStart('This transfer is frozen')).toBe(true);
+    expect(isClosingLineStart('Your request is staged for a second')).toBe(true);
+  });
+
+  it('matches a full close sentence too (a partial-of-itself)', () => {
+    for (const s of ENGINE_CLOSE_SENTENCES) {
+      expect(isClosingLineStart(s), s).toBe(true);
+    }
+  });
+
+  it('does not match a short, ambiguous prefix shared by more than one close sentence (e.g. "This")', () => {
+    expect(isClosingLineStart('This')).toBe(false);
+    expect(isClosingLineStart('This is')).toBe(false);
+  });
+
+  it('does not match an ordinary substantive reply or a holding line', () => {
+    expect(isClosingLineStart('Just to confirm, the beneficiary is Meridian Supply.')).toBe(false);
+    expect(isClosingLineStart('One moment while I verify that.')).toBe(false);
+  });
+
+  it('does not match a reply that merely happens to contain close wording later, not at the start', () => {
+    expect(isClosingLineStart('Okay, so, This transfer is frozen')).toBe(false);
+  });
+});
+
 describe('closeLineSpokenForVerdict', () => {
   it('matches when a single agent line is exactly the verdict\'s close sentence', () => {
     expect(closeLineSpokenForVerdict('FREEZE', [CLOSE_SENTENCE_BY_VERDICT.FREEZE])).toBe(true);
@@ -580,5 +620,119 @@ describe('waitForPatientTurn', () => {
 
     expect(result.outcome).toBe('speak');
     expect(warnings.some((w) => w.includes('no agent reply started within 60ms'))).toBe(true);
+  }, 10_000);
+
+  // PROVEN gap (2026-09-14, scripts/rehearse/reports/2026-09-14T13-47-07-miller-patient
+  // .diagnostics.json): a CLOSE-retry reply landed with reply.started === reply.done (64ms)
+  // and produced NO transcript.agent line at all. The old code judged the turn by whatever
+  // agent text happened to already be sitting in the transcript (here, a stale line from the
+  // PREVIOUS reply) and fell through to 'speak' -- a person does not answer a reply that said
+  // nothing. These four tests prove the fix: such a reply is now ignored outright (the caller
+  // keeps waiting, still bounded by agentSilenceFailMs), and a genuinely spoken reply -- via
+  // either a transcript line or at least MIN_SPOKEN_MS of audio -- is still accepted.
+  it("ignores a reply with NO transcript line and effectively no audio (reply.audio.first === reply.done) -- never falls through to stale earlier text", async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0;
+    const warnings: string[] = [];
+
+    const resultPromise = waitForPatientTurn(client, 5000, warnings);
+    await sleep(20);
+    // The empty CLOSE-retry reply: exactly one audio frame, no transcript line appended.
+    client.audioTimestamps.push(performance.now() - client.startedAt);
+
+    // A further, real reply follows well within agentSilenceFailMs -- proves the caller kept
+    // waiting instead of resolving off the empty reply (or any stale text already present).
+    setTimeout(() => {
+      client.audioTimestamps.push(performance.now() - client.startedAt);
+      client.setAgentLine('Just to confirm, the beneficiary is Meridian Supply. Is that correct?');
+    }, 900);
+
+    const result = await resultPromise;
+
+    expect(result.outcome).toBe('speak');
+    expect(warnings).toEqual([]);
+  }, 10_000);
+
+  it('ignores a short reply too -- audio present but under MIN_SPOKEN_MS, and no transcript line', async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0;
+    const warnings: string[] = [];
+
+    const resultPromise = waitForPatientTurn(client, 5000, warnings);
+    await sleep(20);
+    const anchorAt = performance.now() - client.startedAt;
+    client.audioTimestamps.push(anchorAt);
+    client.audioTimestamps.push(anchorAt + (MIN_SPOKEN_MS - 400)); // under MIN_SPOKEN_MS, no transcript
+
+    setTimeout(() => {
+      client.audioTimestamps.push(performance.now() - client.startedAt);
+      client.setAgentLine('Just to confirm, the beneficiary is Meridian Supply. Is that correct?');
+    }, 900);
+
+    const result = await resultPromise;
+
+    expect(result.outcome).toBe('speak');
+    expect(warnings).toEqual([]);
+  }, 10_000);
+
+  it('accepts a reply as spoken once it has at least MIN_SPOKEN_MS of audio, even before any transcript line has arrived', async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0;
+    const warnings: string[] = [];
+
+    const resultPromise = waitForPatientTurn(client, 5000, warnings);
+    await sleep(20);
+    const anchorAt = performance.now() - client.startedAt;
+    client.audioTimestamps.push(anchorAt);
+    client.audioTimestamps.push(anchorAt + MIN_SPOKEN_MS + 50); // at/over MIN_SPOKEN_MS, no transcript
+
+    const result = await resultPromise;
+
+    expect(result.outcome).toBe('speak');
+    expect(warnings).toEqual([]);
+  }, 10_000);
+
+  it('accepts a normal, fully-transcribed substantive reply as spoken (unaffected by the empty-reply fix)', async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0;
+    const warnings: string[] = [];
+
+    const resultPromise = waitForPatientTurn(client, 5000, warnings);
+    await sleep(20);
+    client.audioTimestamps.push(performance.now() - client.startedAt);
+    client.setAgentLine('Please restate the dollar amount you just requested.');
+
+    const result = await resultPromise;
+
+    expect(result.outcome).toBe('speak');
+    expect(warnings).toEqual([]);
+  }, 10_000);
+
+  // PROVEN gap (2026-09-14, same report): the run's THIRD close-retry reply actually began
+  // "This transfer is frozen" but got interrupted mid-sentence by the caller's next scripted
+  // line before the sentence -- and the goodbye -- ever finished. `waitForPatientTurn` must
+  // stop the caller the moment a close sentence BEGINS, without waiting for it to fully
+  // settle (the exact case `isClosingLine`, which requires the whole sentence, cannot catch).
+  it('stops the instant the agent begins a close sentence, even from a partial/interrupted transcript line -- never waits for the full settle window or lets the caller speak over it', async () => {
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0;
+    const warnings: string[] = [];
+
+    const startedAt = performance.now();
+    const resultPromise = waitForPatientTurn(client, 5000, warnings);
+    await sleep(20);
+    client.audioTimestamps.push(performance.now() - client.startedAt);
+    // Only the opening clause has been transcribed so far -- not the full FREEZE close
+    // sentence -- exactly the "(interrupted) This transfer is frozen" shape from the report.
+    client.setAgentLine('This transfer is frozen');
+
+    const result = await resultPromise;
+    const elapsed = performance.now() - startedAt;
+
+    expect(result.outcome).toBe('stop');
+    expect(warnings).toEqual([]);
+    // Decisively faster than SILENCE_MS (700ms): proves this resolved on the partial-close
+    // match, not by falling through to the ordinary settle-then-judge path.
+    expect(elapsed).toBeLessThan(400);
   }, 10_000);
 });
