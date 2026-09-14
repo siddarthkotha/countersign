@@ -96,6 +96,7 @@ export function evaluate(input: EngineInput, overrides?: Record<string, Evidence
     tools,
     actions,
     nextChallenge,
+    conversation,
   });
 
   // 9. Assemble output. Every EngineOutput field is filled -- no undefined placeholders.

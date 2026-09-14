@@ -20,6 +20,7 @@ import type {
   SeedConfig,
   ToolLogEntry,
   ToolName,
+  Utterance,
   Verdict,
 } from './types.js';
 
@@ -172,6 +173,35 @@ function elicitMissingSentence(field: ClaimField): string {
   }
 }
 
+/** Bug fix (P3, 2026-09-14, PROVEN live defect, rehearsal report
+ *  scripts/rehearse/reports/2026-09-14T18-06-55-single-wrong-answer.md): the caller said "I
+ *  need to request a wire correction for Meridian Supply, please" with no amount.
+ *  `evidenceFromTranscript`'s `request_params` card only ever fires once SOME amount is
+ *  found (see its own "request_params (first amount only)" section) -- with identity
+ *  claimed but no amount, `deriveState` stays in CLAIM and `phrasingGoal`'s CLAIM branch
+ *  used to hand the model the bare instruction "Ask what the caller needs." (same class of
+ *  bug READBACK/CLOSE/ELICIT_MISSING_CRITICAL were already fixed for): the model invented
+ *  "What is the transaction reference number?" -- a field the caller could never answer --
+ *  and the call idled out to NO_ACTION. A request is "recognizable" once the caller has
+ *  said a payment-intent word (wire/transfer/payment/correction/refund/invoice/
+ *  reimbursement/ach) even with no amount yet; this composes the exact, ready-to-speak
+ *  question for the one missing piece (the amount), naming the vendor when one is already
+ *  on the ledger (a beneficiary claim can exist with no amount claim -- extractCuedNames
+ *  and extractAmounts run independently over the same utterance). With no payment-intent
+ *  word at all, the caller hasn't described a request yet, so a plain, still-verbatim
+ *  opening question is used instead -- never the old prose instruction. */
+const PAYMENT_INTENT_RE = /\b(?:wire|transfer|payment|correction|refund|invoice|reimbursement|ach)\b/i;
+
+function hasPaymentIntent(conversation: Utterance[]): boolean {
+  return conversation.some((u) => u.speaker === 'caller' && PAYMENT_INTENT_RE.test(u.text));
+}
+
+function elicitRequestSentence(intentStated: boolean, beneficiaryClaim: Claim | null): string {
+  if (!intentStated) return 'What do you need today?';
+  if (beneficiaryClaim) return `What is the exact amount for this payment to ${beneficiaryClaim.quote.text}?`;
+  return 'What is the exact amount you need to send, and to which vendor?';
+}
+
 /** Bug fix (2026-09-03 later that night, founder-observed live call + three harness runs --
  *  scripts/rehearse/reports/2026-09-03T23-04-42-, T23-32-42- and T23-39-25-
  *  scenario-a-dana-legitimate.md): the legitimate-caller scenario never reached STAGE. Two
@@ -293,6 +323,12 @@ export interface PhrasingGoalInput {
   tools: ToolLogEntry[];
   actions: AgentAction[];
   nextChallenge: ChallengeSpec | null; // precomputed by evaluate.ts via selectChallenge
+  // P3 fix (2026-09-14): the CLAIM/ELICIT_REQUEST branch needs the raw caller utterances to
+  // detect a stated-but-incomplete request (payment intent with no amount yet) -- see
+  // `hasPaymentIntent`/`elicitRequestSentence` above. Nothing else in this file reads it.
+  // Optional (defaults to []) so every pre-existing hand-built PhrasingGoalInput in the test
+  // suite -- none of which exercise the CLAIM branch -- keeps compiling unchanged.
+  conversation?: Utterance[];
 }
 
 function goal(code: GoalCode, hint: string, keyterms: string[], patient: boolean, extra?: Partial<PhrasingGoal>): PhrasingGoal {
@@ -300,7 +336,7 @@ function goal(code: GoalCode, hint: string, keyterms: string[], patient: boolean
 }
 
 export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
-  const { state, decideResult, evidence, ledger, seed, tools, nextChallenge } = input;
+  const { state, decideResult, evidence, ledger, seed, tools, nextChallenge, conversation = [] } = input;
   const keyterms = buildKeyterms(seed, ledger, evidence);
   const patient = state === 'CHALLENGE' || (state === 'CONSISTENCY_CHECK' && decideResult.rule_hit === 5);
 
@@ -358,9 +394,12 @@ export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
       );
     }
     const hasIdentity = evidence.some((e) => e.kind === 'identity_claim');
-    return hasIdentity
-      ? goal('ELICIT_REQUEST', 'Ask what the caller needs.', keyterms, patient)
-      : goal('ELICIT_IDENTITY', 'Ask who is calling.', keyterms, patient);
+    if (!hasIdentity) return goal('ELICIT_IDENTITY', 'Ask who is calling.', keyterms, patient);
+    // P3 fix (see `elicitRequestSentence` above): a recognizable-but-incomplete request
+    // (payment intent stated, no amount yet) gets an exact, ready-to-speak question naming
+    // the one missing piece, never the old open-ended "Ask what the caller needs." prose.
+    const beneficiaryClaim = currentClaim(ledger, 'beneficiary');
+    return goal('ELICIT_REQUEST', elicitRequestSentence(hasPaymentIntent(conversation), beneficiaryClaim), keyterms, patient);
   }
 
   if (state === 'CONSISTENCY_CHECK') {

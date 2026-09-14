@@ -350,6 +350,22 @@ describe('renderPrompt', () => {
     expect(nowSection).toBe(`Say exactly this and nothing else: "${say}"`);
   });
 
+  // Bug fix (P3, 2026-09-14, PROVEN live defect, rehearsal report
+  // scripts/rehearse/reports/2026-09-14T18-06-55-single-wrong-answer.md): ELICIT_REQUEST used
+  // to fall through to the unconstrained `default` branch, which relayed `goal.hint` as a
+  // loose instruction ("Ask what the caller needs.") with nothing telling the model to say
+  // only that and stop -- the model invented "What is the transaction reference number?", a
+  // field the caller could never answer, and the call idled out. fsm.ts's
+  // `elicitRequestSentence` now composes an exact, ready-to-speak sentence into `goal.hint`
+  // itself; this case must relay it verbatim, same treatment as ELICIT_MISSING_CRITICAL.
+  it('ELICIT_REQUEST says the engine-composed sentence verbatim, wrapped in "say exactly", and invents no system field', () => {
+    const say = 'What is the exact amount you need to send, and to which vendor?';
+    const prompt = renderPrompt(baseGoal('ELICIT_REQUEST', { hint: say }), makeCtx());
+    const nowSection = prompt.split('\n\n').at(-1);
+    expect(nowSection).toBe(`Say exactly this and nothing else: "${say}"`);
+    expect(nowSection?.toLowerCase()).not.toContain('transaction reference');
+  });
+
   describe('STALL', () => {
     it('picks a stalling line from the library matching ctx.stall_kind (not the hint -- fix round 1, finding 2)', () => {
       const promptGeneric = renderPrompt(baseGoal('STALL'), makeCtx({ stall_kind: 'generic' }));

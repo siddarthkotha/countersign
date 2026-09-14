@@ -153,6 +153,17 @@ function nowSection(goal: PhrasingGoal, ctx: PromptCtx): string {
     // `goal.hint`; this case relays it verbatim, the same treatment.
     case 'ELICIT_MISSING_CRITICAL':
       return `Say exactly this and nothing else: "${goal.hint}"`;
+    // Bug fix (P3, 2026-09-14, PROVEN live defect, rehearsal report
+    // scripts/rehearse/reports/2026-09-14T18-06-55-single-wrong-answer.md): a caller who had
+    // named a vendor/payment intent but not yet an amount ("I need to request a wire
+    // correction for Meridian Supply, please") got the old bare instruction "Ask what the
+    // caller needs." here, with nothing telling the model to say only that and stop -- it
+    // invented "What is the transaction reference number?", a field the caller could never
+    // answer, and the call idled out. fsm.ts's `elicitRequestSentence` now composes an
+    // exact, ready-to-speak question into `goal.hint` itself (same treatment
+    // ELICIT_MISSING_CRITICAL gets just above); this case relays it verbatim.
+    case 'ELICIT_REQUEST':
+      return `Say exactly this and nothing else: "${goal.hint}"`;
     case 'CLOSE':
       // Bug fix (2026-09-11, PROVEN from scripts/rehearse/reports/2026-09-11T16-35-23-
       // scenario-a-dana-legitimate.md): CLOSE used to fall through to the `default` branch
@@ -177,11 +188,11 @@ function nowSection(goal: PhrasingGoal, ctx: PromptCtx): string {
       if (ANNOUNCE_CODES.has(goal.code) && ctx.claimed_identity_name) {
         return `${goal.hint} Address the caller as ${ctx.claimed_identity_name}.`;
       }
-      // ELICIT_IDENTITY, ELICIT_REQUEST, PROBE_CONSISTENCY, REFUSE_AUTHORITY,
-      // EXPLAIN_OUT_OF_SCOPE, EXPLAIN_OPEN_REQUEST, and an ANNOUNCE_* goal before any
-      // identity is claimed: the hint, verbatim, and nothing added (the engine already wrote
-      // whatever reasons belong in it). CLOSE and RE_ELICIT_AFTER_SWITCH have their own
-      // verbatim-wrapped cases above, not this one.
+      // ELICIT_IDENTITY, PROBE_CONSISTENCY, REFUSE_AUTHORITY, EXPLAIN_OUT_OF_SCOPE,
+      // EXPLAIN_OPEN_REQUEST, and an ANNOUNCE_* goal before any identity is claimed: the
+      // hint, verbatim, and nothing added (the engine already wrote whatever reasons belong
+      // in it). CLOSE, RE_ELICIT_AFTER_SWITCH, ELICIT_MISSING_CRITICAL, and ELICIT_REQUEST
+      // have their own verbatim-wrapped cases above, not this one.
       return goal.hint;
   }
 }

@@ -160,6 +160,21 @@ describe('extractCuedNames', () => {
     expect(extractCuedNames('This is Robert Miller')).toEqual([]);
   });
 
+  // fix (P2, 2026-09-14, rehearsal report 2026-09-14T18-05-49-single-wrong-answer.md): the
+  // caller named the approver AFTER "approved" ("Elena Park approved it"), not via "approved
+  // by NAME" -- the only pattern that used to exist. Mirrors the reversed counsel patterns
+  // just above ("X handled the deal", "X is/was our counsel").
+  it('matches the reversed approver cue "<Name> approved ..." alongside "approved by <Name>"', () => {
+    expect(extractCuedNames('wait, I mean Elena Park approved it')).toEqual([
+      { field: 'approver', value: 'Elena Park', quote: 'Elena Park' },
+    ]);
+    const both = 'approved by Marcus Obie— wait, I mean Elena Park approved it.';
+    expect(extractCuedNames(both)).toEqual([
+      { field: 'approver', value: 'Marcus Obie', quote: 'Marcus Obie' },
+      { field: 'approver', value: 'Elena Park', quote: 'Elena Park' },
+    ]);
+  });
+
   // Fix round 1, finding 1: bare "counsel <Name>" (no is/was/of record is/of record was) must
   // NOT match — only a real connector counts.
   it('does not match a bare "counsel <Name>" with no connector', () => {

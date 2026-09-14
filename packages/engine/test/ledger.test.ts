@@ -395,4 +395,57 @@ describe('buildLedger', () => {
     // new figure -- graded exactly as before this fix.
     expect(amountClaims[1]).toMatchObject({ kind: 'CONTRADICTED', value: 42_300 });
   });
+
+  // 11. Corrected critical field (P2, PROVEN live defect, rehearsal report
+  // scripts/rehearse/reports/2026-09-14T18-05-49-single-wrong-answer.md): the caller said
+  // "approved by Marcus Obie— wait, I mean Elena Park approved it." -- ONE utterance, a
+  // correction cue ("wait", "i mean" -- "i mean" is in seed.correction_lexicon), and a
+  // corrected name. The live agent read back "Marcus Obi" (the PRE-correction value)
+  // because extractCuedNames's only approver pattern was "approved by (NAME)" -- "Elena
+  // Park approved it" never matched (the name comes BEFORE "approved", not after "by").
+  // Founder's definition of "corrected critical field": no security-relevant value becomes
+  // final until an unambiguous complete answer or a confirmed readback of the CORRECTED
+  // value -- so the current claim must be Elena Park, and the first (superseded) quote
+  // must still be on the record (LAW 4: facts kept, never erased).
+  it('11. self-correction inside one utterance ("approved by X— wait, I mean Y approved it") -> Y is the current approver claim, X kept as superseded', () => {
+    const conversation = [
+      u('u1', 'This is Dana Whitfield, corporate treasury.', 0),
+      u(
+        'u2',
+        "It's a small correction from the number on file, approved by Marcus Obie— wait, I mean Elena Park approved it.",
+        20_000,
+      ),
+    ];
+    const { claims } = buildLedger(conversation, [], MERIDIAN);
+    const approverClaims = claims.filter((c) => c.field === 'approver');
+    expect(approverClaims).toHaveLength(2);
+    expect(approverClaims[0]).toMatchObject({ kind: 'STATED', value: 'marcus obie', quote: { text: 'Marcus Obie' } });
+    expect(approverClaims[1]).toMatchObject({
+      kind: 'CORRECTED',
+      value: 'elena park',
+      quote: { text: 'Elena Park' },
+      supersedes: approverClaims[0]!.id,
+    });
+    expect(currentClaim(claims, 'approver')?.value).toBe('elena park');
+    // Both quotes are still on the record -- the first is marked superseded, not deleted.
+    expect(claims.find((c) => c.id === approverClaims[0]!.id)).toBeDefined();
+  });
+
+  // 11b. The same correction, split across two adjacent caller utterances with no
+  // intervening agent turn -- the cue lands in the FIRST utterance, the corrected name in
+  // the SECOND (the same adjacency rule test 10 already proves for amount_usd, condition
+  // (a2)). Proves the fix is not merely a same-utterance special case.
+  it('11b. self-correction split across two adjacent utterances (no intervening agent turn) -> same result as 11', () => {
+    const conversation = [
+      u('u1', 'This is Dana Whitfield, corporate treasury. This has been approved by Marcus Obie.', 0),
+      u('u2', 'Actually, hold on.', 20_000),
+      u('u3', 'Elena Park approved it.', 21_000),
+    ];
+    const { claims } = buildLedger(conversation, [], MERIDIAN);
+    const approverClaims = claims.filter((c) => c.field === 'approver');
+    expect(approverClaims).toHaveLength(2);
+    expect(approverClaims[0]).toMatchObject({ kind: 'STATED', value: 'marcus obie' });
+    expect(approverClaims[1]).toMatchObject({ kind: 'CORRECTED', value: 'elena park', supersedes: approverClaims[0]!.id });
+    expect(currentClaim(claims, 'approver')?.value).toBe('elena park');
+  });
 });

@@ -71,6 +71,15 @@ const ESCROW_CUE_CONNECTOR = '(?:is\\s+at\\s+|is\\s+|at\\s+|with\\s+|account\\s+
 
 const CUE_PATTERNS: { field: CuedNameField; re: RegExp }[] = [
   { field: 'approver', re: new RegExp(`\\bapproved by\\s+(${NAME})`, 'g') },
+  // fix (P2, 2026-09-14, rehearsal report 2026-09-14T18-05-49-single-wrong-answer.md): a
+  // caller correcting themselves said "...wait, I mean Elena Park approved it." -- the name
+  // comes BEFORE "approved", not after "approved by", so the only pattern above never
+  // captured it and the ledger's approver claim stayed on the pre-correction name for the
+  // rest of the call (the readback and the trap-fact challenge both spoke it). Mirrors the
+  // reversed counsel patterns just below ("(NAME) is/are/was/were counsel", "(NAME) handled
+  // it"): a name immediately followed by "approved" (optionally "it"/"this"/"that"/"the
+  // payment"/"the transfer"/"the wire") is an approver claim too.
+  { field: 'approver', re: new RegExp(`(${NAME})\\s+approved\\b`, 'g') },
   // Fix round 1, finding 1: connector is now mandatory (was `?\s*`, which let bare
   // "counsel Jane Doe" match with no "is"/"was"/etc.), matching the beneficiary/vendor shape.
   { field: 'counsel', re: new RegExp(`\\bcounsel\\b (?:is|was|of record is|of record was)\\s+(${NAME})`, 'g') },

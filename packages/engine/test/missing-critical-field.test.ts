@@ -189,8 +189,11 @@ describe('CONSISTENCY_CHECK never STALLs on a critical field with no claim at al
   // transcript -- the same `extractAmounts` call ledger.ts uses to create the amount_usd
   // CLAIM in the first place. So a caller who never states an amount never gets
   // `request_params` evidence either, and `deriveState` (fsm.ts) never leaves CLAIM
-  // (`hasRequest` stays false) -- it keeps asking ELICIT_REQUEST ("Ask what the caller
-  // needs"), which was never the STALL deadlock this defect describes. This is a direct
+  // (`hasRequest` stays false) -- it keeps asking ELICIT_REQUEST (see fsm.ts's
+  // `elicitRequestSentence`, fixed 2026-09-14 for the P3 defect: an exact elicit-the-amount
+  // question once a payment intent is recognizable, "What do you need today?" otherwise --
+  // no longer the bare "Ask what the caller needs." prose this comment used to name), which
+  // was never the STALL deadlock this defect describes. This is a direct
   // unit test of `phrasingGoal`'s CONSISTENCY_CHECK branch instead (the same pattern
   // rules.test.ts's "phrasingGoal (fsm.ts) -- CONSISTENCY_CHECK sub-branches" describe block
   // already uses), to prove the fix itself is field-agnostic and also covers amount_usd.
@@ -282,5 +285,48 @@ describe('CONSISTENCY_CHECK never STALLs on a critical field with no claim at al
 
     expect(out.verdict).toBe('STAGE');
     expect(out.assurance.critical_fields_confirmed).toBe(true);
+  });
+});
+
+// P3 (2026-09-14, PROVEN live defect, rehearsal report
+// scripts/rehearse/reports/2026-09-14T18-06-55-single-wrong-answer.md): the caller said "I
+// need to request a wire correction for Meridian Supply, please" -- a recognizable request
+// (payment-intent word "correction"/"wire", a named vendor) with no amount. The old
+// ELICIT_REQUEST goal was the bare instruction "Ask what the caller needs.", so the model
+// improvised "What is the transaction reference number?" -- a field the caller could never
+// answer -- and the call idled out to NO_ACTION. fsm.ts's `elicitRequestSentence` now
+// composes an exact, ready-to-speak amount-elicit question instead. Driven through the REAL
+// `evaluate()` (LAW 3: never a copy of the engine).
+describe('ELICIT_REQUEST composes an exact, ready-to-speak sentence for a recognizable-but-incomplete request (P3 fix)', () => {
+  it('vendor named, no amount -> verbatim goal asks for the amount and names the vendor', () => {
+    const conversation: Utterance[] = [
+      {
+        id: 'c1',
+        speaker: 'caller',
+        text: 'Hi, this is Dana Whitfield from Corporate Treasury. I need to request a wire correction for Meridian Supply, please.',
+        t_ms: 1000,
+      },
+    ];
+    const input: EngineInput = { conversation, tools: [], actions: [], call: danaCall, seed: MERIDIAN };
+    const out = evaluate(input);
+
+    expect(out.state).toBe('CLAIM');
+    expect(out.goal.code).toBe('ELICIT_REQUEST');
+    // A ready-to-speak question a caller can actually answer -- never "transaction
+    // reference number" or any other invented system field.
+    expect(out.goal.hint).toBe('What is the exact amount you need to send, and to which vendor?');
+    expect(out.goal.hint.toLowerCase()).not.toContain('transaction reference');
+  });
+
+  it('no payment intent at all yet -> the plain opening question, not the old prose instruction', () => {
+    const conversation: Utterance[] = [
+      { id: 'c1', speaker: 'caller', text: 'Hi, this is Dana Whitfield from Corporate Treasury.', t_ms: 1000 },
+    ];
+    const input: EngineInput = { conversation, tools: [], actions: [], call: danaCall, seed: MERIDIAN };
+    const out = evaluate(input);
+
+    expect(out.state).toBe('CLAIM');
+    expect(out.goal.code).toBe('ELICIT_REQUEST');
+    expect(out.goal.hint).toBe('What do you need today?');
   });
 });
