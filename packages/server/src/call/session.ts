@@ -35,6 +35,7 @@ import { validateToolArgs } from './validate.js';
 import { stallKindFor, stallLineFor, type StallKind } from './stalls.js';
 import { argsForTerminalTool } from './terminalActions.js';
 import { transcriptMatchesCloseSentence } from './closeMatch.js';
+import { QUESTION_GOALS, verbatimQuestionSentence, transcriptAsksQuestion } from './questionMatch.js';
 
 export interface CallSessionOpts {
   session_id: string;
@@ -399,6 +400,18 @@ export class CallSession {
    *  already asked for would fire a second, redundant `reply.create` for a reply that has
    *  not begun yet (never two reply.create for the same goal rendering). */
   private replyCreateAwaitingStart = false;
+
+  /** Question-reask fix (2026-09-14, PROVEN live failure -- see `maybeReaskQuestion`'s own
+   *  doc comment for the incident): at most QUESTION_REASK_MAX reasks per GOAL RENDERING
+   *  (not per call, not per goal code) -- `questionReaskGoalKey` is `JSON.stringify` of the
+   *  goal object the counter is currently scoped to (same convention `previousGoalKey`
+   *  above already uses to detect "this is the same rendering, not a fresh one"); the
+   *  counter resets to 0 the moment that key changes. Lazily read/reset from inside
+   *  `maybeReaskQuestion` itself rather than from `applyEvaluate` -- only a QUESTION_GOAL
+   *  rendering ever needs to be tracked here at all. */
+  private questionReaskGoalKey: string | null = null;
+  private questionReaskCount = 0;
+  private static readonly QUESTION_REASK_MAX = 2;
 
   private clearCloseTimers(): void {
     if (this.closeGraceTimer) {
@@ -1102,6 +1115,12 @@ export class CallSession {
         // reply.create fix, round 2 -- requirement 3 unchanged: the tool.result flush rule
         // stays first (immediately above); this only ever sends AFTER that.
         this.maybeSendReplyCreateAfterReplyDone(evt.reply_id);
+        // Question-reask fix (2026-09-14): only when NOTHING was just sent above does this
+        // get a chance to fire -- see `maybeReaskQuestion`'s own doc comment for the guard
+        // it makes of `replyCreateAwaitingStart` itself; QUESTION_GOALS and
+        // FORCE_SPEAK_GOALS/HOLDING_GOALS are disjoint by construction, so this and the
+        // generic force-speak machinery above never both want to send for the same event.
+        this.maybeReaskQuestion(evt.reply_id, evt.status);
         // reply.create fix, round 3: only when NOTHING was just sent above (the generic
         // force-speak machinery found no new goal to speak at all) does the CLOSE-specific,
         // transcript-confirmed check get to decide whether to arm the hang-up or retry --
@@ -1208,6 +1227,73 @@ export class CallSession {
         field: goal.elicit.field,
       });
     }
+  }
+
+  /** Question-reask fix (2026-09-14, PROVEN live failure -- see
+   *  scripts/rehearse/reports/2026-09-14T15-47-29-miller-patient.diagnostics.json and its own
+   *  .md): at 33741 the engine rendered goal ASK_CHALLENGE (the next verification question);
+   *  the model's own reply was "Checking the record." (20 chars, no question at all); the SAME
+   *  goal re-rendered unchanged at 37041 (nothing new to say, so no fresh session.update went
+   *  out either, and nothing else in this class ever asks the model to try again); a
+   *  person-like caller then waited for a question that never came until the idle timer ended
+   *  the call 33 seconds later. LAW 3 is unaffected either way -- the engine already composed
+   *  the question (fsm.ts/challenges.ts); this only ever asks AssemblyAI to actually speak the
+   *  SAME already-computed goal again, never a new one and never a verdict.
+   *
+   *  Called once per completed reply, from `dispatchAaiEvent`'s 'reply.done' case, reading
+   *  `this.last` from BEFORE that event's own trailing `tick()` runs -- same timing
+   *  `recordGoalCompletionAction`/`scheduleCloseIfNeeded` already rely on, for the same
+   *  reason: this is the goal the reply that just finished was actually phrased under.
+   *
+   *  Guards, in order: only a `status === 'completed'` reply is even eligible (an interrupted
+   *  reply was cut off by the caller, not abandoned by the model -- nothing to reask yet, the
+   *  next turn will re-render the same unmet goal on its own). Never while the call has ended,
+   *  the goodbye is already transcript-confirmed (closeMatch.ts's `goodbyeConfirmed` --
+   *  nothing is ever owed again once that's true, same rule `sendReplyCreate` itself already
+   *  enforces), or something else already sent a `reply.create` this same event
+   *  (`maybeSendReplyCreateAfterReplyDone`, immediately above this call at the call site).
+   *  Only fires for a QUESTION_GOAL (questionMatch.ts) -- every holding/announcement/close
+   *  goal is excluded by construction, never checked here at all.
+   *
+   *  `replyGoalAtStart.get(replyId)` (set at THIS reply's own `reply.started`, same map
+   *  `maybeSendReplyCreateAfterReplyDone` already reads) must still equal the CURRENT goal
+   *  code, or the caller has already moved on to a different question by the time this reply
+   *  finished -- reasking the STALE one now would only confuse them further.
+   *
+   *  The per-rendering cap (`questionReaskGoalKey`/`questionReaskCount`) resets the moment the
+   *  goal object itself changes (a fresh challenge, a fresh readback field, ...); a rendering
+   *  gets at most QUESTION_REASK_MAX (2) reasks before this gives up on it silently (the next
+   *  goal change, or the call's own idle/cap timers, take over from there -- no new escalation
+   *  path is added here). */
+  private maybeReaskQuestion(replyId: string, status: string): void {
+    if (status !== 'completed') return;
+    if (this.ended || this.goodbyeConfirmed) return;
+    if (this.replyCreateAwaitingStart) return; // something else already sent one this turn
+    if (!this.last) return;
+
+    const goal = this.last.goal;
+    if (!QUESTION_GOALS.has(goal.code)) return;
+
+    const label = this.replyGoalAtStart.get(replyId) ?? null;
+    if (label !== goal.code) return; // the goal moved on before this reply even finished
+
+    const goalKey = JSON.stringify(goal);
+    if (goalKey !== this.questionReaskGoalKey) {
+      this.questionReaskGoalKey = goalKey;
+      this.questionReaskCount = 0;
+    }
+    if (this.questionReaskCount >= CallSession.QUESTION_REASK_MAX) return;
+
+    const transcript = this.replyTranscripts.get(replyId) ?? '';
+    const sentence = verbatimQuestionSentence(goal);
+    if (transcriptAsksQuestion(transcript, sentence)) return;
+
+    this.questionReaskCount += 1;
+    const instructions = sentence
+      ? `Say exactly this and nothing else: "${sentence}"`
+      : `Ask the caller this question now, in one sentence: ${goal.hint}`;
+    this.sendReplyCreate(goal.code, 'question_not_asked', instructions);
+    this.diag('question_reask_sent', { goal_code: goal.code, attempt: this.questionReaskCount });
   }
 
   private handleToolCall(evt: Extract<AaiEvent, { type: 'tool.call' }>): void {

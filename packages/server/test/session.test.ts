@@ -1509,13 +1509,17 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       // than stacking a second one. Since 'tools-1' (the reply that actually lands the close
       // line) starts and completes before that single pending retry ever fires, the retry is
       // superseded and cancelled the moment the match is found -- so this drive costs exactly
-      // ONE reply.create for the whole call (the original tick_end send), not three: the old
-      // "cap reached at 3" framing no longer applies (there is no cap), and coalescing +
-      // supersession are what actually decide the count here, not exhaustion.
+      // TWO reply.create for the whole call: the question-reask fix's own send (2026-09-14 --
+      // this same corpus text needs a SECOND SEED_FACT challenge that the scripted a2 line
+      // never actually asks, so ONE `question_not_asked` reply.create goes out before CLOSE is
+      // ever reached -- see call/session.ts's `maybeReaskQuestion`) plus the original CLOSE
+      // tick_end send, not three: the old "cap reached at 3" framing no longer applies (there
+      // is no cap), and coalescing + supersession are what actually decide the count here, not
+      // exhaustion.
       driveScenarioBThroughA4(session, aai, clock);
       expect(session.last?.state).toBe('SEALED');
       expect(session.last?.goal.code).toBe('CLOSE');
-      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(2);
       expect(sent.some((e) => e.type === 'ended')).toBe(false); // not ended before 'tools-1' completes
 
       // Drive 'tools-1' (already speaking, started inside the helper) to completion, this
@@ -1531,7 +1535,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       // cancelled, not merely not-yet-due: it does not fire a spurious extra send here.
       vi.advanceTimersByTime(1500);
       expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
-      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(2);
     });
 
     it("(d) GREET is a real exclusion branch, not a coincidence of nothing else happening yet: zero reply.create before the caller's first turn, one once a genuinely force-spoken goal is reached in the SAME session (Important 5, 2026-09-13 review)", () => {
@@ -1556,11 +1560,14 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       // mismatch's retry now waits behind a CLOSE_RETRY_MIN_GAP_MS (400ms) timer instead of
       // sending synchronously -- see test (c) above for the full mechanism. Since this whole
       // drive runs synchronously with no real wall-clock delay, that retry timer never
-      // actually fires within the test, so only the ORIGINAL tick_end send has gone out by
-      // the time `driveScenarioBThroughA4` returns. This test's own subject (GREET is a real
-      // exclusion, not a false pass from nothing having happened yet) only needs "more than
-      // zero", which this still proves.
-      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+      // actually fires within the test, so only the ORIGINAL tick_end send (plus, since the
+      // question-reask fix, 2026-09-14: one earlier `question_not_asked` send mid-drive, for
+      // the SAME corpus gap test (c) above documents -- a second SEED_FACT challenge this
+      // scripted corpus text never actually asks) has gone out by the time
+      // `driveScenarioBThroughA4` returns. This test's own subject (GREET is a real exclusion,
+      // not a false pass from nothing having happened yet) only needs "more than zero", which
+      // this still proves regardless of the exact count.
+      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length).toBeGreaterThan(0);
     });
 
     // Critical 1 (2026-09-13 review, FAIL on round 1 commit 48a0969): round 1 labelled a
@@ -1710,7 +1717,18 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
    *  FIRST real reply.create (reason tick_end) as part of this same drive, so every test
    *  below starts from a state the real engine actually computed, not a mutated stand-in
    *  (direct mutation of `session.last` gets clobbered the moment any later real AAI event
-   *  ticks the engine again -- transcript.agent/reply.done both do). */
+   *  ticks the engine again -- transcript.agent/reply.done both do).
+   *
+   *  Question-reask fix (2026-09-14): a2's own corpus line is "Pulling the Hartwell file
+   *  now…" (scenarioB.conversation[3]) -- no question mark, and the engine has already
+   *  advanced to a SECOND SEED_FACT challenge (escrow_institution) by the time a2 completes,
+   *  which that line never actually asks. Unlike `driveScenarioBThroughA4` above (whose exact
+   *  corpus text is load-bearing for the very first test's `toEqual(scenarioB.conversation)`
+   *  check), nothing downstream of THIS helper depends on a2's literal wording -- only on
+   *  reaching FREEZE/SEALED/CLOSE with a known, small reply.create count. A trailing question
+   *  mark keeps `maybeReaskQuestion` (call/session.ts) from firing here at all (this helper's
+   *  whole point is CLOSE mechanics, not the reask fix -- that has its own dedicated describe
+   *  block further down), so every count below is unchanged from before that fix existed. */
   function driveToFreezeCloseWithFirstSend(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
     clock.now = 1000;
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
@@ -1724,7 +1742,7 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     aai.emit({ type: 'transcript.user', item_id: 'c2', text: scenarioB.conversation[2]!.text });
     clock.now = 3000;
     aai.emit({ type: 'reply.started', reply_id: 'a2' });
-    aai.emit({ type: 'transcript.agent', item_id: 'a2', text: scenarioB.conversation[3]!.text, reply_id: 'a2', interrupted: false });
+    aai.emit({ type: 'transcript.agent', item_id: 'a2', text: `${scenarioB.conversation[3]!.text} Which institution holds it?`, reply_id: 'a2', interrupted: false });
     clock.now = 3500;
     aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
 
@@ -2431,5 +2449,299 @@ describe('CallSession — ELICIT_MISSING_CRITICAL goal completion logs an elicit
     sessionInternals(session).recordGoalCompletionAction('interrupted');
 
     expect(session.logs.actions.some((a) => a.kind === 'elicit_issued')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Question-reask fix (2026-09-14, PROVEN live failure -- see
+// scripts/rehearse/reports/2026-09-14T15-47-29-miller-patient.diagnostics.json and its own
+// .md): at 33741 the engine rendered goal ASK_CHALLENGE (the next verification question);
+// the model's reply was "Checking the record." (20 chars, no question at all); at 37041 the
+// SAME goal re-rendered (nothing changed, so no fresh session.update went out either); a
+// person-like caller then waited for a question that never came until the idle timer fired
+// at 70572 -- the ESCALATE goodbye was spoken correctly and the call ended, but the caller
+// lost the call to a holding line the model improvised in place of the question.
+// `maybeReaskQuestion` (call/session.ts) is the fix: once a reply for a QUESTION_GOAL
+// completes without actually asking anything (checked via call/questionMatch.ts's
+// `transcriptAsksQuestion`), the SERVER -- never the model -- sends one more `reply.create`
+// spelling out the engine's own already-composed question verbatim, capped at
+// QUESTION_REASK_MAX (2) per goal rendering.
+//
+// Direct state construction (same technique the ELICIT_MISSING_CRITICAL describe block
+// above, and the reply.create-fix round-3 CLOSE describe block further up, both use, and for
+// the same reason each states): pinning an unstable intermediate goal like ASK_CHALLENGE or
+// READBACK does not survive a real `tick()` -- ANY further `aai.emit` re-runs the actual
+// engine over the (unchanged, still-empty) conversation/tools logs and recomputes whatever
+// GREET/INTAKE really evaluates to from them, clobbering the forced goal before the
+// mechanism under test ever runs. `maybeReaskQuestion` and the two maps it reads
+// (`replyGoalAtStart`, `replyTranscripts`) are exercised directly, exactly like
+// `recordGoalCompletionAction` is above -- this isolates the reask mechanism itself, not how
+// CHALLENGE/CONSISTENCY_CHECK is reached live (already proven by the Scenario A/B live tests
+// at the top of this file).
+describe('CallSession — question-reask: a completed reply that never asked the goal\'s question gets one more chance (PROVEN live failure, 2026-09-14T15-47-29-miller-patient)', () => {
+  function sessionInternals(session: CallSession) {
+    return session as unknown as {
+      maybeReaskQuestion: (replyId: string, status: string) => void;
+      replyGoalAtStart: Map<string, string>;
+      replyTranscripts: Map<string, string>;
+      replyCreateAwaitingStart: boolean;
+      goodbyeConfirmed: boolean;
+    };
+  }
+
+  const CHALLENGE_SPEAK = 'Just to confirm, this transfer goes to Northgate Partners. Is that correct?';
+
+  function newQuestionSession(clock: { now: number }, aai: FakeAaiSocket, sent: ServerEvent[], diagEvents: { kind: string; detail: unknown }[]) {
+    const call: CallContext = { session_id: 'sess-question-reask', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = new CallSession({
+      session_id: call.session_id,
+      seed: MERIDIAN,
+      call,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+    });
+    session.start();
+    return session;
+  }
+
+  /** Forces `session.last` to an ASK_CHALLENGE rendering carrying the engine's own
+   *  CHALLENGE-SPEAKABLE sentence (fsm.ts/challenges.ts: `goal.challenge.speak`) on a
+   *  TRAP_FACT/beneficiary challenge -- the exact shape the PROVEN live failure hit. */
+  function forceAskChallenge(session: CallSession): void {
+    session.last = {
+      ...session.last!,
+      state: 'CHALLENGE',
+      goal: {
+        code: 'ASK_CHALLENGE',
+        hint: CHALLENGE_SPEAK,
+        keyterms: [],
+        turn_detection_hint: 'patient',
+        challenge: {
+          challenge_id: 'sess-question-reask-1',
+          kind: 'TRAP_FACT',
+          field: 'beneficiary',
+          ask: 'Confirm the request back to the caller as if summarizing, but say "Northgate Partners" in place of their beneficiary, then pause.',
+          speak: CHALLENGE_SPEAK,
+          expect: { trap_value: 'Northgate Partners', true_claim_id: 'claim-1' },
+        },
+      },
+    };
+  }
+
+  const READBACK_SENTENCE = 'Just to confirm, the amount is $84,500. Is that correct?';
+
+  /** Forces `session.last` to a READBACK rendering -- fsm.ts composes the exact,
+   *  ready-to-speak confirmation sentence straight into `goal.hint` itself (no separate
+   *  `speak` field the way ASK_CHALLENGE has one). */
+  function forceReadback(session: CallSession): void {
+    session.last = {
+      ...session.last!,
+      state: 'CONSISTENCY_CHECK',
+      goal: {
+        code: 'READBACK',
+        hint: READBACK_SENTENCE,
+        keyterms: [],
+        turn_detection_hint: 'patient',
+        readback: { field: 'amount_usd', value: '84500' },
+      },
+    };
+  }
+
+  /** Forces `session.last` to ELICIT_IDENTITY -- a QUESTION_GOAL whose `hint` is a
+   *  paraphrase-instruction ("Ask who is calling."), never a verbatim sentence (fsm.ts).
+   *  Exercises the general "?" branch of `transcriptAsksQuestion`, not the verbatim one. */
+  function forceElicitIdentity(session: CallSession): void {
+    session.last = {
+      ...session.last!,
+      state: 'CLAIM',
+      goal: {
+        code: 'ELICIT_IDENTITY',
+        hint: 'Ask who is calling.',
+        keyterms: [],
+        turn_detection_hint: 'default',
+      },
+    };
+  }
+
+  it('(a) ASK_CHALLENGE: a non-question reply gets one reask carrying the challenge\'s speakable sentence verbatim; a later reply containing "?" sends nothing further', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newQuestionSession(clock, aai, sent, diagEvents);
+    const internals = sessionInternals(session);
+
+    forceAskChallenge(session);
+    internals.replyGoalAtStart.set('a1', 'ASK_CHALLENGE');
+    internals.replyTranscripts.set('a1', 'Checking the record.'); // PROVEN live text, no question
+
+    clock.now = 33741;
+    internals.maybeReaskQuestion('a1', 'completed');
+
+    let replyCreateMsgs = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    expect(replyCreateMsgs).toHaveLength(1);
+    const msg = replyCreateMsgs[0] as { type: string; instructions?: string };
+    expect(msg.instructions).toBe(`Say exactly this and nothing else: "${CHALLENGE_SPEAK}"`);
+    let reaskDiags = diagEvents.filter((e) => e.kind === 'question_reask_sent');
+    expect(reaskDiags).toHaveLength(1);
+    expect(reaskDiags[0]!.detail).toEqual({ goal_code: 'ASK_CHALLENGE', attempt: 1 });
+
+    // The reask's own `sendReplyCreate` marks a reply.create outstanding -- the real
+    // reply.started that follows it would clear this; simulate that before the next reply.
+    internals.replyCreateAwaitingStart = false;
+    internals.replyGoalAtStart.set('a2', 'ASK_CHALLENGE'); // goal still unchanged
+    internals.replyTranscripts.set('a2', 'You are requesting a transfer to Northgate Partners. Is that correct?');
+
+    clock.now = 37041;
+    internals.maybeReaskQuestion('a2', 'completed');
+
+    replyCreateMsgs = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    expect(replyCreateMsgs).toHaveLength(1); // nothing further sent
+    reaskDiags = diagEvents.filter((e) => e.kind === 'question_reask_sent');
+    expect(reaskDiags).toHaveLength(1);
+  });
+
+  it('(b) READBACK: a reply that actually says the readback sentence sends nothing', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newQuestionSession(clock, aai, sent, diagEvents);
+    const internals = sessionInternals(session);
+
+    forceReadback(session);
+    internals.replyGoalAtStart.set('a1', 'READBACK');
+    internals.replyTranscripts.set('a1', READBACK_SENTENCE);
+
+    internals.maybeReaskQuestion('a1', 'completed');
+
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+    expect(diagEvents.some((e) => e.kind === 'question_reask_sent')).toBe(false);
+  });
+
+  it('(c) caps at QUESTION_REASK_MAX (2) reasks per goal rendering: two non-question replies send, a third sends nothing', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newQuestionSession(clock, aai, sent, diagEvents);
+    const internals = sessionInternals(session);
+
+    forceAskChallenge(session);
+
+    for (const replyId of ['a1', 'a2', 'a3']) {
+      internals.replyCreateAwaitingStart = false;
+      internals.replyGoalAtStart.set(replyId, 'ASK_CHALLENGE');
+      internals.replyTranscripts.set(replyId, 'One moment please.');
+      internals.maybeReaskQuestion(replyId, 'completed');
+    }
+
+    const replyCreateMsgs = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    expect(replyCreateMsgs).toHaveLength(2);
+    const reaskDiags = diagEvents.filter((e) => e.kind === 'question_reask_sent');
+    expect(reaskDiags.map((e) => (e.detail as { attempt: number }).attempt)).toEqual([1, 2]);
+  });
+
+  it('(d) sends nothing when the goal changed between reply.started and reply.done', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newQuestionSession(clock, aai, sent, diagEvents);
+    const internals = sessionInternals(session);
+
+    // By the time this reply completed, the CURRENT goal is ASK_CHALLENGE -- but the reply
+    // was phrased when the goal was still READBACK (recorded at that reply's own
+    // reply.started): the caller has moved on, and forcing the stale reply's wording onto
+    // the new goal would only confuse them further.
+    forceAskChallenge(session);
+    internals.replyGoalAtStart.set('a1', 'READBACK');
+    internals.replyTranscripts.set('a1', 'Checking the record.');
+
+    internals.maybeReaskQuestion('a1', 'completed');
+
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+    expect(diagEvents.some((e) => e.kind === 'question_reask_sent')).toBe(false);
+  });
+
+  it('(e) sends nothing once the goodbye is transcript-confirmed', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newQuestionSession(clock, aai, sent, diagEvents);
+    const internals = sessionInternals(session);
+
+    forceAskChallenge(session);
+    internals.replyGoalAtStart.set('a1', 'ASK_CHALLENGE');
+    internals.replyTranscripts.set('a1', 'Checking the record.');
+    internals.goodbyeConfirmed = true;
+
+    internals.maybeReaskQuestion('a1', 'completed');
+
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+    expect(diagEvents.some((e) => e.kind === 'question_reask_sent')).toBe(false);
+  });
+
+  it('never reasks a holding goal (STALL is not a QUESTION_GOAL)', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newQuestionSession(clock, aai, sent, diagEvents);
+    const internals = sessionInternals(session);
+
+    session.last = {
+      ...session.last!,
+      state: 'EVIDENCE',
+      goal: { code: 'STALL', hint: 'Checks are running.', keyterms: [], turn_detection_hint: 'default' },
+    };
+    internals.replyGoalAtStart.set('a1', 'STALL');
+    internals.replyTranscripts.set('a1', 'One moment while I check that.');
+
+    internals.maybeReaskQuestion('a1', 'completed');
+
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+    expect(diagEvents.some((e) => e.kind === 'question_reask_sent')).toBe(false);
+  });
+
+  it('ELICIT_IDENTITY (paraphrase-instruction goal, no verbatim sentence): any question mark satisfies it, otherwise the reask instructs the model to ask the hint as one question', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newQuestionSession(clock, aai, sent, diagEvents);
+    const internals = sessionInternals(session);
+
+    forceElicitIdentity(session);
+    internals.replyGoalAtStart.set('a1', 'ELICIT_IDENTITY');
+    internals.replyTranscripts.set('a1', 'One moment.'); // no question mark
+
+    internals.maybeReaskQuestion('a1', 'completed');
+
+    const replyCreateMsgs = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    expect(replyCreateMsgs).toHaveLength(1);
+    const msg = replyCreateMsgs[0] as { type: string; instructions?: string };
+    expect(msg.instructions).toBe('Ask the caller this question now, in one sentence: Ask who is calling.');
+  });
+
+  it('does not reask when status is interrupted, only when completed', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newQuestionSession(clock, aai, sent, diagEvents);
+    const internals = sessionInternals(session);
+
+    forceAskChallenge(session);
+    internals.replyGoalAtStart.set('a1', 'ASK_CHALLENGE');
+    internals.replyTranscripts.set('a1', 'Checking the record.');
+
+    internals.maybeReaskQuestion('a1', 'interrupted');
+
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
   });
 });
