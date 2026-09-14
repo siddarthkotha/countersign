@@ -207,7 +207,21 @@ function makeEntrySink(
         console.log(JSON.stringify({ countersign_diag: summarizeBundle(bundle) }));
       }
     }
+    // `entry.deliver` is what actually pushes `e` down the wire (a live send, or the grace
+    // buffer while detached) -- do that FIRST, so a real `ended` message still reaches an
+    // attached browser before its socket closes. Round 4, requirement 9 (moved here from
+    // `endCall`, 2026-09-14): closing the browser socket the instant a call truly ends,
+    // regardless of what ended it (idle reaper, cap timer, caller hangup, an AAI error) --
+    // `entry.ws` is null whenever nothing is currently attached (already detached into the
+    // grace buffer, e.g. `startGrace`'s own `browser_gone` path), so this is a no-op then.
     entry.deliver(e);
+    if (e.type === 'ended' && entry.ws) {
+      try {
+        entry.ws.close();
+      } catch {
+        // already gone -- nothing to close
+      }
+    }
   };
 }
 
@@ -441,7 +455,6 @@ export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): Brow
   function endCall(session_id: string, reason: string): boolean {
     const entry = activeCalls.get(session_id);
     if (entry) {
-      const ws = entry.ws;
       // Flight recorder: a distinct, easy-to-grep `cap` server_event for the two abuse-cap
       // paths (BRIEF's cap timer above, and index.ts's idle reaper) BEFORE the generic
       // `session_ended` diag CallSession.end() itself records -- "caps events (cap reached,
@@ -451,20 +464,16 @@ export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): Brow
         recordServerEvent(deps.diagnostics, session_id, deps.now(), 'cap', { event: reason });
       }
       // `entry.session.end(reason)` emits `ended`, which `makeEntrySink` already routes into
-      // clearing both timers, `activeCalls.delete`, and `endSession` -- idempotent, so a
-      // call that already ended between the caller's check and this call is a harmless no-op.
+      // clearing both timers, `activeCalls.delete`, `endSession`, AND (round 4, requirement
+      // 9 -- see that function's own doc comment) closing the browser socket -- idempotent,
+      // so a call that already ended between the caller's check and this call is a harmless
+      // no-op. Round 4 (2026-09-14): `CallSession.end('idle_timeout')` can now DEFER (it
+      // speaks a goodbye before actually ending, see session.ts's own doc comment) rather
+      // than emitting `ended` synchronously -- closing the browser ws HERE, unconditionally,
+      // used to race ahead of that goodbye and cut the socket before `ended` (or the
+      // goodbye's own audio/state) ever reached it. `makeEntrySink`'s `ended` branch is the
+      // one place that actually knows the call is DONE talking, so the close moved there.
       entry.session.end(reason);
-      // The AAI socket is closed by `CallSession.end` itself; the browser socket is a
-      // transport `CallSession` knows nothing about, so it's closed here instead -- a
-      // server-initiated end (idle timeout, cap reached, an operator's `/reset`) must not
-      // leave a live-looking browser socket open past the call it belonged to.
-      if (ws) {
-        try {
-          ws.close();
-        } catch {
-          // already gone -- nothing to close
-        }
-      }
       return true;
     }
     // No live CallEntry (never attached a `/ws/call/:id` socket, or already fully ended) --

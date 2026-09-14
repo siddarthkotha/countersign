@@ -331,8 +331,15 @@ describe('ws/browser — /ws/call/:id', () => {
     ws1.close();
   });
 
+  // Round 4, requirement 9 (2026-09-14, session lane): `endCall(..., 'idle_timeout')` no
+  // longer closes the socket the instant it's called -- nothing was ever said on this call,
+  // so `CallSession.end('idle_timeout')` finds verdict NO_ACTION (row 15) and now speaks a
+  // goodbye ("Thank you for calling. Goodbye.") before actually ending, so a stranger judge
+  // idled out mid-demo hears something instead of a silent hangup. This test drives that
+  // goodbye through the session's own (fake) AAI socket, then confirms the call still ends
+  // `idle_timeout` (not `agent_closed`) once it's heard.
   it('CRITICAL 1 (final review): endCall ends a LIVE call -- the browser gets `ended`, its socket closes, and the caps slot frees', async () => {
-    const { base, wsBase, state, endCall } = await start();
+    const { base, wsBase, state, endCall, aaiInstances } = await start();
     const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
     const { session_id, ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
 
@@ -349,7 +356,21 @@ describe('ws/browser — /ws/call/:id', () => {
     const ended = endCall(session_id, 'idle_timeout');
     expect(ended).toBe(true);
 
-    await pollUntil(() => messages.some((m) => m.type === 'ended'));
+    // Not ended yet -- a goodbye was just requested (round 4, requirement 9), never a silent
+    // hangup. Speak it back through the session's own fake AAI socket.
+    const aai = aaiInstances.get(session_id)!;
+    await pollUntil(() => (aai.sent as { type?: string }[]).some((m) => m.type === 'reply.create'));
+    aai.emit({ type: 'reply.started', reply_id: 'goodbye-1' });
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'a-goodbye-1',
+      text: 'Thank you for calling. Goodbye.',
+      reply_id: 'goodbye-1',
+      interrupted: false,
+    });
+    aai.emit({ type: 'reply.done', reply_id: 'goodbye-1', status: 'completed' });
+
+    await pollUntil(() => messages.some((m) => m.type === 'ended'), 4000);
     expect(messages.find((m) => m.type === 'ended')).toEqual({ type: 'ended', reason: 'idle_timeout' });
     // The browser socket itself is closed by `endCall`, not left dangling for the client to
     // notice on its own.
