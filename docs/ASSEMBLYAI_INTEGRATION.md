@@ -85,6 +85,34 @@ additions, all PROVEN in that file with URLs:
 - UNKNOWN still: idle timeout on their side; CORS on the token endpoint (irrelevant — minted
   server-side); whether the server stops `reply.audio` on interrupt (client flushes regardless).
 
+## VERIFY-AT-BUILD: `reply.create` schema, fetched 2026-09-13
+
+PROVEN bug (founder screen recording, session 84ddf47a, Miller fraud scenario): a
+`session.update` that only changes `system_prompt` never makes the agent speak on its own --
+the server sent three of them in one tick (FREEZE → ANNOUNCE_FROZEN → CLOSE) and the closing
+line was never spoken; the call ended `agent_closed` with the caller having heard nothing
+after the holding line. Root cause: nothing in the code ever asked AssemblyAI for a fresh
+reply -- only a new caller turn (or the initial greeting) ever produced one.
+
+Fetched from https://www.assemblyai.com/docs/voice-agents/voice-agent-api/api-spec/voice-agent-websocket
+on 2026-09-13 (via an errand agent's WebFetch, per the research-guard rule): the client
+message `reply.create` --
+
+> Client asks the agent to generate a reply now, optionally with one-shot instructions.
+
+Schema, quoted:
+- `type` (string, required): `"reply.create"`
+- `instructions` (string, optional): "Optional one-shot instructions the agent uses to
+  compose this reply. Does not modify `system_prompt`."
+
+**UNKNOWN (docs silent):** whether it is safe/defined behavior to send `reply.create` while a
+reply is already in progress (between `reply.started` and `reply.done`). The fix in
+`packages/server/src/call/session.ts` never does that -- it waits for the in-flight reply's
+own `reply.done` before sending one, and only when the goal that reply was phrased under
+differs from the goal that now needs to be spoken (see that file's `sendReplyCreate`/
+`mustForceSpeak` doc comments). Type added at `packages/server/src/aai/types.ts`
+(`ReplyCreateMessage`).
+
 ## VERIFY-AT-BUILD note added 2026-09-09 (transcript dedupe)
 
 The server now ignores a final `transcript.user` / `transcript.agent` event whose `item_id` was

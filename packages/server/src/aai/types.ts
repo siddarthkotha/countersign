@@ -29,6 +29,20 @@ export interface AaiSocket {
   debugForceDrop?(): boolean;
 }
 
+/** Client -> AssemblyAI message that asks the agent to generate a reply right now, without
+ *  waiting for the caller to speak first. Documented at
+ *  https://www.assemblyai.com/docs/voice-agents/voice-agent-api/api-spec/voice-agent-websocket
+ *  (fetched 2026-09-13): `type: "reply.create"`, optional `instructions` -- "Optional
+ *  one-shot instructions the agent uses to compose this reply. Does not modify
+ *  `system_prompt`." The docs are silent on whether it is safe to send while a reply is
+ *  already in progress (between `reply.started` and `reply.done`) -- `call/session.ts`
+ *  never does that: it defers sending until the in-flight reply's own `reply.done`, then
+ *  only if the goal that reply was phrased under differs from the goal that needs saying. */
+export interface ReplyCreateMessage {
+  type: 'reply.create';
+  instructions?: string;
+}
+
 /** Server <- AssemblyAI events actually used by S2 (a strict subset of the full events
  *  reference -- session.updated, transcript.*.delta, session.resume are not needed by the
  *  server-authoritative logs and are left out rather than modeled and ignored). */
