@@ -2115,6 +2115,157 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
   });
 });
 
+// Round 5 (2026-09-14, PROVEN live: scripts/rehearse/reports/2026-09-13T22-57-34-miller-
+// patient.md + its .diagnostics.json): after the agent finished speaking the full close
+// sentence at 46135ms, a NEW reply started ("(interrupted) Checking the transaction history.
+// Please hold.") and was cut off mid-word by the scheduled hang-up -- a judge hears the
+// goodbye, then the start of a holding line. Once the goodbye is transcript-confirmed, no
+// further reply.create may go out, and any reply.started arriving after confirmation must
+// have its audio suppressed rather than relayed to the browser -- the goodbye reply's own
+// remaining frames are the one exception.
+describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, PROVEN live: 2026-09-13T22-57-34-miller-patient)', () => {
+  /** Same shape as the round-3 describe block's own helper above -- drives Scenario B's
+   *  c1..c3 far enough that server-driven lookups/terminal actions reach FREEZE/SEALED/CLOSE
+   *  with nothing speaking, so `maybeSendReplyCreateForTick` sends the first real
+   *  `reply.create` (reason tick_end) as part of the same drive. */
+  function driveToFreezeCloseWithFirstSend(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    clock.now = 1500;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: scenarioB.conversation[1]!.text, reply_id: 'a1', interrupted: false });
+    clock.now = 2000;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    clock.now = 2500;
+    aai.emit({ type: 'transcript.user', item_id: 'c2', text: scenarioB.conversation[2]!.text });
+    clock.now = 3000;
+    aai.emit({ type: 'reply.started', reply_id: 'a2' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a2', text: scenarioB.conversation[3]!.text, reply_id: 'a2', interrupted: false });
+    clock.now = 3500;
+    aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
+
+    clock.now = 4000;
+    aai.emit({ type: 'transcript.user', item_id: 'c3', text: scenarioB.conversation[4]!.text });
+  }
+
+  it('(a) a NEW reply.started after the goodbye is transcript-confirmed has its audio frames dropped, logs post_goodbye_reply_suppressed once, and the call still ends agent_closed on the unchanged schedule', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = new CallSession({
+      session_id: CALL_B.session_id,
+      seed: MERIDIAN,
+      call: CALL_B,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+    });
+    session.start();
+    driveToFreezeCloseWithFirstSend(session, aai, clock);
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    // The goodbye is spoken and transcript-confirmed mid-stream (maybeArmCloseOnTranscript).
+    aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+
+    const audioFramesSent = () => sent.filter((e) => e.type === 'audio').length;
+    const framesBefore = audioFramesSent();
+
+    // A NEW reply starts AFTER confirmation -- AssemblyAI's own turn-driven follow-up (the
+    // PROVEN "(interrupted) Checking the transaction history. Please hold." line) -- and
+    // streams audio frames.
+    aai.emit({ type: 'reply.started', reply_id: 'r2' });
+    aai.emit({ type: 'reply.audio', data: 'AAAA' });
+    aai.emit({ type: 'reply.audio', data: 'BBBB' });
+
+    // Not one frame of the post-goodbye reply reaches the browser.
+    expect(audioFramesSent()).toBe(framesBefore);
+    expect(sent.some((e) => e.type === 'audio' && (e.data === 'AAAA' || e.data === 'BBBB'))).toBe(false);
+
+    // Exactly one suppression diagnostic, logged at reply.started (not once per frame).
+    const suppressed = diagEvents.filter((e) => e.kind === 'post_goodbye_reply_suppressed');
+    expect(suppressed).toHaveLength(1);
+    expect(suppressed[0]!.detail).toEqual({ reply_id: 'r2' });
+
+    // The hang-up still fires on schedule (CLOSE_GRACE_MS after the confirmed reply's own
+    // reply.done, unaffected by whatever AssemblyAI does afterward).
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    vi.advanceTimersByTime(1500);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+  });
+
+  it('(b) the goodbye reply\'s OWN remaining audio frames, arriving after its transcript already matched, are still forwarded', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession(clock, CALL_B, aai, sent);
+    session.start();
+    driveToFreezeCloseWithFirstSend(session, aai, clock);
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    // A frame BEFORE the transcript match -- ordinary forwarding, sanity baseline.
+    aai.emit({ type: 'reply.audio', data: 'pre-match' });
+    expect(sent.some((e) => e.type === 'audio' && e.data === 'pre-match')).toBe(true);
+
+    // The transcript now matches the full close sentence -- confirms the goodbye mid-stream.
+    aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
+
+    // MORE frames for the SAME reply id, arriving after confirmation -- these are the tail of
+    // the goodbye itself finishing its own flush to the wire, not a new unrelated reply, and
+    // must still reach the browser.
+    aai.emit({ type: 'reply.audio', data: 'post-match-same-reply' });
+    expect(sent.some((e) => e.type === 'audio' && e.data === 'post-match-same-reply')).toBe(true);
+
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+    vi.advanceTimersByTime(1500);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+  });
+
+  it('(c) no reply.create is ever sent again once the goodbye is confirmed, even when something would otherwise force-speak a re-rendered goal', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession(clock, CALL_B, aai, sent);
+    session.start();
+    driveToFreezeCloseWithFirstSend(session, aai, clock);
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+
+    const replyCreateCountBefore = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+    expect(replyCreateCountBefore).toBeGreaterThan(0); // the original tick_end send, at minimum
+
+    // Directly exercise the single choke point every caller funnels through (force-speak,
+    // close_retry, the lost-reply-create recovery) -- "even if the goal re-renders" means
+    // even a caller that still believes something must be spoken must not get through.
+    const internals = session as unknown as {
+      sendReplyCreate: (goalCode: string, reason: string, instructions?: string) => void;
+      goodbyeConfirmed: boolean;
+    };
+    expect(internals.goodbyeConfirmed).toBe(true);
+    internals.sendReplyCreate('CLOSE', 'close_retry');
+    internals.sendReplyCreate('ANNOUNCE_FROZEN', 'tick_end');
+
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(replyCreateCountBefore);
+
+    // Advancing well past the close grace period sends nothing new and ends the call normally.
+    vi.advanceTimersByTime(10_000);
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(replyCreateCountBefore);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+  });
+});
+
 // Important 2 (review of commit 5930450, 2026-09-13): recordGoalCompletionAction only ever
 // logged an action for ASK_CHALLENGE/READBACK -- an ELICIT_MISSING_CRITICAL completion was
 // never logged at all, so compose.ts's computeReadbackReaskExhausted (folded to also count

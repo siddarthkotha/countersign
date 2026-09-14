@@ -265,6 +265,46 @@ export class CallSession {
    *  still matches doesn't re-arm a fresh `CLOSE_DONE_WAIT_MS` timer on top of the one
    *  already running. */
   private closeArmedForReplyId: string | null = null;
+  /** Round 5 (2026-09-14, PROVEN live: scripts/rehearse/reports/2026-09-13T22-57-34-miller-
+   *  patient.md + its .diagnostics.json): after the agent finished speaking the full close
+   *  sentence (confirmed at 46135ms), a NEW reply started ("(interrupted) Checking the
+   *  transaction history. Please hold.") -- AssemblyAI's own turn-driven follow-up, or a
+   *  queued `reply.create` -- and the server relayed its audio to the browser before the
+   *  scheduled hang-up cut it off mid-word. A judge hears the goodbye, then the start of a
+   *  holding line. `beginCloseGrace`'s timer only decides WHEN the socket closes -- it never
+   *  stopped AssemblyAI from generating (and this class from relaying) more in the meantime.
+   *
+   *  `goodbyeConfirmed`/`goodbyeConfirmedReplyId` are set together, exactly once per call, by
+   *  whichever path confirms the transcript match first (`maybeArmCloseOnTranscript` mid-
+   *  stream, or `scheduleCloseIfNeeded` at that reply's own `reply.done`) -- never cleared
+   *  once true. Three effects, all keyed off this pair:
+   *   1. `sendReplyCreate` refuses every future send once `goodbyeConfirmed` is true: no more
+   *      goodbye retry is owed (the words were heard), and no OTHER goal's reply.create can
+   *      slip out either -- this is the single choke point every caller (force-speak,
+   *      close_retry, the lost-reply-create recovery) already funnels through, so one guard
+   *      there closes all of them.
+   *   2. `reply.started` for any id OTHER than `goodbyeConfirmedReplyId`, arriving once
+   *      `goodbyeConfirmed` is true, marks itself `suppressPostGoodbyeReplyAudio` and logs
+   *      `post_goodbye_reply_suppressed` exactly once (at start, not per frame).
+   *   3. `reply.audio` frames while that flag is set are dropped instead of relayed to the
+   *      browser -- the goodbye reply's OWN remaining frames (same reply id) are never
+   *      suppressed, only a reply that STARTS AFTER confirmation is.
+   *
+   *  No AssemblyAI client message to cancel/stop an in-flight reply is documented (docs/
+   *  ASSEMBLYAI_INTEGRATION.md's client-event list has no such type -- session.update,
+   *  input.audio, session.resume, session.end, tool.result, reply.create,
+   *  conversation.message is the complete set) -- suppression on this server's own relay
+   *  path is the only mechanism available, not a substitute for a documented cancel call
+   *  that does not exist. */
+  private goodbyeConfirmed = false;
+  private goodbyeConfirmedReplyId: string | null = null;
+  /** The AAI reply id the most recent `reply.started` labelled -- `reply.audio` events carry
+   *  no reply id of their own (see aai/types.ts), so this is the only way to know which reply
+   *  a given audio frame belongs to. */
+  private currentReplyId: string | null = null;
+  /** True while `currentReplyId` is a reply that started AFTER `goodbyeConfirmed` went true
+   *  and is not the confirmed reply itself -- see the `goodbyeConfirmed` doc comment above. */
+  private suppressPostGoodbyeReplyAudio = false;
   /** Round 4, requirement 8: whether the CLOSE reply that most recently completed (matched or
    *  not) carried an empty/whitespace-only accumulated transcript -- read once by the retry
    *  this triggers (`armCloseRetryTimer`/`sendReplyCreate`) so that retry does NOT bump the
@@ -487,6 +527,7 @@ export class CallSession {
    *  `closeArmedForReplyId` guards against re-arming a second `CLOSE_DONE_WAIT_MS` timer on
    *  top of one already running for the same reply id as more transcript chunks stream in. */
   private maybeArmCloseOnTranscript(replyId: string): void {
+    if (this.goodbyeConfirmed) return; // round 5: nothing left to arm -- already confirmed
     const sentence = this.currentCloseSentence();
     if (!sentence) return;
     if (this.ended || this.closeGraceTimer) return;
@@ -496,6 +537,10 @@ export class CallSession {
     if (!transcriptMatchesCloseSentence(transcript, sentence)) return;
 
     this.closeArmedForReplyId = replyId;
+    // Round 5: this IS the transcript confirmation -- see the class-field doc comment on
+    // `goodbyeConfirmed` above for what this triggers.
+    this.goodbyeConfirmed = true;
+    this.goodbyeConfirmedReplyId = replyId;
     // The words are already heard -- no further retry is owed for this rendering of CLOSE.
     if (this.closeRetryTimer) {
       clearTimeout(this.closeRetryTimer);
@@ -563,6 +608,12 @@ export class CallSession {
    *  (CLOSE_REPLY_ATTEMPTS is gone) -- retries continue, spaced, until either a match is
    *  heard or the CLOSE_TOTAL_MS (45s) hard cap (`armClose`) ends the call `close_timeout`. */
   private scheduleCloseIfNeeded(replyId: string): void {
+    // Round 5: once confirmed, nothing is owed for any OTHER reply -- but the confirmed
+    // reply's own `reply.done` must still fall through below (test (e)'s own PROVEN
+    // "reply.done wins the race" behaviour: `beginCloseGrace` is idempotent, so letting this
+    // one final call through here costs nothing and starts the grace period immediately
+    // instead of waiting for CLOSE_DONE_WAIT_MS's own timer to do it later).
+    if (this.goodbyeConfirmed && replyId !== this.goodbyeConfirmedReplyId) return;
     const sentence = this.currentCloseSentence();
     if (!sentence) return;
     if (this.ended) return;
@@ -570,6 +621,11 @@ export class CallSession {
     const transcript = this.replyTranscripts.get(replyId) ?? '';
 
     if (transcriptMatchesCloseSentence(transcript, sentence)) {
+      // Round 5: this IS the transcript confirmation (when `maybeArmCloseOnTranscript` did
+      // not already catch it mid-stream) -- see the class-field doc comment on
+      // `goodbyeConfirmed` above for what this triggers.
+      this.goodbyeConfirmed = true;
+      this.goodbyeConfirmedReplyId = replyId;
       this.beginCloseGrace();
       return;
     }
@@ -972,6 +1028,15 @@ export class CallSession {
         // Round 4, requirement 5: this reply.create (if any was outstanding) is no longer at
         // risk of being "lost" -- something started.
         this.clearReplyCreateLostTimer();
+        // Round 5: `reply.audio` events carry no reply id of their own (aai/types.ts) -- this
+        // is the only record of which reply subsequent frames belong to. A reply that starts
+        // AFTER the goodbye is already transcript-confirmed, and is not the confirmed reply
+        // itself, is AssemblyAI generating something nobody asked for (its own turn-driven
+        // follow-up, or a queued reply.create) -- see the class-field doc comment on
+        // `goodbyeConfirmed`. Logged once, here, rather than per-frame.
+        this.currentReplyId = evt.reply_id;
+        this.suppressPostGoodbyeReplyAudio = this.goodbyeConfirmed && evt.reply_id !== this.goodbyeConfirmedReplyId;
+        if (this.suppressPostGoodbyeReplyAudio) this.diag('post_goodbye_reply_suppressed', { reply_id: evt.reply_id });
         this.diag('reply.started', {});
         break;
 
@@ -981,6 +1046,10 @@ export class CallSession {
         // root cause of the flood (1,998 `evaluate` events in 46s, PROVEN from the
         // 2026-09-03 flight-recorder bundle). Forward the frame to the browser and stop
         // (no tick) -- the one-time first-frame diagnostic below still records normally.
+        // Round 5: a frame belonging to a reply that started after the goodbye was already
+        // confirmed is dropped instead of relayed -- the suppression diagnostic was already
+        // logged once, at that reply's own `reply.started`, above.
+        if (this.suppressPostGoodbyeReplyAudio) return;
         this.opts.onServerEvent({ type: 'audio', data: evt.data });
         // Flight recorder: only the FIRST audio frame of this reply -- a reply can carry
         // dozens of frames, and recording every one was the bulk of what starved the live
@@ -1510,6 +1579,10 @@ export class CallSession {
    *  a fresh watch for its own `reply.started` never showing up. */
   private sendReplyCreate(goalCode: GoalCode, reason: string, instructions?: string, opts?: { countAttempt?: boolean }): void {
     if (this.ended) return;
+    // Round 5: once the goodbye is transcript-confirmed, nothing more is ever owed -- not
+    // another CLOSE retry (the words were heard) and not any other goal's reply.create
+    // either. See the class-field doc comment on `goodbyeConfirmed` above.
+    if (this.goodbyeConfirmed) return;
     if (goalCode === 'CLOSE' && (opts?.countAttempt ?? true)) {
       this.closeReplySendCount += 1;
     }
