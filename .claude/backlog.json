@@ -2067,6 +2067,51 @@
    "agent_id": "",
    "started_at": "2026-09-14T03:25:33.704Z",
    "lane_note": "launched 10:27 PM; lane 5724a45 cherry-picked to main as ea294d8 + 8120377 (npm script) 10:43 PM; gate running. FINDING: no FREEZE run ever spoke its close line (12 reports Sep 3-13); only STAGE did."
+  },
+  {
+   "id": "FREE-PLAY-BATCH",
+   "title": "free-play batch: ten judge cases x 3 runs with the improvising caller (own words, random pauses), graded on verdict + goodbye + no dead air + every question answered",
+   "files": [],
+   "status": "held",
+   "held_because": "founder ruling 2026-09-14 3:29 PM: run as soon as the harness lanes land (credits ~45 min approved by that ruling); waits on HARNESS-WAIT-FOR-SERVER-HANGUP + HARNESS-FREE-PLAY merged and gated",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "POST-GOODBYE-SUPPRESS",
+   "title": "server: no reply.create and no audio relay after the goodbye is confirmed (stray holding line after Goodbye)",
+   "files": [
+    "packages/server/**"
+   ],
+   "status": "running",
+   "held_because": "",
+   "agent_id": "aff2d1035104464c3",
+   "started_at": "2026-09-14T20:28:00Z",
+   "lane_note": "launched 3:28 PM"
+  },
+  {
+   "id": "HARNESS-FREE-PLAY",
+   "title": "harness free-play mode + sim:freeplay command",
+   "files": [
+    "scripts/rehearse/**"
+   ],
+   "status": "running",
+   "held_because": "",
+   "agent_id": "a7899aaf32e15ea0f",
+   "started_at": "2026-09-14T20:26:00Z",
+   "lane_note": "launched 3:26 PM; merge after the hang-up fix"
+  },
+  {
+   "id": "HARNESS-WAIT-FOR-SERVER-HANGUP",
+   "title": "harness waits for the server's own hang-up after the last turn; hang_up turns explicit",
+   "files": [
+    "scripts/rehearse/**"
+   ],
+   "status": "running",
+   "held_because": "",
+   "agent_id": "a2d9878feff51e1f1",
+   "started_at": "2026-09-14T20:22:00Z",
+   "lane_note": "launched 3:22 PM"
   }
  ]
 }
