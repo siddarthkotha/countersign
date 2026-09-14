@@ -1207,6 +1207,135 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     expect(session.last?.reasons).toEqual([]);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'caller_ended' });
   });
+
+  // ---------------------------------------------------------------------------------------
+  // reply.create fix (2026-09-13, founder screen recording, session 84ddf47a, Miller fraud
+  // scenario): a session.update that only changes system_prompt never makes the agent
+  // speak on its own -- the CLOSE line was never spoken, WIRE FROZEN appeared, and the call
+  // ended agent_closed with the caller having heard nothing after the holding line. See
+  // docs/ASSEMBLYAI_INTEGRATION.md's "VERIFY-AT-BUILD: reply.create schema" section for the
+  // quoted AssemblyAI schema this implements against.
+  describe('reply.create: the server explicitly asks the agent to speak a goal it must not wait on the caller for', () => {
+    it('(a) reply.create is deferred while the stale in-flight reply (phrased under the old goal) is still speaking, sent right after its reply.done, does not end the call on that reply.done, and the call ends only once the reply that follows completes', () => {
+      vi.useFakeTimers();
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const call: CallContext = { session_id: 'sess-replycreate-race', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+      const session = newSession(clock, call, aai, sent);
+      session.start();
+      driveThroughC4AndStartA4(session, aai, clock);
+      expect(session.last?.goal.code).toBe('READBACK'); // 'a4' is still speaking, phrased under this goal
+
+      // The stray tool.call ticks the engine straight to SEALED/CLOSE while 'a4' is still
+      // in flight (same mechanism the CLOSE-race tests above exercise).
+      clock.now = 6200;
+      aai.emit({ type: 'tool.call', call_id: 'stray-1', name: 'check_sso_context', arguments: {} });
+      expect(session.last?.goal.code).toBe('CLOSE');
+      expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(false);
+
+      // 'a4' completes: reply.create goes out NOW (its recorded goal, READBACK, differs from
+      // the current goal, CLOSE) -- and this reply.done must NOT end the call.
+      clock.now = 6500;
+      aai.emit({ type: 'reply.done', reply_id: 'a4', status: 'completed' });
+      expect(aai.sent.at(-1)).toEqual({ type: 'reply.create' });
+      vi.advanceTimersByTime(1500);
+      expect(sent.some((e) => e.type === 'ended')).toBe(false);
+
+      // The reply that follows (the actual close line, prompted by our reply.create) is a
+      // fresh reply phrased under CLOSE -- completing it is what finally ends the call.
+      clock.now = 8100;
+      aai.emit({ type: 'reply.started', reply_id: 'a5' });
+      aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
+      clock.now = 8600;
+      aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' });
+      expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
+
+      vi.advanceTimersByTime(1500);
+      expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+
+      // Exactly one reply.create for this whole CLOSE rendering (c).
+      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    });
+
+    it('(b) sends reply.create immediately after the session.update when no reply is in progress', () => {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const call: CallContext = { session_id: 'sess-replycreate-idle', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+      const session = newSession(clock, call, aai, sent);
+      session.start();
+      driveToSealedStage(session, aai, clock);
+      expect(session.last?.goal.code).toBe('CLOSE');
+
+      // No reply was in progress at the instant CLOSE was rendered ('a4' already completed,
+      // no reply.started for the close line has fired yet) -- reply.create goes out
+      // immediately, right after the session.update that carries the CLOSE prompt.
+      expect(aai.sent.at(-1)).toEqual({ type: 'reply.create' });
+      const secondLast = aai.sent.at(-2) as { type?: string };
+      expect(secondLast?.type).toBe('session.update');
+    });
+
+    it('(c) no double reply.create when the goal advances twice (e.g. toward ANNOUNCE_FROZEN then CLOSE) before any reply actually starts', () => {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const session = newSession(clock, CALL_B, aai, sent);
+      session.start();
+      // Reaches FREEZE/SEALED entirely from server-driven lookups/terminal actions, with no
+      // reply in progress at any point during that chain (the helper's own final line starts
+      // a reply only AFTER the chain has already finished).
+      driveScenarioBThroughA4(session, aai, clock);
+      expect(session.last?.state).toBe('SEALED');
+      expect(session.last?.goal.code).toBe('CLOSE');
+
+      const replyCreates = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+      expect(replyCreates.length).toBeLessThanOrEqual(1);
+    });
+
+    it('(d) never sends reply.create for the initial GREET goal', () => {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const call: CallContext = { session_id: 'sess-replycreate-greet', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+      const session = newSession(clock, call, aai, sent);
+      session.start();
+      expect(session.last?.goal.code).toBe('GREET');
+      expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(false);
+    });
+
+    it('records a reply_create_sent diag event and a session_config_updated action entry when it sends one', () => {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const diagEvents: { kind: string; detail: unknown }[] = [];
+      const call: CallContext = { session_id: 'sess-replycreate-diag', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+      const session = new CallSession({
+        session_id: call.session_id,
+        seed: MERIDIAN,
+        call,
+        aai,
+        now: () => clock.now,
+        onServerEvent: (e) => sent.push(e),
+        mock: mockToolResult,
+        onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+      });
+      session.start();
+      driveToSealedStage(session, aai, clock);
+      expect(session.last?.goal.code).toBe('CLOSE');
+
+      const replyCreateDiags = diagEvents.filter((e) => e.kind === 'reply_create_sent');
+      expect(replyCreateDiags.length).toBeGreaterThanOrEqual(1);
+      const detail = replyCreateDiags[0]!.detail as { goal_code: string; reason: string };
+      expect(detail.goal_code).toBe('CLOSE');
+      expect(typeof detail.reason).toBe('string');
+
+      const actionEntries = session.logs.actions.filter(
+        (a) => a.kind === 'session_config_updated' && typeof a.detail === 'string' && a.detail.startsWith('reply_create:'),
+      );
+      expect(actionEntries.length).toBeGreaterThanOrEqual(1);
+    });
+  });
 });
 
 // Important 2 (review of commit 5930450, 2026-09-13): recordGoalCompletionAction only ever
