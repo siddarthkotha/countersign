@@ -20,6 +20,7 @@ import type { FreePlayCallerTurnResult } from './freePlayPrompt.js';
 import { gradeFreePlay } from './freePlayGrading.js';
 import { createSeededPauseGenerator, type SeededPauseGenerator } from './seededPause.js';
 import {
+  CLOSE_WAIT_MS,
   computeTurnGaps,
   DEFAULT_AGENT_SILENCE_FAIL_MS,
   lastAgentTranscriptText,
@@ -28,6 +29,7 @@ import {
   waitForGreeting,
   waitForPatientTurn,
   waitForReplyStarted,
+  waitForServerHangup,
   waitForVerdict,
 } from './turnController.js';
 import { connectCall, fetchDiagnostics, mintSession } from './wsClient.js';
@@ -42,6 +44,7 @@ import type {
   StateHistoryRecord,
   TranscriptRecord,
 } from './types.js';
+import type { Verdict } from '@countersign/engine';
 
 function nowT(client: CallClient): number {
   return performance.now() - client.startedAt;
@@ -255,10 +258,98 @@ export async function runFreePlayTurns(
   return { warnings, callerEndTimes, resolvedLines, llm_turns: turnIndex, went_silent: wentSilent };
 }
 
+// ---------- verdict + hang-up wait ----------
+
+/** Same magnitude as run.ts's own `ENDED_TIMEOUT_MS` -- declared here (not below, next to
+ *  `READY_TIMEOUT_MS`) so `waitForFreePlayVerdictAndHangup`'s default parameter below resolves
+ *  against an already-initialized constant, not one declared later in the module. */
+const ENDED_TIMEOUT_MS = 8_000;
+
+export interface FreePlayCallEndOutcome {
+  transcript: TranscriptRecord[];
+  stateHistory: StateHistoryRecord[];
+  endedReason: string | null;
+  /** Set only when the server never produced its own `ended` event within the wait budget and
+   *  the harness had to end the call itself as a last resort -- same unconditional-fail
+   *  treatment `run.ts`'s scripted/LLM paths already give `server_never_hung_up`. */
+  hangupFailReason: 'server_never_hung_up' | undefined;
+  verdictReached: boolean;
+  actualVerdict: Verdict | 'PENDING' | null;
+  warnings: string[];
+}
+
+/** PROVEN gap (2026-09-14, scripts/rehearse/reports/2026-09-14T17-18-03-dana-patient.md): a
+ *  free-play run where the agent spoke the full STAGE goodbye ended with "Call ended reason:
+ *  caller_ended" and "Close line: n/a (caller ended)" -- `runFreePlayOne` used to send its own
+ *  `{type:'end'}` unconditionally right after the verdict/settle wait, exactly the same race
+ *  against the server's own CLOSE hang-up and its goodbye that `waitForServerHangup` (this
+ *  module reuses, verbatim) and run.ts's `waitForVerdictAndHangup` were built to fix for the
+ *  scripted/LLM paths (see turnController.ts's `CLOSE_WAIT_MS` doc comment). Free play has no
+ *  `ScenarioTurn.hang_up` concept at all -- that field only exists on the scripted turn list a
+ *  free-play run never uses -- so, unlike run.ts's dual `callerHungUp` branch, EVERY free-play
+ *  call always waits for the server's own `ended` event here, whether the caller model stopped
+ *  because it ran out of turns, hit its own caps, said `silent: true`, or the agent's own close
+ *  line was heard mid-loop (`waitForPatientTurn`'s `'stop'` outcome) -- only ending the call
+ *  itself, as `server_never_hung_up`, if that wait expires. Extracted (like run.ts's own
+ *  `waitForVerdictAndHangup`) so it is unit-testable directly against a fake `CallClient`, no
+ *  network involved -- see test/freePlay.test.ts. The transcript/state-history snapshot is
+ *  taken AFTER this wait resolves, for the same reason run.ts's fix takes its snapshot after
+ *  its own hang-up wait: any agent transcript line (including the goodbye) that lands WHILE the
+ *  harness is waiting must still make it into the report and the close-line grade. */
+export async function waitForFreePlayVerdictAndHangup(
+  client: CallClient,
+  scenario: Scenario,
+  endedTimeoutMs: number = ENDED_TIMEOUT_MS,
+): Promise<FreePlayCallEndOutcome> {
+  const warnings: string[] = [];
+
+  const remainingMs = Math.max(1000, scenario.expected.max_wall_ms - (performance.now() - client.startedAt));
+  const verdictResult = await waitForVerdict(client, remainingMs);
+  if (!verdictResult.reached) {
+    warnings.push(`no terminal verdict within the scenario's max_wall_ms (${scenario.expected.max_wall_ms}ms)`);
+  } else {
+    await waitForCountersignSettle(client);
+  }
+
+  const closeWaitMs = Math.max(scenario.expected.max_wall_ms, CLOSE_WAIT_MS);
+  const hangup = await waitForServerHangup(client, closeWaitMs, () => client.send({ type: 'end' }), endedTimeoutMs);
+  const endedReason = hangup.ended_reason;
+  let hangupFailReason: 'server_never_hung_up' | undefined;
+  if (hangup.self_ended) {
+    hangupFailReason = 'server_never_hung_up';
+    warnings.push(
+      `the server never ended this call on its own within ${closeWaitMs}ms after the free-play caller stopped/went silent; the harness ended it itself (reason: ${endedReason ?? 'none observed even after ending it itself'})`,
+    );
+  }
+
+  // Snapshot taken HERE -- after the hang-up wait has resolved -- so every agent transcript/
+  // state event received up to (and including) the `ended` event is captured, not just
+  // whatever had arrived by the time the verdict/settle wait finished.
+  const finalState = client.latestState();
+  const transcript: TranscriptRecord[] = finalState
+    ? finalState.transcript.map((l) => ({ speaker: l.speaker, text: l.text, t_ms: l.t_ms, ...(l.interrupted ? { interrupted: true } : {}) }))
+    : [];
+  const stateHistory: StateHistoryRecord[] = client.stateHistory.map((s) => ({
+    t_ms: s.t_ms,
+    state: s.state.state,
+    verdict: s.state.verdict,
+    agent_status: s.state.agent_status,
+  }));
+
+  return {
+    transcript,
+    stateHistory,
+    endedReason,
+    hangupFailReason,
+    verdictReached: verdictResult.reached,
+    actualVerdict: verdictResult.verdict,
+    warnings,
+  };
+}
+
 // ---------- one full free-play call ----------
 
 const READY_TIMEOUT_MS = 20_000;
-const ENDED_TIMEOUT_MS = 8_000;
 const DEFAULT_FREEPLAY_MAX_TURNS = 14;
 const DEFAULT_FREEPLAY_MAX_WALL_MS = 240_000;
 const DEFAULT_FREEPLAY_MAX_WORDS_PER_LINE = 30;
@@ -364,28 +455,13 @@ export async function runFreePlayOne(scenario: Scenario, url: string, voice: str
   );
   warnings.push(...outcome.warnings);
 
-  const remainingMs = Math.max(1000, scenario.expected.max_wall_ms - (performance.now() - client.startedAt));
-  const verdictResult = await waitForVerdict(client, remainingMs);
-  if (!verdictResult.reached) {
-    warnings.push(`no terminal verdict within the scenario's max_wall_ms (${scenario.expected.max_wall_ms}ms)`);
-  } else {
-    await waitForCountersignSettle(client);
-  }
-
-  const finalState = client.latestState();
-  const transcript: TranscriptRecord[] = finalState
-    ? finalState.transcript.map((l) => ({ speaker: l.speaker, text: l.text, t_ms: l.t_ms, ...(l.interrupted ? { interrupted: true } : {}) }))
-    : [];
-  const stateHistory: StateHistoryRecord[] = client.stateHistory.map((s) => ({
-    t_ms: s.t_ms,
-    state: s.state.state,
-    verdict: s.state.verdict,
-    agent_status: s.state.agent_status,
-  }));
-
-  client.send({ type: 'end' });
-  const endedReason = await client.waitForEnded(ENDED_TIMEOUT_MS);
-  if (endedReason === null) warnings.push(`no "ended" event within ${ENDED_TIMEOUT_MS}ms of sending end; closing the socket anyway`);
+  // PROVEN gap (2026-09-14, scripts/rehearse/reports/2026-09-14T17-18-03-dana-patient.md): see
+  // `waitForFreePlayVerdictAndHangup`'s own doc comment -- this used to be inlined here, ending
+  // the call itself unconditionally and snapshotting the transcript BEFORE that, exactly the bug
+  // run.ts's `waitForVerdictAndHangup` was built to fix for the scripted/LLM paths.
+  const endOutcome = await waitForFreePlayVerdictAndHangup(client, scenario, ENDED_TIMEOUT_MS);
+  warnings.push(...endOutcome.warnings);
+  const { transcript, stateHistory, endedReason, hangupFailReason, verdictReached, actualVerdict } = endOutcome;
   client.close();
 
   const totalWallMs = performance.now() - client.startedAt;
@@ -394,7 +470,6 @@ export async function runFreePlayOne(scenario: Scenario, url: string, voice: str
   const diagnostics = summarizeDiagnostics(bundle);
 
   const turnGaps = computeTurnGaps(client, outcome.callerEndTimes);
-  const actualVerdict = verdictResult.verdict;
 
   const expectationCheck = checkScenarioExpectations(scenario, transcript, bundle);
   for (const failure of expectationCheck.failures) warnings.push(failure);
@@ -409,7 +484,7 @@ export async function runFreePlayOne(scenario: Scenario, url: string, voice: str
   const freePlayGrade = gradeFreePlay({
     scenario,
     actualVerdict,
-    verdictReached: verdictResult.reached,
+    verdictReached,
     turnGaps,
     transcript,
     agentSilenceFailMs,
@@ -418,8 +493,15 @@ export async function runFreePlayOne(scenario: Scenario, url: string, voice: str
   });
   warnings.push(...freePlayGrade.failures);
 
-  const pass = freePlayGrade.pass && expectationCheck.ok && closeLineCheck.status !== 'not_spoken';
-  const failReason = freePlayGrade.fail_reason ?? (closeLineCheck.status === 'not_spoken' ? ('close_line_not_spoken' as const) : undefined);
+  // PROVEN gap (2026-09-14): a server that never hangs up on its own is an unconditional fail
+  // here too -- same precedence run.ts's `runOne` already uses (a turn-loop fail outranks
+  // everything, already folded into `freePlayGrade.fail_reason` via `turnLoopFailReason`; a
+  // forced self-hangup outranks the close-line check, since the harness ending the call itself
+  // is the more specific, more actionable diagnosis even when a close line happened to be heard
+  // first).
+  const pass = freePlayGrade.pass && expectationCheck.ok && closeLineCheck.status !== 'not_spoken' && hangupFailReason === undefined;
+  const failReason =
+    freePlayGrade.fail_reason ?? hangupFailReason ?? (closeLineCheck.status === 'not_spoken' ? ('close_line_not_spoken' as const) : undefined);
 
   const minutesEstimate = totalWallMs / 60000;
 
@@ -429,7 +511,7 @@ export async function runFreePlayOne(scenario: Scenario, url: string, voice: str
     session_id: session.session_id,
     started_at_iso: startedAtIso,
     ended_reason: endedReason,
-    verdict_reached: verdictResult.reached,
+    verdict_reached: verdictReached,
     actual_verdict: actualVerdict,
     pass,
     timings: {
