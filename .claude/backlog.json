@@ -2000,9 +2000,9 @@
   },
   {
    "id": "PUSH-26",
-   "title": "push 26: sim:friday runner + video pre-prod assets",
+   "title": "push 26: sim:friday + video assets + engine STALL fixes + patient-caller harness + server reply.create fix",
    "files": [],
-   "status": "held",
+   "status": "running",
    "held_because": "founder ruling 8:11 PM: push once the server fix is gated on main",
    "agent_id": "",
    "started_at": ""
@@ -2029,7 +2029,7 @@
    "held_because": "",
    "agent_id": "a026629853513216e",
    "started_at": "2026-09-13T20:25:00Z",
-   "lane_note": "engine replay of the scripted turns does NOT stall (lane, 5/5); root cause needs the call bundle: GET /api/session/<uuid>/diagnostics, ids only in the Render log (countersign_diag lines) -> founder asked 3:40 PM. NO PUSH until captured (redeploy wipes the 50-bundle ring). Reproduction scenario written: scripts/rehearse/scenarios/miller-silent-after-amount.json (live run blocked by the auto-mode classifier). | ROOT CAUSE PROVEN 4:17 PM from the founder recording (session 84ddf47a): agent spoke a hold line, engine froze in the same tick, close line never spoken, server hung up as agent_closed. Two causes: server never sends AAI reply.create after a mid-turn prompt change (docs PROVEN); armClose stale-reply guard treats a reply composed under the old prompt as the CLOSE reply. Fix lane running. | first fix lane hung 3 h with no commit, stopped 8:12 PM; re-dispatched off 8213dbc with commit-early rule. Founder 8:11 PM: push once the server fix is gated. | retry lane df373c4 (red) + 4ffa283 merged as 48a0969 9:02 PM; gate on main 1447/1447 (79 files), typecheck clean, corpus 128/128, rehearse 285/285; review running; push 26 right after"
+   "lane_note": "engine replay of the scripted turns does NOT stall (lane, 5/5); root cause needs the call bundle: GET /api/session/<uuid>/diagnostics, ids only in the Render log (countersign_diag lines) -> founder asked 3:40 PM. NO PUSH until captured (redeploy wipes the 50-bundle ring). Reproduction scenario written: scripts/rehearse/scenarios/miller-silent-after-amount.json (live run blocked by the auto-mode classifier). | ROOT CAUSE PROVEN 4:17 PM from the founder recording (session 84ddf47a): agent spoke a hold line, engine froze in the same tick, close line never spoken, server hung up as agent_closed. Two causes: server never sends AAI reply.create after a mid-turn prompt change (docs PROVEN); armClose stale-reply guard treats a reply composed under the old prompt as the CLOSE reply. Fix lane running. | first fix lane hung 3 h with no commit, stopped 8:12 PM; re-dispatched off 8213dbc with commit-early rule. Founder 8:11 PM: push once the server fix is gated. | retry lane df373c4 (red) + 4ffa283 merged as 48a0969 9:02 PM; gate on main 1447/1447 (79 files), typecheck clean, corpus 128/128, rehearse 285/285; review running; push 26 right after | fix round 8c9bb62 merged as 29de83b; gate 1449/1449, typecheck clean, corpus 128/128, rehearse 285/285; RE-REVIEW PASS 10:20 PM (reviewer re-ran its own Scenario B reproduction: one reply.create for CLOSE, close-labelled reply, agent_closed only after it). Push 26 now; live proof pending."
   },
   {
    "id": "ENGINE-MISSING-CRITICAL-FIELD-STALL",
