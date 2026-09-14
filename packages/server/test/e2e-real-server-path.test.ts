@@ -274,6 +274,29 @@ describe('end-to-end: real server path (no recorded corpus context/actions fed t
     aai.emit({ type: 'transcript.agent', item_id: turns[7]!.id, text: turns[7]!.text, reply_id: turns[7]!.id, interrupted: false });
     aai.emit({ type: 'reply.done', reply_id: turns[7]!.id, status: 'completed' });
 
+    // Review fix (2026-09-15, Critical -- recordGoalCompletionAction bookkeeping,
+    // call/session.ts): the corpus's own eight recorded lines ask a real question only once
+    // (turns[1], the compound "Which escrow institution, and who is our counsel of
+    // record..."); turns[3]/turns[7] never ask anything and turns[5] is interrupted, so under
+    // the corrected (LAW-4-respecting) bookkeeping only ONE of Scenario B's own three required
+    // challenges (seed.thresholds.max_challenges, MERIDIAN) is ever satisfied by this
+    // historical transcript alone -- same reasoning session.test.ts's own
+    // `driveScenarioBThroughA4` doc comment documents in full. A few more real-ask-shaped
+    // turns complete the outstanding requirement: any reply containing a literal "?" satisfies
+    // `transcriptAsksQuestion`'s general fallback regardless of which specific challenge is
+    // current, so the exact wording here doesn't need to track the engine's own (session-id-
+    // dependent) challenge selection the way the unit-level session.test.ts drive does.
+    for (let i = 0; i < 3; i++) {
+      try {
+        await pollUntil(() => lastStateOf(messages)?.state.verdict === 'FREEZE', 800);
+        break;
+      } catch {
+        const replyId = `challenge-completion-${i}`;
+        aai.emit({ type: 'reply.started', reply_id: replyId });
+        aai.emit({ type: 'transcript.agent', item_id: replyId, text: 'Can you confirm that detail for me?', reply_id: replyId, interrupted: false });
+        aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });
+      }
+    }
     await pollUntil(() => lastStateOf(messages)?.state.verdict === 'FREEZE', 3000);
 
     const finalState = lastStateOf(messages)!.state;

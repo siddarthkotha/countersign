@@ -49,7 +49,15 @@ const CALL_B = scenarioB.call as CallContext;
  *  land on the allowlist (EVIDENCE state) -- needed here so a tool.call actually reaches the
  *  mock backend (status "ok", or a throwing mock) instead of being rejected before it ever
  *  does. Duplicated locally rather than imported: session.test.ts doesn't export it, and
- *  this file only needs "far enough to reach EVIDENCE", not the full FREEZE walk. */
+ *  this file only needs "far enough to reach EVIDENCE", not the full FREEZE walk.
+ *
+ *  Review fix (2026-09-15, Critical -- recordGoalCompletionAction bookkeeping,
+ *  call/session.ts): the corpus's own eight lines ask a real question only once (a1) -- a2/a4
+ *  never ask anything and a3 is interrupted -- so under the corrected bookkeeping only ONE of
+ *  Scenario B's own three required challenges is ever satisfied by this historical transcript
+ *  alone, and the call never reaches EVIDENCE at all (same root cause session.test.ts's own
+ *  `driveScenarioBThroughA4` doc comment documents in full). Two more real-ask turns,
+ *  appended after a4, complete what a fully-fixed live agent would actually have said. */
 function driveScenarioBIntoEvidence(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
   clock.now = 1000;
   aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
@@ -82,6 +90,15 @@ function driveScenarioBIntoEvidence(session: CallSession, aai: FakeAaiSocket, cl
   aai.emit({ type: 'reply.started', reply_id: 'a4' });
   aai.emit({ type: 'transcript.agent', item_id: 'a4', text: scenarioB.conversation[7]!.text, reply_id: 'a4', interrupted: false });
   aai.emit({ type: 'reply.done', reply_id: 'a4', status: 'completed' });
+
+  for (let i = 0; i < 2 && session.last?.goal.code === 'ASK_CHALLENGE' && session.last.goal.challenge; i++) {
+    const sentence = session.last.goal.challenge.speak!;
+    const replyId = `challenge-completion-${i}`;
+    clock.now += 100;
+    aai.emit({ type: 'reply.started', reply_id: replyId });
+    aai.emit({ type: 'transcript.agent', item_id: replyId, text: sentence, reply_id: replyId, interrupted: false });
+    aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });
+  }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -534,6 +551,18 @@ describe('CallSession — onDiagnostic', () => {
     session.start();
     driveScenarioBIntoEvidence(session, aai, clock);
 
+    // Review fix (2026-09-15, Critical -- recordGoalCompletionAction bookkeeping): reaching
+    // EVIDENCE at all now needs the helper's own two appended real-ask turns (see its doc
+    // comment) -- `runLookupsIfNeeded` only retries an errored lookup ONCE per tick, so
+    // get_request_history's own bounded retry-then-abandon (MAX_LOOKUP_ATTEMPTS = 3) needs a
+    // few more ticks than the two challenge-completion turns alone provide before I4 can
+    // force a terminal verdict. A few harmless caller pings (nothing new evidentially -- SSO/
+    // OOB already resolved; only get_request_history is still retrying) supply those ticks.
+    for (let i = 0; i < 3 && session.last?.state !== 'SEALED'; i++) {
+      clock.now += 500;
+      aai.emit({ type: 'transcript.user', item_id: `ping-${i}`, text: 'Still there?' });
+    }
+
     // Bug fix (2026-09-03): with the throwing mock installed, the server's own lookup
     // runner already tried get_request_history itself during the drive above (bounded
     // retries, its own `server_lookup_error`/`server_lookup_abandoned` diagnostics -- never
@@ -685,6 +714,20 @@ describe('CallSession — onDiagnostic', () => {
 
     session.start();
     driveScenarioBIntoEvidence(session, aai, clock);
+
+    // Review fix (2026-09-15, Critical -- recordGoalCompletionAction bookkeeping): same
+    // reasoning as the throwing-mock test above -- reaching EVIDENCE at all now needs the
+    // helper's own two appended real-ask turns, and both `runLookupsIfNeeded` (three lookups)
+    // and, once terminal, `runTerminalActionsIfNeeded` (three more owed actions) only retry
+    // ONE errored attempt per tick each, so exhausting every one of those six bounded retry
+    // budgets (MAX_LOOKUP_ATTEMPTS / MAX_TERMINAL_ACTION_ATTEMPTS = 3 each) needs several more
+    // ticks than those two turns alone provide. A generous run of harmless caller pings
+    // supplies those ticks; each is a no-op once everything has already settled.
+    const abandonedSoFar = () => new Set(events.filter((e) => e.kind === 'terminal_action_abandoned').map((e) => (e.detail as { name: string }).name));
+    for (let i = 0; i < 15 && abandonedSoFar().size < 3; i++) {
+      clock.now += 500;
+      aai.emit({ type: 'transcript.user', item_id: `ping-${i}`, text: 'Still there?' });
+    }
 
     // Bug fix (2026-09-03): the always-throwing mock means the server's own lookup runner
     // already exhausted its bounded retries on all three lookups during the drive above (its

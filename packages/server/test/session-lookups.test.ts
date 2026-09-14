@@ -86,6 +86,27 @@ describe('CallSession -- server-initiated lookup runner (deadlock bug fix)', () 
     // three lookups on its own.
     driveConversationLive(session, aai, clock, scenarioB.conversation as (Utterance & { interrupted?: boolean })[]);
 
+    // Review fix (2026-09-15, Critical -- recordGoalCompletionAction bookkeeping,
+    // call/session.ts): the corpus's own eight recorded lines ask a real question only once
+    // (a1's compound "Which escrow institution, and who is our counsel of record..."); a2/a4
+    // never ask anything and a3 is interrupted, so under the corrected (LAW-4-respecting)
+    // bookkeeping only ONE of Scenario B's own three required challenges
+    // (seed.thresholds.max_challenges, MERIDIAN) is ever satisfied by this historical
+    // transcript alone -- the SAME reasoning session.test.ts's own `driveScenarioBThroughA4`
+    // doc comment documents in full. Two more real-ask turns, appended AFTER the full
+    // historical replay (not interleaved -- evidence from c3's contradiction/c4's pressure is
+    // already computed by then regardless of state, so completing the requirement last still
+    // reaches the exact same comprehensive reason set), complete what a fully-fixed live
+    // agent would actually have said.
+    for (let i = 0; i < 2 && session.last?.goal.code === 'ASK_CHALLENGE' && session.last.goal.challenge; i++) {
+      const sentence = session.last.goal.challenge.speak!;
+      const replyId = `challenge-completion-${i}`;
+      clock.now += 100;
+      aai.emit({ type: 'reply.started', reply_id: replyId });
+      aai.emit({ type: 'transcript.agent', item_id: replyId, text: sentence, reply_id: replyId, interrupted: false });
+      aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });
+    }
+
     // BUG: on the old code, nothing ever ran the lookups (handleToolCall is the only place
     // that invokes the mock backend, and it's only reachable from an actual tool.call AAI
     // event) -- the call sits in EVIDENCE with an empty tools log and a PENDING verdict

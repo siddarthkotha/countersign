@@ -25,7 +25,33 @@ function newSession(clockRef: { now: number }, call: CallContext, aai: FakeAaiSo
  *  to 2 by c3's amount contradiction) so `check_sso_context`/`get_request_history`/
  *  `verify_out_of_band` are on the allowlist (EVIDENCE state) afterward -- the shared setup
  *  behind the main replay test and the two fix-round-1 tests that only care about what
- *  happens to ONE tool.call from that point on. */
+ *  happens to ONE tool.call from that point on.
+ *
+ *  Review fix (2026-09-15, Critical -- recordGoalCompletionAction bookkeeping): the corpus's
+ *  own recorded a1 line asks a REAL question (contains "?", satisfies sess-b-1's counsel
+ *  challenge) but a2/a4 ("Pulling the Hartwell file now…" / "I can't accept authority as
+ *  verification. One last check.") never ask anything, and a3 is interrupted (never logged
+ *  either way) -- so under the corrected bookkeeping (recordGoalCompletionAction now only
+ *  logs `challenge_issued` for a reply that actually asked), only ONE of Scenario B's own
+ *  THREE required challenges (seed.thresholds.max_challenges, MERIDIAN) is ever satisfied by
+ *  replaying these exact eight historical lines alone -- row 4 (rules.ts) never releases,
+ *  and the call never reaches EVIDENCE/FREEZE at all through this literal replay (PROVEN:
+ *  before this fix, `challenge_issued` was logged unconditionally, so a2's silently-unasked
+ *  "issue" was exactly the bug the question-reask fix exists to catch and correct).
+ *
+ *  Two more real-ask turns (`x1`/`x2` below, appended AFTER a4 -- not interleaved with it)
+ *  complete the outstanding two challenges: each speaks the engine's OWN current
+ *  `goal.challenge.speak` verbatim, exactly what the question-reask fix's own spaced retry
+ *  would eventually extract from a real model given the "say exactly this" one-shot
+ *  instructions (call/session.ts's `armQuestionReaskTimer`) -- this is what a FULLY-FIXED
+ *  live agent actually says today, given the SAME caller input, that the historical
+ *  (pre-fix) transcript never captured. Appending them AFTER a4 rather than interleaving
+ *  matters: evidence computation (consistency_flag from c3's contradiction, pressure_marker
+ *  from c4's threat) is state-independent and already computed from the full conversation
+ *  the moment those lines are logged -- row 4 just outranks row 8 (FREEZE) until it
+ *  releases -- so completing the challenge requirement only AFTER every caller line has
+ *  landed means FREEZE fires with the exact same comprehensive reason set
+ *  `scenarioB.expected.reasons` already documents, PROVEN by running this drive end to end. */
 function driveScenarioBThroughA4(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
   clock.now = 1000;
   aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
@@ -59,6 +85,24 @@ function driveScenarioBThroughA4(session: CallSession, aai: FakeAaiSocket, clock
   aai.emit({ type: 'transcript.agent', item_id: 'a4', text: scenarioB.conversation[7]!.text, reply_id: 'a4', interrupted: false });
   aai.emit({ type: 'reply.done', reply_id: 'a4', status: 'completed' });
 
+  // The two additional real asks completing sess-b-2/sess-b-3 -- see the doc comment above.
+  // Each reads the engine's OWN current challenge sentence, so this stays correct even if
+  // the seed's own knowledge facts or their order ever changes.
+  if (session.last?.goal.code === 'ASK_CHALLENGE' && session.last.goal.challenge) {
+    clock.now = 50100;
+    const sentence1 = session.last.goal.challenge.speak!;
+    aai.emit({ type: 'reply.started', reply_id: 'x1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'x1', text: sentence1, reply_id: 'x1', interrupted: false });
+    aai.emit({ type: 'reply.done', reply_id: 'x1', status: 'completed' });
+  }
+  if (session.last?.goal.code === 'ASK_CHALLENGE' && session.last.goal.challenge) {
+    clock.now = 50200;
+    const sentence2 = session.last.goal.challenge.speak!;
+    aai.emit({ type: 'reply.started', reply_id: 'x2' });
+    aai.emit({ type: 'transcript.agent', item_id: 'x2', text: sentence2, reply_id: 'x2', interrupted: false });
+    aai.emit({ type: 'reply.done', reply_id: 'x2', status: 'completed' });
+  }
+
   clock.now = 50500;
   aai.emit({ type: 'reply.started', reply_id: 'tools-1' });
 }
@@ -85,6 +129,14 @@ describe('CallSession — Scenario B (Robert Miller, fraudulent) replayed as liv
     // reached, in the SAME tick the amount contradiction (c3) bumps request_version to 2 --
     // so by the time `driveScenarioBThroughA4` returns, the call has already gone all the
     // way to FREEZE and SEALED, matching the corpus's own recorded expectation.
+    //
+    // Review fix (2026-09-15, Critical -- recordGoalCompletionAction bookkeeping): the
+    // helper's own doc comment explains why two more real-ask turns (x1/x2) now follow a4 --
+    // the historical eight-line corpus alone never completes Scenario B's own three-challenge
+    // requirement under the corrected (LAW-4-respecting) bookkeeping. `driveScenarioBThroughA4`
+    // still reaches the SAME state/verdict/reasons the corpus documents; it just needs two
+    // more turns a fully-fixed live agent would actually speak (and the historical, pre-fix
+    // transcript never captured) to get there honestly.
     driveScenarioBThroughA4(session, aai, clock);
 
     expect(session.last?.state).toBe('SEALED');
@@ -96,10 +148,13 @@ describe('CallSession — Scenario B (Robert Miller, fraudulent) replayed as liv
 
     // ---- logs reproduce the corpus shapes (modulo generated ids) ----
     // Conversation is an objective input -- what was actually said -- so a live feed of the
-    // exact same lines reproduces it exactly. The tool results are what the SAME
-    // deterministic mock backend returns for the SAME (identity, request_version) the corpus
-    // used, this time computed by the server itself rather than hand-authored.
-    expect(session.logs.conversation).toEqual(scenarioB.conversation);
+    // exact same lines reproduces it exactly, as a PREFIX: the corpus's own eight lines,
+    // verbatim, followed by the two additional real-ask turns (x1/x2) the helper's own doc
+    // comment explains. The tool results are what the SAME deterministic mock backend
+    // returns for the SAME (identity, request_version) the corpus used, this time computed
+    // by the server itself rather than hand-authored.
+    expect(session.logs.conversation.slice(0, scenarioB.conversation.length)).toEqual(scenarioB.conversation);
+    expect(session.logs.conversation).toHaveLength(scenarioB.conversation.length + 2);
 
     const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
     const recordedThreeTools = session.logs.tools
@@ -120,14 +175,19 @@ describe('CallSession — Scenario B (Robert Miller, fraudulent) replayed as liv
 
     // The corpus file's own `challenge_issued` action names the counsel-of-record question
     // specifically -- one legal choice among several the live engine could make; this
-    // session's own live goal-following independently chose two different (also legal)
-    // SEED_FACT challenges via the same deterministic selectChallenge. Which exact
-    // challenges get asked isn't the load-bearing fact here (both are equally valid
-    // consequences of the SAME deterministic selection given the SAME session_id/seed); that
-    // the live path reaches the SAME verdict and the SAME full reason set as the corpus is.
+    // session's own live goal-following independently chose further challenges (the SAME
+    // deterministic `selectChallenge`, but now over a longer live conversation than the
+    // corpus's own single recorded action reflects -- see the drive helper's own doc comment:
+    // two more real-ask turns, x1/x2, complete the three challenges Scenario B's own
+    // thresholds require, and by then enough live caller turns have passed that
+    // `selectChallenge` picks a LIVE_COMMITMENT before falling back to SEED_FACT, not always
+    // the same kind the corpus's one-shot fixture happened to record). Which exact challenges
+    // get asked isn't the load-bearing fact here (all are equally valid consequences of the
+    // SAME deterministic selection given the SAME session_id/seed and CALLER-controlled
+    // conversation); that the live path reaches the SAME verdict and the SAME full reason set
+    // as the corpus is -- checked below.
     const challenges = session.logs.actions.filter((a) => a.kind === 'challenge_issued');
-    expect(challenges.length).toBeGreaterThan(0);
-    expect(challenges.every((a) => a.spec?.kind === 'SEED_FACT')).toBe(true);
+    expect(challenges.length).toBeGreaterThanOrEqual(3);
 
     // ---- terminal actions ran, in the FSM's FREEZE order ----
     const TERMINAL_NAMES = ['freeze_transaction_rail', 'open_incident', 'alert_principal', 'seal_evidence_record'];
@@ -2155,7 +2215,14 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
   /** Same shape as the round-3 describe block's own helper above -- drives Scenario B's
    *  c1..c3 far enough that server-driven lookups/terminal actions reach FREEZE/SEALED/CLOSE
    *  with nothing speaking, so `maybeSendReplyCreateForTick` sends the first real
-   *  `reply.create` (reason tick_end) as part of the same drive. */
+   *  `reply.create` (reason tick_end) as part of the same drive.
+   *
+   *  Question-reask + recordGoalCompletionAction fixes (2026-09-14/15): same reasoning as
+   *  the round-3 describe block's own identical helper above -- a2's real corpus line never
+   *  asks anything, and nothing downstream of THIS helper depends on its literal wording, so
+   *  a trailing question mark keeps both fixes from ever firing here (this helper's whole
+   *  point is post-goodbye suppression mechanics, not the reask/bookkeeping fixes, which each
+   *  have their own dedicated describe blocks elsewhere). */
   function driveToFreezeCloseWithFirstSend(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
     clock.now = 1000;
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
@@ -2169,7 +2236,7 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
     aai.emit({ type: 'transcript.user', item_id: 'c2', text: scenarioB.conversation[2]!.text });
     clock.now = 3000;
     aai.emit({ type: 'reply.started', reply_id: 'a2' });
-    aai.emit({ type: 'transcript.agent', item_id: 'a2', text: scenarioB.conversation[3]!.text, reply_id: 'a2', interrupted: false });
+    aai.emit({ type: 'transcript.agent', item_id: 'a2', text: `${scenarioB.conversation[3]!.text} Which institution holds it?`, reply_id: 'a2', interrupted: false });
     clock.now = 3500;
     aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
 
@@ -2396,12 +2463,22 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
 // actually evaluates to, before this mechanic ever ran. No reachable live scenario can
 // otherwise pin the exact instant this goal is active without a much longer drive, and this
 // test's only subject is the logging mechanic itself, not how CONSISTENCY_CHECK is reached.
+// Review fix (2026-09-15, Critical): `recordGoalCompletionAction` now takes the completed
+// reply's own id too (`replyId`), so it can look up that reply's accumulated transcript
+// (`replyTranscripts`) and check -- via questionMatch.ts's `transcriptAsksQuestion`, the SAME
+// matcher `maybeReaskQuestion` uses -- whether the reply actually asked the goal's own
+// question before logging anything at all. Both tests below now also seed
+// `replyTranscripts` for the reply id they pass, matching what the real `transcript.agent`
+// handler would already have populated by the time a real `reply.done` fires.
 describe('CallSession — ELICIT_MISSING_CRITICAL goal completion logs an elicit_issued action (Important 2, 2026-09-13)', () => {
   function sessionInternals(session: CallSession) {
-    return session as unknown as { recordGoalCompletionAction: (status: string) => void };
+    return session as unknown as {
+      recordGoalCompletionAction: (replyId: string, status: string) => void;
+      replyTranscripts: Map<string, string>;
+    };
   }
 
-  it('logs kind elicit_issued naming the field once the agent\'s reply for the goal completes', () => {
+  it('logs kind elicit_issued naming the field once the agent\'s reply for the goal completes, but only when that reply actually asked it', () => {
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -2423,8 +2500,19 @@ describe('CallSession — ELICIT_MISSING_CRITICAL goal completion logs an elicit
 
     expect(session.logs.actions.some((a) => a.kind === 'elicit_issued')).toBe(false);
 
+    const internals = sessionInternals(session);
+
+    // A reply that never actually asked the question logs nothing (review fix) -- LAW 4
+    // spirit: the record must not claim a question was put to the caller that never was.
+    internals.replyTranscripts.set('r0', 'One moment, checking that.');
+    clock.now = 500;
+    internals.recordGoalCompletionAction('r0', 'completed');
+    expect(session.logs.actions.some((a) => a.kind === 'elicit_issued')).toBe(false);
+
+    // A reply that DOES ask it (here, verbatim -- the goal's own hint) logs the action.
+    internals.replyTranscripts.set('r1', 'Which account ending should this go to? Please give me the last four digits.');
     clock.now = 1000;
-    sessionInternals(session).recordGoalCompletionAction('completed');
+    internals.recordGoalCompletionAction('r1', 'completed');
 
     const elicit = session.logs.actions.find((a) => a.kind === 'elicit_issued');
     expect(elicit).toBeDefined();
@@ -2435,7 +2523,7 @@ describe('CallSession — ELICIT_MISSING_CRITICAL goal completion logs an elicit
     expect(elicit?.value).toBeUndefined();
   });
 
-  it('logs nothing when the reply is interrupted, not completed', () => {
+  it('logs nothing when the reply is interrupted, not completed (even if it did ask)', () => {
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -2455,8 +2543,10 @@ describe('CallSession — ELICIT_MISSING_CRITICAL goal completion logs an elicit
       },
     };
 
+    const internals = sessionInternals(session);
+    internals.replyTranscripts.set('r1', 'What is the exact amount for this payment?');
     clock.now = 1000;
-    sessionInternals(session).recordGoalCompletionAction('interrupted');
+    internals.recordGoalCompletionAction('r1', 'interrupted');
 
     expect(session.logs.actions.some((a) => a.kind === 'elicit_issued')).toBe(false);
   });
@@ -2892,5 +2982,257 @@ describe('CallSession — question-reask: a completed reply that never asked the
     vi.advanceTimersByTime(REASK_GAP_MS + 1000);
 
     expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Review fix (2026-09-15, Critical -- PROVEN through the REAL reply.done dispatch, not
+// internals): `recordGoalCompletionAction` used to log `challenge_issued` UNCONDITIONALLY on
+// any completed reply, regardless of whether that reply's own transcript actually asked the
+// question. For ASK_CHALLENGE, `challenge_issued` is exactly what `selectChallenge`
+// (engine/challenges.ts) reads to decide the current challenge has been put to the caller and
+// move on to the next one -- so a "Checking the record." reply logged it anyway, and THIS
+// SAME event's own trailing `tick()` (dispatchAaiEvent) immediately advanced the engine to a
+// FRESH challenge (same code ASK_CHALLENGE, a different challenge_id -- PROVEN reproduction:
+// sess-b-1 -> sess-b-2) before `maybeReaskQuestion`'s spaced timer ever got to fire 400ms
+// later. That timer's own goal-key snapshot then no longer matched at fire time, so
+// `armQuestionReaskTimer` correctly cancelled what LOOKED like a stale reask -- but
+// `mustForceSpeak` ignores a same-code re-render, so NOTHING ever prompted the model to ask
+// sess-b-1's real question either. The question-reask fix silently did nothing on exactly the
+// live shape it exists to catch.
+//
+// Every test below drives the REAL CallSession through `aai.emit` (reply.started /
+// transcript.agent / reply.done), never internals -- this is deliberate: the bug above was
+// invisible to the previous round's internals-based tests (they pinned `session.last`
+// directly, bypassing the real `dispatchAaiEvent`/`tick()` sequence where the bug actually
+// lived) and only surfaced once the reviewer replayed it through the real dispatch path.
+describe('CallSession — recordGoalCompletionAction only logs an issued action for a REAL ask (review fix, 2026-09-15, Critical -- proven through the real reply.done dispatch)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const REASK_GAP_MS = 400; // CallSession.CLOSE_RETRY_MIN_GAP_MS, reused for the reask timer
+
+  function newLiveSession(clock: { now: number }, call: CallContext, aai: FakeAaiSocket, sent: ServerEvent[], diagEvents: { kind: string; detail: unknown }[]) {
+    const session = new CallSession({
+      session_id: call.session_id,
+      seed: MERIDIAN,
+      call,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+    });
+    session.start();
+    return session;
+  }
+
+  it('(a) the live shape end to end: ASK_CHALLENGE (sess-b-1) -- a non-question reply logs no challenge_issued and sends nothing synchronously; the spaced reask (+400ms) carries the sess-b-1 sentence verbatim; a later reply that actually asks it logs challenge_issued once, with no further send', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newLiveSession(clock, CALL_B, aai, sent, diagEvents);
+
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    expect(session.last?.state).toBe('CHALLENGE');
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+    expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-1'); // PROVEN reproduction's own shape
+    const sessB1Sentence = session.last!.goal.challenge!.speak!;
+
+    // "Checking the record." -- the PROVEN live text, no question at all.
+    clock.now = 1500;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: 'Checking the record.', reply_id: 'a1', interrupted: false });
+    clock.now = 2000;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    // No challenge_issued was logged -- the reply never actually asked it (the fix).
+    expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(false);
+    // Nothing sent synchronously at reply.done.
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+    // The engine's own goal is STILL sess-b-1, unadvanced -- the bug this fix closes.
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+    expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-1');
+
+    // The spaced reask fires at +400ms, carrying the ENGINE's own sentence verbatim.
+    vi.advanceTimersByTime(REASK_GAP_MS);
+    const replyCreates = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    expect(replyCreates).toHaveLength(1);
+    expect((replyCreates[0] as { instructions?: string }).instructions).toBe(`Say exactly this and nothing else: "${sessB1Sentence}"`);
+    expect(diagEvents.find((e) => e.kind === 'question_reask_sent')?.detail).toEqual({ goal_code: 'ASK_CHALLENGE', attempt: 1 });
+
+    // The reask's own reply.create is now outstanding -- a real reply.started clears it.
+    clock.now = 2500;
+    aai.emit({ type: 'reply.started', reply_id: 'a2' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a2', text: sessB1Sentence, reply_id: 'a2', interrupted: false });
+    clock.now = 3000;
+    aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
+
+    // NOW challenge_issued is logged, exactly once, for sess-b-1.
+    const issued = session.logs.actions.filter((a) => a.kind === 'challenge_issued');
+    expect(issued).toHaveLength(1);
+    expect(issued[0]!.challenge_id).toBe('sess-b-1');
+
+    // No further reply.create for sess-b-1 -- well past another spacing gap, to be sure.
+    vi.advanceTimersByTime(1000);
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    expect(diagEvents.filter((e) => e.kind === 'question_reask_sent')).toHaveLength(1);
+  });
+
+  it('(b) READBACK end to end, unchanged: a non-question reply logs no readback_issued and reasks (spaced +400ms); a reply that actually says the readback sentence logs readback_issued once, with no further send', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const call: CallContext = { session_id: 'sess-readback-live', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = newLiveSession(clock, call, aai, sent, diagEvents);
+
+    // Same opening line the Scenario A live test at the top of this file uses.
+    clock.now = 1000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c1',
+      text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
+    });
+    expect(session.last?.state).toBe('CHALLENGE');
+
+    clock.now = 1500;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: session.last!.goal.hint, reply_id: 'a1', interrupted: false });
+    clock.now = 2000;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    clock.now = 2500;
+    aai.emit({ type: 'transcript.user', item_id: 'c2', text: "No, that's wrong. It's Meridian Supply." });
+    expect(session.last?.state).toBe('CONSISTENCY_CHECK');
+    expect(session.last?.goal.code).toBe('READBACK');
+    const readbackSentence = session.last!.goal.hint;
+
+    // a2: a non-question reply for the READBACK goal.
+    clock.now = 3000;
+    aai.emit({ type: 'reply.started', reply_id: 'a2' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a2', text: 'One moment, checking that.', reply_id: 'a2', interrupted: false });
+    clock.now = 3500;
+    aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
+
+    expect(session.logs.actions.some((a) => a.kind === 'readback_issued')).toBe(false);
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+    // READBACK's own field-advancement is caller-confirmation-driven, not issuance-driven
+    // (the review's own point) -- the SAME field is still pending, unadvanced.
+    expect(session.last?.goal.code).toBe('READBACK');
+    expect(session.last?.goal.hint).toBe(readbackSentence);
+
+    vi.advanceTimersByTime(REASK_GAP_MS);
+    const replyCreates = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    expect(replyCreates).toHaveLength(1);
+    expect((replyCreates[0] as { instructions?: string }).instructions).toBe(`Say exactly this and nothing else: "${readbackSentence}"`);
+
+    // a3: the real readback sentence.
+    clock.now = 4000;
+    aai.emit({ type: 'reply.started', reply_id: 'a3' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a3', text: readbackSentence, reply_id: 'a3', interrupted: false });
+    clock.now = 4500;
+    aai.emit({ type: 'reply.done', reply_id: 'a3', status: 'completed' });
+
+    const readbackActions = session.logs.actions.filter((a) => a.kind === 'readback_issued');
+    expect(readbackActions).toHaveLength(1);
+
+    vi.advanceTimersByTime(1000);
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+  });
+
+  it('(c) a reply that asks the question on the FIRST try logs the issued action immediately and never arms a reask', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newLiveSession(clock, CALL_B, aai, sent, diagEvents);
+
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+    const sentence = session.last!.goal.challenge!.speak!;
+
+    clock.now = 1500;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: sentence, reply_id: 'a1', interrupted: false });
+    clock.now = 2000;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    expect(session.logs.actions.filter((a) => a.kind === 'challenge_issued')).toHaveLength(1);
+
+    vi.advanceTimersByTime(REASK_GAP_MS + 1000);
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+    expect(diagEvents.some((e) => e.kind === 'question_reask_sent')).toBe(false);
+  });
+
+  it('(d) the engine\'s own challenge counters/caps still count only real asks: three real asks exhaust the requirement as before; three non-asks do not', () => {
+    // (d1) three REAL asks -- each reads the engine's own CURRENT challenge sentence and
+    // speaks it verbatim, exactly what a fully-fixed live agent (via the reask fix, given
+    // enough turns) actually produces. No fake timers needed -- each turn is a NATURAL
+    // caller-turn-driven reply (never a reask), so nothing here depends on the 400ms gap.
+    {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const session = newLiveSession(clock, CALL_B, aai, sent, []);
+
+      clock.now = 1000;
+      aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+      expect(session.last?.state).toBe('CHALLENGE');
+
+      let t = 1500;
+      for (let i = 1; i <= 3; i++) {
+        expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+        const sentence = session.last!.goal.challenge!.speak!;
+        const replyId = `real-ask-${i}`;
+        aai.emit({ type: 'reply.started', reply_id: replyId });
+        aai.emit({ type: 'transcript.agent', item_id: replyId, text: sentence, reply_id: replyId, interrupted: false });
+        clock.now = t += 500;
+        aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });
+        clock.now = t += 500;
+      }
+
+      // All three challenges were genuinely issued, and the requirement is now exhausted --
+      // the engine has moved on (SSO/OOB lookups now run and the call resolves), same
+      // terminal shape `driveScenarioBThroughA4`'s own two-real-ask completion proves.
+      expect(session.logs.actions.filter((a) => a.kind === 'challenge_issued')).toHaveLength(3);
+      expect(session.last?.state).not.toBe('CHALLENGE');
+    }
+
+    // (d2) three NON-asks -- the same challenge (sess-b-1) never gets marked issued and
+    // keeps rendering unchanged; the requirement is never satisfied by silence.
+    {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const session = newLiveSession(clock, CALL_B, aai, sent, []);
+
+      clock.now = 1000;
+      aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+      expect(session.last?.state).toBe('CHALLENGE');
+      const challengeId = session.last!.goal.challenge!.challenge_id;
+
+      let t = 1500;
+      for (let i = 1; i <= 3; i++) {
+        const replyId = `non-ask-${i}`;
+        aai.emit({ type: 'reply.started', reply_id: replyId });
+        aai.emit({ type: 'transcript.agent', item_id: replyId, text: 'Checking the record.', reply_id: replyId, interrupted: false });
+        clock.now = t += 500;
+        aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });
+        clock.now = t += 500;
+      }
+
+      expect(session.logs.actions.filter((a) => a.kind === 'challenge_issued')).toHaveLength(0);
+      expect(session.last?.state).toBe('CHALLENGE');
+      expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+      expect(session.last?.goal.challenge?.challenge_id).toBe(challengeId);
+    }
   });
 });

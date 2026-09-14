@@ -1142,7 +1142,7 @@ export class CallSession {
         // `reply.create` send closed for the rest of the call.
         this.replyCreateAwaitingStart = false;
         this.clearReplyCreateLostTimer();
-        this.recordGoalCompletionAction(evt.status);
+        this.recordGoalCompletionAction(evt.reply_id, evt.status);
         this.diag('reply.done', { status: evt.status });
         if (evt.status === 'interrupted') {
           this.opts.onServerEvent({ type: 'flush' });
@@ -1242,11 +1242,48 @@ export class CallSession {
    *  count for a caller who never states a critical field at all -- re-asked forever, no
    *  escalation. Now logs an `elicit_issued` action naming the field (no `value`: nothing
    *  has been stated yet), which computeReadbackReaskExhausted folds into the same
-   *  per-field cap it already enforces for readback_issued. */
-  private recordGoalCompletionAction(status: string): void {
+   *  per-field cap it already enforces for readback_issued.
+   *
+   *  Review fix (2026-09-15, Critical -- proven through the REAL reply.done dispatch, not
+   *  internals): this used to log the issued action UNCONDITIONALLY on any `status ===
+   *  'completed'` reply, regardless of whether that reply's own transcript actually asked
+   *  the question. For ASK_CHALLENGE specifically, `challenge_issued` is exactly what
+   *  `selectChallenge` (engine/challenges.ts, via `reconstructIssued`) reads to decide the
+   *  challenge has been put to the caller and it is time to select the NEXT one -- so a
+   *  "Checking the record." reply (no question asked at all) still logged `challenge_issued`
+   *  and this SAME event's own trailing `tick()` (called after this method returns, at the
+   *  bottom of `dispatchAaiEvent`) immediately re-evaluated and advanced the engine to a
+   *  FRESH challenge (same code ASK_CHALLENGE, different challenge_id -- PROVEN reproduction:
+   *  sess-b-1 -> sess-b-2). By the time `maybeReaskQuestion`'s own spaced timer fired 400ms
+   *  later, `armQuestionReaskTimer`'s goal-key snapshot no longer matched (a real, and
+   *  correct, cancellation of what LOOKED like a stale reask) -- but `mustForceSpeak` ignores
+   *  a same-CODE re-render, so nothing else ever prompted the model to ask sess-b-1's
+   *  question either. Net effect: the caller was never actually asked anything, and the
+   *  question-reask fix silently did nothing on exactly the live shape it exists to catch.
+   *
+   *  Fix: reuse `transcriptAsksQuestion` (questionMatch.ts) with the goal's own composed
+   *  verbatim sentence (`verbatimQuestionSentence`) to decide whether THIS reply actually
+   *  asked the question before logging anything at all. If it did not, log NOTHING for this
+   *  goal (LAW 4 spirit: the record must never claim a question was put to the caller that
+   *  never was) -- the goal then does not advance, `maybeReaskQuestion`'s own spaced timer
+   *  (armed right after this method returns, from the same `reply.done` case) finds the SAME
+   *  goal still current at fire time, and the reask actually reaches the model. Interrupted
+   *  replies are unaffected either way -- the `status !== 'completed'` guard above already
+   *  short-circuits before this check is ever reached, exactly as before this fix.
+   *
+   *  READBACK's own field-advancement is driven by the CALLER's confirmation (the ledger),
+   *  never by `readback_issued` itself, so this fix does not change WHEN a READBACK moves on
+   *  -- only (a) that `readback_issued`/`elicit_issued` never again claims a question that
+   *  was never asked, and (b) that an un-asked readback/elicit no longer inflates
+   *  `computeReadbackReaskExhausted`'s own per-field cap (compose.ts) with a "re-ask" that
+   *  was not actually one. */
+  private recordGoalCompletionAction(replyId: string, status: string): void {
     if (status !== 'completed' || !this.last) return;
     const goal: PhrasingGoal = this.last.goal;
+    const transcript = this.replyTranscripts.get(replyId) ?? '';
+    const asked = transcriptAsksQuestion(transcript, verbatimQuestionSentence(goal));
     if (goal.code === 'ASK_CHALLENGE' && goal.challenge) {
+      if (!asked) return;
       this.logs.actions.push({
         id: this.nextActionId(),
         kind: 'challenge_issued',
@@ -1255,6 +1292,7 @@ export class CallSession {
         spec: goal.challenge,
       });
     } else if (goal.code === 'READBACK' && goal.readback) {
+      if (!asked) return;
       this.logs.actions.push({
         id: this.nextActionId(),
         kind: 'readback_issued',
@@ -1263,6 +1301,7 @@ export class CallSession {
         value: goal.readback.value,
       });
     } else if (goal.code === 'ELICIT_MISSING_CRITICAL' && goal.elicit) {
+      if (!asked) return;
       this.logs.actions.push({
         id: this.nextActionId(),
         kind: 'elicit_issued',
