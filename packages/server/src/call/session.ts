@@ -225,43 +225,40 @@ export class CallSession {
   private static readonly CLOSE_TIMEOUT_MS = 15_000;
   private closeGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private closeHardCapTimer: ReturnType<typeof setTimeout> | null = null;
-  /** reply.create fix (2026-09-13, PROVEN live bug: session 84ddf47a, Miller fraud
-   *  scenario -- see docs/ASSEMBLYAI_INTEGRATION.md's "VERIFY-AT-BUILD: reply.create
-   *  schema" section). Replaces fix round 2's old `closeStaleReplyId` single-id snapshot:
-   *  that approach could only ever reject ONE stale reply (whichever was in flight the
-   *  instant CLOSE was first rendered) and said nothing about which GOAL a reply was
-   *  actually phrased under, which is what `mustForceSpeak`/`maybeSendDeferredReplyCreate`
-   *  below also need to know. Recorded once per `reply.started`, from `this.last.goal.code`
-   *  at that exact instant (the goal the reply's `system_prompt` was rendered for -- see
-   *  `dispatchAaiEvent`'s `reply.started` case, which records this BEFORE `tick()` runs).
-   *  Never cleared -- a call is short-lived and reply_ids are never reused, so this is not
-   *  a real memory concern. `scheduleCloseIfNeeded` uses it to reject any reply.done whose
-   *  reply was not phrased under CLOSE (point 2 of the fix), exactly the same generalization
-   *  `mustForceSpeak`'s deferred path uses to decide whether the reply that just finished
-   *  already said what the CURRENT goal needs said. */
+  /** reply.create fix, round 2 (2026-09-13 review verdict FAIL on round 1, commit 48a0969 --
+   *  PROVEN live bug: session 84ddf47a, Miller fraud scenario; see
+   *  docs/ASSEMBLYAI_INTEGRATION.md's "VERIFY-AT-BUILD: reply.create schema" section).
+   *  Round 1's mistake (Critical 1): it decided whether to force-speak, and what to label a
+   *  reply, separately at EVERY individual `applyEvaluate()` call -- of which one `tick()`
+   *  can make several (a goal can pass through ANNOUNCE_FROZEN and land on CLOSE in the
+   *  same tick, once `runTerminalActionsIfNeeded` settles). Labeling a `reply.started` with
+   *  `this.last.goal.code` was then reading whatever the goal had ALREADY become by the
+   *  time that reply actually started, not what was requested when the `reply.create` was
+   *  sent -- so a reply asked for under ANNOUNCE_FROZEN could get mislabelled CLOSE, which
+   *  made `scheduleCloseIfNeeded` arm the hang-up on it and `maybeSendReplyCreateAfterReplyDone`
+   *  believe CLOSE had already been spoken, when no `reply.create` for CLOSE had ever gone
+   *  out. Round 2's design (simpler, race-proof): decide AT MOST ONCE PER TICK, at the very
+   *  end of `tick()` (`maybeSendReplyCreateForTick`), comparing the goal in force at the
+   *  START of that tick to the FINAL goal once the whole tick (evaluate + lookups + terminal
+   *  actions) has settled -- intermediate goals within one tick are deliberately coalesced
+   *  into whatever the tick actually lands on (CLOSE's own verbatim sentence already carries
+   *  the outcome; the Friday judge-sim's own passing live runs spoke under CLOSE, never a
+   *  separate ANNOUNCE_FROZEN utterance, so this loses nothing a caller would notice).
+   *  `pendingRequestedGoal` records exactly what was asked for at send time, and
+   *  `reply.started` labels the reply from THAT (not `this.last`) whenever one is
+   *  outstanding -- see that case's own comment. */
   private readonly replyGoalAtStart = new Map<string, GoalCode>();
-  /** The `GoalCode` from the goal BEFORE the most recent change `applyEvaluate` observed --
-   *  i.e. the "from" side of a transition, so `mustForceSpeak` can tell "STALL -> CLOSE"
-   *  (must force) apart from "STALL -> STALL" (a fresh holding-line variant; the caller's
-   *  own turn already prompts the next reply naturally, no forcing needed). Updated on
-   *  EVERY goal change `applyEvaluate` sees, whether or not that change turns out to need
-   *  forcing. Null only before the very first goal (GREET) is ever rendered. */
-  private previousGoalCode: GoalCode | null = null;
-  /** Set when `mustForceSpeak` fires while a reply is already in flight (or our own
-   *  `reply.create` is already outstanding, see `replyCreateAwaitingStart` below) --
-   *  i.e. we owe the agent a forced utterance of this goal but cannot ask for one yet.
-   *  Overwritten (never stacked) if the goal changes again before it is resolved: only the
-   *  LATEST goal the caller never got to hear matters once the model is finally asked to
-   *  speak. Resolved (sent or dropped) at the busy reply's own `reply.done` --
-   *  `maybeSendDeferredReplyCreate`. */
-  private forceSpeakPendingGoalCode: GoalCode | null = null;
+  /** Set by `sendReplyCreate` to the goal it just asked AssemblyAI to speak, and consumed
+   *  (read then cleared) by the very next `reply.started` to label that reply -- see
+   *  `replyGoalAtStart`'s own doc comment for why this must NOT be re-derived from
+   *  `this.last` at label time. Null whenever no `reply.create` is outstanding. */
+  private pendingRequestedGoal: GoalCode | null = null;
   /** True from the moment `sendReplyCreate` actually sends one until the `reply.started`
-   *  it asked for arrives. Folded into the same "busy" check `mustForceSpeak`'s caller uses
-   *  as `this.speaking` -- without this, a SECOND goal change landing before AssemblyAI has
-   *  even started generating the reply we already asked for would fire a second, redundant
-   *  `reply.create` for a reply that hasn't begun yet (LAW/task requirement: never two
-   *  reply.create for the same goal rendering -- this also prevents two for two DIFFERENT
-   *  goal renderings that both precede the same not-yet-started reply). */
+   *  it asked for arrives. Folded into the same "busy" check both `maybeSendReplyCreateForTick`
+   *  and `maybeSendReplyCreateAfterReplyDone` use alongside `this.speaking` -- without this,
+   *  a goal change landing before AssemblyAI has even started generating the reply we
+   *  already asked for would fire a second, redundant `reply.create` for a reply that has
+   *  not begun yet (never two reply.create for the same goal rendering). */
   private replyCreateAwaitingStart = false;
 
   private clearCloseTimers(): void {
@@ -299,8 +296,8 @@ export class CallSession {
    *  whether the close line has actually been spoken (that reply's recorded goal will not
    *  be `'CLOSE'`). Such a reply.done is still handled completely normally by every other
    *  branch of the `reply.done` case (flush/discard, `recordGoalCompletionAction`, the
-   *  diagnostics event, `maybeSendDeferredReplyCreate`); only the arming of the grace timer
-   *  is skipped here. Any reply recorded as phrased under CLOSE -- completed or interrupted
+   *  diagnostics event, `maybeSendReplyCreateAfterReplyDone`); only the arming of the grace
+   *  timer is skipped here. Any reply recorded as phrased under CLOSE -- completed or interrupted
    *  -- schedules the hang-up: once SEALED, there is nothing left for the model to do, so a
    *  caller who talks over the close line does not buy the call more time. The short grace
    *  period lets the close line's own audio frames actually reach the wire before the
@@ -627,17 +624,19 @@ export class CallSession {
         // Skipping it would leave the browser showing "not speaking" for the whole reply.
         this.speaking = true;
         this.replyFirstAudioRecorded = false;
-        // reply.create fix (2026-09-13), point 2: record which goal this reply's
-        // system_prompt was actually rendered for -- `this.last` here is still whatever the
-        // PRECEDING tick last set (this event's own `tick()` hasn't run yet), i.e. exactly
-        // the goal AssemblyAI was asked to phrase this reply under. `scheduleCloseIfNeeded`
-        // and `maybeSendDeferredReplyCreate` both key off this.
-        if (this.last) this.replyGoalAtStart.set(evt.reply_id, this.last.goal.code);
-        // Our own outstanding reply.create (if any) has now been answered by AssemblyAI
-        // actually starting to generate a reply -- see `replyCreateAwaitingStart`'s own doc
-        // comment for why this folds into `mustForceSpeak`'s "busy" check the same way
-        // `this.speaking` (just set above) does.
+        // reply.create fix, round 2 (Critical 1, 2026-09-13 review): label this reply with
+        // what was actually REQUESTED, never with whatever `this.last` happens to read by
+        // now. If a `reply.create` is outstanding, `pendingRequestedGoal` is the goal it
+        // asked for -- that is this reply's true phrasing intent even if a LATER, separate
+        // tick has since advanced `this.last.goal.code` further (the exact bug round 1 had:
+        // it labelled from `this.last` unconditionally). Only when nothing is outstanding
+        // (this reply arose from ordinary caller-turn-driven flow, not our own ask) does
+        // `this.last.goal.code` -- the goal in force at this exact instant, before this
+        // event's own `tick()` runs -- correctly describe what it was phrased under.
+        const requestedGoal = this.replyCreateAwaitingStart ? this.pendingRequestedGoal : (this.last?.goal?.code ?? null);
+        if (requestedGoal) this.replyGoalAtStart.set(evt.reply_id, requestedGoal);
         this.replyCreateAwaitingStart = false;
+        this.pendingRequestedGoal = null;
         this.diag('reply.started', {});
         break;
 
@@ -681,10 +680,9 @@ export class CallSession {
         } else {
           this.flushToolResults();
         }
-        // reply.create fix (2026-09-13), requirement 3: the tool.result flush rule stays
-        // first (immediately above) -- any deferred `reply.create` this reply's completion
-        // owes goes out only after that.
-        this.maybeSendDeferredReplyCreate(evt.reply_id);
+        // reply.create fix, round 2 -- requirement 3 unchanged: the tool.result flush rule
+        // stays first (immediately above); this only ever sends AFTER that.
+        this.maybeSendReplyCreateAfterReplyDone(evt.reply_id);
         break;
 
       case 'input.speech.started':
@@ -875,9 +873,20 @@ export class CallSession {
   /** Re-run the engine, react to a goal change, run terminal actions if newly owed, then
    *  push the resulting ScreenState. Called once per AAI event and once from start(). */
   private tick(): void {
+    // reply.create fix, round 2 (Critical 1): captured BEFORE any of this tick's own
+    // evaluate() calls run -- the goal that was in force when this tick began, i.e. the
+    // "from" side `maybeSendReplyCreateForTick` compares against the goal this tick
+    // actually lands on, once evaluate/lookups/terminal-actions have all settled.
+    // Defensive `?.` on `goal` too (not just `this.last`): a caught mid-dispatch error can
+    // leave `this.last.goal` transiently undefined (see diagnostics.test.ts's own "poison
+    // last.goal, then check it gets restored" recovery tests) -- this must never itself
+    // throw, or `recoverFromDispatchError`'s own retry of `tick()` gives up before
+    // `applyEvaluate()` ever gets a chance to restore a real goal.
+    const goalAtTickStart: GoalCode | null = this.last?.goal?.code ?? null;
     this.applyEvaluate();
     this.runLookupsIfNeeded();
     this.runTerminalActionsIfNeeded();
+    this.maybeSendReplyCreateForTick(goalAtTickStart);
     this.emitState();
   }
 
@@ -1057,53 +1066,35 @@ export class CallSession {
       // from `reply.done`, which is exactly the event this cap exists to cover the absence
       // of. See `armClose`'s own doc comment.
       if (output.goal.code === 'CLOSE') this.armClose();
-
-      // reply.create fix (2026-09-13), requirement 1: some goals must be spoken WITHOUT
-      // waiting for the caller to talk first -- nothing else would ever prompt AssemblyAI
-      // to generate a reply for them (see this file's own PROVEN-bug doc comment above
-      // `closeGraceTimer`/`docs/ASSEMBLYAI_INTEGRATION.md`'s VERIFY-AT-BUILD section).
-      // `mustForceSpeak` decides which; `fromCode` is the goal this transition is LEAVING
-      // (recorded before being overwritten for the next comparison).
-      const fromCode = this.previousGoalCode;
-      this.previousGoalCode = output.goal.code;
-      if (!this.ended && this.mustForceSpeak(fromCode, output.goal.code)) {
-        if (this.speaking || this.replyCreateAwaitingStart) {
-          // A reply is already in flight (phrased under the OLD goal), or we already asked
-          // for one that AssemblyAI hasn't started generating yet -- either way, asking
-          // again now would either race a live reply or double up on one not yet begun.
-          // Defer: resolved at that reply's own `reply.done` (`maybeSendDeferredReplyCreate`)
-          // -- overwritten here, not stacked, if the goal moves again before that happens.
-          this.forceSpeakPendingGoalCode = output.goal.code;
-        } else {
-          this.sendReplyCreate(output.goal.code, 'goal_change_idle');
-        }
-      }
     }
     this.last = output;
   }
 
-  /** reply.create fix (2026-09-13): true when a transition from `fromCode` to `toCode`
-   *  leaves the agent with something it must say that nothing else will prompt it to say --
-   *  ANNOUNCE_FROZEN/ANNOUNCE_STAGED/ANNOUNCE_ESCALATED/CLOSE always (their whole point is
-   *  to state an outcome the instant the engine reaches it), or leaving a holding pattern
-   *  (STALL/CONTAIN) for a genuinely different goal (STALL/CONTAIN -> STALL is excluded on
-   *  purpose: consecutive holding-line variants are always caller-turn-driven in practice,
-   *  same as every other in-conversation goal change -- AssemblyAI's own automatic
+  /** reply.create fix, round 2 (2026-09-13): true when a transition from `fromCode` to
+   *  `toCode` leaves the agent with something it must say that nothing else will prompt it
+   *  to say -- ANNOUNCE_FROZEN/ANNOUNCE_STAGED/ANNOUNCE_ESCALATED/CLOSE always (their whole
+   *  point is to state an outcome the instant the engine reaches it), or leaving a holding
+   *  pattern (STALL/CONTAIN/CONTAIN_NO_DISCLOSURE -- Important 4, 2026-09-13 review: fsm.ts
+   *  returns CONTAIN_NO_DISCLOSURE, not CONTAIN, for EVIDENCE under pressure, so it needs
+   *  the same treatment) for a genuinely different goal (STALL/CONTAIN* -> STALL is excluded
+   *  on purpose: consecutive holding-line variants are always caller-turn-driven in
+   *  practice, same as every other in-conversation goal change -- AssemblyAI's own automatic
    *  turn-taking already covers that case). Never GREET (the initial greeting is the AAI
    *  session's own `greeting` field from the FIRST session.update, built in aai/config.ts --
    *  not this per-goal one at all). `fromCode === toCode` is deliberately excluded even
-   *  when both are holding goals: that is not a "change", it's the same STALL/CONTAIN
+   *  when both are holding goals: that is not a "change", it's the same STALL/CONTAIN*
    *  pattern with a fresh line, which is the caller-turn-driven case this function exists to
-   *  NOT force. */
+   *  NOT force. Called from exactly two places: `maybeSendReplyCreateForTick` (once per
+   *  tick, comparing the goal at tick-start to the goal the tick settled on -- this is what
+   *  coalesces an intermediate ANNOUNCE_* into the CLOSE it lands on in the same tick) and
+   *  `maybeSendReplyCreateAfterReplyDone` (comparing a just-finished reply's own recorded
+   *  label to the current goal, to catch up on whatever was owed while that reply was busy
+   *  speaking). */
   private mustForceSpeak(fromCode: GoalCode | null, toCode: GoalCode): boolean {
     if (toCode === 'GREET') return false;
     // Same CODE re-rendering (e.g. a fresh evidence quote changing the keyterms list, or a
     // new stall/challenge/readback line for the SAME code) is not a "change" -- only a
-    // different code is something new the caller hasn't been told yet. Without this, two
-    // evaluate() passes that both land on CLOSE (e.g. re-evaluating after terminal actions
-    // settle changes an evidence-derived keyterm) would fire a second, redundant
-    // reply.create for a goal that already has one outstanding (PROVEN in Scenario B's own
-    // replay: CLOSE renders twice, once before and once after seal_evidence_record runs).
+    // different code is something new the caller hasn't been told yet.
     if (fromCode === toCode) return false;
     if (CallSession.FORCE_SPEAK_GOALS.has(toCode)) return true;
     if (fromCode && CallSession.HOLDING_GOALS.has(fromCode) && toCode !== 'STALL') return true;
@@ -1116,17 +1107,41 @@ export class CallSession {
     'ANNOUNCE_ESCALATED',
     'CLOSE',
   ]);
-  private static readonly HOLDING_GOALS: ReadonlySet<GoalCode> = new Set<GoalCode>(['STALL', 'CONTAIN']);
+  // Important 4 (2026-09-13 review): CONTAIN_NO_DISCLOSURE added -- fsm.ts's own EVIDENCE
+  // pressure-response returns THIS code, not plain CONTAIN; both are holding patterns whose
+  // consecutive same-code variants are caller-turn-driven, but whose exit to a genuinely
+  // different goal is not.
+  private static readonly HOLDING_GOALS: ReadonlySet<GoalCode> = new Set<GoalCode>(['STALL', 'CONTAIN', 'CONTAIN_NO_DISCLOSURE']);
+
+  /** reply.create fix, round 2: at most one send per tick, decided once `tick()`'s own
+   *  evaluate/lookups/terminal-actions cascade has fully settled -- `goalAtTickStart` is
+   *  what `tick()` captured before any of that ran; `this.last.goal.code` here is the
+   *  FINAL, settled goal. Coalesces any intermediate goal the tick passed through (e.g.
+   *  ANNOUNCE_FROZEN on the way to CLOSE) into whichever goal the tick actually landed on --
+   *  see the class-field doc comment above `replyGoalAtStart` for why this is the correct,
+   *  race-proof design and not merely a simplification. Never sends while a reply
+   *  is in flight or our own prior `reply.create` is still awaiting its `reply.started`
+   *  -- `maybeSendReplyCreateAfterReplyDone` is what catches up once that clears. */
+  private maybeSendReplyCreateForTick(goalAtTickStart: GoalCode | null): void {
+    if (this.ended || !this.last) return;
+    if (this.speaking || this.replyCreateAwaitingStart) return;
+    const finalGoal = this.last.goal.code;
+    if (!this.mustForceSpeak(goalAtTickStart, finalGoal)) return;
+    this.sendReplyCreate(finalGoal, 'tick_end');
+  }
 
   /** Sends the actual `reply.create` (never here without going through this one method --
-   *  see requirement 5: every send gets the same diag event + action-log entry). Guarded by
+   *  requirement 5: every send gets the same diag event + action-log entry). Guarded by
    *  `this.ended` for the same reason every other outbound send in this class is: a call
-   *  that has already ended must never produce one more websocket message. */
+   *  that has already ended must never produce one more websocket message. Records
+   *  `pendingRequestedGoal` so the very next `reply.started` labels itself correctly (see
+   *  that case's own comment and the class-field doc comment on `replyGoalAtStart`). */
   private sendReplyCreate(goalCode: GoalCode, reason: string): void {
     if (this.ended) return;
     const msg: ReplyCreateMessage = { type: 'reply.create' };
     this.opts.aai.send(msg);
     this.replyCreateAwaitingStart = true;
+    this.pendingRequestedGoal = goalCode;
     this.logs.actions.push({
       id: this.nextActionId(),
       kind: 'session_config_updated',
@@ -1137,20 +1152,25 @@ export class CallSession {
   }
 
   /** Fired from `reply.done`, after the tool.result flush/discard rule has already run
-   *  (requirement 3) -- resolves whatever `mustForceSpeak` deferred because a reply was
-   *  busy. `replyId`'s own recorded phrasing goal (`replyGoalAtStart`, set at ITS
-   *  `reply.started`) is what decides whether anything still needs saying: if that reply
-   *  already spoke under the pending goal (recorded goal equals the pending one), the model
-   *  already said what was owed and there is nothing left to force -- this is what stops
-   *  the reply.create WE sent from ever chasing its own tail once the reply it prompted
-   *  actually lands. */
-  private maybeSendDeferredReplyCreate(replyId: string): void {
-    const pending = this.forceSpeakPendingGoalCode;
-    if (!pending) return;
-    const repliedGoal = this.replyGoalAtStart.get(replyId);
-    this.forceSpeakPendingGoalCode = null;
-    if (repliedGoal === pending) return; // this reply already said it
-    this.sendReplyCreate(pending, 'goal_change_deferred');
+   *  (requirement 3) -- catches up on whatever `maybeSendReplyCreateForTick` could not send
+   *  while this reply was busy speaking. `replyId`'s own recorded label (`replyGoalAtStart`,
+   *  set at ITS `reply.started` -- see that case's own comment) is compared against the
+   *  CURRENT goal (`this.last.goal.code`, still the goal from BEFORE this event's own
+   *  `tick()` runs): if they differ and `mustForceSpeak` says the current goal must still be
+   *  spoken, send one `reply.create` for it and label the reply that follows with it
+   *  (`sendReplyCreate` sets `pendingRequestedGoal`). If they match, the reply that just
+   *  finished already said what was owed -- nothing left to force. Defensive `this.speaking
+   *  || this.replyCreateAwaitingStart` guard: `this.speaking` was just set false by the
+   *  caller and nothing else in this handler can set `replyCreateAwaitingStart`, so this
+   *  should never actually be true here, but "never send while busy" is cheap to keep
+   *  airtight at every call site. */
+  private maybeSendReplyCreateAfterReplyDone(replyId: string): void {
+    if (this.ended || !this.last) return;
+    if (this.speaking || this.replyCreateAwaitingStart) return;
+    const label = this.replyGoalAtStart.get(replyId) ?? null;
+    const current = this.last.goal.code;
+    if (!this.mustForceSpeak(label, current)) return;
+    this.sendReplyCreate(current, 'reply_done_goal_diverged');
   }
 
   /** LAW 2: STAGE is the ceiling this ever reaches on its own. The server runs the owed
