@@ -161,10 +161,20 @@ export function parseFreePlayCallerReply(raw: string): FreePlayCallerTurnResult 
   }
 }
 
+/** Detects whether the caller is about to speak for the first time in this call: history has
+ *  no entries with speaker === 'caller'. PROVEN gap (2026-09-14, defect 2): on the caller's
+ *  opening line, the model must never be allowed to set `silent: true` -- every persona must
+ *  state its opening request before going silent (hangup-after-request, miller-silent-after-
+ *  amount). */
+function isCallerFirstTurn(history: readonly LlmTurnHistoryEntry[]): boolean {
+  return !history.some((entry) => entry.speaker === 'caller');
+}
+
 /** One full free-play round-trip: build the free-play messages, call the right provider
  *  (delegating to llmCaller.ts's own, already-tested `callOpenRouter`/`callGemini`), parse
  *  the reply with this file's own `parseFreePlayCallerReply` (not llmCaller.ts's
- *  `parseCallerReply` -- that shape has no room for `silent`). */
+ *  `parseCallerReply` -- that shape has no room for `silent`). Enforces (2026-09-14, defect 2)
+ *  that `silent: true` is never allowed on the caller's first turn. */
 export async function requestNextFreePlayLine(
   http: HttpClient,
   provider: LlmProvider,
@@ -177,5 +187,12 @@ export async function requestNextFreePlayLine(
 ): Promise<FreePlayCallerTurnResult> {
   const messages = buildFreePlayMessages(persona, truth, history, maxWords);
   const raw = provider === 'gemini' ? await callGemini(http, apiKey, model, messages) : await callOpenRouter(http, apiKey, model, messages);
-  return parseFreePlayCallerReply(raw);
+  let result = parseFreePlayCallerReply(raw);
+  // Defect 2 (2026-09-14): a persona's FIRST spoken line must never be silent -- it must state
+  // an opening request. If the model returned silent on the first turn, force it back to false
+  // and ensure the text is non-empty (treated as the model's actual response).
+  if (isCallerFirstTurn(history) && result.silent) {
+    result = { text: result.text.trim().length > 0 ? result.text : raw.trim(), barge_in: false, silent: false };
+  }
+  return result;
 }

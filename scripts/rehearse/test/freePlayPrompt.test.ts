@@ -167,9 +167,15 @@ describe('parseFreePlayCallerReply', () => {
 });
 
 describe('requestNextFreePlayLine', () => {
-  it('routes to openrouter and parses the reply, including silent', async () => {
+  it('routes to openrouter and parses the reply, including silent (on a non-first turn)', async () => {
+    // Note: empty history [] would be a first turn. This test uses a history with a caller
+    // entry, so it's not the first turn and silent: true is allowed.
+    const history: LlmTurnHistoryEntry[] = [
+      { speaker: 'caller', text: 'Hello, this is Dana Whitfield.' },
+      { speaker: 'agent', text: 'Confirming the amount?' },
+    ];
     const http = mockHttp({ choices: [{ message: { content: '{"text":"","barge_in":false,"silent":true}' } }] });
-    const result = await requestNextFreePlayLine(http, 'openrouter', 'openai/gpt-4o-mini', 'sk-test', 'persona', undefined, [], 30);
+    const result = await requestNextFreePlayLine(http, 'openrouter', 'openai/gpt-4o-mini', 'sk-test', 'persona', undefined, history, 30);
     expect(result).toEqual({ text: '', barge_in: false, silent: true });
   });
 
@@ -177,5 +183,31 @@ describe('requestNextFreePlayLine', () => {
     const http = mockHttp({ candidates: [{ content: { parts: [{ text: '{"text":"Whitmore and Bass.","barge_in":false,"silent":false}' }] } }] });
     const result = await requestNextFreePlayLine(http, 'gemini', 'gemini-1.5-flash', 'gk-test', 'persona', undefined, [], 30);
     expect(result).toEqual({ text: 'Whitmore and Bass.', barge_in: false, silent: false });
+  });
+
+  it('rejects silent:true on the caller\'s first turn, even if the model returns it (defect 2, 2026-09-14)', async () => {
+    // History with only agent entries (no caller entries yet) means the caller is about to speak
+    // for the first time. A persona must never go silent before stating its opening request.
+    const history: LlmTurnHistoryEntry[] = [
+      { speaker: 'agent', text: 'Meridian payments desk, verification line. How can I help you today?' },
+    ];
+    const http = mockHttp({ choices: [{ message: { content: '{"text":"","barge_in":false,"silent":true}' } }] });
+    const result = await requestNextFreePlayLine(http, 'openrouter', 'openai/gpt-4o-mini', 'sk-test', 'persona', undefined, history, 30);
+    // The model returned silent:true on the caller's first line, but it must be forced to false
+    expect(result.silent).toBe(false);
+    // And the text should be non-empty (the model's response, not blank)
+    expect(result.text.trim().length > 0).toBe(true);
+  });
+
+  it('allows silent:true on a later turn, after the caller has already spoken', async () => {
+    // History with caller entries means the caller has already spoken. A later silent is allowed
+    // (hangup-after-request, miller-silent-after-amount scenarios).
+    const history: LlmTurnHistoryEntry[] = [
+      { speaker: 'caller', text: 'This is Dana Whitfield. I need $84,500 wired today.' },
+      { speaker: 'agent', text: 'Confirming the amount, $84,500?' },
+    ];
+    const http = mockHttp({ choices: [{ message: { content: '{"text":"","barge_in":false,"silent":true}' } }] });
+    const result = await requestNextFreePlayLine(http, 'openrouter', 'openai/gpt-4o-mini', 'sk-test', 'persona', undefined, history, 30);
+    expect(result).toEqual({ text: '', barge_in: false, silent: true });
   });
 });

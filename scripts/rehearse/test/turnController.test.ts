@@ -440,6 +440,21 @@ describe('isHoldingLine', () => {
       expect(isHoldingLine(s), s).toBe(false);
     }
   });
+
+  it('does not match a holding phrase that contains a question (defect 1, 2026-09-14)', () => {
+    // A reply that starts with a holding prefix but contains a question is NOT a holding line --
+    // the agent is waiting for something specific, not just stalling for time.
+    const casesWithQuestions = [
+      'One moment while I verify the request. Understood. What is the total amount for these two wires?',
+      'Let me verify that. How much are we talking about?',
+      'Checking now -- can you confirm the account number?',
+      'Please hold. Which beneficiary are we wiring to?',
+      'Bear with me. Who is the recipient of this transfer?',
+    ];
+    for (const reply of casesWithQuestions) {
+      expect(isHoldingLine(reply), reply).toBe(false);
+    }
+  });
 });
 
 describe('isClosingLine', () => {

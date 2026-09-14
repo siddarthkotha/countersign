@@ -106,8 +106,29 @@ export const HOLDING_LINE_PATTERNS: RegExp[] = [
   /while i verify/i,
 ];
 
+/** Detects whether text contains a question that requires a caller response. Checks for
+ *  "?" or imperative question forms like "what is", "which", "who", "can you", "please state".
+ *  PROVEN gap (2026-09-14, defect 1): a reply like "One moment while I verify. What is the
+ *  amount?" starts with a holding line prefix but contains a real question -- it is NOT a holding
+ *  line, it is a request for specific information the caller must answer. */
+export function containsQuestion(text: string): boolean {
+  if (text.includes('?')) return true;
+  const lower = text.toLowerCase();
+  return (
+    /\bwhat\s+is\b/.test(lower) ||
+    /\bwhich\b/.test(lower) ||
+    /\bwho\s+is\b/.test(lower) ||
+    /\bcan\s+you\b/.test(lower) ||
+    /\bplease\s+state\b/.test(lower)
+  );
+}
+
 export function isHoldingLine(text: string): boolean {
-  return HOLDING_LINE_PATTERNS.some((p) => p.test(text));
+  const startsWithHolding = HOLDING_LINE_PATTERNS.some((p) => p.test(text));
+  // A holding line that contains a question is not a pure holding line -- the agent is
+  // asking for something specific, not just stalling for time (defect 1, 2026-09-14).
+  if (startsWithHolding && containsQuestion(text)) return false;
+  return startsWithHolding;
 }
 
 /** Copied, NOT imported, verbatim from `closeSentence` in packages/engine/src/fsm.ts:207-218
