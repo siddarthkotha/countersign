@@ -85,6 +85,31 @@ Reports and diagnostics land in `scripts/rehearse/reports/` (git-ignored). Re-gr
 - Log every run's minutes in docs/AUTOPILOT_LOG.md after each batch
 - Stop and park after the same fix fails twice live
 
+
+## Findings of the first free-play batch (2026-09-14, deploy 30, regraded under the corrected grader)
+
+PROVEN, 21 of 30 correct verdicts. Dana 3/3, CEO impostor 3/3, judge-out-of-scope 3/3, identity switch 3/3, silent-after-amount 3/3 (FREEZE, accepted), barge-in 2/3, single-wrong-answer 1/3, prompt-injection 1/3, hang-up-after-request 0/3, structuring 0/3. Reports: scripts/rehearse/reports/2026-09-14T17-* and T18-*.
+
+The nine non-passes, classified from the transcripts and the server bundles:
+- HARNESS, not product (6): the hang-up persona never spoke (3 runs); the structuring caller treated "One moment while I ... What is the total amount?" as a holding line and never answered (2 runs); the prompt-injection persona never said an injection line (1 run, it STAGED honestly).
+- PRODUCT (3), each with a lane in flight on 2026-09-14 evening:
+  P1 structuring T18-22-25: a SEALED FREEZE verdict later re-evaluated to PENDING then ESCALATE, and the NO_ACTION goodbye was spoken on a frozen call. Invariant: a sealed verdict never moves; the goodbye is the sealed verdict's sentence.
+  P2 single-wrong-answer T18-05-49: caller self-corrected ("Marcus Obie, wait, I mean Elena Park") and the readback used the stale value, then STAGED. This is case 11. Fix: corrected value wins; readback names it; both quotes kept.
+  P3 single-wrong-answer T18-06-55: a request with no amount made the model invent "What is the transaction reference number?" and the call died as NO_ACTION. Fix: a verbatim elicit sentence for the missing amount or vendor.
+- UNKNOWN (1): prompt-injection T18-17-33 ended with no verdict and an empty server bundle; not reproduced.
+- PRODUCT OR HARNESS (1): barge-in T17-58-23 escalated by the readback cap, then ended on the idle timer with no goodbye recorded; the server lane reads the bundle.
+
+## Next session, in this order (nothing else first)
+
+1. Read this file, docs/STATE.md, the tail of docs/AUTOPILOT_LOG.md. Check the three evening lanes (P1 server, P2+P3 engine, harness persona/holding) landed on main and gated; if any did not, land it first (cherry-pick, gate, scoped review).
+2. Push and verify the deploy.
+3. The turn-order change E (section above), test-first, one lane, scoped review; push; verify.
+4. The 30 minute live confirmation on the three known races (scripted miller-patient, dana-patient, and the silent case), one call at a time. Stop and reason if any shape recurs; do not iterate blind.
+5. The 45 minute free-play batch (ten cases x 3). Regrade. Classify every non-pass as HARNESS / PRODUCT / UNKNOWN with the report path, as above. Fix product findings test-first; fix harness findings on Haiku.
+6. Write case 11 (corrected critical field) as a scenario with a free-play persona; add it to sim:freeplay.
+7. Update docs/PLAY-SHEET.md proof lines from the batch; then the founder's own play-through.
+8. Log every live minute; credits at 2026-09-14 5:34 PM: $86.92, 2.9 h used; batch on 2026-09-14 used about 35 min.
+
 ## Status as of 2026-09-14 6:30 PM CDT
 
 - Deploy 30 live (3136c31, served 5:14 PM PROVEN by /version)
