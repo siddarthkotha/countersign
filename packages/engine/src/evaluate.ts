@@ -23,11 +23,51 @@ import {
 } from './compose.js';
 import type { ChallengeResult, EngineInput, EngineOutput, Evidence, EvidenceStatus } from './types.js';
 
+/** PROVEN defect (2026-09-14, scripts/rehearse/reports/2026-09-14T18-22-25-structuring-two-
+ *  wires.md + its .diagnostics.json): a call already SEALED FREEZE at t=83982/85235 (rule
+ *  row 8) flipped to PENDING at t=89976 (row 7) off nothing but two more caller lines, then
+ *  to ESCALATE at t=102686 (row 15) -- `deriveState` (fsm.ts) already locks the visible
+ *  STATE to SEALED forever once `seal_evidence_record` has a successful tool-log entry, but
+ *  nothing locked the VERDICT: `evaluate` recomputed it fresh from the FULL conversation on
+ *  every call, so post-seal caller speech kept moving `decide()`'s own rule table. LAW 2's
+ *  "voice never releases the wire" corollary is that a verified/frozen/escalated case can
+ *  never be REOPENED or RECLASSIFIED by whatever the caller keeps saying into an already-
+ *  ended interaction.
+ *
+ *  `evaluate` stays a pure function of its input (no remembered flag) -- the freeze point is
+ *  re-derived on every call from the logs themselves: the EARLIEST successful
+ *  `seal_evidence_record` tool entry's `t_ms`. Every conversation/tool/action entry strictly
+ *  AFTER that instant is dropped before any ledger/evidence/rule computation runs, so the
+ *  whole pipeline computes exactly what it would have computed the instant sealing happened,
+ *  every time, forever. `deriveState`'s own SEALED check (fsm.ts) is unaffected either way --
+ *  it only needs the seal entry ITSELF present, and the "<=" boundary always keeps it (the
+ *  four terminal-action tool entries for one verdict are always logged in the same tick, at
+ *  the same t_ms -- see terminalActions.ts/session.ts's `runOwedTerminalActions` -- so none of
+ *  a sealed verdict's own siblings is ever cut by this truncation).
+ *
+ *  No corpus fixture has any conversation/tool/action entry timestamped after its own seal
+ *  (verified by scanning every file in packages/engine/corpus), so this is a no-op for every
+ *  existing replay -- corpus.test.ts stays 128/128. See test/evaluate.test.ts's "sealed
+ *  verdict never moves" cases for the regression coverage (the P1 shape: FREEZE sealed, then
+ *  two more caller lines -> verdict/goal stay FREEZE/CLOSE). */
+function freezeAtSeal(input: EngineInput): EngineInput {
+  const sealedAtMs = input.tools
+    .filter((t) => t.name === 'seal_evidence_record' && t.result !== undefined && t.result.error === undefined)
+    .reduce((min, t) => (min === null || t.t_ms < min ? t.t_ms : min), null as number | null);
+  if (sealedAtMs === null) return input;
+  return {
+    ...input,
+    conversation: input.conversation.filter((u) => u.t_ms <= sealedAtMs),
+    tools: input.tools.filter((t) => t.t_ms <= sealedAtMs),
+    actions: input.actions.filter((a) => a.t_ms <= sealedAtMs),
+  };
+}
+
 /** `overrides` and `mutant` are TEST-ONLY (used by test/evaluate.test.ts's counterfactual
  *  checks and test/mutants.test.ts respectively). `evaluate(input)` alone stays the only
  *  signature the server/browser ever calls -- a real invocation never supplies either. */
-export function evaluate(input: EngineInput, overrides?: Record<string, EvidenceStatus>, mutant?: RuleMutant): EngineOutput {
-  const { conversation, tools, actions, call, seed } = input;
+export function evaluate(rawInput: EngineInput, overrides?: Record<string, EvidenceStatus>, mutant?: RuleMutant): EngineOutput {
+  const { conversation, tools, actions, call, seed } = freezeAtSeal(rawInput);
 
   // 1. Story ledger.
   const { claims, request_version } = buildLedger(conversation, actions, seed);

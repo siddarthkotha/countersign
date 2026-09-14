@@ -3236,3 +3236,147 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
     }
   });
 });
+
+// ---------------------------------------------------------------------------------------
+// PROVEN defect P1 (2026-09-14, scripts/rehearse/reports/2026-09-14T18-22-25-structuring-
+// two-wires.md + .diagnostics.json): a call already SEALED FREEZE (rule row 8) flipped to
+// PENDING (row 7) off nothing but two more caller lines, then to ESCALATE (row 15) -- and the
+// close line spoken drifted with it, from the correct FREEZE sentence to the generic
+// NO_ACTION default ("Thank you for calling. Goodbye."). Fixed at the engine layer
+// (packages/engine/src/evaluate.ts's `freezeAtSeal`, see packages/engine/test/evaluate.test.ts
+// for the engine-level regression) -- this proves the SERVER never even sees the drift: the
+// same live event sequence, through the real CallSession/FakeAaiSocket path, holds verdict,
+// state, and the exact close sentence forever once sealed.
+// ---------------------------------------------------------------------------------------
+describe('CallSession — sealed verdict never moves at the server layer (P1 fix, 2026-09-14)', () => {
+  it('two more caller lines after FREEZE/SEALED never move the verdict/state/close sentence, and CLOSE is asked for exactly once (structuring-two-wires PROVEN shape)', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-sealed-freeze-holds', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+    driveScenarioBThroughA4(session, aai, clock);
+
+    expect(session.last?.verdict).toBe('FREEZE');
+    expect(session.last?.state).toBe('SEALED');
+    expect(session.last?.goal.code).toBe('CLOSE');
+    const closeSentence = session.last!.goal.hint;
+    expect(closeSentence).toBe('This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.');
+
+    // The close line is actually spoken and confirmed, exactly like a real call -- whatever
+    // reply.create the tick above already sent for CLOSE completes with the exact sentence.
+    clock.now = 53000;
+    aai.emit({ type: 'reply.started', reply_id: 'close-1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'close-1-t', text: closeSentence, reply_id: 'close-1', interrupted: false });
+    clock.now = 54000;
+    aai.emit({ type: 'reply.done', reply_id: 'close-1', status: 'completed' });
+
+    const countReplyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+    const replyCreatesBeforePostSeal = countReplyCreates();
+    expect(replyCreatesBeforePostSeal).toBeGreaterThan(0); // sanity: CLOSE was actually asked for
+
+    // Two more caller lines after sealing -- the PROVEN structuring-two-wires shape: a
+    // repeated request-adjacent statement, then a fresh non-answer.
+    clock.now = 60000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'post-seal-1',
+      text: 'The payment is for materials we approved in yesterday’s meeting.',
+    });
+    clock.now = 65000;
+    aai.emit({ type: 'transcript.user', item_id: 'post-seal-2', text: 'Can we move forward with the first wire of $42,250?' });
+
+    expect(session.last?.verdict).toBe('FREEZE');
+    expect(session.last?.state).toBe('SEALED');
+    expect(session.last?.goal.code).toBe('CLOSE');
+    expect(session.last?.goal.hint).toBe(closeSentence);
+
+    // No further reply.create went out for CLOSE after the two post-seal lines -- the close
+    // was asked for and confirmed exactly once, never re-requested under a drifted verdict.
+    expect(countReplyCreates()).toBe(replyCreatesBeforePostSeal);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// PROVEN defect P4 (2026-09-14, scripts/rehearse/reports/2026-09-14T17-58-23-barge-in-
+// interrupt.md + .diagnostics.json): CLOSE was rendered (goal_code ANNOUNCE_ESCALATED then
+// CLOSE at t=173058/173059), a reply.create for it was sent (attempt 1), reply.started and
+// reply.audio.first both arrived (t=173071/173104) -- then NOTHING else: no transcript.agent
+// chunk, no reply.done, for the rest of the call. `scheduleCloseIfNeeded` only runs off
+// reply.done and `maybeArmCloseOnTranscript` only off a transcript.agent chunk, so neither
+// ever got a chance to retry; the only thing that eventually fired was the CLOSE_TOTAL_MS
+// (45s) hard cap, ending the call `idle_timeout` having asked AssemblyAI for the goodbye
+// exactly once in 45 seconds. This proves the fix (`armCloseStuckWatchdog`, session.ts): a
+// CLOSE reply that never produces a transcript chunk or a reply.done gets retried well before
+// the hard cap, instead of silently burning the whole close budget on one dead reply.
+// ---------------------------------------------------------------------------------------
+describe('CallSession — a CLOSE reply that never completes (no transcript, no reply.done) is retried before the hard cap (P4 fix, 2026-09-14)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('reply.started for CLOSE with no transcript and no reply.done ever arriving triggers a retry after CLOSE_REPLY_STUCK_MS, well inside the 45s hard cap', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-close-stuck-reply', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+    driveScenarioBThroughA4(session, aai, clock);
+    expect(session.last?.verdict).toBe('FREEZE');
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    const countReplyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+    const replyCreatesBeforeStuckReply = countReplyCreates();
+    expect(replyCreatesBeforeStuckReply).toBeGreaterThan(0); // CLOSE was already asked for once
+
+    // The reply AssemblyAI started for that ask never produces anything else: no
+    // transcript.agent chunk (so `maybeArmCloseOnTranscript` never fires), no reply.done (so
+    // `scheduleCloseIfNeeded` never fires either) -- exactly the P4 bundle's own shape.
+    clock.now = 53000;
+    aai.emit({ type: 'reply.started', reply_id: 'stuck-close-1' });
+
+    // Well before the 45s hard cap, but past the stuck-reply watchdog window: a retry must
+    // already have gone out, and the call must still be alive.
+    vi.advanceTimersByTime(20_000);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    expect(countReplyCreates()).toBeGreaterThan(replyCreatesBeforeStuckReply);
+
+    // The call is never ended by this alone -- it's still well inside the 45s budget.
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+  });
+
+  it('a CLOSE reply whose transcript eventually matches after the watchdog would have fired still ends the call normally (no double-retry stampede)', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-close-stuck-then-recovers', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+    driveScenarioBThroughA4(session, aai, clock);
+    const closeSentence = session.last!.goal.hint;
+
+    clock.now = 53000;
+    aai.emit({ type: 'reply.started', reply_id: 'stuck-close-1' });
+
+    // The watchdog fires and asks for a fresh CLOSE reply (spaced by CLOSE_RETRY_MIN_GAP_MS).
+    vi.advanceTimersByTime(12_000 + 400);
+    const retried = aai.sent.at(-1) as { type?: string; instructions?: string };
+    expect(retried.type).toBe('reply.create');
+    expect(retried.instructions).toEqual(expect.stringContaining('Say exactly this'));
+
+    // AssemblyAI's own next reply is the retried one, and this time it actually says the
+    // close line and completes normally.
+    clock.now = 65500;
+    aai.emit({ type: 'reply.started', reply_id: 'close-2' });
+    aai.emit({ type: 'transcript.agent', item_id: 'close-2-t', text: closeSentence, reply_id: 'close-2', interrupted: false });
+    clock.now = 66000;
+    aai.emit({ type: 'reply.done', reply_id: 'close-2', status: 'completed' });
+
+    vi.advanceTimersByTime(1500); // CLOSE_GRACE_MS
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+  });
+});

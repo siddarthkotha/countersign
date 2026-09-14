@@ -615,3 +615,94 @@ describe('evaluate -- identity-switch resolution: a legitimate handoff (founder 
     expect(again).toEqual(out);
   });
 });
+
+// ---------------------------------------------------------------------------------------
+// PROVEN defect (2026-09-14, structuring-two-wires): a call sealed FREEZE flipped to PENDING
+// then ESCALATE off nothing but two more caller lines after sealing -- see evaluate.ts's
+// `freezeAtSeal` doc comment for the full mechanism. Reuses Scenario B's own fixtures (reaches
+// FREEZE) plus the four terminal-action tool entries a real server run would have logged in
+// the SAME tick sealing happens (see terminalActions.ts's `runOwedTerminalActions` -- all four
+// always share one t_ms), so `deriveState` (fsm.ts) already reads SEALED the same way it does
+// live.
+// ---------------------------------------------------------------------------------------
+describe('evaluate -- sealed verdict never moves (P1 fix, 2026-09-14)', () => {
+  const SEAL_T_MS = 53000;
+  const sealedTools: ToolLogEntry[] = [
+    ...scenarioBTools,
+    {
+      id: 'term-freeze',
+      name: 'freeze_transaction_rail',
+      t_ms: SEAL_T_MS,
+      args: { rail_id: MERIDIAN.rails[0]?.id ?? null, request_version: 2 },
+      result: mockToolResult('freeze_transaction_rail', { rail_id: MERIDIAN.rails[0]?.id ?? null, request_version: 2 }, MERIDIAN, ctxTool),
+    },
+    {
+      id: 'term-incident',
+      name: 'open_incident',
+      t_ms: SEAL_T_MS,
+      args: { request_version: 2 },
+      result: mockToolResult('open_incident', { request_version: 2 }, MERIDIAN, ctxTool),
+    },
+    {
+      id: 'term-alert',
+      name: 'alert_principal',
+      t_ms: SEAL_T_MS,
+      args: { identity_id: 'robert-miller', request_version: 2 },
+      result: mockToolResult('alert_principal', { identity_id: 'robert-miller', request_version: 2 }, MERIDIAN, ctxTool),
+    },
+    {
+      id: 'term-seal',
+      name: 'seal_evidence_record',
+      t_ms: SEAL_T_MS,
+      args: { request_version: 2 },
+      result: mockToolResult('seal_evidence_record', { request_version: 2 }, MERIDIAN, ctxTool),
+    },
+  ];
+
+  const sealedInput: EngineInput = {
+    conversation: scenarioBConversation,
+    tools: sealedTools,
+    actions: scenarioBActions,
+    call: scenarioBCall,
+    seed: MERIDIAN,
+  };
+  const sealedOut = evaluate(sealedInput);
+
+  it('sanity: sealing reproduces FREEZE/SEALED/CLOSE with the FREEZE close sentence', () => {
+    expect(sealedOut.verdict).toBe('FREEZE');
+    expect(sealedOut.state).toBe('SEALED');
+    expect(sealedOut.goal.code).toBe('CLOSE');
+    expect(sealedOut.goal.hint).toBe('This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.');
+  });
+
+  it('the P1 shape: two more caller lines after sealing (a wire amount repeated, then a fresh non-answer) never move the verdict, state, or close sentence -- output is byte-for-byte identical to the sealed instant', () => {
+    const postSealConversation: Utterance[] = [
+      ...scenarioBConversation,
+      { id: 'c5', speaker: 'caller', text: 'The payment is for materials we approved in yesterday’s meeting.', t_ms: 60000 },
+      { id: 'c6', speaker: 'caller', text: 'Can we move forward with the first wire of $42,250?', t_ms: 65000 },
+    ];
+    const postSealOut = evaluate({ ...sealedInput, conversation: postSealConversation });
+
+    expect(postSealOut.verdict).toBe('FREEZE');
+    expect(postSealOut.state).toBe('SEALED');
+    expect(postSealOut.goal.code).toBe('CLOSE');
+    expect(postSealOut.goal.hint).toBe(sealedOut.goal.hint);
+    // The whole EngineOutput is frozen at the seal instant -- the two post-seal caller lines
+    // are dropped before any ledger/evidence/rule computation, so this is not merely "same
+    // verdict" but byte-for-byte the same output the engine produced the instant it sealed.
+    expect(postSealOut).toEqual(sealedOut);
+  });
+
+  it('a later tool-log entry after sealing (a stray/late model call) is likewise never fed back into the sealed decision', () => {
+    const postSealTools: ToolLogEntry[] = [
+      ...sealedTools,
+      { id: 'late-1', name: 'check_sso_context', t_ms: 90000, args: { identity_id: 'robert-miller', request_version: 2, ignored: true }, result: { error: 'not_allowed_in_state' } },
+    ];
+    const postSealOut = evaluate({ ...sealedInput, tools: postSealTools });
+    expect(postSealOut).toEqual(sealedOut);
+  });
+
+  it('determinism: evaluating the sealed input twice is deep-equal', () => {
+    expect(evaluate(sealedInput)).toEqual(sealedOut);
+  });
+});

@@ -256,11 +256,28 @@ export class CallSession {
    *  goodbye). Whichever fires first (`reply.done` or this timeout) wins; the call is never
    *  ended twice. */
   private static readonly CLOSE_DONE_WAIT_MS = 4_000;
+  /** PROVEN defect (2026-09-14, scripts/rehearse/reports/2026-09-14T17-58-23-barge-in-
+   *  interrupt.md + .diagnostics.json): a CLOSE `reply.create` was sent, `reply.started` and
+   *  `reply.audio.first` both arrived, then NOTHING else -- no `transcript.agent` chunk, no
+   *  `reply.done` -- for the rest of the call. `scheduleCloseIfNeeded` only runs off
+   *  `reply.done` and `maybeArmCloseOnTranscript` only off a `transcript.agent` chunk, so
+   *  neither ever got a chance to notice this reply died and retry; the ONLY thing left
+   *  running was the (idle-deferred) CLOSE_TOTAL_MS hard cap, which duly ended the call 45s
+   *  after CLOSE first rendered, having sent exactly one `reply.create` for it the entire
+   *  time. `armCloseStuckWatchdog` (below) is the missing third leg: armed at that reply's
+   *  own `reply.started`, it fires only if NEITHER a matching transcript NOR a `reply.done`
+   *  showed up first (both paths cancel it) -- treats the reply as dead, gives up "speaking"
+   *  it, and asks for a fresh one via the SAME spaced retry (`armCloseRetryTimer`) every
+   *  other CLOSE mismatch already uses. Left well inside CLOSE_TOTAL_MS (45s) so a stuck
+   *  reply still gets several retries before the hard cap would otherwise be the only thing
+   *  to fire. */
+  private static readonly CLOSE_REPLY_STUCK_MS = 12_000;
   private closeGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private closeHardCapTimer: ReturnType<typeof setTimeout> | null = null;
   private closeRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private replyCreateLostTimer: ReturnType<typeof setTimeout> | null = null;
   private closeDoneWaitTimer: ReturnType<typeof setTimeout> | null = null;
+  private closeStuckTimer: ReturnType<typeof setTimeout> | null = null;
   /** Round 4: the reply id `maybeArmCloseOnTranscript` has already started the hang-up
    *  sequence for, so a second (or third) `transcript.agent` chunk for the SAME reply that
    *  still matches doesn't re-arm a fresh `CLOSE_DONE_WAIT_MS` timer on top of the one
@@ -470,6 +487,10 @@ export class CallSession {
       clearTimeout(this.closeDoneWaitTimer);
       this.closeDoneWaitTimer = null;
     }
+    if (this.closeStuckTimer) {
+      clearTimeout(this.closeStuckTimer);
+      this.closeStuckTimer = null;
+    }
     // Review fix (2026-09-15): the question-reask spacing timer is not CLOSE-specific, but
     // this is the one method every ending path (`end()`) already funnels through to clear
     // every other pending send timer -- same reasoning as `replyCreateLostTimer` above.
@@ -495,6 +516,17 @@ export class CallSession {
    *  neither path needs its own copy of "is a goodbye owed right now, and what does it say." */
   private currentCloseSentence(): string | null {
     if (this.last?.goal.code === 'CLOSE') return this.last.goal.hint;
+    // Guard (P1 fix, 2026-09-14, structuring-two-wires bundle): `closeSentenceOverride` is
+    // ONLY ever the generic NO_ACTION line ("Thank you for calling. Goodbye.",
+    // `beginIdleNoActionGoodbye`'s own doc comment) -- it must never stand in for a REAL
+    // goodbye once a STAGE/FREEZE/ESCALATE verdict has been sealed. In practice this branch
+    // is unreachable for a sealed terminal verdict now that `evaluate` itself holds the
+    // sealed verdict/state/goal forever (packages/engine/src/evaluate.ts's `freezeAtSeal`):
+    // `deriveState` (fsm.ts) locks state to SEALED and `phrasingGoal`'s SEALED branch always
+    // renders goal.code 'CLOSE', so the branch above always wins for the whole rest of the
+    // call. Kept as an explicit assertion rather than silent trust in that invariant holding
+    // everywhere this method is ever called from.
+    if (this.last && this.last.verdict !== 'NO_ACTION' && this.last.state === 'SEALED') return null;
     return this.closeSentenceOverride;
   }
 
@@ -597,10 +629,16 @@ export class CallSession {
     // `goodbyeConfirmed` above for what this triggers.
     this.goodbyeConfirmed = true;
     this.goodbyeConfirmedReplyId = replyId;
-    // The words are already heard -- no further retry is owed for this rendering of CLOSE.
+    // The words are already heard -- no further retry is owed for this rendering of CLOSE,
+    // and the stuck watchdog (armed at this same reply's own reply.started) has nothing left
+    // to watch for either.
     if (this.closeRetryTimer) {
       clearTimeout(this.closeRetryTimer);
       this.closeRetryTimer = null;
+    }
+    if (this.closeStuckTimer) {
+      clearTimeout(this.closeStuckTimer);
+      this.closeStuckTimer = null;
     }
     this.closeDoneWaitTimer = setTimeout(() => {
       this.closeDoneWaitTimer = null;
@@ -633,6 +671,40 @@ export class CallSession {
       this.sendReplyCreate('CLOSE', 'close_retry', wrapper, { countAttempt: !this.closeLastReplyWasEmpty });
     }, CallSession.CLOSE_RETRY_MIN_GAP_MS);
     this.closeRetryTimer.unref?.();
+  }
+
+  /** PROVEN defect (2026-09-14, barge-in-interrupt bundle -- see `CLOSE_REPLY_STUCK_MS`'s own
+   *  class-field doc comment for the full incident): fires only when a CLOSE reply's own
+   *  `reply.started` arrived but NEITHER a transcript match (`maybeArmCloseOnTranscript`) NOR
+   *  its `reply.done` (`scheduleCloseIfNeeded`) ever followed within the watchdog window --
+   *  both of those clear this timer the instant they run, so a reply that finishes normally,
+   *  however it finishes, never reaches this callback at all. Treats the reply as dead: there
+   *  is nothing left to wait for from IT specifically, so `this.speaking` is given up here
+   *  (the same release `reply.done` itself would have done) and a fresh CLOSE reply is asked
+   *  for via the SAME spaced retry (`armCloseRetryTimer`) every other CLOSE mismatch already
+   *  uses -- never a direct `sendReplyCreate` here, so the existing 400ms spacing and
+   *  in-flight guards still apply. `currentReplyId !== replyId` (a newer reply has already
+   *  superseded this one) and `!this.speaking` (reply.done already ran for this exact reply,
+   *  racing this timer) both make this a no-op, matching every other CLOSE timer's own
+   *  re-check-everything-at-fire-time convention. */
+  private armCloseStuckWatchdog(replyId: string): void {
+    if (this.closeStuckTimer) {
+      clearTimeout(this.closeStuckTimer);
+      this.closeStuckTimer = null;
+    }
+    this.closeStuckTimer = setTimeout(() => {
+      this.closeStuckTimer = null;
+      if (this.ended || this.goodbyeConfirmed) return;
+      if (this.currentReplyId !== replyId) return;
+      if (!this.speaking) return;
+      const sentence = this.currentCloseSentence();
+      if (!sentence) return;
+      this.diag('close_reply_stuck', { reply_id: replyId });
+      this.speaking = false;
+      this.closeLastReplyWasEmpty = (this.replyTranscripts.get(replyId) ?? '').trim().length === 0;
+      this.armCloseRetryTimer();
+    }, CallSession.CLOSE_REPLY_STUCK_MS);
+    this.closeStuckTimer.unref?.();
   }
 
   /** Fired from `reply.done`, and ONLY when the generic force-speak machinery
@@ -1109,6 +1181,13 @@ export class CallSession {
         this.currentReplyId = evt.reply_id;
         this.suppressPostGoodbyeReplyAudio = this.goodbyeConfirmed && evt.reply_id !== this.goodbyeConfirmedReplyId;
         if (this.suppressPostGoodbyeReplyAudio) this.diag('post_goodbye_reply_suppressed', { reply_id: evt.reply_id });
+        // PROVEN defect fix (2026-09-14, barge-in-interrupt bundle): a close owed right now
+        // means whatever reply just started could BE the close line -- arm the stuck watchdog
+        // so a reply that never produces a transcript chunk or a reply.done (see
+        // `armCloseStuckWatchdog`'s own doc comment) still gets retried well before the 45s
+        // hard cap. A no-op the instant this reply's own transcript/reply.done arrives (both
+        // clear it), and superseded automatically if a newer reply starts first.
+        if (this.currentCloseSentence()) this.armCloseStuckWatchdog(evt.reply_id);
         this.diag('reply.started', {});
         break;
 
@@ -1135,6 +1214,14 @@ export class CallSession {
 
       case 'reply.done':
         this.speaking = false;
+        // A reply.done for this reply means it is no longer at risk of being "stuck" --
+        // `scheduleCloseIfNeeded` (below) is the authoritative next step for a CLOSE reply,
+        // whether it matched or not; the watchdog's own job (catching a reply that ends
+        // WITHOUT ever producing a reply.done) is moot the instant one actually arrives.
+        if (this.closeStuckTimer) {
+          clearTimeout(this.closeStuckTimer);
+          this.closeStuckTimer = null;
+        }
         // reply.create fix, round 3 (2026-09-13, requirement 4): a reply.done always means
         // AssemblyAI is not currently generating anything for us -- if `replyCreateAwaitingStart`
         // is somehow still true here (its own `reply.started` never fired, or fired for a
