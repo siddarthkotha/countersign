@@ -1258,7 +1258,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
     });
 
-    it('(b) sends reply.create immediately after the session.update when no reply is in progress', () => {
+    it('(b) sends reply.create immediately, right after the session.update, when no reply is in progress', () => {
       const clock = { now: 0 };
       const aai = new FakeAaiSocket();
       const sent: ServerEvent[] = [];
@@ -1268,29 +1268,38 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       driveToSealedStage(session, aai, clock);
       expect(session.last?.goal.code).toBe('CLOSE');
 
-      // No reply was in progress at the instant CLOSE was rendered ('a4' already completed,
-      // no reply.started for the close line has fired yet) -- reply.create goes out
-      // immediately, right after the session.update that carries the CLOSE prompt.
-      expect(aai.sent.at(-1)).toEqual({ type: 'reply.create' });
-      const secondLast = aai.sent.at(-2) as { type?: string };
-      expect(secondLast?.type).toBe('session.update');
+      // No reply is ever in progress anywhere in this drive ('a4' already completed at c4,
+      // and c5's tick carries the engine all the way to ANNOUNCE_STAGED and then straight on
+      // to CLOSE, entirely synchronously, before any reply.started fires for either) --
+      // reply.create goes out immediately, adjacent to the session.update that triggered it.
+      const types = aai.sent.map((m) => (m as { type: string }).type);
+      const replyCreateIdx = types.indexOf('reply.create');
+      expect(replyCreateIdx).toBeGreaterThan(0);
+      expect(types[replyCreateIdx - 1]).toBe('session.update');
+      // No reply.started ever preceded it -- proof it was not deferred behind an in-flight
+      // reply (the only other path that sends one).
+      expect(types.slice(0, replyCreateIdx).includes('reply.started')).toBe(false);
     });
 
-    it('(c) no double reply.create when the goal advances twice (e.g. toward ANNOUNCE_FROZEN then CLOSE) before any reply actually starts', () => {
+    it('(c) no double reply.create when the goal advances twice (ANNOUNCE_FROZEN then CLOSE) before any reply actually starts', () => {
       const clock = { now: 0 };
       const aai = new FakeAaiSocket();
       const sent: ServerEvent[] = [];
       const session = newSession(clock, CALL_B, aai, sent);
       session.start();
       // Reaches FREEZE/SEALED entirely from server-driven lookups/terminal actions, with no
-      // reply in progress at any point during that chain (the helper's own final line starts
-      // a reply only AFTER the chain has already finished).
+      // reply in progress anywhere in the chain (the helper's own final line starts a reply
+      // only AFTER the chain has already finished) -- ANNOUNCE_FROZEN gets an immediate
+      // reply.create; the very next tick advances straight to CLOSE while that reply.create
+      // is still outstanding (no reply.started for it yet), which must defer rather than
+      // fire a second one -- exactly the shape the PROVEN live bug's own tick took
+      // (FREEZE -> ANNOUNCE_FROZEN -> CLOSE, three session.update in one tick).
       driveScenarioBThroughA4(session, aai, clock);
       expect(session.last?.state).toBe('SEALED');
       expect(session.last?.goal.code).toBe('CLOSE');
 
       const replyCreates = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
-      expect(replyCreates.length).toBeLessThanOrEqual(1);
+      expect(replyCreates).toHaveLength(1);
     });
 
     it('(d) never sends reply.create for the initial GREET goal', () => {
@@ -1324,11 +1333,14 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       driveToSealedStage(session, aai, clock);
       expect(session.last?.goal.code).toBe('CLOSE');
 
+      // The one reply.create sent in this drive is for ANNOUNCE_STAGED (sent immediately,
+      // reason goal_change_idle) -- CLOSE's own force-speak is still deferred at this point
+      // (no reply has started yet to resolve it against), same shape test (b)/(c) exercise.
       const replyCreateDiags = diagEvents.filter((e) => e.kind === 'reply_create_sent');
-      expect(replyCreateDiags.length).toBeGreaterThanOrEqual(1);
+      expect(replyCreateDiags).toHaveLength(1);
       const detail = replyCreateDiags[0]!.detail as { goal_code: string; reason: string };
-      expect(detail.goal_code).toBe('CLOSE');
-      expect(typeof detail.reason).toBe('string');
+      expect(detail.goal_code).toBe('ANNOUNCE_STAGED');
+      expect(detail.reason).toBe('goal_change_idle');
 
       const actionEntries = session.logs.actions.filter(
         (a) => a.kind === 'session_config_updated' && typeof a.detail === 'string' && a.detail.startsWith('reply_create:'),
