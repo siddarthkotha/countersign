@@ -73,3 +73,16 @@ their own words, any pauses, any pronunciation, every case) within about 19 hour
 - Live budget: about 5 h of the remaining 19 h, milestones as Seat 2's table.
 - Add case 11 (corrected critical field) and replace the question-mark oracle with the
   required-field check in the grader.
+
+## Citation fetch-verification (Haiku errand, 6:05 PM CDT)
+PROVEN from AssemblyAI docs: a session.update system_prompt applies "on the next turn";
+reply.create carries a one-shot instruction; transcript.agent arrives "after all audio for
+the response has been delivered"; every reply carries a reply_id; no client correlation key
+exists for reply.create (UNVERIFIED as absent: the docs do not mention one); turn detection
+is semantic and adaptive and "you never signal end-of-turn yourself"; the agent waits for a
+whole value when a tool parameter expects a number, date or entity; tool HOLD MODE "keeps the
+agent silent while the tool runs. The user can't trigger replies during this period ... This
+suits ... sensitive workflows like payment authentication. When you send the tool result, it
+automatically triggers the agent's next response"; TTS exists only inside the Voice Agent
+pipeline. Price $4.50/hour: not on the docs page, but PROVEN by the founder's dashboard
+(2.9 h used, $13.08 spent).
