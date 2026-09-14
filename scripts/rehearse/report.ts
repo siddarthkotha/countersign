@@ -2,7 +2,33 @@
 // Renders one scenario run into a markdown file (scripts/rehearse/reports/, gitignored) plus
 // a one-line stdout summary. Plain English, no em-dashes (CLAUDE.md style rule), every number
 // labeled where it isn't simply "what the wire carried".
+import { lastAgentLineDisplay } from './expectations.js';
 import type { RollupResult, RunResult } from './types.js';
+
+/** Point 1 (run.ts's own PASS/FAIL grading) and point 2 (this report's "Close line" line)
+ *  share one plain-English description per `fail_reason` so the two never say something
+ *  different about the same run. */
+function failReasonDescription(reason: NonNullable<RunResult['fail_reason']>): string {
+  switch (reason) {
+    case 'agent_silent_after_hold':
+      return 'patient-mode caller: a holding line, then silence -- see Warnings';
+    case 'close_line_not_spoken':
+      return "the server ended the call, but the agent's transcript never contains the closing sentence for the actual verdict -- see Warnings";
+  }
+}
+
+/** "Close line: spoken | NOT spoken | n/a (caller ended)" -- always printed, pass or fail, so
+ *  every report says plainly whether a judge would have heard the agent's own goodbye before
+ *  the call ended. `not_spoken` also names the agent's actual last line, so this doesn't
+ *  require opening the full transcript table to see what happened instead. */
+function closeLineStatusDisplay(r: RunResult): string {
+  if (r.close_line_status === 'spoken') return 'spoken';
+  if (r.close_line_status === 'not_spoken') {
+    const last = lastAgentLineDisplay(r.transcript);
+    return `NOT spoken (last agent line: ${last === null ? '(none)' : JSON.stringify(last)})`;
+  }
+  return 'n/a (caller ended)';
+}
 
 function fmtMs(ms: number | null): string {
   if (ms === null) return 'n/a';
@@ -218,11 +244,12 @@ export function renderReport(r: RunResult): string {
   lines.push('');
   lines.push(`- Expected verdict: ${r.scenario.expected.verdict}`);
   lines.push(`- Actual verdict: ${r.actual_verdict ?? 'none reached'}`);
-  if (r.fail_reason) lines.push(`- Fail reason: ${r.fail_reason} (patient-mode caller: a holding line, then silence -- see Warnings)`);
+  if (r.fail_reason) lines.push(`- Fail reason: ${r.fail_reason} (${failReasonDescription(r.fail_reason)})`);
   lines.push(`- Reached a terminal verdict: ${r.verdict_reached ? 'yes' : 'no (timed out)'}`);
   lines.push(`- Expected max wall time: ${r.scenario.expected.max_wall_ms}ms`);
   lines.push(`- Actual wall time: ${Math.round(r.timings.total_wall_ms)}ms`);
   lines.push(`- Call ended reason: ${r.ended_reason ?? 'unknown (harness closed the socket without seeing "ended")'}`);
+  lines.push(`- Close line: ${closeLineStatusDisplay(r)}`);
   lines.push(`- Exit code: ${r.exit_code}`);
   lines.push('');
   if (r.warnings.length > 0) {

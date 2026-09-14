@@ -48,6 +48,7 @@ function baseResult(overrides: Partial<RunResult> = {}): RunResult {
     minutes_estimate: 0.7,
     resolved_lines: [],
     caller_mode: 'reactive',
+    close_line_status: 'n/a',
     ...overrides,
   };
 }
@@ -243,6 +244,45 @@ describe('report rendering', () => {
     const line = oneLineSummary(baseResult({ pass: false, actual_verdict: 'FREEZE', exit_code: 1 }), '/tmp/report.md');
     expect(line).toContain('[FAIL]');
     expect(line).toContain('verdict=FREEZE');
+  });
+
+  // PROVEN gap (2026-09-13, expectations.ts's checkCloseLineExpectation doc comment): every
+  // report must say plainly whether a judge would have heard the agent's own goodbye.
+  describe('Close line reporting', () => {
+    it('shows "Close line: spoken" near the Call ended reason line', () => {
+      const md = renderReport(baseResult({ close_line_status: 'spoken' }));
+      expect(md).toContain('- Close line: spoken');
+      const endedIdx = md.indexOf('Call ended reason:');
+      const closeIdx = md.indexOf('Close line:');
+      expect(closeIdx).toBeGreaterThan(endedIdx);
+    });
+
+    it('shows "Close line: n/a (caller ended)" when the check did not apply', () => {
+      const md = renderReport(baseResult({ close_line_status: 'n/a' }));
+      expect(md).toContain('- Close line: n/a (caller ended)');
+    });
+
+    it('shows "Close line: NOT spoken" with the actual last agent line, and the one-line summary carries the fail reason, for the miller-patient regression shape', () => {
+      const result = baseResult({
+        pass: false,
+        exit_code: 1,
+        actual_verdict: 'FREEZE',
+        ended_reason: 'agent_closed',
+        fail_reason: 'close_line_not_spoken',
+        close_line_status: 'not_spoken',
+        transcript: [
+          { speaker: 'agent', text: 'Which institution holds the Hartwell escrow?', t_ms: 40875 },
+          { speaker: 'agent', text: 'Please provide the', t_ms: 49543, interrupted: true },
+        ],
+      });
+      const md = renderReport(result);
+      expect(md).toContain('- Close line: NOT spoken (last agent line: "(interrupted) Please provide the")');
+      expect(md).toContain('- Fail reason: close_line_not_spoken');
+
+      const line = oneLineSummary(result, '/tmp/report.md');
+      expect(line).toContain('[FAIL]');
+      expect(line).toContain('reason=close_line_not_spoken');
+    });
   });
 
   // Founder ruling 2026-09-11: greeting_configured field distinguishes between greeting

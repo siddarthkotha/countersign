@@ -104,15 +104,67 @@ export function isHoldingLine(text: string): boolean {
  *  match, or `isClosingLine` below silently stops firing. Used only by patient-mode waits to
  *  recognize "the agent has reached its real final line" so the caller stops talking instead
  *  of speaking over the goodbye. */
-export const ENGINE_CLOSE_SENTENCES: readonly string[] = [
-  'Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.',
-  'This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.',
-  'This cannot be completed by voice. A callback on the registered number will follow. Goodbye.',
-  'Thank you for calling. Goodbye.',
-];
+/** Same copy as above, indexed by the verdict each sentence actually belongs to (`fsm.ts`'s
+ *  `closeSentence` switches on `Verdict`) -- `NO_ACTION` stands in for that function's
+ *  `default` branch (PENDING is not a terminal verdict a call ever closes on, per LAW 2, so
+ *  it carries no sentence here). Added 2026-09-13 (PROVEN gap: run.ts's grading used to
+ *  accept any of the four sentences from ANY agent line as proof of a spoken close, which
+ *  would have let a run that reached FREEZE but only ever spoke the STAGE sentence -- or no
+ *  sentence at all, paired with a coincidental substring match -- pass; the grader needs the
+ *  ONE sentence that matches the call's ACTUAL verdict). `ENGINE_CLOSE_SENTENCES` above is
+ *  now derived from this map's values so the two can never drift apart. */
+export const CLOSE_SENTENCE_BY_VERDICT: Record<'STAGE' | 'FREEZE' | 'ESCALATE' | 'NO_ACTION', string> = {
+  STAGE: 'Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.',
+  FREEZE: 'This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.',
+  ESCALATE: 'This cannot be completed by voice. A callback on the registered number will follow. Goodbye.',
+  NO_ACTION: 'Thank you for calling. Goodbye.',
+};
+
+export const ENGINE_CLOSE_SENTENCES: readonly string[] = Object.values(CLOSE_SENTENCE_BY_VERDICT);
 
 export function isClosingLine(text: string): boolean {
   return ENGINE_CLOSE_SENTENCES.some((s) => text.includes(s));
+}
+
+/** Strips everything but letters/digits/spaces and collapses whitespace, so a close-line
+ *  match tolerates STT/TTS punctuation and casing drift ("Nothing has moved," vs "nothing
+ *  has moved") without tolerating a genuinely different sentence. */
+function normalizeForCloseMatch(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** The close sentence's own final substantive clause -- e.g. "Nothing has moved" for FREEZE,
+ *  "The evidence record is complete" for STAGE -- with the trailing "Goodbye." clause
+ *  dropped. Used as the lenient fallback match: a transcript that got the closing "Goodbye"
+ *  and this one distinguishing clause, but not the sentence's opening clause verbatim (a
+ *  live model's own minor rewording, or the caller/harness's STT dropping a word), still
+ *  counts as "the close line was spoken" -- ANY other combination (e.g. "Goodbye" alone, or
+ *  the opening clause without "Goodbye") does not. */
+function lastSubstantiveClause(sentence: string): string {
+  const clauses = sentence
+    .split('.')
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0 && c.toLowerCase() !== 'goodbye');
+  return clauses[clauses.length - 1] ?? sentence;
+}
+
+/** True iff `agentLines` (every agent transcript line, in order, concatenated -- the close
+ *  sentence can land split across two transcript records when a reply gets interrupted mid
+ *  final-clause and the model is asked again) together contain the ONE close sentence that
+ *  matches `verdict` -- either verbatim (modulo `normalizeForCloseMatch`'s case/punctuation/
+ *  whitespace leniency) or, failing that, this verdict's own `lastSubstantiveClause` AND the
+ *  word "goodbye", both present somewhere in the concatenation. Never matches on a DIFFERENT
+ *  verdict's sentence, and never matches on "goodbye" alone. */
+export function closeLineSpokenForVerdict(verdict: 'STAGE' | 'FREEZE' | 'ESCALATE' | 'NO_ACTION', agentLines: readonly string[]): boolean {
+  const concatenated = normalizeForCloseMatch(agentLines.join(' '));
+  const fullSentence = CLOSE_SENTENCE_BY_VERDICT[verdict];
+  if (concatenated.includes(normalizeForCloseMatch(fullSentence))) return true;
+  const lastClause = normalizeForCloseMatch(lastSubstantiveClause(fullSentence));
+  return concatenated.includes(lastClause) && concatenated.includes('goodbye');
 }
 
 /** Scenario-level default for `Scenario.agent_silence_fail_ms` (types.ts) when a patient-mode

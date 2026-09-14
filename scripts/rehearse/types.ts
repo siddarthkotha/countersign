@@ -308,10 +308,19 @@ export interface RunResult {
   caller_mode: 'reactive' | 'llm';
   /** Set only when a patient-mode wait (turnController.ts's `waitForPatientTurn`) caught the
    *  exact bug this feature exists to catch: a holding line spoken, then silence past
-   *  `agent_silence_fail_ms` with no further reply -- a distinct, greppable fail reason
+   *  `agent_silence_fail_ms` with no further reply; OR (PROVEN gap, 2026-09-13,
+   *  expectations.ts's `checkCloseLineExpectation` doc comment) the server ended the call
+   *  itself but the agent transcript never contains the closing sentence matching the actual
+   *  verdict -- `close_line_not_spoken`. Either way: a distinct, greppable fail reason
    *  surfaced in the report's one-line result and its Result section, separate from the
    *  generic warnings list. Absent for every ordinary pass or fail. */
-  fail_reason?: 'agent_silent_after_hold';
+  fail_reason?: 'agent_silent_after_hold' | 'close_line_not_spoken';
+  /** expectations.ts's `checkCloseLineExpectation` result -- `'n/a'` when the check didn't
+   *  apply (the caller/harness ended the call first, or no verdict was ever reached),
+   *  `'spoken'`/`'not_spoken'` when it did. Rendered near "Call ended reason" in the report
+   *  regardless of pass/fail, so every report says plainly whether a judge would have heard
+   *  the agent's own goodbye. */
+  close_line_status: 'spoken' | 'not_spoken' | 'n/a';
 }
 
 // ---------- LLM-driven caller (llmCaller.ts) ----------

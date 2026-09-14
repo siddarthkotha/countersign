@@ -48,6 +48,7 @@ function baseResult(overrides: Partial<RunResult> = {}): RunResult {
     resolved_lines: [],
     caller_mode: 'reactive',
     raw_diagnostics: null,
+    close_line_status: 'n/a',
     ...overrides,
   };
 }

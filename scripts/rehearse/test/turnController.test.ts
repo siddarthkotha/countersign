@@ -4,6 +4,8 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
 import {
+  closeLineSpokenForVerdict,
+  CLOSE_SENTENCE_BY_VERDICT,
   computeTurnGaps,
   ENGINE_CLOSE_SENTENCES,
   isClosingLine,
@@ -448,6 +450,52 @@ describe('isClosingLine', () => {
 
   it('does not match an ordinary mid-call substantive reply', () => {
     expect(isClosingLine('Just to confirm, the beneficiary is Meridian Supply. Is that correct?')).toBe(false);
+  });
+});
+
+describe('closeLineSpokenForVerdict', () => {
+  it('matches when a single agent line is exactly the verdict\'s close sentence', () => {
+    expect(closeLineSpokenForVerdict('FREEZE', [CLOSE_SENTENCE_BY_VERDICT.FREEZE])).toBe(true);
+    expect(closeLineSpokenForVerdict('STAGE', [CLOSE_SENTENCE_BY_VERDICT.STAGE])).toBe(true);
+    expect(closeLineSpokenForVerdict('ESCALATE', [CLOSE_SENTENCE_BY_VERDICT.ESCALATE])).toBe(true);
+    expect(closeLineSpokenForVerdict('NO_ACTION', [CLOSE_SENTENCE_BY_VERDICT.NO_ACTION])).toBe(true);
+  });
+
+  it('tolerates case, punctuation and whitespace drift', () => {
+    const messy = '  this TRANSFER is frozen and an incident has been opened for review nothing has moved goodbye!! ';
+    expect(closeLineSpokenForVerdict('FREEZE', [messy])).toBe(true);
+  });
+
+  it('concatenates every agent line, so a sentence split across two transcript records still matches', () => {
+    expect(
+      closeLineSpokenForVerdict('FREEZE', ['This transfer is frozen and an incident has been opened for review.', 'Nothing has moved. Goodbye.']),
+    ).toBe(true);
+  });
+
+  it('accepts the lenient fallback: the verdict\'s own last clause plus "goodbye", even without the opening clause', () => {
+    // e.g. a live model rewording the opener but keeping the distinguishing clause and the goodbye.
+    expect(closeLineSpokenForVerdict('FREEZE', ['Okay, I have frozen this. Nothing has moved. Goodbye then.'])).toBe(true);
+  });
+
+  it('does NOT match on "goodbye" alone, with no matching last clause', () => {
+    expect(closeLineSpokenForVerdict('FREEZE', ['Alright, goodbye.'])).toBe(false);
+  });
+
+  it('does NOT match on the last clause alone, with no "goodbye" (e.g. cut off before it)', () => {
+    expect(closeLineSpokenForVerdict('FREEZE', ['This transfer is frozen and nothing has moved.'])).toBe(false);
+  });
+
+  it('does NOT match a DIFFERENT verdict\'s close sentence', () => {
+    expect(closeLineSpokenForVerdict('FREEZE', [CLOSE_SENTENCE_BY_VERDICT.STAGE])).toBe(false);
+    expect(closeLineSpokenForVerdict('STAGE', [CLOSE_SENTENCE_BY_VERDICT.FREEZE])).toBe(false);
+  });
+
+  it('does NOT match an interrupted, incomplete reply (the miller-patient regression shape)', () => {
+    expect(closeLineSpokenForVerdict('FREEZE', ['Please provide the'])).toBe(false);
+  });
+
+  it('returns false for no agent lines at all', () => {
+    expect(closeLineSpokenForVerdict('FREEZE', [])).toBe(false);
   });
 });
 

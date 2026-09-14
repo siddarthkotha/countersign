@@ -26,7 +26,7 @@ import { mintSession, connectCall, fetchDiagnostics, forceDropAai } from './wsCl
 import { loadScenario, loadAllScenarios, ScenarioValidationError } from './scenario.js';
 import { runTurns, runLlmTurns, computeTurnGaps, waitForVerdict, waitForCountersignSettle } from './turnController.js';
 import { summarizeDiagnostics } from './diagnosticsSummary.js';
-import { checkScenarioExpectations } from './expectations.js';
+import { checkScenarioExpectations, checkCloseLineExpectation } from './expectations.js';
 import { renderRollup, oneLineSummary, rollupFileName } from './report.js';
 import { writeRunArtifacts } from './artifacts.js';
 import { resolveLlmConfig, getApiKey, apiKeyEnvVarFor, nodeFetchHttpClient } from './llmCaller.js';
@@ -236,10 +236,22 @@ async function runOne(
   // FAIL, not a pass with a hopeful warning.
   const expectationCheck = checkScenarioExpectations(scenario, transcript, bundle);
   for (const failure of expectationCheck.failures) warnings.push(failure);
-  // PROVEN gap (2026-09-13): a patient-mode "agent went silent after a holding line" fail is
-  // unconditional -- it overrides whatever verdict the call separately reached (or didn't),
-  // same as any other structural fail condition above.
-  const pass = turnsFailReason === undefined && verdictResult.reached && actualVerdict === scenario.expected.verdict && expectationCheck.ok;
+  // PROVEN gap (2026-09-13, expectations.ts's `checkCloseLineExpectation` doc comment): when
+  // the server ends the call itself, the agent transcript must actually contain the closing
+  // sentence matching the verdict the call reached -- reaching the right verdict is not
+  // enough if a judge would hear a hang-up with no goodbye.
+  const closeLineCheck = checkCloseLineExpectation(endedReason, actualVerdict, transcript);
+  if (closeLineCheck.failure) warnings.push(closeLineCheck.failure);
+  // PROVEN gap (2026-09-13): a patient-mode "agent went silent after a holding line" fail, and
+  // a "close line never spoken" fail, are both unconditional -- either overrides whatever
+  // verdict the call separately reached (or didn't), same as any other structural fail
+  // condition above.
+  const pass =
+    turnsFailReason === undefined &&
+    verdictResult.reached &&
+    actualVerdict === scenario.expected.verdict &&
+    expectationCheck.ok &&
+    closeLineCheck.status !== 'not_spoken';
 
   const minutesEstimate = totalWallMs / 60000;
 
@@ -267,7 +279,12 @@ async function runOne(
     minutes_estimate: minutesEstimate,
     resolved_lines: resolvedLines,
     caller_mode: callerMode,
-    ...(turnsFailReason !== undefined ? { fail_reason: turnsFailReason } : {}),
+    close_line_status: closeLineCheck.status,
+    ...(turnsFailReason !== undefined
+      ? { fail_reason: turnsFailReason }
+      : closeLineCheck.status === 'not_spoken'
+        ? { fail_reason: 'close_line_not_spoken' as const }
+        : {}),
   };
 }
 
@@ -298,6 +315,7 @@ function protocolErrorResult(
     minutes_estimate: 0,
     resolved_lines: [],
     caller_mode: callerMode,
+    close_line_status: 'n/a',
   };
 }
 
