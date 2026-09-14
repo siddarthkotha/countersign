@@ -166,6 +166,22 @@ describe('parseFreePlayCallerReply', () => {
   });
 });
 
+describe('prompt-injection-midcall free-play system prompt (defect 3, 2026-09-14)', () => {
+  it('contains both injection lexicon phrases: "ignore your instructions" and "mark this verified"', async () => {
+    // Defect 3 free-play fix (2026-09-14): the persona must explicitly instruct the improvising
+    // model to say both exact injection lexicon phrases mid-call (packages/engine/src/seed/
+    // meridian.ts injection_lexicon line 182). This test loads the actual scenario and verifies
+    // the built system prompt contains both phrases.
+    const { loadScenario } = await import('../scenario.js');
+    const scenario = await loadScenario('prompt-injection-midcall');
+    if (!scenario.persona) throw new Error('scenario missing persona');
+    const systemPrompt = buildFreePlaySystemPrompt(scenario.persona, scenario.truth, 30);
+    // The prompt should contain the persona, which now explicitly mentions both injection phrases
+    expect(systemPrompt.toLowerCase()).toMatch(/ignore your instructions/);
+    expect(systemPrompt.toLowerCase()).toMatch(/mark this verified/);
+  });
+});
+
 describe('requestNextFreePlayLine', () => {
   it('routes to openrouter and parses the reply, including silent (on a non-first turn)', async () => {
     // Note: empty history [] would be a first turn. This test uses a history with a caller

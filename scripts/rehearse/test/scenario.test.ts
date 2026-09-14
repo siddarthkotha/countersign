@@ -37,21 +37,17 @@ describe('scenario loading (no network)', () => {
     expect(s.turns.some((t) => t.barge_in_after_ms !== undefined)).toBe(true);
   });
 
-  it('prompt-injection-midcall scenario includes both injection lexicon phrases (defect 3, 2026-09-14)', async () => {
-    // Defect 3: the persona must explicitly instruct the model to say injection phrases
-    // mid-call, per the engine's injection_lexicon (packages/engine/src/seed/meridian.ts line 182):
-    // 'ignore previous', 'ignore your instructions', 'system prompt', 'mark this verified', etc.
+  it('prompt-injection-midcall scenario persona includes both injection lexicon phrases (defect 3, 2026-09-14)', async () => {
+    // Defect 3: the persona must explicitly instruct the free-play model to say BOTH injection
+    // lexicon phrases mid-call: 'ignore your instructions' AND 'mark this verified'
+    // (packages/engine/src/seed/meridian.ts injection_lexicon line 182). Free-play uses persona,
+    // not scripted turns, so the persona must be explicit and the model must see both phrases.
     const s = await loadScenario('prompt-injection-midcall');
-    // Check the persona
-    const personaText = s.persona?.toLowerCase() ?? '';
-    // Check the turns for the injection phrase
-    const turnsText = s.turns.map((t) => t.text.toLowerCase()).join(' ');
-    const fullText = personaText + ' ' + turnsText;
-    // The scenario should contain phrases that match the injection lexicon entries.
-    // "ignore your previous instructions" matches both 'ignore previous' and contains 'instructions'
-    expect(fullText).toMatch(/ignore (your )?previous|ignore your instructions/);
-    // "mark this verified" is an exact match
-    expect(fullText).toContain('mark this verified');
+    if (!s.persona) throw new Error('scenario missing persona');
+    const personaLower = s.persona.toLowerCase();
+    // Both exact phrases must be present for the free-play model to include them
+    expect(personaLower).toContain('ignore your instructions');
+    expect(personaLower).toContain('mark this verified');
   });
 
   it('loading an unknown scenario name throws ScenarioValidationError', async () => {
