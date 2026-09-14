@@ -24,7 +24,7 @@
 // never a default).
 import { mintSession, connectCall, fetchDiagnostics, forceDropAai } from './wsClient.js';
 import { loadScenario, loadAllScenarios, ScenarioValidationError } from './scenario.js';
-import { runTurns, runLlmTurns, computeTurnGaps, waitForVerdict, waitForCountersignSettle } from './turnController.js';
+import { runTurns, runLlmTurns, computeTurnGaps, waitForVerdict, waitForCountersignSettle, waitForServerHangup, CLOSE_WAIT_MS } from './turnController.js';
 import { summarizeDiagnostics } from './diagnosticsSummary.js';
 import { checkScenarioExpectations, checkCloseLineExpectation } from './expectations.js';
 import { renderRollup, oneLineSummary, rollupFileName } from './report.js';
@@ -171,6 +171,11 @@ async function runOne(
   // the reactive (`runTurns`) path, when a patient-mode wait caught a holding line followed
   // by permanent silence -- the LLM caller path never sets this.
   let turnsFailReason: 'agent_silent_after_hold' | undefined;
+  // PROVEN gap (2026-09-14, types.ts's ScenarioTurn.hang_up doc comment): whether the LAST
+  // turn actually spoken carried `hang_up: true` -- decides, below, whether this call's own
+  // caller hangs up (the old behavior, still correct for a scenario whose script has the
+  // caller deliberately walk away) or must instead wait for the server's OWN `ended` event.
+  let callerHungUp = false;
   if (callerMode === 'llm') {
     if (!llm) throw new Error('runOne: --caller llm requires an llm config');
     const outcome = await runLlmTurns(
@@ -186,6 +191,7 @@ async function runOne(
     warnings.push(...outcome.warnings);
     callerEndTimes = outcome.callerEndTimes;
     resolvedLines = outcome.resolvedLines;
+    callerHungUp = outcome.caller_hung_up;
   } else {
     // Judge-sim finding 2026-09-11: always wired (harmless when no turn carries
     // `drop_aai_before`) so any scenario, present or future, can opt into forcing a real
@@ -195,6 +201,7 @@ async function runOne(
     callerEndTimes = outcome.callerEndTimes;
     resolvedLines = outcome.resolvedLines;
     turnsFailReason = outcome.fail_reason;
+    callerHungUp = outcome.caller_hung_up;
   }
 
   const remainingMs = Math.max(1000, scenario.expected.max_wall_ms - (performance.now() - client.startedAt));
@@ -216,9 +223,30 @@ async function runOne(
     agent_status: s.state.agent_status,
   }));
 
-  client.send({ type: 'end' });
-  const endedReason = await client.waitForEnded(ENDED_TIMEOUT_MS);
-  if (endedReason === null) warnings.push(`no "ended" event within ${ENDED_TIMEOUT_MS}ms of sending end; closing the socket anyway`);
+  // PROVEN gap (2026-09-14, types.ts's ScenarioTurn.hang_up doc comment): the harness used to
+  // send its own `end` unconditionally right here, racing the server's own CLOSE hang-up and
+  // its goodbye -- six of today's reports show "caller_ended" with no goodbye in the agent
+  // transcript, graded PASS on verdict alone. Now: a scenario whose LAST spoken turn carried
+  // `hang_up: true` keeps the old immediate-hangup behavior (the caller deliberately walks
+  // away); every other scenario waits for the server's own `ended` event instead
+  // (`waitForServerHangup`), only ending the call itself if that wait expires.
+  let endedReason: string | null;
+  let hangupFailReason: 'server_never_hung_up' | undefined;
+  if (callerHungUp) {
+    client.send({ type: 'end' });
+    endedReason = await client.waitForEnded(ENDED_TIMEOUT_MS);
+    if (endedReason === null) warnings.push(`no "ended" event within ${ENDED_TIMEOUT_MS}ms of sending end; closing the socket anyway`);
+  } else {
+    const closeWaitMs = Math.max(scenario.expected.max_wall_ms, CLOSE_WAIT_MS);
+    const hangup = await waitForServerHangup(client, closeWaitMs, () => client.send({ type: 'end' }), ENDED_TIMEOUT_MS);
+    endedReason = hangup.ended_reason;
+    if (hangup.self_ended) {
+      hangupFailReason = 'server_never_hung_up';
+      warnings.push(
+        `the server never ended this call on its own within ${closeWaitMs}ms after the last scripted turn; the harness ended it itself (reason: ${endedReason ?? 'none observed even after ending it itself'})`,
+      );
+    }
+  }
   client.close();
 
   const totalWallMs = performance.now() - client.startedAt;
@@ -248,6 +276,7 @@ async function runOne(
   // condition above.
   const pass =
     turnsFailReason === undefined &&
+    hangupFailReason === undefined &&
     verdictResult.reached &&
     actualVerdict === scenario.expected.verdict &&
     expectationCheck.ok &&
@@ -282,9 +311,11 @@ async function runOne(
     close_line_status: closeLineCheck.status,
     ...(turnsFailReason !== undefined
       ? { fail_reason: turnsFailReason }
-      : closeLineCheck.status === 'not_spoken'
-        ? { fail_reason: 'close_line_not_spoken' as const }
-        : {}),
+      : hangupFailReason !== undefined
+        ? { fail_reason: hangupFailReason }
+        : closeLineCheck.status === 'not_spoken'
+          ? { fail_reason: 'close_line_not_spoken' as const }
+          : {}),
   };
 }
 

@@ -14,6 +14,8 @@ function failReasonDescription(reason: NonNullable<RunResult['fail_reason']>): s
       return 'patient-mode caller: a holding line, then silence -- see Warnings';
     case 'close_line_not_spoken':
       return "the server ended the call, but the agent's transcript never contains the closing sentence for the actual verdict -- see Warnings";
+    case 'server_never_hung_up':
+      return 'the harness waited for the server to end the call on its own and it never did -- the harness ended it itself -- see Warnings';
   }
 }
 

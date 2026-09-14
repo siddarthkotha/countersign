@@ -86,11 +86,18 @@ function validateTurn(raw: unknown, index: number): ScenarioTurn {
       `turn[${index}] (${String(t.id)}).wait_for_agent must be a boolean when present`,
     );
   }
+  if (t.hang_up !== undefined) {
+    assert(
+      typeof t.hang_up === 'boolean',
+      `turn[${index}] (${String(t.id)}).hang_up must be a boolean when present`,
+    );
+  }
   const turn: ScenarioTurn = { id: t.id as string, text: t.text as string };
   if (typeof t.pause_ms === 'number') turn.pause_ms = t.pause_ms;
   if (typeof t.barge_in_after_ms === 'number') turn.barge_in_after_ms = t.barge_in_after_ms;
   if (typeof t.drop_aai_before === 'boolean') turn.drop_aai_before = t.drop_aai_before;
   if (typeof t.wait_for_agent === 'boolean') turn.wait_for_agent = t.wait_for_agent;
+  if (typeof t.hang_up === 'boolean') turn.hang_up = t.hang_up;
   if (t.respond !== undefined) turn.respond = validateRespond(t.respond, `turn[${index}] (${String(t.id)})`);
   return turn;
 }

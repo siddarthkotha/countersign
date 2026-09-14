@@ -567,6 +567,15 @@ export interface TurnRunOutcome {
    *  may separately reach. Absent for every ordinary run, including one with no patient-mode
    *  turn at all. */
   fail_reason?: 'agent_silent_after_hold';
+  /** True iff the LAST turn this caller actually spoke carried `hang_up: true` (types.ts's
+   *  `ScenarioTurn.hang_up` doc comment) -- run.ts uses this to decide whether the caller
+   *  hangs up itself right after speaking (the old, still-correct behavior for a scenario
+   *  that deliberately has the caller walk away) or must instead wait for the SERVER's own
+   *  `ended` event (`waitForServerHangup` below -- the PROVEN-gap fix, 2026-09-14). False for
+   *  every scenario/turn that doesn't set `hang_up`, including a patient-mode `stop` (the
+   *  agent's own close line was detected, so the caller must wait for the real hang-up, not
+   *  perform one itself) and every LLM-driven call (`runLlmTurns` has no `hang_up` concept). */
+  caller_hung_up: boolean;
 }
 
 /** Injected so `runTurns` never has to know about HTTP/URLs/session ids itself (same shape
@@ -659,6 +668,7 @@ export async function runTurns(
           ? { turn_id: turn.id, caller_end_ms: endedMs, barge_in: true, note: timing.note(startedMs) }
           : { turn_id: turn.id, caller_end_ms: endedMs, barge_in: false },
       );
+      if (turn.hang_up) return { warnings, callerEndTimes, resolvedLines, caller_hung_up: true };
       continue;
     }
     if (turn.barge_in_after_ms !== undefined) {
@@ -675,6 +685,7 @@ export async function runTurns(
       const pcm = await pcmPromise;
       const { startedMs, endedMs } = await streamPcm(client, pcm);
       callerEndTimes.push({ turn_id: turn.id, caller_end_ms: endedMs, barge_in: true, note: timing.note(startedMs) });
+      if (turn.hang_up) return { warnings, callerEndTimes, resolvedLines, caller_hung_up: true };
       continue;
     }
     // PROVEN gap (2026-09-13, types.ts's ScenarioTurn.wait_for_agent doc comment): a
@@ -690,7 +701,7 @@ export async function runTurns(
         warnings.push(
           `turn ${turn.id}: agent spoke a holding line and then went silent for ${agentSilenceFailMs}ms with no further reply; failing this run (agent_silent_after_hold)`,
         );
-        return { warnings, callerEndTimes, resolvedLines, fail_reason: 'agent_silent_after_hold' };
+        return { warnings, callerEndTimes, resolvedLines, fail_reason: 'agent_silent_after_hold', caller_hung_up: false };
       }
       if (patientResult.outcome === 'stop') break; // the agent's own closing line -- nothing left to say.
       await sleep(turn.pause_ms ?? 400);
@@ -699,6 +710,7 @@ export async function runTurns(
       resolvedLines.push({ turn_id: turn.id, text: resolved.text, source: resolved.source, reacted_to: lastAgentText });
       const { endedMs } = await speakLine(client, resolved.text, voice);
       callerEndTimes.push({ turn_id: turn.id, caller_end_ms: endedMs, barge_in: false });
+      if (turn.hang_up) return { warnings, callerEndTimes, resolvedLines, caller_hung_up: true };
       continue;
     }
     await waitBeforeSpeaking(client, turn.pause_ms ?? 400, warnings);
@@ -707,9 +719,10 @@ export async function runTurns(
     resolvedLines.push({ turn_id: turn.id, text: resolved.text, source: resolved.source, reacted_to: lastAgentText });
     const { endedMs } = await speakLine(client, resolved.text, voice);
     callerEndTimes.push({ turn_id: turn.id, caller_end_ms: endedMs, barge_in: false });
+    if (turn.hang_up) return { warnings, callerEndTimes, resolvedLines, caller_hung_up: true };
   }
 
-  return { warnings, callerEndTimes, resolvedLines };
+  return { warnings, callerEndTimes, resolvedLines, caller_hung_up: false };
 }
 
 export interface LlmTurnCaps {
@@ -801,7 +814,7 @@ export async function runLlmTurns(
     turnIndex++;
   }
 
-  return { warnings, callerEndTimes, resolvedLines, llm_turns: turnIndex };
+  return { warnings, callerEndTimes, resolvedLines, llm_turns: turnIndex, caller_hung_up: false };
 }
 
 /** Post-hoc turn-gap computation: for each non-barge-in turn, the gap is the time from that
@@ -858,6 +871,48 @@ export async function waitForCountersignSettle(client: CallClient, timeoutMs = 8
     if (nowT(client) > deadline) return;
     await sleep(POLL_MS);
   }
+}
+
+/** PROVEN gap (2026-09-14, today's reports for miller-patient/structuring-two-wires/
+ *  single-wrong-answer/hangup-after-request/judge-out-of-scope/prompt-injection-midcall):
+ *  the harness used to send its own `{type:'end'}` right after the verdict/settle wait,
+ *  regardless of whether the server had said anything at all -- racing the server's own
+ *  CLOSE hang-up (packages/server/src/call/session.ts, CLOSE_TOTAL_MS hard cap = 45s) and its
+ *  goodbye. `waitForServerHangup` below waits for the real `ended` event instead, up to
+ *  `Math.max(scenario_max_wall_ms, CLOSE_WAIT_MS)` -- 60s gives 15s of margin over the
+ *  server's own 45s hard cap even for a scenario whose own `expected.max_wall_ms` is small. */
+export const CLOSE_WAIT_MS = 60_000;
+
+export interface ServerHangupResult {
+  ended_reason: string | null;
+  /** True iff the server never produced its own `ended` event within the wait budget and
+   *  the harness had to end the call itself as a last resort (a `caller_ended` reason from
+   *  the server's point of view) so the run could still be reported -- always paired with
+   *  `fail_reason: 'server_never_hung_up'` in run.ts, same unconditional-fail treatment as
+   *  `agent_silent_after_hold`/`close_line_not_spoken` elsewhere in this file. */
+  self_ended: boolean;
+}
+
+/** Called once every scripted (or LLM-driven) turn is done and the verdict/settle wait has
+ *  already run -- see `ScenarioTurn.hang_up`'s doc comment for the one exception (a scenario
+ *  whose script has the caller deliberately walk away, which run.ts handles by NOT calling
+ *  this at all and instead sending `end` itself immediately, the old behavior, still correct
+ *  for that case). Waits for the server's own `ended` event up to `waitMs`; if it never
+ *  arrives, sends `end` itself via the injected `sendEnd` (run.ts binds this to
+ *  `client.send({type:'end'})`) and gives the socket `fallbackTimeoutMs` more to report a
+ *  reason before giving up for good. Never throws -- a run that hits this always finishes and
+ *  gets reported, just with `self_ended: true` so run.ts can fail it correctly. */
+export async function waitForServerHangup(
+  client: CallClient,
+  waitMs: number,
+  sendEnd: () => void,
+  fallbackTimeoutMs: number,
+): Promise<ServerHangupResult> {
+  const reason = await client.waitForEnded(waitMs);
+  if (reason !== null) return { ended_reason: reason, self_ended: false };
+  sendEnd();
+  const fallbackReason = await client.waitForEnded(fallbackTimeoutMs);
+  return { ended_reason: fallbackReason, self_ended: true };
 }
 
 export function frameMs(): number {

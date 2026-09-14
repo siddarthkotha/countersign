@@ -121,6 +121,19 @@ export interface ScenarioTurn {
    *  to override that default on an individual turn. Absent (the default) preserves the exact
    *  old grace-window-then-speak-regardless behavior -- no existing scenario changes. */
   wait_for_agent?: boolean;
+  /** PROVEN gap (2026-09-14, today's reports for miller-patient/structuring-two-wires/
+   *  single-wrong-answer/hangup-after-request/judge-out-of-scope/prompt-injection-midcall,
+   *  each: "Call ended reason: caller_ended" with "Close line: n/a (caller ended)" and no
+   *  goodbye in the agent transcript, graded PASS on verdict alone): the harness used to end
+   *  every call itself right after the last scripted turn (or a patient-mode `stop`), racing
+   *  the server's own CLOSE hang-up and its goodbye. Now the harness never ends a call itself
+   *  after the last turn UNLESS that turn carries `hang_up: true` -- otherwise it waits for
+   *  the server's own `ended` event (see turnController.ts's `waitForServerHangup`). Set this
+   *  ONLY on a turn whose script deliberately has the caller leave without waiting to hear a
+   *  goodbye (e.g. judge-out-of-scope's caller walks away once they've explained they're just
+   *  testing) -- never as a workaround for a scenario that is supposed to prove the server's
+   *  own close line. Absent (the default, false) on every other scenario. */
+  hang_up?: boolean;
 }
 
 export interface ScenarioExpected {
@@ -314,7 +327,14 @@ export interface RunResult {
    *  verdict -- `close_line_not_spoken`. Either way: a distinct, greppable fail reason
    *  surfaced in the report's one-line result and its Result section, separate from the
    *  generic warnings list. Absent for every ordinary pass or fail. */
-  fail_reason?: 'agent_silent_after_hold' | 'close_line_not_spoken';
+  /** PROVEN gap (2026-09-14): the harness waited for the server's own `ended` event after the
+   *  last scripted turn (or a patient-mode `stop`) -- see `ScenarioTurn.hang_up`'s doc
+   *  comment -- and it never arrived within the wait budget (turnController.ts's
+   *  `waitForServerHangup`). The harness then ended the call itself as a last resort so the
+   *  run could still be reported, but this is always a bug worth surfacing: the server never
+   *  hangs up on its own is either a hung CLOSE state or a genuinely broken close path,
+   *  neither of which a judge should ever hit live. */
+  fail_reason?: 'agent_silent_after_hold' | 'close_line_not_spoken' | 'server_never_hung_up';
   /** expectations.ts's `checkCloseLineExpectation` result -- `'n/a'` when the check didn't
    *  apply (the caller/harness ended the call first, or no verdict was ever reached),
    *  `'spoken'`/`'not_spoken'` when it did. Rendered near "Call ended reason" in the report

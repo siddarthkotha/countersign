@@ -1,11 +1,14 @@
 // Exercises the pure/pollable pieces of turnController.ts against a FAKE CallClient (no
 // network, no real WebSocket) -- computeTurnGaps' post-hoc math, and waitForVerdict's
 // polling loop against a client whose `latestState()` changes over time.
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import {
   closeLineSpokenForVerdict,
   CLOSE_SENTENCE_BY_VERDICT,
+  CLOSE_WAIT_MS,
   computeTurnGaps,
   ENGINE_CLOSE_SENTENCES,
   isClosingLine,
@@ -13,16 +16,20 @@ import {
   isHoldingLine,
   maybeDropAai,
   MIN_SPOKEN_MS,
+  runTurns,
   scriptedCallerShouldStop,
   waitForBargeIn,
   waitForGreeting,
   waitForOpeningTurn,
   waitForPatientTurn,
+  waitForServerHangup,
   waitForVerdict,
 } from '../turnController.js';
 import type { CallClient } from '../wsClient.js';
-import type { ScenarioTurn } from '../types.js';
+import type { Scenario, ScenarioTurn } from '../types.js';
 import type { ScreenState } from '@countersign/engine';
+
+const execFileAsync = promisify(execFile);
 
 function fakeState(verdict: ScreenState['verdict']): ScreenState {
   return {
@@ -735,4 +742,149 @@ describe('waitForPatientTurn', () => {
     // match, not by falling through to the ordinary settle-then-judge path.
     expect(elapsed).toBeLessThan(400);
   }, 10_000);
+});
+
+// PROVEN gap (2026-09-14, today's reports for miller-patient/structuring-two-wires/
+// single-wrong-answer/hangup-after-request/judge-out-of-scope/prompt-injection-midcall,
+// each: "Call ended reason: caller_ended" with "Close line: n/a (caller ended)" and no
+// goodbye in the agent transcript, graded PASS on verdict alone): run.ts used to send its
+// own `end` unconditionally right after the verdict/settle wait. `waitForServerHangup` is
+// the fix -- it waits for the SERVER's own `ended` event and only ends the call itself, as a
+// last resort, if that wait expires.
+describe('waitForServerHangup', () => {
+  it('calls sendEnd and reports self_ended: true once the wait window expires with no server-initiated ended event', async () => {
+    const client: CallClient = {
+      startedAt: performance.now(),
+      send() {},
+      close() {},
+      stateHistory: [],
+      audioTimestamps: [],
+      linkEvents: [],
+      latestState: () => null,
+      onEnded() {},
+      endedReason: () => null,
+      async waitForEnded(timeoutMs: number) {
+        // Simulates "the server never ends the call": every wait window (the long
+        // server-wait AND the short fallback wait after the harness sends `end` itself)
+        // times out with no reason observed.
+        await sleep(Math.min(timeoutMs, 30));
+        return null;
+      },
+    };
+    let sendEndCalls = 0;
+
+    const result = await waitForServerHangup(client, 40, () => {
+      sendEndCalls++;
+    }, 40);
+
+    expect(sendEndCalls).toBe(1);
+    expect(result.self_ended).toBe(true);
+    expect(result.ended_reason).toBeNull();
+  });
+
+  it("resolves with the server's own ended reason (e.g. agent_closed) and never calls sendEnd when it arrives before the wait window expires", async () => {
+    const client: CallClient = {
+      startedAt: performance.now(),
+      send() {},
+      close() {},
+      stateHistory: [],
+      audioTimestamps: [],
+      linkEvents: [],
+      latestState: () => null,
+      onEnded() {},
+      endedReason: () => null,
+      async waitForEnded() {
+        await sleep(10);
+        return 'agent_closed';
+      },
+    };
+    let sendEndCalls = 0;
+
+    const result = await waitForServerHangup(client, 5000, () => {
+      sendEndCalls++;
+    }, 1000);
+
+    expect(sendEndCalls).toBe(0);
+    expect(result.self_ended).toBe(false);
+    expect(result.ended_reason).toBe('agent_closed');
+  });
+
+  it('CLOSE_WAIT_MS gives margin over the server\'s own CLOSE hard cap (packages/server/src/call/session.ts CLOSE_TOTAL_MS = 45s)', () => {
+    expect(CLOSE_WAIT_MS).toBeGreaterThan(45_000);
+  });
+});
+
+// PROVEN gap (2026-09-14, same reports as above): `runTurns` used to always run through
+// every scripted turn (or stop only on a patient-mode close/fail), leaving run.ts to decide
+// unconditionally when to hang up. `ScenarioTurn.hang_up` (types.ts) is the one legitimate
+// opt-in for a script whose caller deliberately walks away without waiting for a goodbye
+// (e.g. judge-out-of-scope) -- these prove `runTurns` itself stops the instant such a turn
+// has been spoken and reports it via `caller_hung_up`, and that every other run correctly
+// reports `caller_hung_up: false` so run.ts knows to wait for the server's own hang-up
+// instead. Uses REAL `say`/`ffmpeg` synthesis (no network -- same convention as
+// audio.test.ts) since `runTurns` calls `speakLine`/`streamPcm` directly; skips itself on a
+// machine without those tools on PATH.
+describe('runTurns: hang_up', () => {
+  let toolsAvailable = true;
+
+  beforeAll(async () => {
+    try {
+      await execFileAsync('say', ['-v', '?']);
+      await execFileAsync('ffmpeg', ['-version']);
+    } catch {
+      toolsAvailable = false;
+    }
+  });
+
+  function scenarioWithTurns(turns: ScenarioTurn[]): Scenario {
+    return {
+      name: 'hang-up-test-fixture',
+      title: 'hang-up test fixture',
+      description: '',
+      source: 'inline test fixture, not a real scenario file',
+      turns,
+      expected: { verdict: 'NO_ACTION', max_wall_ms: 60000 },
+    };
+  }
+
+  it('stops the instant a turn carrying hang_up: true has been spoken, never speaking any turn after it, and reports caller_hung_up: true', async () => {
+    if (!toolsAvailable) {
+      console.warn('turnController.test: `say`/`ffmpeg` not found on PATH -- skipping (macOS-only harness).');
+      return;
+    }
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0;
+    // One reply audio frame shortly after start so turn 0's greeting-wait settles quickly
+    // instead of waiting out the real 8s GREETING_TIMEOUT_MS.
+    setTimeout(() => client.audioTimestamps.push(performance.now() - client.startedAt), 20);
+
+    const s = scenarioWithTurns([
+      { id: 'c1', text: 'Hi.' },
+      { id: 'c2', text: 'Bye.', hang_up: true },
+      { id: 'c3', text: 'This line must never be spoken.' },
+    ]);
+
+    const outcome = await runTurns(client, s, undefined);
+
+    expect(outcome.caller_hung_up).toBe(true);
+    expect(outcome.resolvedLines.map((l) => l.turn_id)).toEqual(['c1', 'c2']);
+    expect(outcome.callerEndTimes.map((t) => t.turn_id)).toEqual(['c1', 'c2']);
+  }, 30_000);
+
+  it('reports caller_hung_up: false once every scripted turn is spoken and none of them carried hang_up', async () => {
+    if (!toolsAvailable) {
+      console.warn('turnController.test: `say`/`ffmpeg` not found on PATH -- skipping (macOS-only harness).');
+      return;
+    }
+    const client = makeFakeClient();
+    client.audioTimestamps.length = 0;
+    setTimeout(() => client.audioTimestamps.push(performance.now() - client.startedAt), 20);
+
+    const s = scenarioWithTurns([{ id: 'c1', text: 'Hi.' }]);
+
+    const outcome = await runTurns(client, s, undefined);
+
+    expect(outcome.caller_hung_up).toBe(false);
+    expect(outcome.resolvedLines.map((l) => l.turn_id)).toEqual(['c1']);
+  }, 30_000);
 });

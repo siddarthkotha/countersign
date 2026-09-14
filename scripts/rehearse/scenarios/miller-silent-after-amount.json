@@ -1,7 +1,7 @@
 {
  "name": "miller-silent-after-amount",
  "title": "Robert Miller, caller obeys \"please hold\" and goes silent after the amount change (founder-observed 2026-09-13 3:2x PM)",
- "description": "Founder-observed 2026-09-13: after \"$2.1 million\" the agent said a holding line and never spoke again (fixed on deploy 27, transcript-confirmed close). The caller says nothing for 40 s after the amount change. Expected now: FREEZE with the close sentence spoken and the server hanging up on its own; a silent agent or a hang-up without the goodbye is the regression (harness fails it as close_line_not_spoken).",
+ "description": "Founder-observed 2026-09-13: after \"$2.1 million\" the agent said a holding line and never spoke again (fixed on deploy 27, transcript-confirmed close). The caller says nothing for 40 s after the amount change. Expected now: ESCALATE, not FREEZE (2026-09-14 ruling, PROVEN today by report T15-15-12): an impostor who goes silent after one unanswered challenge is escalated to a human callback, not frozen outright -- FREEZE is reserved for an overdetermined fraud finding, and one unanswered challenge plus silence is an incomplete evaluation, not that. The close sentence must still be spoken and the server must still hang up on its own; a silent agent or a hang-up without the goodbye is the regression (harness fails it as close_line_not_spoken).",
  "source": "docs/BRIEF.md section 4 \"Scenario B -- THE INTERROGATION\" + packages/engine/corpus/scenario-b-miller-fraud.json (caller turns c1-c4, read-only source)",
  "truth": {
   "identity": "Robert Miller",
@@ -37,7 +37,7 @@
   }
  ],
  "expected": {
-  "verdict": "FREEZE",
+  "verdict": "ESCALATE",
   "max_wall_ms": 200000
  },
  "demo_persona": "attacker"

@@ -452,6 +452,41 @@ describe('scenario loading (no network)', () => {
     ).toThrow(ScenarioValidationError);
   });
 
+  // PROVEN gap (2026-09-14, types.ts's ScenarioTurn.hang_up doc comment): six of today's
+  // reports show the harness ending a call itself ("caller_ended") with no goodbye ever
+  // spoken, graded PASS on verdict alone. `hang_up` is the one legitimate opt-in for a
+  // scenario whose script deliberately has the caller walk away without waiting for one.
+  it('accepts and preserves a turn with hang_up: true', () => {
+    const s = validateScenario(
+      {
+        name: 'x',
+        title: 'x',
+        description: '',
+        source: '',
+        turns: [{ id: 'c1', text: 'hello', hang_up: true }],
+        expected: { verdict: 'NO_ACTION', max_wall_ms: 1000 },
+      },
+      'inline',
+    );
+    expect(s.turns[0]!.hang_up).toBe(true);
+  });
+
+  it('rejects a non-boolean hang_up', () => {
+    expect(() =>
+      validateScenario(
+        {
+          name: 'x',
+          title: 'x',
+          description: '',
+          source: '',
+          turns: [{ id: 'c1', text: 'hello', hang_up: 'yes' }],
+          expected: { verdict: 'NO_ACTION', max_wall_ms: 1000 },
+        },
+        'inline',
+      ),
+    ).toThrow(ScenarioValidationError);
+  });
+
   it('accepts and preserves caller_style: "patient" and a custom agent_silence_fail_ms', () => {
     const s = validateScenario(
       {
