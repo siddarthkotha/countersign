@@ -929,6 +929,114 @@ describe('CallSession — end() reaches the engine\'s call-ended row (RT-4)', ()
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'idle_timeout' });
   });
 
+  // ---------------------------------------------------------------------------------------
+  // Review fix (2026-09-15, Critical -- FAIL on round 4): the reviewer drove this exact
+  // sequence: caller silent past idle -> NO_ACTION override armed (`closeSentenceOverride`,
+  // requirement 9) -> caller RESUMES with a real fraudulent request before the stale
+  // goodbye is ever confirmed. `currentCloseSentence()` used to check `closeSentenceOverride`
+  // FIRST, so even once the engine went on to render its own real CLOSE goal (ESCALATE, from
+  // a genuine live request), the server kept speaking and matching against the stale "Thank
+  // you for calling. Goodbye." line -- `transcriptMatchesCloseSentence` compared the ESCALATE
+  // reply against the wrong sentence, never matched, and the call burned the full 45s budget
+  // before ending `close_timeout` despite the correct line having actually been spoken.
+  // Fixed: `currentCloseSentence()` now prefers the ENGINE's own CLOSE hint whenever one
+  // exists, falling back to the override only when the engine has not (yet) rendered CLOSE;
+  // `applyEvaluate` also clears both `closeSentenceOverride` and `idleEndReason` the moment
+  // the engine renders a genuinely fresh CLOSE while an override was pending -- that fresh
+  // rendering is a completely new, live-driven close, not a continuation of the earlier idle
+  // event, so it ends `agent_closed` (or `close_timeout`) like any other organic CLOSE, never
+  // `idle_timeout`.
+  it('a stale idle-NO_ACTION override yields to the engine\'s own CLOSE once the caller resumes with a real request -- the ESCALATE sentence is spoken and matched, and the call ends agent_closed within budget (review Critical, 2026-09-15)', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-idle-override-stale', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent);
+    const internals = session as unknown as { closeSentenceOverride: string | null; idleEndReason: string | null };
+
+    session.start(); // GREET, nothing said yet
+    clock.now = 30000;
+    session.end('idle_timeout');
+
+    expect(session.last?.verdict).toBe('NO_ACTION');
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    expect(internals.closeSentenceOverride).toBe('Thank you for calling. Goodbye.');
+    expect(internals.idleEndReason).toBe('idle_timeout');
+
+    // The caller resumes, mid-goodbye, with a real fraudulent request. `call_ended` is
+    // already on record (row 15), so the request landing forces the tentative verdict
+    // straight to ESCALATE (never back to PENDING) the instant it's claimed -- the engine
+    // renders a genuinely fresh CLOSE goal here, live, not a continuation of the idle event.
+    clock.now = 31000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c1',
+      text: 'This is Robert Miller, I need $1.8 million wired to the escrow account.',
+    });
+
+    expect(session.last?.verdict).toBe('ESCALATE');
+    expect(session.last?.goal.code).toBe('CLOSE');
+    expect(session.last?.goal.hint).toMatch(/callback on the registered number/i);
+    // The stale override (and the idle attribution it carried) is cleared -- this is a fresh,
+    // engine-driven close now, not the earlier idle-triggered one.
+    expect(internals.closeSentenceOverride).toBeNull();
+    expect(internals.idleEndReason).toBeNull();
+
+    // The reply that follows must be checked against the ESCALATE sentence (this.last.goal
+    // .hint), never the stale NO_ACTION line -- proven by it actually ending the call.
+    clock.now = 31100;
+    aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: session.last!.goal.hint, reply_id: 'r1', interrupted: false });
+    clock.now = 31200;
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+
+    expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
+    // Well within the 45s budget (round 4) -- and long before it would matter, since a real
+    // match already arrived.
+    vi.advanceTimersByTime(1500);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // Review fix (2026-09-15, Minor -- FAIL on round 4): `logCallEnded` used to write the ONE
+  // `call_ended` action it will ever log, then ignore every later call regardless of reason
+  // -- if the idle-deferred goodbye above was still pending when a DIFFERENT real reason
+  // (e.g. the per-call cap firing) ended the call for real, the logged evidence permanently
+  // read the stale `detail: 'idle_timeout'` even though the call actually ended
+  // `cap_reached`. Fixed: a later call with a DIFFERENT reason updates the already-logged
+  // action's `detail` in place (still exactly one `call_ended` action -- LAW 4 unaffected,
+  // this is bookkeeping/evidence-of-fact, never a verdict) rather than being silently
+  // dropped.
+  it('a later end() reason overwrites the logged call_ended detail when it differs from the reason the idle-deferred goodbye was logged under (review Minor, 2026-09-15)', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-idle-then-cap', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent);
+
+    session.start(); // GREET, nothing said yet
+    clock.now = 30000;
+    session.end('idle_timeout'); // defers: NO_ACTION goodbye armed, call_ended logged as 'idle_timeout'
+
+    const callEndedBefore = session.logs.actions.filter((a) => a.kind === 'call_ended');
+    expect(callEndedBefore).toHaveLength(1);
+    expect(callEndedBefore[0]!.detail).toBe('idle_timeout');
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+
+    // A different, real reason ends the call for good before the goodbye is ever confirmed
+    // (e.g. the per-call session cap firing while the idle goodbye was still outstanding).
+    clock.now = 30100;
+    session.end('cap_reached');
+
+    const callEndedAfter = session.logs.actions.filter((a) => a.kind === 'call_ended');
+    // Still exactly ONE call_ended action -- updated in place, never a second entry.
+    expect(callEndedAfter).toHaveLength(1);
+    expect(callEndedAfter[0]!.detail).toBe('cap_reached');
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'cap_reached' });
+  });
+
   it('the idle reaper and the per-call cap timer both end a call through CallSession.end() alone (ws/browser.ts), so they inherit this fix with no separate wiring', async () => {
     // White-box check, deliberately: ws/browser.ts's `endCall` (used by both the idle
     // reaper and the cap timer, per its own founder-ruling comment) calls

@@ -306,10 +306,17 @@ export class CallSession {
    *  guards against re-entering it when the deferred CLOSE machinery itself later calls
    *  `end('idle_timeout')` again to actually finish the job. */
   private idleDeferAttempted = false;
-  /** Round 4, requirement 9: guards the ONE `call_ended` action this class ever logs for a
-   *  given `end()` sequence -- `end()`'s idle-defer path and its immediate-end path both need
-   *  to log this fact, but only the first one to run should actually write it. */
-  private callEndedLogged = false;
+  /** Round 4, requirement 9: the ONE `call_ended` action this class ever logs for a given
+   *  `end()` sequence -- `end()`'s idle-defer path and its immediate-end path both need to
+   *  log this fact, but only the first one to run should actually push a new entry. Review
+   *  fix (2026-09-15, Minor -- FAIL on round 4): kept as a reference to the pushed action
+   *  (not just a logged-or-not boolean) so a LATER `end()` call with a DIFFERENT reason (the
+   *  idle-deferred goodbye above was still pending when the per-call cap, or a caller
+   *  hangup, ended the call for real) can correct the `detail` field in place -- the logged
+   *  evidence must read the reason the call ACTUALLY ended under, never a stale, superseded
+   *  one, even though only one `call_ended` action is ever recorded (LAW 4 unaffected: this
+   *  is a fact about the call's lifecycle, never a verdict). */
+  private callEndedAction: AgentAction | null = null;
   /** reply.create fix, round 2 (2026-09-13 review verdict FAIL on round 1, commit 48a0969 --
    *  PROVEN live bug: session 84ddf47a, Miller fraud scenario; see
    *  docs/ASSEMBLYAI_INTEGRATION.md's "VERIFY-AT-BUILD: reply.create schema" section).
@@ -376,16 +383,23 @@ export class CallSession {
     }
   }
 
-  /** The close sentence currently owed, if any -- `closeSentenceOverride` (idle+NO_ACTION,
-   *  requirement 9) when set, else `this.last.goal.hint` whenever the ENGINE itself has
-   *  rendered CLOSE, else null (nothing owed). The one thing every CLOSE-hang-up method
-   *  (`scheduleCloseIfNeeded`, `maybeArmCloseOnTranscript`, `armCloseRetryTimer`) checks
-   *  before doing anything, so neither path needs its own copy of "is a goodbye owed right
-   *  now, and what does it say." */
+  /** The close sentence currently owed, if any. Review fix (2026-09-15, Critical -- FAIL on
+   *  round 4): the ENGINE's own rendered CLOSE goal ALWAYS wins over `closeSentenceOverride`
+   *  (idle+NO_ACTION, requirement 9) -- checking the override first meant a caller who
+   *  resumed with a real request after the idle-goodbye was already armed, but before it was
+   *  ever confirmed, kept getting matched against the stale "Thank you for calling.
+   *  Goodbye." line instead of the engine's fresh ESCALATE/STAGE/FREEZE sentence, burning the
+   *  whole 45s budget even though the correct line was actually spoken. `applyEvaluate`
+   *  clears `closeSentenceOverride` (and `idleEndReason`) the moment the engine renders a
+   *  genuinely fresh CLOSE while an override was pending, so in practice the two are never
+   *  simultaneously relevant for long -- this ordering is what's actually authoritative
+   *  between the tick that renders a fresh CLOSE and the (synchronous, same-tick) clearing.
+   *  The one thing every CLOSE-hang-up method (`scheduleCloseIfNeeded`,
+   *  `maybeArmCloseOnTranscript`, `armCloseRetryTimer`) checks before doing anything, so
+   *  neither path needs its own copy of "is a goodbye owed right now, and what does it say." */
   private currentCloseSentence(): string | null {
-    if (this.closeSentenceOverride) return this.closeSentenceOverride;
     if (this.last?.goal.code === 'CLOSE') return this.last.goal.hint;
-    return null;
+    return this.closeSentenceOverride;
   }
 
   /** Round 4, requirement 9 (founder correction, 2026-09-14): the idle reaper's own
@@ -735,12 +749,19 @@ export class CallSession {
 
   /** Round 4, requirement 9: logs the ONE `call_ended` action this class ever writes for a
    *  given `end()` sequence -- `end()`'s idle-defer path may log it (with 'idle_timeout')
-   *  well before the call actually finishes, so the later immediate-end path must not log a
-   *  second one. */
+   *  well before the call actually finishes, so the later immediate-end path must not push a
+   *  second one. Review fix (2026-09-15, Minor): if that later call carries a DIFFERENT
+   *  reason -- the idle-deferred goodbye was still pending when something else (the per-call
+   *  cap, a caller hangup) ended the call for real -- the already-logged action's `detail` is
+   *  corrected in place, so the evidence record reads the reason the call actually ended
+   *  under, not the earlier, superseded one. */
   private logCallEnded(reason: string): void {
-    if (this.callEndedLogged) return;
-    this.callEndedLogged = true;
-    this.logs.actions.push({ id: this.nextActionId(), kind: 'call_ended', t_ms: this.nowT(), detail: reason });
+    if (this.callEndedAction) {
+      if (this.callEndedAction.detail !== reason) this.callEndedAction.detail = reason;
+      return;
+    }
+    this.callEndedAction = { id: this.nextActionId(), kind: 'call_ended', t_ms: this.nowT(), detail: reason };
+    this.logs.actions.push(this.callEndedAction);
   }
 
   private nextToolId(): string {
@@ -1387,7 +1408,21 @@ export class CallSession {
       // it) -- not from `this.last = output` below, which would fire on every tick, and not
       // from `reply.done`, which is exactly the event this cap exists to cover the absence
       // of. See `armClose`'s own doc comment.
-      if (output.goal.code === 'CLOSE') this.armClose();
+      if (output.goal.code === 'CLOSE') {
+        // Review fix (2026-09-15, Critical): the engine has just rendered a genuinely FRESH
+        // CLOSE (this branch only runs on a goalKey change) -- if an idle+NO_ACTION override
+        // was still pending (the caller resumed with a real request before that earlier
+        // goodbye was ever confirmed -- see `currentCloseSentence`'s own doc comment), this
+        // rendering supersedes it entirely: a live, engine-driven close, not a continuation
+        // of the earlier idle event. Clear both the stale sentence AND its `idle_timeout`
+        // attribution -- this fresh CLOSE ends `agent_closed`/`close_timeout` like any other
+        // organic one, never `idle_timeout`.
+        if (this.closeSentenceOverride) {
+          this.closeSentenceOverride = null;
+          this.idleEndReason = null;
+        }
+        this.armClose();
+      }
     }
     this.last = output;
   }
