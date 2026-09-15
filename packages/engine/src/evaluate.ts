@@ -51,14 +51,29 @@ import type { ChallengeResult, EngineInput, EngineOutput, Evidence, EvidenceStat
  *  verdict never moves" cases for the regression coverage (the P1 shape: FREEZE sealed, then
  *  two more caller lines -> verdict/goal stay FREEZE/CLOSE). */
 function freezeAtSeal(input: EngineInput): EngineInput {
-  const sealedAtMs = input.tools
-    .filter((t) => t.name === 'seal_evidence_record' && t.result !== undefined && t.result.error === undefined)
-    .reduce((min, t) => (min === null || t.t_ms < min ? t.t_ms : min), null as number | null);
+  // Find the EARLIEST successful seal_evidence_record entry by scanning the tools array
+  // in order, so we can get both its timestamp AND its array position.
+  let sealedAtMs: number | null = null;
+  let sealIndexInTools = -1;
+  for (let i = 0; i < input.tools.length; i++) {
+    const t = input.tools[i]!;
+    if (t.name === 'seal_evidence_record' && t.result !== undefined && t.result.error === undefined) {
+      sealedAtMs = t.t_ms;
+      sealIndexInTools = i;
+      break; // Take the first one; if there are multiple seals, the first chronologically is the earliest
+    }
+  }
   if (sealedAtMs === null) return input;
+
+  // Truncate by array position: the seal entry marks a boundary, and only tool entries up to
+  // and including the seal's position are kept. For conversation and actions, truncate by
+  // timestamp (keep all entries at or before the seal timestamp), since these arrays aren't
+  // directly ordered relative to tool entries. The position-based truncation for tools
+  // ensures that tool entries placed AFTER the seal (even at the same timestamp) are excluded.
   return {
     ...input,
     conversation: input.conversation.filter((u) => u.t_ms <= sealedAtMs),
-    tools: input.tools.filter((t) => t.t_ms <= sealedAtMs),
+    tools: input.tools.slice(0, sealIndexInTools + 1),
     actions: input.actions.filter((a) => a.t_ms <= sealedAtMs),
   };
 }

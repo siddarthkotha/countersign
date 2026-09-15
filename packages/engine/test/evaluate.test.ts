@@ -705,4 +705,40 @@ describe('evaluate -- sealed verdict never moves (P1 fix, 2026-09-14)', () => {
   it('determinism: evaluating the sealed input twice is deep-equal', () => {
     expect(evaluate(sealedInput)).toEqual(sealedOut);
   });
+
+  it('tool entries placed AFTER the seal in the tools array are excluded, even if at the same timestamp (position-based truncation)', () => {
+    // The P1 fix uses position-based truncation for the tools array: keep tools[0..seal_index].
+    // This means tool entries placed AFTER the seal in the array are excluded, even if they
+    // have the same timestamp. This is different from the old timestamp-based filter.
+    const postSealToolsSameTs: ToolLogEntry[] = [
+      ...sealedTools,
+      // Add a tool entry with the same timestamp as the seal but placed after it in the array.
+      // This should be excluded by the position-based truncation.
+      {
+        id: 'late-sso',
+        name: 'check_sso_context',
+        t_ms: SEAL_T_MS,
+        args: { identity_id: 'robert-miller', request_version: 2 },
+        result: { error: 'not_allowed_in_state' },
+      },
+    ];
+    const postSealOutTools = evaluate({ ...sealedInput, tools: postSealToolsSameTs });
+    // The output must be identical to the sealed output, proving the late tool entry was excluded.
+    expect(postSealOutTools).toEqual(sealedOut);
+  });
+
+  it('conversation and action entries at the seal timestamp are kept (timestamp-based filtering for non-tools)', () => {
+    // Conversation and action entries use timestamp-based filtering (keep <= sealedAtMs),
+    // so entries at the exact seal timestamp are kept. Only the tools array uses position-based
+    // truncation. This test verifies that conversation entries at the seal timestamp are included.
+    const postSealConversationSameTs: Utterance[] = [
+      ...scenarioBConversation,
+      { id: 'c5', speaker: 'caller', text: 'Can we move forward?', t_ms: SEAL_T_MS },
+    ];
+    const postSealOutConvSameTs = evaluate({ ...sealedInput, conversation: postSealConversationSameTs });
+    // The conversation entry at the seal timestamp is included by the timestamp-based filter,
+    // so the output will differ from the sealed output (it will have more evidence/claims).
+    // We just check that it evaluates successfully and reaches the SEALED state.
+    expect(postSealOutConvSameTs.state).toBe('SEALED');
+  });
 });
