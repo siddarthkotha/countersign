@@ -444,6 +444,92 @@ describe('connectAai', () => {
     expect(sockets.length).toBe(1); // no second socket was ever opened
   });
 
+  // Defect 2 fix (timing-analysis.md §E, PROVEN: `billed_seconds` null on 11/11 live
+  // bundles -- close() used to send `session.end` and call `ws.close()` in the same tick,
+  // so AssemblyAI's own Termination event could never arrive in time to be read). Now:
+  // send `session.end`, wait up to `closeTerminationTimeoutMs` for `session.ended`
+  // (resolving early the instant it arrives), THEN close the socket.
+  describe('close() waits for AssemblyAI\'s own session.ended Termination event (Defect 2 fix)', () => {
+    // (a) session.ended arriving within the window is recorded (emitted to handlers with
+    // its billing duration fields) and resolves the wait early -- the socket is NOT closed
+    // the instant close() is called, only once that message actually lands. This is the
+    // event `call/session.ts`'s existing `case 'session.ended'` already turns into the
+    // `aai_session_terminated` diag that feeds `populateBilledSeconds` once it can actually
+    // arrive at all.
+    it('(a) session.ended arriving after session.end is emitted with its billing durations, and only then closes the socket', async () => {
+      const { deps, sockets } = makeDeps();
+      const aai = await connectAndReady(deps, sockets, 'sess-1');
+      const received: AaiEvent[] = [];
+      aai.on((evt) => received.push(evt));
+
+      const sock = sockets[0]!;
+      const sentBefore = sock.sent.length;
+      const closeResult = aai.close();
+      expect(closeResult).toBeUndefined(); // synchronous void, never a Promise -- see (c)
+
+      await waitFor(() => expect(sock.sent.length).toBe(sentBefore + 1));
+      expect(JSON.parse(sock.sent[sentBefore]!)).toEqual({ type: 'session.end' });
+
+      // Not closed yet -- still waiting on AssemblyAI's own Termination event, unlike the
+      // pre-fix behavior (session.end + ws.close() in the same tick).
+      expect(sock.closed).toBe(false);
+
+      // AssemblyAI's Termination event arrives (stands in for "300ms later" -- this fake
+      // transport has no real clock, only event order matters to it).
+      sock.triggerMessage({ type: 'session.ended', session_duration_seconds: 42, audio_duration_seconds: 40 });
+
+      expect(received).toContainEqual({
+        type: 'session.ended',
+        session_duration_seconds: 42,
+        audio_duration_seconds: 40,
+      });
+      // Resolved early -- closes right away once the message arrives, not after waiting
+      // out the rest of the timeout window.
+      await waitFor(() => expect(sock.closed).toBe(true));
+    });
+
+    // (b) nothing arrives within the window: closes anyway, reports the timeout, never
+    // throws. `closeTerminationTimeoutMs` shrinks the real 2000ms production wait the same
+    // way `openTimeoutMs` shrinks the connect-side open wait elsewhere in this file -- the
+    // MECHANISM under test (give up and close once the deadline passes) is the same
+    // regardless of the deadline's length.
+    it('(b) closes anyway once the wait times out with no session.ended, reporting onCloseTimeout and never throwing', async () => {
+      const { deps, sockets } = makeDeps();
+      let closeTimeoutCalls = 0;
+      const fastDeps: AaiConnectDeps = {
+        ...deps,
+        closeTerminationTimeoutMs: 30,
+        onCloseTimeout: () => {
+          closeTimeoutCalls += 1;
+        },
+      };
+      const aai = await connectAndReady(fastDeps, sockets, 'sess-1');
+      const sock = sockets[0]!;
+
+      expect(() => aai.close()).not.toThrow();
+      expect(sock.closed).toBe(false); // not yet -- still within the window
+
+      await waitFor(() => expect(sock.closed).toBe(true));
+      expect(closeTimeoutCalls).toBe(1);
+    });
+
+    // (c) browser hang-up timing unchanged: close() is a plain synchronous void call, same
+    // signature as before this fix -- `call/session.ts`'s `end()` calls `aai.close()` then
+    // immediately emits `ended` to the browser and closes ITS socket, all in the same tick,
+    // completely unaffected by however long the AAI-leg wait above takes in the background.
+    it("(c) close() returns synchronously (void, not a Promise) -- the caller's own hang-up sequence is never made to wait on it", async () => {
+      const { deps, sockets } = makeDeps();
+      const aai = await connectAndReady(deps, sockets, 'sess-1');
+
+      const result = aai.close();
+      expect(result).toBeUndefined();
+      // A second close() call while the first is still waiting must also be a synchronous
+      // no-op (the existing idempotency guard, `if (this.closed) return;`), never a second
+      // session.end or a throw.
+      expect(() => aai.close()).not.toThrow();
+    });
+  });
+
   it('stats() reports server messages this adapter does not model', async () => {
     const { deps, sockets } = makeDeps();
     const aai = await connectAndReady(deps, sockets, 'sess-1');

@@ -33,6 +33,18 @@ const READY_TIMEOUT_MS = 15_000;
 const OPEN_TIMEOUT_MS = 8_000;
 const MAX_RESUME_ATTEMPTS = 3;
 const RESUME_BACKOFF_MS = [500, 1_500, 3_000];
+/** Defect 2 fix (timing-analysis.md §E, PROVEN: `billed_seconds` null on 11/11 live
+ *  bundles): how long `RealAaiSocket.close()` waits for AssemblyAI's own Termination
+ *  event (`session.ended`, carrying `session_duration_seconds`/`audio_duration_seconds`
+ *  per https://www.assemblyai.com/docs/voice-agents/voice-agent-api/events-reference,
+ *  quoted in `mapServerEvent` below) before tearing down the underlying socket itself.
+ *  Close used to send `session.end` and call `ws.close()` in the same tick, so that
+ *  event -- even if AssemblyAI does send one back -- could never arrive in time to be
+ *  read. This does NOT change when the CALL itself finishes for the browser/caps side:
+ *  `call/session.ts`'s `end()` still calls `aai.close()` and immediately emits `ended` to
+ *  the browser on the same schedule as before -- this wait runs in the background on the
+ *  AAI leg only. */
+const CLOSE_TERMINATION_TIMEOUT_MS = 2_000;
 
 /** The slice of `ws`'s WebSocket (and the browser WebSocket API's EventEmitter-style `.on`)
  *  this adapter needs -- kept minimal and dependency-shaped so tests can supply a scripted
@@ -74,6 +86,22 @@ export interface AaiConnectDeps {
    *  can prove, after the fact, whether a live call actually asked AssemblyAI to speak
    *  first -- see `aai_ready`'s detail in index.ts. */
   onReady?: (ms_since_connect_start: number, greeting_configured: boolean) => void;
+  /** Defect 2 fix: tests shrink `CLOSE_TERMINATION_TIMEOUT_MS` (2000ms in production) so a
+   *  test proving the timeout path doesn't have to actually wait 2 real seconds -- same
+   *  role as `openTimeoutMs` above for the connect-side open wait. */
+  closeTerminationTimeoutMs?: number;
+  /** Defect 2 fix: called once, only when `close()`'s wait for AssemblyAI's own
+   *  `session.ended` Termination event runs out without one arriving -- the seam a caller
+   *  (index.ts, same pattern as `onReady` above) wires into the flight recorder as an
+   *  `aai_terminate_timeout` diagnostic, so a bundle can show the billing message never
+   *  came back in time rather than silently having no `billed_seconds` with no explanation.
+   *  Never called when `session.ended` DOES arrive within the window (that AaiEvent, with
+   *  its duration fields if present, is emitted to `on()` handlers normally instead --
+   *  `call/session.ts`'s existing `case 'session.ended'` already turns a numeric
+   *  `session_duration_seconds` into the `aai_session_terminated` diag that feeds
+   *  `populateBilledSeconds`). Optional so every existing test/caller that doesn't pass it
+   *  sees no behavior change. */
+  onCloseTimeout?: () => void;
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -179,6 +207,13 @@ class RealAaiSocket implements AaiSocket {
   /** Server messages whose type this adapter does not model -- never used for control
    *  flow, kept only so a caller (e.g. the live smoke script) can report it if useful. */
   unknownEventCount = 0;
+  /** Defect 2 fix: set by `close()` while it's waiting for AssemblyAI's own
+   *  `session.ended` to arrive, cleared (and called) either by that message showing up
+   *  (`wire()`'s message handler, below) or by the timeout in `close()` itself -- whichever
+   *  happens first. `null` whenever no close is in flight, so a `session.ended` that
+   *  arrives for any OTHER reason (AssemblyAI ending the call on its own, before we ever
+   *  called close()) does not spuriously resolve anything. */
+  private pendingTerminationResolve: (() => void) | null = null;
 
   constructor(
     ws: WsLike,
@@ -204,6 +239,13 @@ class RealAaiSocket implements AaiSocket {
         return;
       }
       this.emit(evt);
+      // Defect 2 fix: a `session.ended` arriving while `close()` is waiting on one is
+      // exactly what it's waiting for -- resolve early (still emitted to handlers above
+      // like any other event first, so `call/session.ts`'s own `aai_session_terminated`
+      // diag still gets whatever billing fields this message carried).
+      if (evt.type === 'session.ended' && this.pendingTerminationResolve) {
+        this.pendingTerminationResolve();
+      }
     });
     ws.on('close', () => {
       if (this.closed || this.expectClose) return;
@@ -307,6 +349,19 @@ class RealAaiSocket implements AaiSocket {
     return { unknown_events: this.unknownEventCount };
   }
 
+  /** Defect 2 fix (timing-analysis.md §E): used to send `session.end` and call
+   *  `ws.close()` in the same synchronous tick, so AssemblyAI's own Termination event
+   *  (`session.ended`, carrying the billing durations) could never arrive in time to be
+   *  read -- PROVEN null `billed_seconds` on 11/11 live bundles. Now: send `session.end`,
+   *  then wait up to `CLOSE_TERMINATION_TIMEOUT_MS` for `session.ended` to come back
+   *  (resolving early via `pendingTerminationResolve`, wired in `wire()`'s message handler
+   *  above), THEN close the socket -- on timeout, close anyway and report
+   *  `deps.onCloseTimeout` rather than hang. Stays synchronous/non-blocking from the
+   *  caller's own point of view (no `Promise` returned, same signature as before): the
+   *  `AaiSocket` interface's `close(): void` is unchanged, and `call/session.ts`'s `end()`
+   *  keeps ending the call -- emitting `ended` to the browser, closing that socket --
+   *  immediately, on exactly its existing schedule; only the underlying AAI transport
+   *  socket itself stays open a little longer in the background. */
   close(): void {
     if (this.closed) return;
     this.closed = true;
@@ -314,8 +369,34 @@ class RealAaiSocket implements AaiSocket {
     try {
       this.ws.send(JSON.stringify({ type: 'session.end' }));
     } catch {
-      // socket already gone -- nothing to tell it
+      // socket already gone -- nothing to tell it, and nothing to wait for either.
+      this.finishClose();
+      return;
     }
+    this.awaitTerminationThenClose();
+  }
+
+  private awaitTerminationThenClose(): void {
+    const timeoutMs = this.deps.closeTerminationTimeoutMs ?? CLOSE_TERMINATION_TIMEOUT_MS;
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      this.pendingTerminationResolve = null;
+      this.deps.onCloseTimeout?.();
+      this.finishClose();
+    }, timeoutMs);
+    (timer as unknown as { unref?: () => void }).unref?.();
+    this.pendingTerminationResolve = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      this.pendingTerminationResolve = null;
+      this.finishClose();
+    };
+  }
+
+  private finishClose(): void {
     try {
       this.ws.close();
     } catch {
