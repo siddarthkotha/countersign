@@ -2224,21 +2224,40 @@
     },
     {
       "id": "WATCHDOG-REARM-FIX",
-      "title": "watchdog re-arm starts a fresh 12 s timer instead of re-checking (review Critical, confirmed in code); fix lane test-first with pinned fire times; blocks push 33 - lane 1 failed to rebase twice (base e11f500); relaunched 8:19 PM on a hand-cut worktree from f2a86b4",
+      "title": "watchdog re-arm starts a fresh 12 s timer instead of re-checking (review Critical, confirmed in code); fix lane test-first with pinned fire times; blocks push 33 - lane 1 failed to rebase twice (base e11f500); relaunched 8:19 PM on a hand-cut worktree from f2a86b4 - LANDED on main 784bdb7 8:35 PM (attempt 3, hand-cut worktree); gate + review running",
       "files": [],
-      "status": "running",
+      "status": "done",
       "held_because": "next session step 1b (docs/TEST-PLAN.md)",
       "agent_id": "a617b91e5a3d2fbdb",
       "started_at": ""
     },
     {
       "id": "EXPOSURE-CORRECTED-EXCLUDE",
-      "title": "engine: corrected amounts excluded from structuring exposure (founder ruling 8:20 PM); new under-line corpus fixture; scenario description",
+      "title": "engine: corrected amounts excluded from structuring exposure (founder ruling 8:20 PM); new under-line corpus fixture; scenario description - LANDED on main ddf1df9 8:44 PM; gate + review running",
       "files": [],
-      "status": "running",
+      "status": "done",
       "held_because": "next session step 6",
       "agent_id": "a395213aa0240bf17",
       "started_at": ""
+    },
+    {
+      "id": "push-33",
+      "title": "push 33: e11f500..4cea6f9 (1b engine+server, inactivity watchdog, case 11, docs) - pushed 8:28 PM on founder word; deploy 33 VERIFIED 8:30 PM, 4cea6f9 served, /health ok",
+      "files": [],
+      "status": "done",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
+    },
+    {
+      "id": "HOOK-LOCAL-TIME-FLUSH",
+      "title": "local-time-gate blocks replies that carry the time (founder screenshot 8:25 PM); hypothesis: hook reads transcript before the final text block flushes; verify in hook + fix (e.g. also accept time in any block, or read stdin last_assistant_message) - ROOT CAUSE PROVEN (docs: transcript lags, use last_assistant_message); hook patched and tested 8:33 PM",
+      "files": [],
+      "status": "done",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
+      "held_because": ""
     }
   ]
 }
