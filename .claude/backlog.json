@@ -1685,10 +1685,10 @@
     },
     {
       "id": "push-19",
-      "title": "push 19: c65a4da..ccfe532 (docs: video plan, preflip, redaction, covers, latency table + batch runner; fixes: outcome-announcement rule, RE_ELICIT verbatim, scenario persona, paraphrase-robust matcher)",
+      "title": "push 19: c65a4da..ccfe532 (docs: video plan, preflip, redaction, covers, latency table + batch runner; fixes: outcome-announcement rule, RE_ELICIT verbatim, scenario persona, paraphrase-robust matcher) - superseded by later pushes (all commits on origin)",
       "files": [],
-      "status": "held",
-      "held_because": "founder's live call ended 10:24 PM; pushing now",
+      "status": "done",
+      "held_because": "",
       "agent_id": "",
       "started_at": ""
     },
@@ -2139,23 +2139,23 @@
     },
     {
       "id": "HARNESS-FREEPLAY-WAIT-HANGUP",
-      "title": "free-play waits for the server hang-up and grades the goodbye",
+      "title": "free-play waits for the server hang-up and grades the goodbye - landed in the Day 7 pushes",
       "files": [
         "scripts/rehearse/**"
       ],
-      "status": "held",
-      "held_because": "lane f6ec66c done and green (rehearse 431/431); cherry-pick after the batch so grading does not change mid-batch",
+      "status": "done",
+      "held_because": "",
       "agent_id": "",
       "started_at": ""
     },
     {
       "id": "HARNESS-GRADER-DEDUPE",
-      "title": "free-play grader: consecutive identical questions count once, post-verdict questions ignored, unanswered questions fail only when the agent gave no chance (<1.5 s); regrade recomputes",
+      "title": "free-play grader: consecutive identical questions count once, post-verdict questions ignored, unanswered questions fail only when the agent gave no chance (<1.5 s); regrade recomputes - landed in the Day 7 pushes",
       "files": [
         "scripts/rehearse/**"
       ],
-      "status": "held",
-      "held_because": "lane b29597d done and green (Haiku); cherry-pick with the free-play wait-hangup fix after the batch, then regrade the whole batch",
+      "status": "done",
+      "held_because": "",
       "agent_id": "",
       "started_at": ""
     },
@@ -2197,11 +2197,11 @@
     },
     {
       "id": "SPIKE-30-MIN",
-      "title": "30 min live confirmation of E on the three known races - launched 8:53 AM on deploy 39: miller, dana, miller-silent, case 11, miller, dana",
+      "title": "30 min live confirmation of E on the three known races - launched 8:53 AM on deploy 39: miller, dana, miller-silent, case 11, miller, dana - ran 8:52 to 9:00 AM on deploy 39: 5 of 6 pass, miller-silent FREEZE (defensible); E measured no better on the tail; follow-ups landed",
       "files": [],
-      "status": "running",
+      "status": "done",
       "held_because": "",
-      "agent_id": "spike.sh",
+      "agent_id": "",
       "started_at": ""
     },
     {
@@ -2409,13 +2409,72 @@
     },
     {
       "id": "COMMIT-APPROVED-RECORDING",
-      "title": "commit the founder-approved regeneration of injection-plus-two-slips-escalates.json",
+      "title": "commit the founder-approved regeneration of injection-plus-two-slips-escalates.json - committed f36324e with GOLDEN_OVERRIDE after autopilot stop 1:30 PM",
+      "files": [],
+      "status": "done",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
+      "held_because": ""
+    },
+    {
+      "id": "push-40",
+      "title": "push 40: 06368f6..HEAD (injection ruling 6, fragment brake, empty holding reply, awaiting grading with re-ask cap, terse answers, name-token fix, approved recordings) - pushed at close 2026-09-15 with the founder close word",
+      "files": [],
+      "status": "running",
+      "agent_id": "close",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
+    },
+    {
+      "id": "SPIKE-2",
+      "title": "second six-call confirmation on deploy 40 vs deploy 36 (goodbye delay, agent lines, wall time)",
       "files": [],
       "status": "held",
       "agent_id": "",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
-      "held_because": "pre-commit gate blocks protected-oracle changes while the autopilot flag is on; founder says \"autopilot stop\", I commit, founder says \"autopilot start\""
+      "held_because": "needs deploy 40 verified; first item next session"
+    },
+    {
+      "id": "FOUNDER-PLAY-THROUGH-2",
+      "title": "founder plays cases 5, 7, 8, 11 on the confirmed build",
+      "files": [],
+      "status": "held",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
+      "held_because": "after SPIKE-2 beats deploy 36; founder ready"
+    },
+    {
+      "id": "CHEAT-SHEET-ON-LANDING",
+      "title": "render the eleven cases on the landing page as the judge cheat-sheet",
+      "files": [],
+      "status": "held",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
+      "held_because": "founder yes needed; ambition pass item from the play sheet rewrite"
+    },
+    {
+      "id": "PRE-COMMIT-GATE-WORKTREE",
+      "title": "pre-commit-gate: run the snapshot gate inside the worktree, not the main checkout",
+      "files": [],
+      "status": "held",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
+      "held_because": ".claude edit; lanes report false failures from the hook inside worktrees"
+    },
+    {
+      "id": "STATUSLINE-MODEL-DISPLAY",
+      "title": "status line shows the model again",
+      "files": [],
+      "status": "held",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
+      "held_because": ".claude edit; founder noticed the model name missing from the status line 2026-09-14"
     }
   ]
 }

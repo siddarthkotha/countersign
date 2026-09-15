@@ -1,61 +1,69 @@
 # Countersign, session snapshot (overwritten at every close; never appended)
 
-Last close: Monday 2026-09-14, 7:31 PM CDT (Day 7, which ran 8:41 AM to 7:31 PM; autopilot
-on 3:33 PM to 7:05 PM). Autopilot is OFF. No lanes in flight: every lane of the day landed.
+Last close: Tuesday 2026-09-15, 2:25 PM CDT (Day 8, which ran Monday 7:37 PM to Tuesday
+2:25 PM with two API-limit outages, 10:34 PM to 11:40 PM and 10:41 AM to 11:30 AM; autopilot
+on 10:29 PM to 1:30 PM). Autopilot is OFF. No lanes in flight.
 
 ## The one-paragraph version
 
-Day 7 turned the goodbye bug into a way of working. The server close path got a time budget,
-a transcript-armed hang-up, an idle-timeout goodbye and no speech after the goodbye; the
-question path got a re-ask when the model swaps a holding line for the question, imperative
-asks count, and an "issued" action follows the transcript. The harness grew free-play mode
-(an improvising caller with seeded random pauses), waits for the server's own hang-up,
-grades the goodbye, dedupes repeated questions and regrades stored reports. The founder set
-the definition of done (a judge in their own words, any pauses, any pronunciation, every
-case), killed the simulator idea with two external panel seats, ruled live tests only,
-approved about five hours of credit, and made Haiku the default lane model. The AssemblyAI
-docs were fetched and settle the design: no verbatim-speech event exists, the automatic reply
-cannot be stopped, reply.create is the only "speak now"; the next design step (E) lets the
-automatic reply be a holding beat and sends one instructed reply.create. The first free-play
-batch (deploy 30) scored 21 of 30 on verdict after regrade; three product defects (a sealed
-verdict drifted and spoke the wrong goodbye; a self-correction lost in the readback; a request
-without an amount produced an invented question) were fixed, reviewed and deployed as push 32.
+Day 8 was the founder's first full live run of all eleven cases (Monday 9:50 to 10:14 PM):
+four verdicts wrong (5, 6, 8, 11), case 7 never hung up, goodbyes cut off, case 11 looped,
+and the recorder had stored no words. Overnight and this morning the logs were analysed and
+every finding fixed test-first: a bare-name answer no longer reads as a new caller; the idle
+timer counts caller silence, not microphone frames; the goodbye waits for its own audio and
+is sent once; every record carries verbatim words and AssemblyAI's billed seconds; the case 11
+script now corrects to Dana's real $84,500 (the $48,500 script could never stage by design of
+the payment record check). Design E (holding beat plus one instructed reply per caller turn)
+went live in push 39 and measured worse on chatter and no better on the goodbye tail, so two
+follow-ups landed: a fragment brake and an empty automatic reply. The engine now leaves a
+question waiting when a reply carries no answer, re-asks up to twice, recognises terse
+answers and spoken digits, and never grades filler as an answer. Founder rulings: case 11 is
+STAGE and corrected amounts do not count toward exposure (ruling 5); an injection attempt
+escalates on its own and no longer feeds the freeze count (ruling 6); the three recordings
+whose numbers changed under the new grading are approved; the admin token stays.
 
 ## PROVEN at this close
-- Live: 6ddd9e9 served 7:27 PM, /health ok. Pushes 26 to 32 today, CI green on each.
-- Close gate 7:31 PM: 1692 tests across 88 files, typecheck clean; corpus 128/128 (7:11 PM).
-- Credits (founder dashboard 5:34 PM): 2.9 h used, $86.92 left, about $4.50 per hour. The
-  free-play batch used about 35 min; today's harness total about 56 min plus the batch
-  (ESTIMATE, wall clock).
-- Standing plan: docs/TEST-PLAN.md (rulings, docs quotes, design E, milestones, pass criteria,
-  eleven cases, commands, batch findings, next-session order with step 1b follow-ups).
-- Panel record: docs/PANEL-2026-09-14-TEST-PLAN.md. Play sheet: docs/PLAY-SHEET.md (proof
-  lines from the deploy-28 scripted runs; free-play batch results in TEST-PLAN).
+- Live: deploy 39 (06368f6) served at the time of writing; push 40 (fifteen commits, main at
+  fd75123) goes out with this close and is verified below in the log.
+- Close gate numbers are on the closing log line (typecheck, full suite, corpus).
+- Harness on deploy 36: 10 of 11 pass; case 11 passed on deploy 38 (STAGE, 100 s, billed
+  100.19 s recorded). Design E confirmation on deploy 39: 5 of 6 pass, one defensible freeze.
+- Report of the whole round: docs/RERUN-2026-09-15.md. Plan: docs/TEST-PLAN.md (rulings 5, 6).
+- Founder dashboard credit: 3.8 h used, $83.01 left at Monday 8:45 PM; about 45 min of
+  harness time since (ESTIMATE); npm run credits:ledger reads billed seconds from deploy 38 on.
 
-## Open, in the order to take them (mirrors docs/TEST-PLAN.md)
-1. Step 1b follow-ups (Haiku): seal truncation by array position; department words not
-   captured as an approver; watchdog boundary test for a long goodbye. Plus
-   questionMatch.ts returning the new ELICIT_REQUEST sentence.
-2. Design E (holding beat, then one instructed reply.create), test-first, one lane, scoped
-   review, push, verify.
-3. 30 min live confirmation on the three known races; then the 45 min free-play batch;
-   regrade; classify every non-pass HARNESS / PRODUCT / UNKNOWN with its report.
-4. Case 11 scenario and persona. Sheet proof lines. Founder play-through in his own words.
-5. Founder items: re-record; Render env items; pre-flip items; the Sep 18 judge sim.
+## Open, in the order to take them
+1. Verify deploy 40, then the second six-call confirmation (miller, dana, miller-silent,
+   case 11, miller, dana) against deploy 36 on goodbye delay, agent lines, wall time. If it
+   beats deploy 36, the founder plays cases 5, 7, 8, 11 (he is ready; about 20 min).
+2. Free-play batch (45 min) once the confirmation passes; regrade; classify non-passes.
+3. Rewrite injection-plus-two-slips-escalates.json as a real ruling-6 proof (append a new
+   fixture with explicit challenge specs so two wrong answers grade FAIL).
+4. Founder decisions parked: case sheet on the landing page; two .claude edits (pre-commit
+   gate false failures in worktrees; status line model name).
+5. Known limits, labelled: the empty automatic reply is UNKNOWN live until measured;
+   magnitude number words ("two thousand and one") are not digitised for account fields.
 
-## Lessons written to memory today
-Done means any judge. Prove the script before founder time. Only the re-gate on main is
-proof. Haiku by default (hook enforces SONNET-JUSTIFIED). Live is the only ground truth for
-speech. Do not launch lanes after a token warning without the founder's word; the autopilot
-toggle only fires on a message that is the words alone.
+## Lessons written today (memory)
+Founder calls need zero-step capture and verbatim words; prove the capture path with a
+harness call before any founder session; `isolation: "worktree"` cuts from the session-start
+tip, hand-cut worktrees from main instead; a lane's green count is not proof until the gate
+runs on main; copy the injected clock, never infer the time; "simplify X" may mean "explain
+X simply", ask before changing a rule.
 
 ## How to test without being the tester
-`npm run rehearse -- --scenario miller-patient --url https://countersign-bf8q.onrender.com`;
-`npm run sim:freeplay -- --url https://countersign-bf8q.onrender.com --model openai/gpt-4o-mini --runs 3 --seed <n>` (needs OPENROUTER_API_KEY exported);
-`npm run rehearse:regrade -- scripts/rehearse/reports/<report>.md` (free).
+`npm run rehearse -- --scenario <name> --url https://countersign-bf8q.onrender.com`
+(scenarios: dana-patient, miller-patient, judge-out-of-scope, identity-switch,
+barge-in-interrupt, single-wrong-answer, hangup-after-request, prompt-injection-midcall,
+structuring-two-wires, miller-silent-after-amount, corrected-critical-field);
+`npm run sim:freeplay -- --url <url> --model openai/gpt-4o-mini --runs 3 --seed <n>`;
+`npm run rehearse:regrade -- <report.md>`; `npm run credits:ledger`;
+live records: GET /api/admin/sessions (bearer COUNTERSIGN_ADMIN_TOKEN from .env), then
+GET /api/session/<id or 8-char code>/diagnostics.
 
 ## Next session
-"Day 8 resume: read docs/TEST-PLAN.md first, then docs/STATE.md and the tail of
-docs/AUTOPILOT_LOG.md. Nothing is in flight. Start at step 1b, then design E, then the 30 min
-live confirmation, then the 45 min batch. Live tests only; log every minute; a fix that fails
-twice live is parked; Haiku by default."
+"Day 9 resume: read docs/STATE.md, docs/RERUN-2026-09-15.md, then the tail of
+docs/AUTOPILOT_LOG.md. Nothing is in flight. Start by confirming deploy 40 is served, run the
+six-call confirmation, compare with deploy 36, then hand the founder cases 5, 7, 8, 11. Live
+tests only; fetch every founder record before any push; Haiku by default, Sonnet for server
+timing and reviews."
