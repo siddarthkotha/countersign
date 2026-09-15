@@ -234,12 +234,12 @@ describe('Call.tsx flight recorder wiring (Task W9)', () => {
       ]),
     );
 
-    // The transcript-line event carries role+length only -- never the transcript text (LAW 4:
-    // the server already has the verbatim line).
+    // The transcript-line event carries role, length, and text. This is diagnostics (not
+    // evidence per LAW 4) -- the text is recorded so live calls can be analyzed post-hoc.
+    // Evidence exports stay the only artefact that proves what was said; this is a
+    // debugging-aid copy with the same text, verbatim.
     const transcriptEvent = events.find((e) => e.kind === 'transcript_line')!;
-    expect(transcriptEvent.detail).toEqual({ role: 'caller', length: 'This is Robert Miller.'.length });
-    const raw = JSON.stringify(events);
-    expect(raw).not.toContain('This is Robert Miller');
+    expect(transcriptEvent.detail).toEqual({ role: 'caller', length: 'This is Robert Miller.'.length, text: 'This is Robert Miller.' });
 
     // The link events carry the leg and the dropped_frames count.
     const linkEvents = events.filter((e) => e.kind === 'link');

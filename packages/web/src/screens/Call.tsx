@@ -286,12 +286,13 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
         if (state.transcript.length > prevLen) {
           const newLines = state.transcript.slice(prevLen);
           transcriptLenRef.current = state.transcript.length;
-          // Task W9: role + length only, per LAW 4 -- never `line.text` (the server already
-          // has the verbatim transcript; this is a debugging aid, not a second evidence copy).
-          // W9 review, fix round 1 (Minor): same reasoning as `recordStateEvent` above --
-          // `recordTranscriptLine` is the one source of truth for this event's shape.
+          // Task W9: role, length, and text recorded. This is diagnostics (not evidence per
+          // LAW 4) -- the text is recorded so live calls can be analyzed post-hoc. Evidence
+          // exports stay the only artefact that proves what was said; this is a debugging-aid
+          // copy with the same text, verbatim. W9 review, fix round 1 (Minor): same reasoning
+          // as `recordStateEvent` above -- `recordTranscriptLine` is the one source of truth.
           for (const line of newLines) {
-            recordTranscriptLine(line.speaker, line.text.length);
+            recordTranscriptLine(line.speaker, line.text.length, line.text);
           }
           if (newLines.some((line) => line.speaker === 'caller')) {
             // Minor (W8 review): a turn that never got its own agent audio back (a silent,

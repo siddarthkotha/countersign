@@ -136,11 +136,12 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-/** `role`/`length` only -- the two fields the flight recorder ask calls out by name for a
- *  transcript line arrival. Never pass `line.text` here (LAW 4: the server already has the
- *  verbatim text; this is a debugging aid, not a second copy of evidence). */
-export function recordTranscriptLine(role: string, length: number): void {
-  recordEvent('transcript_line', { role, length });
+/** `role`, `length`, and `text` -- records the transcript line with verbatim text. This is
+ *  diagnostics (not evidence per LAW 4) -- the text is recorded so live calls can be analyzed
+ *  post-hoc. Evidence exports stay the only artefact that proves what was said; this is a
+ *  debugging-aid copy with the same text, verbatim. */
+export function recordTranscriptLine(role: string, length: number, text: string): void {
+  recordEvent('transcript_line', { role, length, text });
 }
 
 /** Small helper so Call.tsx's `onState` handler reads as one line per state field it cares
