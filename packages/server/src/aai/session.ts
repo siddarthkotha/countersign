@@ -102,6 +102,16 @@ export interface AaiConnectDeps {
    *  `populateBilledSeconds`). Optional so every existing test/caller that doesn't pass it
    *  sees no behavior change. */
   onCloseTimeout?: () => void;
+  /** Defect 2 fix (2026-09-15): called every time a raw `session.ended` (or any
+   *  termination-shaped) message arrives from AssemblyAI -- before it is mapped to an
+   *  AaiEvent. The callback receives the parsed message's top-level keys and any numeric
+   *  fields, so a caller (index.ts, same pattern as `onReady` above) can record an
+   *  `aai_session_ended_raw` diagnostic proving exactly what AssemblyAI sent for billing
+   *  (or proving it sent nothing), without exposing transcript text or audio data. Called
+   *  for every session.ended, whether it carries billing fields or not, and whether a
+   *  close() is currently waiting on it or not. Optional so every existing test/caller
+   *  that doesn't pass it sees no behavior change. */
+  onSessionEnded?: (msg: Record<string, unknown>) => void;
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -239,6 +249,11 @@ class RealAaiSocket implements AaiSocket {
         return;
       }
       this.emit(evt);
+      // Defect 2 fix: record the raw session.ended message (top-level keys and numeric
+      // fields only, no transcript/audio) for diagnostic proof of what AssemblyAI sent.
+      if (msg.type === 'session.ended') {
+        this.deps.onSessionEnded?.(msg);
+      }
       // Defect 2 fix: a `session.ended` arriving while `close()` is waiting on one is
       // exactly what it's waiting for -- resolve early (still emitted to handlers above
       // like any other event first, so `call/session.ts`'s own `aai_session_terminated`

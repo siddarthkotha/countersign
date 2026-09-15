@@ -220,6 +220,26 @@ function createAai(session_id: string): AaiSocket {
         // actually asked AssemblyAI to speak first.
         greeting_configured,
       }),
+    // Defect 2 fix (2026-09-15): when close() times out waiting for AssemblyAI's own
+    // session.ended Termination event, record aai_terminate_timeout so a bundle shows
+    // the billing message never came back in time (see aai/session.ts's `onCloseTimeout`
+    // doc comment for the reasoning).
+    onCloseTimeout: () =>
+      recordServerEvent(diagnostics, session_id, Date.now(), 'aai_terminate_timeout', {}),
+    // Defect 2 fix (2026-09-15): every time a raw session.ended arrives, record its
+    // top-level keys and numeric fields (no transcript text, no audio), so a bundle proves
+    // what AssemblyAI sent for billing -- or that it sent nothing (aai_terminate_timeout
+    // fired instead).
+    onSessionEnded: (msg) => {
+      const detail: Record<string, unknown> = { keys: Object.keys(msg) };
+      // Extract numeric fields (session_duration_seconds, audio_duration_seconds, timestamp)
+      for (const key of Object.keys(msg)) {
+        if (typeof msg[key] === 'number') {
+          detail[key] = msg[key];
+        }
+      }
+      recordServerEvent(diagnostics, session_id, Date.now(), 'aai_session_ended_raw', detail);
+    },
   });
 
   return new PendingAaiSocket(connecting);
