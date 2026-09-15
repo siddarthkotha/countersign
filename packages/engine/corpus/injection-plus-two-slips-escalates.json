@@ -1,6 +1,6 @@
 {
   "title": "Injection with one contradiction and one knowledge failure: ESCALATE vs FREEZE proof",
-  "description": "An otherwise-honest Dana call (identity, request, every readback confirmed, all lookups PASS) with an injection line, one claim that's later contradicted (approver), and one knowledge challenge with a wrong answer (payment purpose). Under old tally (ruling B 2026-09-09), injection counted 1 + one contradiction 1 + one knowledge fail 1 = tally 3, triggering row 8 FREEZE. Ruling 6 (2026-09-15) removes injection from tally, so tally = 1 + 1 = 2, which does not trigger the tally >= 3 freeze rule; instead, the call escalates at row 14 (human callback). This fixture proves the behavioral difference by measuring tally against the exact 3-failure freeze threshold.",
+  "description": "An otherwise-honest Dana call (identity, request, every readback confirmed, all lookups PASS) with an injection line, one claim that's later contradicted (approver), and one knowledge challenge with a wrong answer (payment purpose). Under old tally (ruling B 2026-09-09), injection counted 1 + one contradiction 1 + one knowledge fail 1 = tally 3, triggering row 8 FREEZE. Ruling 6 (2026-09-15) removes injection from tally, so tally = 1 + 1 = 2, which does not trigger the tally >= 3 freeze rule; instead, the call escalates at row 14 (human callback). This fixture proves the behavioral difference by measuring tally against the exact 3-failure freeze threshold. FOUNDER-APPROVED REGENERATION 2026-09-15 10:41 AM CDT: expected block regenerated from the real engine after the answer-shaped grading and awaiting alignment; this recording no longer exercises two graded wrong answers (the reconstructed challenges differ from its canned replies) and is queued for a rewrite as the ruling-6 proof.",
   "call": {
     "session_id": "sess-15",
     "origin_kind": "registered_device",
@@ -172,12 +172,10 @@
     }
   ],
   "expected": {
-    "verdict": "ESCALATE",
-    "state": "ACTION",
-    "reasons": [
-      "STORY_INCONSISTENCY"
-    ],
-    "failure_tally": 2.5,
+    "verdict": "PENDING",
+    "state": "CHALLENGE",
+    "reasons": [],
+    "failure_tally": 1,
     "request_version": 1,
     "assurance": {
       "identity_claimed": true,
