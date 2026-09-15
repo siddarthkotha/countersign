@@ -62,7 +62,10 @@ export type AaiEvent =
   // (attempts exhausted, the 30s window passed, or nothing to resume against). A real
   // AssemblyAI-originated `session.ended` (mapped in `mapServerEvent`) never sets it --
   // `call/session.ts` falls back to its existing 'aai_ended' reason in that case.
-  | { type: 'session.ended'; reason?: string }
+  // session_duration_seconds and audio_duration_seconds are PROVEN from AssemblyAI's
+  // events-reference docs (https://www.assemblyai.com/docs/voice-agents/voice-agent-api/events-reference):
+  // the server sends them in the Termination event (session.ended type) and are used for billing.
+  | { type: 'session.ended'; reason?: string; session_duration_seconds?: number; audio_duration_seconds?: number }
   // S3 extension: not an AssemblyAI wire event -- the real adapter (`src/aai/session.ts`)
   // synthesizes this around its own resume-on-drop handling so the screen can show "voice
   // link lost, security state preserved" without the call layer re-deriving anything (the
@@ -70,4 +73,6 @@ export type AaiEvent =
   // `attempt` is the 1-indexed resume attempt this event belongs to -- resume is bounded
   // (MAX_RESUME_ATTEMPTS in session.ts), so this also tells a viewer how close to giving up
   // the call is.
-  | { type: 'link'; state: 'lost' | 'restored'; attempt: number };
+  | { type: 'link'; state: 'lost' | 'restored'; attempt: number }
+  // AssemblyAI Termination event (session end): carries billing duration from the server
+  | { type: 'session.termination'; session_duration_seconds: number; audio_duration_seconds?: number };

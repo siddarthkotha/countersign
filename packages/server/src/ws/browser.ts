@@ -32,7 +32,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { MERIDIAN, mockToolResult } from '@countersign/engine';
 import type { BrowserEvent, CallContext, SeedConfig, ServerEvent } from '@countersign/engine';
 import { endSession, personaFor, touch, type CapsState } from '../caps.js';
-import { createBundle, endBundle, recordServerEvent, summarizeBundle, type DiagnosticsState } from '../diagnostics.js';
+import { createBundle, endBundle, recordServerEvent, summarizeBundle, populateBilledSeconds, type DiagnosticsState } from '../diagnostics.js';
 import type { AaiSocket } from '../aai/types.js';
 import type { ServerConfig } from '../config.js';
 import { CallSession } from '../call/session.js';
@@ -203,6 +203,8 @@ function makeEntrySink(
       // tracked (or the ring already evicted it) -- both harmless no-ops here.
       const bundle = endBundle(deps.diagnostics, session_id, deps.now(), e.reason);
       if (bundle) {
+        // Extract billed_seconds from the aai_session_terminated event if present
+        populateBilledSeconds(bundle);
         // eslint-disable-next-line no-console -- this line IS the feature: Render's log tail.
         console.log(JSON.stringify({ countersign_diag: summarizeBundle(bundle) }));
       }

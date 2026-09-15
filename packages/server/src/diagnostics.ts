@@ -67,6 +67,10 @@ export interface DiagnosticBundle {
    *  check -- the sliding window `checkClientPostRate` enforces
    *  `MAX_CLIENT_POSTS_PER_MINUTE` against. */
   client_post_times: number[];
+  /** Billing duration in seconds from AssemblyAI's session.ended Termination event
+   *  (session_duration_seconds field). Populated when the AAI Termination event arrives.
+   *  Used to compute actual billed cost: billed_seconds * ($4.50 / 3600). */
+  billed_seconds?: number;
 }
 
 export interface DiagnosticsState {
@@ -304,4 +308,25 @@ export function summarizeBundle(bundle: DiagnosticBundle): {
     verdict,
     errors: counts.error ?? 0,
   };
+}
+
+/** Extract billed_seconds from the aai_session_terminated diagnostic event (if present)
+ *  and set it on the bundle. Called after endBundle to populate the billing duration
+ *  from AssemblyAI's session.ended Termination event. */
+export function populateBilledSeconds(bundle: DiagnosticBundle): void {
+  if (bundle.billed_seconds !== undefined) return; // already set
+  for (const e of bundle.server_events) {
+    if (
+      e.kind === 'aai_session_terminated' &&
+      typeof e.detail === 'object' &&
+      e.detail !== null &&
+      'session_duration_seconds' in e.detail
+    ) {
+      const duration = (e.detail as { session_duration_seconds: unknown }).session_duration_seconds;
+      if (typeof duration === 'number') {
+        bundle.billed_seconds = duration;
+      }
+      return;
+    }
+  }
 }

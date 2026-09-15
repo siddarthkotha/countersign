@@ -145,8 +145,21 @@ function mapServerEvent(msg: Record<string, unknown>): AaiEvent | null {
       };
     case 'session.error':
       return { type: 'session.error', code: String(msg.code), message: String(msg.message) };
-    case 'session.ended':
-      return { type: 'session.ended' };
+    case 'session.ended': {
+      // AssemblyAI Termination event (session.ended type) carries billing duration.
+      // VERIFY-AT-BUILD PROVEN: https://www.assemblyai.com/docs/voice-agents/voice-agent-api/events-reference
+      // Fields: session_duration_seconds (number), audio_duration_seconds (number), timestamp (number)
+      const result: { type: 'session.ended'; session_duration_seconds?: number; audio_duration_seconds?: number } = {
+        type: 'session.ended',
+      };
+      if (typeof msg.session_duration_seconds === 'number') {
+        result.session_duration_seconds = msg.session_duration_seconds;
+      }
+      if (typeof msg.audio_duration_seconds === 'number') {
+        result.audio_duration_seconds = msg.audio_duration_seconds;
+      }
+      return result;
+    }
     default:
       return null;
   }
