@@ -660,6 +660,108 @@ describe('http server', () => {
     });
   });
 
+  it('POST /api/session/:prefix/diagnostics with 8-char prefix returns 404 (no prefix writes)', async () => {
+    const { base, diagnostics } = await start();
+    const fullId = '11111111-1111-1111-1111-111111111111';
+
+    // Create a bundle
+    const bundle = {
+      session_id: fullId,
+      started_at: 1000,
+      ended_at: null,
+      end_reason: null,
+      deployed_commit: null,
+      server_events: [],
+      client_events: [],
+      client_bytes: 0,
+      client_post_times: [],
+    } as DiagnosticBundle;
+    diagnostics.bundles.set(fullId, bundle);
+
+    // POST with exact UUID works
+    const rExact = await fetch(`${base}/api/session/${fullId}/diagnostics`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: [{ t_ms: 1, kind: 'test' }] }),
+    });
+    expect(rExact.status).toBe(200);
+    expect(bundle.client_events).toHaveLength(1);
+
+    // POST with 8-char prefix returns 404 (no write allowed)
+    const rPrefix = await fetch(`${base}/api/session/${fullId.slice(0, 8)}/diagnostics`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: [{ t_ms: 2, kind: 'test2' }] }),
+    });
+    expect(rPrefix.status).toBe(404);
+    // Bundle should still have only 1 event (no write occurred)
+    expect(bundle.client_events).toHaveLength(1);
+  });
+
+  it('GET /api/session/:prefix/diagnostics with ambiguous prefix returns 409 without count', async () => {
+    const { base, diagnostics } = await start();
+
+    // Create two bundles with same prefix
+    const id1 = '11111111-1111-1111-1111-111111111111';
+    const id2 = '11111111-2222-2222-2222-222222222222';
+    diagnostics.bundles.set(id1, { session_id: id1, started_at: 1000 } as DiagnosticBundle);
+    diagnostics.bundles.set(id2, { session_id: id2, started_at: 2000 } as DiagnosticBundle);
+
+    const r = await fetch(`${base}/api/session/11111111/diagnostics`);
+    expect(r.status).toBe(409);
+    const body = await r.json();
+    expect(body).toEqual({ error: 'ambiguous' });
+    // Ensure no count is returned
+    expect(body).not.toHaveProperty('matches');
+  });
+
+  it('admin routes handle token comparison safely (different length, no crash)', async () => {
+    const { base } = await start({ admin_token: 'secret-token' });
+
+    // Wrong token with different length should return 401, not crash
+    const r = await fetch(`${base}/api/admin/sessions`, {
+      headers: { Authorization: 'Bearer x' },
+    });
+    expect(r.status).toBe(401);
+    const body = await r.json();
+    expect(body).toEqual({ error: 'unauthorized' });
+  });
+
+  it('?limit parameter clamps: rejects negative/zero/non-integer, caps at 200', async () => {
+    const adminToken = 'secret-token';
+    const { base, diagnostics } = await start({ admin_token: adminToken });
+
+    // Add one bundle so we have something to return
+    const bundle: DiagnosticBundle = {
+      session_id: '11111111-1111-1111-1111-111111111111',
+      started_at: 1000,
+      ended_at: null,
+      end_reason: null,
+      deployed_commit: null,
+      server_events: [],
+      client_events: [],
+      client_bytes: 0,
+      client_post_times: [],
+    };
+    diagnostics.bundles.set(bundle.session_id, bundle);
+
+    // Negative defaults to 50
+    const rNeg = await fetch(`${base}/api/admin/sessions?limit=-5`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(rNeg.status).toBe(200);
+    const bodyNeg = (await rNeg.json()) as { sessions: unknown[] };
+    expect(bodyNeg.sessions).toHaveLength(1);
+
+    // Above 200 caps at 200
+    const r999 = await fetch(`${base}/api/admin/sessions?limit=999`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(r999.status).toBe(200);
+    const body999 = (await r999.json()) as { sessions: unknown[] };
+    expect(body999.sessions).toHaveLength(1);
+  });
+
   it('GET /api/admin/sessions returns 404 when COUNTERSIGN_ADMIN_TOKEN is unset', async () => {
     const { base } = await start();
     const r = await fetch(`${base}/api/admin/sessions`);

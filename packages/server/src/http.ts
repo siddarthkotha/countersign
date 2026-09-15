@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import type { ServerConfig } from './config.js';
 import {
   newCapsState,
@@ -135,6 +136,25 @@ function statusForDecisionReason(reason: CapDecisionReason): number {
   return reason === 'kill_switch' || reason === 'no_api_key' || reason === 'credits_exhausted' || reason === 'mint_error'
     ? 503
     : 429;
+}
+
+/** Safe bearer token comparison: returns false if lengths differ, uses timingSafeEqual
+ *  for same-length comparison to prevent timing attacks. Never throws. */
+function isBearerTokenValid(authHeader: string | undefined, expectedToken: string): boolean {
+  if (!authHeader) return false;
+  const prefix = 'Bearer ';
+  if (!authHeader.startsWith(prefix)) return false;
+  const providedToken = authHeader.slice(prefix.length);
+
+  // Different lengths: not equal (safe)
+  if (providedToken.length !== expectedToken.length) return false;
+
+  // Same length: use timing-safe comparison
+  try {
+    return timingSafeEqual(Buffer.from(providedToken), Buffer.from(expectedToken));
+  } catch {
+    return false;
+  }
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -378,7 +398,7 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
           return;
         }
         if ('error' in lookupResult) {
-          sendJson(res, 409, { error: lookupResult.error, matches: lookupResult.count });
+          sendJson(res, 409, { error: lookupResult.error });
           return;
         }
         sendJson(res, 200, lookupResult.bundle);
@@ -394,22 +414,10 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
       // session-cumulative-budget validation (400 for shape, 413 for a full session budget)
       // is `addClientEvents`'s job (diagnostics.ts) -- same division as everywhere else in
       // this file (transport-level checks here, payload validation in the owning module).
-      // For POST, only apply prefix lookup to GET side per the requirement ("do not widen writes").
-      let lookupId = id;
-      if (!isExactUuid && isValidIdLength) {
-        const lookupResult = lookupBundleResult(deps.diagnostics, id);
-        if (!lookupResult) {
-          sendJson(res, 404, { error: 'not_found' });
-          return;
-        }
-        if ('error' in lookupResult) {
-          sendJson(res, 409, { error: lookupResult.error, matches: lookupResult.count });
-          return;
-        }
-        lookupId = lookupResult.bundle.session_id;
-      }
+      // NOTE: POST requires EXACT session id only; prefix lookup is GET-only per law 2
+      // ("never widen writes to prefixes").
 
-      const rate = checkClientPostRate(deps.diagnostics, lookupId, now);
+      const rate = checkClientPostRate(deps.diagnostics, id, now);
       if (rate === 'not_found') {
         sendJson(res, 404, { error: 'not_found' });
         return;
@@ -437,7 +445,7 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
         sendJson(res, 413, { error: 'payload_too_large' });
         return;
       }
-      const result = addClientEvents(deps.diagnostics, lookupId, bodyResult.body);
+      const result = addClientEvents(deps.diagnostics, id, bodyResult.body);
       if (!result.ok) {
         const status = result.reason === 'not_found' ? 404 : result.reason === 'session_full' ? 413 : 400;
         sendJson(res, status, { error: result.reason });
@@ -455,16 +463,20 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
         sendJson(res, 404, { error: 'not_found' });
         return;
       }
-      const authHeader = req.headers.authorization;
-      if (authHeader !== `Bearer ${cfg.admin_token}`) {
+      if (!isBearerTokenValid(req.headers.authorization, cfg.admin_token)) {
         sendJson(res, 401, { error: 'unauthorized' });
         return;
       }
 
-      const limit = Math.min(
-        parseInt(url.searchParams.get('limit') ?? '50', 10) || 50,
-        200,
-      );
+      // Parse limit: must be a finite positive integer, clamped to [1, 200]
+      let limit = 50;
+      const limitParam = url.searchParams.get('limit');
+      if (limitParam) {
+        const parsed = parseInt(limitParam, 10);
+        if (Number.isFinite(parsed) && parsed >= 1) {
+          limit = Math.min(parsed, 200);
+        }
+      }
       const sessions = Array.from(deps.diagnostics.bundles.values())
         .sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))
         .slice(0, limit)
@@ -495,8 +507,7 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
         sendJson(res, 404, { error: 'not_found' });
         return;
       }
-      const authHeader = req.headers.authorization;
-      if (authHeader !== `Bearer ${cfg.admin_token}`) {
+      if (!isBearerTokenValid(req.headers.authorization, cfg.admin_token)) {
         sendJson(res, 401, { error: 'unauthorized' });
         return;
       }
