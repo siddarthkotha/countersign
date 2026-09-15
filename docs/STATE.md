@@ -23,8 +23,8 @@ escalates on its own and no longer feeds the freeze count (ruling 6); the three 
 whose numbers changed under the new grading are approved; the admin token stays.
 
 ## PROVEN at this close
-- Live: deploy 39 (06368f6) served at the time of writing; push 40 (fifteen commits, main at
-  fd75123) goes out with this close and is verified below in the log.
+- Live: push 41 (grace-window fix fce67a1, on top of push 40) went out at 3:29 PM with the
+  founder word; verification and the Dana proof are on the closing log lines.
 - Close gate numbers are on the closing log line (typecheck, full suite, corpus).
 - Harness on deploy 36: 10 of 11 pass; case 11 passed on deploy 38 (STAGE, 100 s, billed
   100.19 s recorded). Design E confirmation on deploy 39: 5 of 6 pass, one defensible freeze.
@@ -33,10 +33,7 @@ whose numbers changed under the new grading are approved; the admin token stays.
   harness time since (ESTIMATE); npm run credits:ledger reads billed seconds from deploy 38 on.
 
 ## Open, in the order to take them
-0. Push 41 first: main is two commits ahead of origin with the challenge grace-window fix
-   (fce67a1, gated 1910/1910 twice plus one unrelated flake, review PASS); the founder chose
-   not to push at close. Push, verify, prove Dana once.
-1. Then the second six-call confirmation (miller, dana, miller-silent,
+1. The second six-call confirmation (miller, dana, miller-silent,
    case 11, miller, dana) against deploy 36 on goodbye delay, agent lines, wall time. If it
    beats deploy 36, the founder plays cases 5, 7, 8, 11 (he is ready; about 20 min).
 2. Free-play batch (45 min) once the confirmation passes; regrade; classify non-passes.
@@ -66,7 +63,6 @@ GET /api/session/<id or 8-char code>/diagnostics.
 
 ## Next session
 "Day 9 resume: read docs/STATE.md, docs/RERUN-2026-09-15.md, then the tail of
-docs/AUTOPILOT_LOG.md. Nothing is in flight. Start by pushing the gated grace-window fix as
-push 41 with the founder word, verify the deploy, prove Dana once, run the six-call confirmation, compare with deploy 36, then hand the founder cases 5, 7, 8, 11. Live
+docs/AUTOPILOT_LOG.md. Nothing is in flight. Push 41 (grace-window fix) went out at close; confirm it is served, run the six-call confirmation, compare with deploy 36, then hand the founder cases 5, 7, 8, 11. Live
 tests only; fetch every founder record before any push; Haiku by default, Sonnet for server
 timing and reviews."
