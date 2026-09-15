@@ -3,7 +3,8 @@ import { resolveIdentitySwitch } from '../src/compose';
 import { answersToPersonQuestion } from '../src/extract/personQuestion';
 import { MERIDIAN } from '../src/seed/meridian';
 import { buildLedger } from '../src/ledger';
-import type { Evidence, Claim, Utterance, AgentAction, ChallengeSpec } from '../src/types';
+import { evaluate } from '../src/evaluate';
+import type { Evidence, Claim, Utterance, AgentAction, ChallengeSpec, EngineInput } from '../src/types';
 
 describe('resolveIdentitySwitch with person question context', () => {
   /**
@@ -247,5 +248,72 @@ describe('resolveIdentitySwitch with person question context', () => {
     expect(personQuestionAnswers.has('c2')).toBe(true);
     // c3 is NOT exempt (window closed after c2)
     expect(personQuestionAnswers.has('c3')).toBe(false);
+  });
+
+  it('bare-name fragment answering an approver challenge keeps request_version at 1 through the real engine', () => {
+    // FIX (2026-09-15, person-window lane): PROVEN defect -- a caller who answers a
+    // person-shaped LIVE_COMMITMENT challenge with a BARE name and no cue (e.g. "Marcus
+    // Obi." rather than "That's Marcus Obi.") used to get that bare name recorded by the
+    // LEDGER's OWN extractIdentityClaim call as a false self-identification (a CONTRADICTED
+    // identity claim), bumping request_version from 1 to 2 -- even though the extended
+    // person-question exemption window (answersToPersonQuestion) already correctly covered
+    // that utterance for the OTHER two call sites (fromTranscript.ts, resolveIdentitySwitch).
+    // evaluate.ts now builds the ledger in two passes so all three call sites agree; this is
+    // an end-to-end regression test through the real `evaluate()`, not just the exemption set.
+    const call = { session_id: 'sess-bare-name-rv', origin_kind: 'registered_device' as const, origin_geo: 'Austin, TX' };
+    const conversation: Utterance[] = [
+      { id: 'c1', speaker: 'caller', text: 'This is Dana Whitfield, corporate treasury. This was approved by Marcus Obi.', t_ms: 1000 },
+      { id: 'c2', speaker: 'caller', text: 'I need to wire it to Meridian Supply — $84,500, account ending 4471.', t_ms: 2000 },
+      { id: 'c3', speaker: 'caller', text: 'Please let me know once it\'s done.', t_ms: 3000 },
+      { id: 'a1', speaker: 'agent', text: 'Can you restate the approver you gave me earlier?', t_ms: 3500 },
+      { id: 'c-frag2', speaker: 'caller', text: 'Marcus Obi.', t_ms: 4200 }, // bare name, no cue
+      { id: 'a2', speaker: 'agent', text: 'To confirm: $84,500. Is that right?', t_ms: 4700 },
+      { id: 'c4', speaker: 'caller', text: "Yes, that's right.", t_ms: 5000 },
+      { id: 'a3', speaker: 'agent', text: 'And the account ending 4471, correct?', t_ms: 5500 },
+      { id: 'c5', speaker: 'caller', text: 'Yes, correct.', t_ms: 6000 },
+      { id: 'a4', speaker: 'agent', text: 'And Meridian Supply is the beneficiary, correct?', t_ms: 6500 },
+      { id: 'c6', speaker: 'caller', text: "Yes, that's right.", t_ms: 7000 },
+    ];
+    const tools = [
+      {
+        id: 't1',
+        name: 'check_sso_context',
+        t_ms: 1500,
+        args: { identity_id: 'dana-whitfield', request_version: 1 },
+        result: { session_active: true, geo: 'Austin, TX', device: 'Dell Latitude (managed)', request_version: 1 },
+      },
+      {
+        id: 't2',
+        name: 'get_request_history',
+        t_ms: 1600,
+        args: { identity_id: 'dana-whitfield', request_version: 1 },
+        result: {
+          known_vendors: ['Meridian Supply'],
+          matches: [{ vendor: 'Meridian Supply', amount_usd: 84500, account_last4: '4471', due: '2026-09-04' }],
+          request_version: 1,
+        },
+      },
+      {
+        id: 't3',
+        name: 'verify_out_of_band',
+        t_ms: 1700,
+        args: { identity_id: 'dana-whitfield', request_version: 1 },
+        result: { sent: true, devices: 1, response: 'confirmed', latency_ms: 2500, request_version: 1 },
+      },
+    ];
+    const actions: AgentAction[] = [
+      { id: 'ch1', kind: 'challenge_issued', t_ms: 3500, challenge_id: 'sess-bare-name-rv-1' },
+      { id: 'r1', kind: 'readback_issued', t_ms: 4700, field: 'amount_usd', value: '84500' },
+      { id: 'r2', kind: 'readback_issued', t_ms: 5500, field: 'account_last4', value: '4471' },
+      { id: 'r3', kind: 'readback_issued', t_ms: 6500, field: 'beneficiary', value: 'Meridian Supply' },
+    ];
+
+    const input: EngineInput = { conversation, tools: tools as EngineInput['tools'], actions, call, seed: MERIDIAN };
+    const out = evaluate(input);
+
+    expect(out.request_version).toBe(1);
+    expect(out.failure_tally).toBe(0);
+    expect(out.verdict).toBe('STAGE');
+    expect(out.assurance.no_contradictions).toBe(true);
   });
 });

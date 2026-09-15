@@ -147,6 +147,7 @@ export function buildLedger(
   conversation: Utterance[],
   actions: AgentAction[],
   seed: SeedConfig,
+  personQuestionAnswers?: Set<string>,
 ): { claims: Claim[]; request_version: number } {
   const callerUtterances = conversation.filter((u) => u.speaker === 'caller').sort((a, b) => a.t_ms - b.t_ms);
 
@@ -179,8 +180,19 @@ export function buildLedger(
   const activeReadback: Partial<Record<ClaimField, PendingReadback>> = {};
   const repairWindowSince: Partial<Record<ClaimField, number>> = {};
 
-  // Compute which caller utterances are answers to person-shaped questions (approver, counsel, etc)
-  const personQuestionAnswers = answersToPersonQuestion(conversation, actions);
+  // Compute which caller utterances are answers to person-shaped questions (approver, counsel, etc).
+  //
+  // FIX (2026-09-15, person-window lane): a caller (`buildLedger` is called from evaluate.ts)
+  // can supply the SAME extended-window exemption set (computed with seed, claims, and the
+  // reconstructed issued specs -- see personQuestion.ts) that fromTranscript.ts and
+  // resolveIdentitySwitch already use, so all three `extractIdentityClaim` call sites agree.
+  // Falling back to the bare 2-arg call here (no seed/claims/issued) is intentionally the OLD,
+  // narrow behavior: it can only ever exempt the first caller utterance and, worse, cannot
+  // resolve a `challenge_issued` action's field at all when the action carries no recorded
+  // `spec` (the common corpus-fixture shape) -- since there's no `issued` to fall back to. That
+  // makes the fallback a safe, deliberately-conservative PROVISIONAL pass only (see evaluate.ts's
+  // two-pass ledger build), never the real exemption a caller answering a person question needs.
+  const pqa = personQuestionAnswers ?? answersToPersonQuestion(conversation, actions);
 
   function addClaim(
     field: ClaimField,
@@ -322,7 +334,7 @@ export function buildLedger(
     // Check both active readbacks AND the precomputed set of challenge answers.
     const answeringPersonQuestion =
       Object.keys(activeReadback).some((field) => PERSON_SHAPED_FIELDS.has(field as ClaimField)) ||
-      personQuestionAnswers.has(u.id);
+      pqa.has(u.id);
 
     // See `classifyDifferentValue`'s (a2) comment: defined only when the immediately
     // preceding caller utterance exists AND no agent turn happened between it and this

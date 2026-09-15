@@ -104,7 +104,25 @@ export function evaluate(rawInput: EngineInput, overrides?: Record<string, Evide
   const { conversation, tools, actions, call, seed } = freezeAtSeal(rawInput);
 
   // 1. Story ledger.
-  const { claims, request_version } = buildLedger(conversation, actions, seed);
+  //
+  // FIX (2026-09-15, person-window lane): the ledger's OWN identity-claim extraction (the
+  // `extractIdentityClaim` call inside buildLedger) needs the same extended person-question
+  // exemption window `answersToPersonQuestion` computes for the other two call sites below
+  // (fromTranscript.ts, resolveIdentitySwitch) -- otherwise a bare name answering a
+  // person-shaped challenge (e.g. "Marcus Obi." with no cue) gets recorded as a false
+  // self-identification, bumping request_version and failing multiple assurance checks that a
+  // cued answer ("That's Marcus Obi.") never triggers. But that exemption window itself needs
+  // to know what was ISSUED (reconstructIssued), which needs claims -- a genuine ordering
+  // dependency. Resolved with a two-pass build: a PROVISIONAL ledger pass (old/narrow
+  // exemption, per buildLedger's own fallback) is used only to reconstruct `issued` and the
+  // real exemption window; every provisional claim strictly BEFORE the challenge/readback
+  // action it bootstraps is unaffected by the window bug (the window only ever exempts
+  // utterances AFTER such an action), so the provisional `issued` reconstruction is sound. The
+  // REAL ledger claims/request_version below are then rebuilt with the correct window.
+  const provisional = buildLedger(conversation, actions, seed);
+  const provisionalIssued = reconstructIssued(provisional.claims, actions, seed, call.session_id, conversation);
+  const ledgerPersonQuestionAnswers = answersToPersonQuestion(conversation, actions, seed, provisional.claims, provisionalIssued);
+  const { claims, request_version } = buildLedger(conversation, actions, seed, ledgerPersonQuestionAnswers);
   const claimedIdentity = currentClaim(claims, 'identity');
   const claimed_identity_id = claimedIdentity ? String(claimedIdentity.value) : null;
   const amountClaim = currentClaim(claims, 'amount_usd');
