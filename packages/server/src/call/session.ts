@@ -257,6 +257,18 @@ export class CallSession {
    *  goodbye). Whichever fires first (`reply.done` or this timeout) wins; the call is never
    *  ended twice. */
   private static readonly CLOSE_DONE_WAIT_MS = 4_000;
+  /** Defect A fix (2026-09-15, PROVEN on all 8 server-ended founder calls 2026-09-14):
+   *  output audio is 24 kHz PCM16 mono (docs/ASSEMBLYAI_INTEGRATION.md line 17, matching
+   *  `packages/web/src/audio/playback.ts`'s own `SAMPLE_RATE = 24000`) -- 24000 samples/sec *
+   *  2 bytes/sample * 1 channel = 48000 bytes/sec of decoded PCM. Used by `beginCloseGrace`
+   *  to convert relayed `reply.audio` byte counts into an estimated playback duration. */
+  private static readonly OUTPUT_AUDIO_BYTES_PER_SECOND = 48_000;
+  /** Defect A fix: extra margin added on top of the estimated goodbye playback length before
+   *  hanging up -- covers browser-side queueing/scheduling latency the server has no
+   *  visibility into (the mechanism analysis found no `BrowserEvent` exists for "audio
+   *  finished playing"). Chosen to match the task's own stated formula; not independently
+   *  measured (ESTIMATE, not PROVEN) since no round-trip playback-finished signal exists yet. */
+  private static readonly CLOSE_AUDIO_TAIL_BUFFER_MS = 1_000;
   /** PROVEN defect (2026-09-14, scripts/rehearse/reports/2026-09-14T17-58-23-barge-in-
    *  interrupt.md + .diagnostics.json): a CLOSE `reply.create` was sent, `reply.started` and
    *  `reply.audio.first` both arrived, then NOTHING else for the rest of the call (no further
@@ -279,6 +291,13 @@ export class CallSession {
   private replyCreateLostTimer: ReturnType<typeof setTimeout> | null = null;
   private closeDoneWaitTimer: ReturnType<typeof setTimeout> | null = null;
   private closeStuckTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Defect A fix: bytes of `reply.audio` actually RELAYED to the browser (post-suppression),
+   *  and the server clock time the first relayed frame went out, keyed by AAI reply id --
+   *  never pruned (same convention `replyTranscripts` above already uses: one call's total
+   *  volume is small and bounded by the session cap). Read by `beginCloseGrace` for the
+   *  confirmed goodbye reply only. */
+  private readonly replyAudioBytes = new Map<string, number>();
+  private readonly replyFirstAudioAt = new Map<string, number>();
   /** Round 4: the reply id `maybeArmCloseOnTranscript` has already started the hang-up
    *  sequence for, so a second (or third) `transcript.agent` chunk for the SAME reply that
    *  still matches doesn't re-arm a fresh `CLOSE_DONE_WAIT_MS` timer on top of the one
@@ -589,10 +608,12 @@ export class CallSession {
   private beginCloseGrace(): void {
     if (this.ended) return;
     if (this.closeGraceTimer) return;
-    if (this.closeHardCapTimer) {
-      clearTimeout(this.closeHardCapTimer);
-      this.closeHardCapTimer = null;
-    }
+    // Defect A fix (2026-09-15): the hard cap is deliberately left running here (it used to
+    // be cleared the instant grace began) -- the audio-aware delay computed below can now be
+    // LONGER than the old fixed CLOSE_GRACE_MS, and CLOSE_TOTAL_MS must still be the one
+    // absolute backstop that wins if that stretches the call past the 45s budget (requirement
+    // "still capped by CLOSE_TOTAL_MS"). Whichever timer's callback runs first calls `end()`,
+    // which clears the other one via `clearCloseTimers()` -- never a double end.
     if (this.closeDoneWaitTimer) {
       clearTimeout(this.closeDoneWaitTimer);
       this.closeDoneWaitTimer = null;
@@ -601,10 +622,37 @@ export class CallSession {
       clearTimeout(this.closeRetryTimer);
       this.closeRetryTimer = null;
     }
+
+    // Defect A fix: size the wait to the goodbye's own estimated playback length instead of a
+    // flat CLOSE_GRACE_MS regardless of how much audio there was to play. `replyId` is the
+    // CONFIRMED goodbye reply (`goodbyeConfirmedReplyId`, always set before this method is
+    // ever called from `scheduleCloseIfNeeded`/`maybeArmCloseOnTranscript`) -- its own relayed
+    // byte count and first-relayed-frame timestamp are what `dispatchAaiEvent`'s `reply.audio`
+    // case records. No audio recorded
+    // at all (bytes === 0, e.g. every existing transcript-only test fixture, or a genuinely
+    // silent reply) falls back to the unchanged flat CLOSE_GRACE_MS -- today's timing exactly.
+    const replyId = this.goodbyeConfirmedReplyId;
+    const bytes = replyId ? (this.replyAudioBytes.get(replyId) ?? 0) : 0;
+    const firstAudioAt = replyId ? (this.replyFirstAudioAt.get(replyId) ?? null) : null;
+    const now = this.opts.now();
+    const audioSeconds = bytes / CallSession.OUTPUT_AUDIO_BYTES_PER_SECOND;
+    let delayMs = CallSession.CLOSE_GRACE_MS;
+    if (firstAudioAt !== null && bytes > 0) {
+      // max(reply.done/confirmation-time + CLOSE_GRACE_MS, first_audio_relayed_at +
+      // audio_seconds + CLOSE_AUDIO_TAIL_BUFFER_MS) -- `now` stands in for "reply.done" (this
+      // method runs synchronously from that event in the normal case; in the
+      // transcript-confirmed-before-reply.done fallback it is the confirming event's own
+      // time, which is the closest available proxy).
+      const graceBasedDeadline = now + CallSession.CLOSE_GRACE_MS;
+      const audioBasedDeadline = firstAudioAt + audioSeconds * 1000 + CallSession.CLOSE_AUDIO_TAIL_BUFFER_MS;
+      delayMs = Math.max(0, Math.max(graceBasedDeadline, audioBasedDeadline) - now);
+    }
+    this.diag('close_tail_wait', { audio_seconds: audioSeconds, waited_ms: delayMs });
+
     this.closeGraceTimer = setTimeout(() => {
       this.closeGraceTimer = null;
       if (!this.ended) this.end(this.idleEndReason ?? 'agent_closed');
-    }, CallSession.CLOSE_GRACE_MS);
+    }, delayMs);
     this.closeGraceTimer.unref?.();
   }
 
@@ -1257,6 +1305,19 @@ export class CallSession {
         this.lastReplyAudioAt = this.opts.now();
         if (this.suppressPostGoodbyeReplyAudio) return;
         this.opts.onServerEvent({ type: 'audio', data: evt.data });
+        // Defect A fix (2026-09-15): track bytes of THIS reply's audio actually relayed to
+        // the browser, and when the first relayed frame went out -- `beginCloseGrace` reads
+        // this (for the confirmed goodbye reply only) to size the hang-up wait to the
+        // reply's own estimated playback length. `evt.data` is base64 (docs/
+        // ASSEMBLYAI_INTEGRATION.md line 17); `Buffer.byteLength(str, 'base64')` gives the
+        // DECODED byte count without allocating a full Buffer per frame.
+        if (this.currentReplyId) {
+          const bytes = Buffer.byteLength(evt.data, 'base64');
+          this.replyAudioBytes.set(this.currentReplyId, (this.replyAudioBytes.get(this.currentReplyId) ?? 0) + bytes);
+          if (!this.replyFirstAudioAt.has(this.currentReplyId)) {
+            this.replyFirstAudioAt.set(this.currentReplyId, this.opts.now());
+          }
+        }
         // Flight recorder: only the FIRST audio frame of this reply -- a reply can carry
         // dozens of frames, and recording every one was the bulk of what starved the live
         // bundle's event cap (2026-09-03 finding). This is enough to see when audio actually
