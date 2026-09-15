@@ -1,0 +1,177 @@
+{
+  "title": "A self-correction split across two utterances, under the exposure line",
+  "description": "Dana states an amount, pauses, then in a separate utterance corrects herself with \"sorry\" and the corrected amount is below the high-value threshold. PROVEN defect (2026-09-14): before the fix, buildExposureEvidence summed BOTH amounts (40,000 + 48,500 = 88,500 > 50k), causing ESCALATE instead of STAGE. FOUNDER RULING (2026-09-14 8:20 PM CDT): a corrected amount does not count toward exposure, whether the correction spans one utterance or multiple. The engine now identifies CORRECTED claims that are NOT additive (no additive-lexicon hit) and excludes their superseded amounts. This fixture proves the split-turn case (shapes C/D2) is handled correctly. The corrected figure still needs an ordinary readback + affirm before it counts as CONFIRMED.",
+  "call": {
+    "session_id": "sess-7",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply, forty thousand",
+      "t_ms": 1000
+    },
+    {
+      "id": "c1b",
+      "speaker": "caller",
+      "text": "sorry, forty eight thousand five hundred, account ending 4471, approved in yesterday's close meeting.",
+      "t_ms": 1050
+    },
+    {
+      "id": "a1t",
+      "speaker": "agent",
+      "text": "Just to confirm back to you -- this wire is going to Northgate Partners, is that right?",
+      "t_ms": 1200
+    },
+    {
+      "id": "c1t",
+      "speaker": "caller",
+      "text": "No, that's wrong -- it's Meridian Supply, not Northgate Partners.",
+      "t_ms": 1400
+    },
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "To confirm: $48,500 to Meridian Supply, account ending 4471. Is that right?",
+      "t_ms": 2000
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 2500
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "And the account ending 4471, correct?",
+      "t_ms": 3000
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "Yes, correct.",
+      "t_ms": 3500
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "And Meridian Supply is the beneficiary, correct?",
+      "t_ms": 4000
+    },
+    {
+      "id": "c4",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 4500
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 5000,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 2
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 2
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 5100,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 2
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 48500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 2
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 5200,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 2
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 2
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "ch1",
+      "kind": "challenge_issued",
+      "t_ms": 1200,
+      "challenge_id": "sess-7-1"
+    },
+    {
+      "id": "r1",
+      "kind": "readback_issued",
+      "t_ms": 2000,
+      "field": "amount_usd",
+      "value": "48500"
+    },
+    {
+      "id": "r2",
+      "kind": "readback_issued",
+      "t_ms": 3000,
+      "field": "account_last4",
+      "value": "4471"
+    },
+    {
+      "id": "r3",
+      "kind": "readback_issued",
+      "t_ms": 4000,
+      "field": "beneficiary",
+      "value": "Meridian Supply"
+    }
+  ],
+  "expected": {
+    "verdict": "STAGE",
+    "state": "ACTION",
+    "reasons": [],
+    "failure_tally": 0,
+    "request_version": 2,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": true,
+      "critical_fields_confirmed": true,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": true,
+      "no_injection_attempt": true
+    }
+  }
+}

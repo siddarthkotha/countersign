@@ -519,81 +519,97 @@ describe('buildConsistencyEvidence -- a double identity switch counts each switc
 });
 
 // Founder ruling 2026-09-14 8:20 PM CDT: a corrected amount does not count toward
-// structuring exposure. A self-correction within a single utterance (e.g. "forty thousand,
-// uh sorry, forty eight thousand five hundred") excludes the withdrawn amount from the
-// exposure sum. Separate transactions (different utterances, even with "Actually") still
-// count toward the anti-structuring check.
-describe('buildExposureEvidence -- self-corrections and structuring (founder ruling 2026-09-14)', () => {
+// structuring exposure. The distinction is withdrawal vs. addition: a CORRECTED claim
+// without an additive-lexicon hit excludes its superseded amount (e.g. "sorry, $42k").
+// A CORRECTED claim WITH an additive-lexicon hit preserves both amounts (e.g. "also $42k").
+describe('buildExposureEvidence -- corrections, additive detection, and structuring (founder ruling 2026-09-14)', () => {
   function exposureEvidence(conversation: Utterance[], actions: AgentAction[] = []): ReturnType<typeof buildExposureEvidence> {
     const { claims, request_version } = buildLedger(conversation, actions, SEED);
     return buildExposureEvidence(claims, SEED, request_version);
   }
 
-  it('excludes a self-corrected amount (same utterance) from exposure but includes a separate second wire', () => {
-    // Self-correction within c1: "forty thousand, uh, sorry, forty eight thousand five hundred"
-    // Then a separate second wire in c2: "Actually, forty two thousand more"
-    // Should exclude the 40k (corrected away) but include both 48.5k and 42k from separate utterances.
-    // Total: 48,500 + 42,000 = 90,500 > 50,000 threshold
+  it('excludes a self-corrected amount (no additive cue): "sorry, $42,300" after $42,250', () => {
     const convo = [
-      u('c1', 'caller', 'Dana here. Wire forty thousand, uh, sorry, forty eight thousand five hundred to Meridian.', 1000),
-      u('a1', 'agent', 'Confirm forty eight thousand five hundred?', 2000),
-      u('c2', 'caller', 'Yes, that is right.', 2500),
-      u('c3', 'caller', 'Actually, we need another wire for forty two thousand to the same vendor.', 3000),
-    ];
-    const actions: AgentAction[] = [
-      { id: 'r1', kind: 'readback_issued', t_ms: 2000, field: 'amount_usd', value: '48500' },
-      { id: 'r2', kind: 'readback_issued', t_ms: 3500, field: 'amount_usd', value: '42000' },
-    ];
-    const evidence = exposureEvidence(convo, actions);
-    // 40k is excluded (corrected in same utterance as 48.5k), so only 48.5k + 42k = 90.5k
-    expect(evidence?.status).toBe('FAIL'); // over threshold
-    expect(evidence?.facts.exposure_usd).toBe(90500);
-  });
-
-  it('includes both amounts when stated in separate utterances, even with "Actually"', () => {
-    // Different utterances: structuring case with correction-lexicon hit in different turn
-    const convo = [
-      u('c1', 'caller', 'This is Dana. Wire $42,250 to Meridian.', 1000),
-      u('c2', 'agent', 'Confirm $42,250?', 2000),
-      u('c3', 'caller', 'Yes.', 2500),
-      u('c4', 'caller', 'Actually, there is a second wire for $42,300 too.', 3000),
+      u('c1', 'caller', 'Dana. Wire $42,250 to Meridian.', 1000),
+      u('a1', 'agent', 'Confirm $42,250?', 2000),
+      u('c2', 'caller', 'Yes.', 2500),
+      u('a2', 'agent', 'Any other wires?', 3000),
+      u('c3', 'caller', 'Actually, make it $42,300 instead.', 3500),
     ];
     const actions: AgentAction[] = [
       { id: 'r1', kind: 'readback_issued', t_ms: 2000, field: 'amount_usd', value: '42250' },
-      { id: 'r2', kind: 'readback_issued', t_ms: 3500, field: 'amount_usd', value: '42300' },
+      { id: 'r2', kind: 'readback_issued', t_ms: 4000, field: 'amount_usd', value: '42300' },
     ];
     const evidence = exposureEvidence(convo, actions);
-    // Both amounts should count (different utterances): 42,250 + 42,300 = 84,550 > 50,000
-    expect(evidence?.status).toBe('FAIL'); // over threshold
+    // Only one distinct amount left (42300), no exposure card needed
+    expect(evidence).toBeNull();
+  });
+
+  it('includes both amounts when second has additive cue: "also $42,300" after $42,250', () => {
+    const convo = [
+      u('c1', 'caller', 'Dana. Wire $42,250 to Meridian.', 1000),
+      u('a1', 'agent', 'Confirm $42,250?', 2000),
+      u('c2', 'caller', 'Yes.', 2500),
+      u('a2', 'agent', 'Any other wires?', 3000),
+      u('c3', 'caller', 'Actually, also $42,300 to the same vendor.', 3500),
+    ];
+    const actions: AgentAction[] = [
+      { id: 'r1', kind: 'readback_issued', t_ms: 2000, field: 'amount_usd', value: '42250' },
+      { id: 'r2', kind: 'readback_issued', t_ms: 4000, field: 'amount_usd', value: '42300' },
+    ];
+    const evidence = exposureEvidence(convo, actions);
+    // Both amounts count: 42,250 + 42,300 = 84,550 > 50,000
+    expect(evidence?.status).toBe('FAIL');
     expect(evidence?.facts.exposure_usd).toBe(84550);
   });
 
-  it('self-corrected amount is excluded even when another amount would push total over threshold', () => {
-    // Self-correction in c1: "forty thousand, sorry, forty eight thousand five hundred"
-    // Plus a separate second amount in c3: "another wire for thirty five thousand"
-    // Without the fix: 40k + 48.5k + 35k (all three amounts) would be 123.5k > 50k
-    // With the fix: exclude 40k (corrected away), so 48.5k + 35k = 83.5k > 50k (still FAIL)
+  it('handles additive cue in preceding utterance (split-turn transcript): "second one" then amount', () => {
     const convo = [
-      u('c1', 'caller', 'Dana. Wire forty thousand, sorry, forty eight thousand five hundred to Meridian.', 1000),
-      u('a1', 'agent', 'Confirm forty eight thousand five hundred?', 2000),
-      u('c2', 'caller', 'Yes, that is right.', 2500),
-      u('a3', 'agent', 'Anything else?', 3000),
-      u('c3', 'caller', 'Another wire for thirty five thousand to the same vendor.', 3500),
+      u('c1', 'caller', 'Dana. Wire $42,250 to Meridian.', 1000),
+      u('a1', 'agent', 'Confirm $42,250?', 2000),
+      u('c2', 'caller', 'Yes.', 2500),
+      u('c3a', 'caller', 'Actually, there is a second one too.', 3500),
+      u('c3b', 'caller', '$42,300 to the same vendor.', 3600),
     ];
     const actions: AgentAction[] = [
-      { id: 'r1', kind: 'readback_issued', t_ms: 2000, field: 'amount_usd', value: '48500' },
-      { id: 'r2', kind: 'readback_issued', t_ms: 4000, field: 'amount_usd', value: '35000' },
+      { id: 'r1', kind: 'readback_issued', t_ms: 2000, field: 'amount_usd', value: '42250' },
+      { id: 'r2', kind: 'readback_issued', t_ms: 4000, field: 'amount_usd', value: '42300' },
     ];
     const evidence = exposureEvidence(convo, actions);
-    // Self-corrected 40k is excluded; sum is 48.5k + 35k = 83.5k > 50k
+    // "second one" in preceding utterance marks it additive, both amounts count
     expect(evidence?.status).toBe('FAIL');
-    expect(evidence?.facts.exposure_usd).toBe(83500);
+    expect(evidence?.facts.exposure_usd).toBe(84550);
   });
 
-  it('returns null when there is only one distinct amount, even after self-correction', () => {
-    // Only one final distinct amount (48500), so no exposure card at all (need >=2 distinct)
-    const convo = [u('c1', 'caller', 'Dana. Forty thousand, uh sorry, forty eight thousand five hundred to Meridian.', 1000)];
-    const evidence = exposureEvidence(convo);
-    expect(evidence).toBeNull();
+  it('self-correction without additive cue, split across utterances: "forty k" then "sorry, 48.5k"', () => {
+    const convo = [
+      u('c1', 'caller', 'Dana. Wire forty thousand', 1000),
+      u('a1', 'agent', 'Confirm?', 2000),
+      u('c2', 'caller', 'sorry, forty eight thousand five hundred to Meridian.', 2500),
+    ];
+    const actions: AgentAction[] = [
+      { id: 'r1', kind: 'readback_issued', t_ms: 3000, field: 'amount_usd', value: '48500' },
+    ];
+    const evidence = exposureEvidence(convo, actions);
+    // "sorry" in c2 marks it CORRECTED without additive cue; 40k is excluded
+    expect(evidence).toBeNull(); // only one distinct amount
+  });
+
+  it('contradiction (no cue) still counts both amounts toward structuring sum', () => {
+    const convo = [
+      u('c1', 'caller', 'Dana. Wire $42,250 to Meridian.', 1000),
+      u('a1', 'agent', 'Confirm $42,250?', 2000),
+      u('c2', 'caller', 'Yes.', 2500),
+      u('a2', 'agent', 'Anything else?', 3000),
+      u('c3', 'caller', 'Forty two thousand three hundred.', 3500),
+    ];
+    const actions: AgentAction[] = [
+      { id: 'r1', kind: 'readback_issued', t_ms: 2000, field: 'amount_usd', value: '42250' },
+      { id: 'r2', kind: 'readback_issued', t_ms: 4000, field: 'amount_usd', value: '42300' },
+    ];
+    const evidence = exposureEvidence(convo, actions);
+    // No correction cue, no additive cue → CONTRADICTED, both count for structuring defense
+    expect(evidence?.status).toBe('FAIL');
+    expect(evidence?.facts.exposure_usd).toBe(84550);
   });
 });

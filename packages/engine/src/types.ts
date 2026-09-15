@@ -112,6 +112,7 @@ export interface Claim {
   supersedes?: string; // claim id this one corrected or contradicted
   request_version: number; // version this claim belongs to
   entered_as?: ClaimKind; // original kind when claim was first created (e.g., CORRECTED before later CONFIRMED via readback)
+  additive?: boolean; // true if this CORRECTED claim hits additive_lexicon (indicates a new transaction, not a replacement)
 }
 
 // ---------- Challenges (v2: the LLM may ask, never grade) ----------
@@ -220,6 +221,7 @@ export interface SeedConfig {
   pressure_lexicon: string[]; // lower-case phrases
   out_of_scope_lexicon: string[]; // lower-case phrases
   correction_lexicon: string[]; // v2: lower-case phrases, e.g. "actually", "scratch that"
+  additive_lexicon: string[]; // v2: lower-case phrases indicating a new/additional transaction (e.g. "second one", "another", "also"); used to distinguish "also $42k" (additive, both count toward structuring) from "sorry $42k" (corrective, withdrawn amount excluded)
   affirm_lexicon: string[]; // v2: lower-case phrases, e.g. "yes", "correct"
   negate_lexicon: string[]; // v2: lower-case phrases, e.g. "no", "wrong"
   injection_lexicon: string[]; // v2: lower-case phrases, e.g. "ignore previous"

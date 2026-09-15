@@ -183,6 +183,7 @@ export function buildLedger(
     text: string,
     t_ms: number,
     supersedes: string | undefined,
+    additive?: boolean,
   ): void {
     const claim: Claim = {
       id: `cl-${nextId}`,
@@ -196,6 +197,7 @@ export function buildLedger(
       // entered_as records the original kind when the claim was first created,
       // preserved if the kind later changes (e.g., CORRECTED → CONFIRMED via readback)
       entered_as: kind,
+      ...(additive !== undefined ? { additive } : {}),
     };
     nextId += 1;
     claims = [...claims, claim];
@@ -281,7 +283,16 @@ export function buildLedger(
     if (current.value === value) return;
     const kind = classifyDifferentValue(field, u, current, value, precedingCorrectionText);
     if (VERSIONED_FIELDS.has(field)) request_version += 1;
-    addClaim(field, kind, value, u.id, quote, u.t_ms, current.id);
+    // Founder ruling 2026-09-14: a CORRECTED claim that is additive (hits additive_lexicon)
+    // indicates a new transaction, not a replacement. This flag is read by compose.ts
+    // buildExposureEvidence to distinguish "also $42k" (both count) from "sorry $42k" (withdrawn).
+    // Check both current utterance AND immediately preceding caller utterance (no agent turn
+    // between), mirroring the correction-lexicon path (a2) to handle split-turn transcripts.
+    const additive = kind === 'CORRECTED' && (
+      hasLexiconHit(u.text, seed.additive_lexicon) ||
+      (precedingCorrectionText !== undefined && hasLexiconHit(precedingCorrectionText, seed.additive_lexicon))
+    );
+    addClaim(field, kind, value, u.id, quote, u.t_ms, current.id, additive);
   }
 
   let previousCallerUtterance: Utterance | null = null;

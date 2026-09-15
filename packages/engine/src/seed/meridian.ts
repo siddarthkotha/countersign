@@ -172,6 +172,9 @@ export const MERIDIAN: SeedConfig = {
   correction_lexicon: [
     'sorry', 'i mean', 'correction', 'actually', 'no wait', 'scratch that', 'let me correct',
   ],
+  additive_lexicon: [
+    'second one', 'another', 'also', 'too', 'as well', 'additional', 'one more', 'on top', 'in addition', 'a second', 'the other',
+  ],
   affirm_lexicon: [
     'yes', 'correct', "that's right", 'right', 'yep', 'confirmed', 'exactly',
   ],
