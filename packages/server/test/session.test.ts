@@ -2403,11 +2403,13 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
     expect(session.logs.conversation.some((u) => u.text === strayText)).toBe(false);
 
     // No ordinary `transcript` diag for this dropped text (would otherwise record its length
-    // as agent speech) -- exactly one drop diagnostic instead, naming the reply id and length,
-    // never the text (LAW 4).
+    // as agent speech) -- exactly one drop diagnostic instead, naming the reply id, length,
+    // and text. This is diagnostics (not evidence per LAW 4); text is recorded so live calls
+    // can be analyzed post-hoc. Evidence exports stay the only artefact that proves what was
+    // said.
     const dropped = diagEvents.filter((e) => e.kind === 'post_goodbye_transcript_dropped');
     expect(dropped).toHaveLength(1);
-    expect(dropped[0]!.detail).toEqual({ reply_id: 'r2', length: strayText.length });
+    expect(dropped[0]!.detail).toEqual({ reply_id: 'r2', length: strayText.length, text: strayText });
 
     // The hang-up still fires on the unchanged schedule.
     expect(sent.some((e) => e.type === 'ended')).toBe(false);

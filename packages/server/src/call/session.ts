@@ -1167,7 +1167,7 @@ export class CallSession {
         // instead, length only (LAW 4: never the text itself), and no `tick()` -- nothing in
         // EngineInput changed, same reasoning as the `transcript_duplicate_ignored` case above.
         if (evt.type === 'transcript.agent' && this.goodbyeConfirmed && evt.reply_id !== this.goodbyeConfirmedReplyId) {
-          this.diag('post_goodbye_transcript_dropped', { reply_id: evt.reply_id, length: evt.text.length });
+          this.diag('post_goodbye_transcript_dropped', { reply_id: evt.reply_id, length: evt.text.length, text: evt.text });
           return;
         }
         // Changes `conversation`, part of EngineInput -- must tick.
@@ -1184,9 +1184,11 @@ export class CallSession {
           // reply.done -- see `maybeArmCloseOnTranscript`'s own doc comment.
           this.maybeArmCloseOnTranscript(evt.reply_id);
         }
-        // Flight recorder: role + text LENGTH only -- never the transcript text itself
-        // (that stays evidence-only, LAW 4; diagnostics is not evidence).
-        this.diag('transcript', { role: evt.type === 'transcript.user' ? 'user' : 'agent', length: evt.text.length });
+        // Flight recorder: role, length, and text all recorded. This is diagnostics (not
+        // evidence per LAW 4) -- the text is recorded so live calls can be analyzed post-hoc
+        // without re-reading server logs. Evidence exports stay the only artefact that proves
+        // what was said; this is a debugging-aid copy with the same text, verbatim.
+        this.diag('transcript', { role: evt.type === 'transcript.user' ? 'user' : 'agent', length: evt.text.length, text: evt.text });
         break;
       }
 

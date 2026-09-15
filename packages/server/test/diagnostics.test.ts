@@ -1066,7 +1066,7 @@ describe('CallSession — onDiagnostic', () => {
     expect(events.filter((e) => e.kind === 'reply.audio.first')).toHaveLength(2);
   });
 
-  it('records transcript diagnostics with role and text length only -- never the transcript text itself', () => {
+  it('records transcript diagnostics with role, length, and text verbatim', () => {
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const events: { kind: string; detail: unknown }[] = [];
@@ -1085,15 +1085,15 @@ describe('CallSession — onDiagnostic', () => {
     const transcriptEvents = events.filter((e) => e.kind === 'transcript');
     expect(transcriptEvents).toHaveLength(2);
 
-    const userDetail = transcriptEvents[0]!.detail as { role: string; length: number };
+    const userDetail = transcriptEvents[0]!.detail as { role: string; length: number; text: string };
     expect(userDetail.role).toBe('user');
     expect(userDetail.length).toBe(userText.length);
-    expect(JSON.stringify(userDetail)).not.toContain(userText);
+    expect(userDetail.text).toBe(userText);
 
-    const agentDetail = transcriptEvents[1]!.detail as { role: string; length: number };
+    const agentDetail = transcriptEvents[1]!.detail as { role: string; length: number; text: string };
     expect(agentDetail.role).toBe('agent');
     expect(agentDetail.length).toBe(agentText.length);
-    expect(JSON.stringify(agentDetail)).not.toContain(agentText);
+    expect(agentDetail.text).toBe(agentText);
   });
 
   it('records input.speech.started and input.speech.stopped', () => {
