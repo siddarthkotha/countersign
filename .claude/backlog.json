@@ -1272,7 +1272,7 @@
     },
     {
       "id": "RENDER-ADMIN-TOKEN",
-      "title": "set COUNTERSIGN_ADMIN_TOKEN in Render's secret store so the live-calls reset route works in production",
+      "title": "set COUNTERSIGN_ADMIN_TOKEN in Render's secret store so the live-calls reset route works in production - value generated into local .env 9:30 PM; founder pastes it into Render",
       "files": [],
       "status": "held",
       "held_because": "deploy secret store is the founder's (or needs his Render access); the route is disabled without it, which is safe",
@@ -2258,6 +2258,42 @@
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
       "held_because": ""
+    },
+    {
+      "id": "push-34",
+      "title": "push 34: 4cea6f9..c1b0f03 (watchdog re-check, hook fix, exposure fix + additive lexicon) - pushed 8:47 PM on founder word; deploy verification polling",
+      "files": [],
+      "status": "done",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
+    },
+    {
+      "id": "CREDITS-METER",
+      "title": "credit meter from AssemblyAI session.ended duration + npm run credits:ledger (server part on main 233c8a0; ledger time-zone fix round running; review running) - complete on main 2df0802, gate 1747/1747",
+      "files": [],
+      "status": "done",
+      "agent_id": "a5179f3bae26b2a91",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
+    },
+    {
+      "id": "PLAY-SHEET-REWRITE",
+      "title": "docs/PLAY-SHEET.md rewritten judge-facing: exact sentences per case, no file paths in the body (founder ask 8:52 PM) - landed 01984c2 + self-review 233f017",
+      "files": [],
+      "status": "done",
+      "agent_id": "a6a07ae21e331adc2",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
+    },
+    {
+      "id": "SESSION-LOOKUP",
+      "title": "session lookup: diagnostics by 8-char prefix, code under the banner, per-browser recent-calls list, token-gated GET /api/admin/sessions (founder: zero-step retrieval)",
+      "files": [],
+      "status": "running",
+      "agent_id": "a38cca04c9da865f2",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
     }
   ]
 }
