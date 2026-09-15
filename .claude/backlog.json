@@ -2270,7 +2270,7 @@
     },
     {
       "id": "CREDITS-METER",
-      "title": "credit meter from AssemblyAI session.ended duration + npm run credits:ledger (server part on main 233c8a0; ledger time-zone fix round running; review running) - complete on main 2df0802, gate 1747/1747",
+      "title": "credit meter from AssemblyAI session.ended duration + npm run credits:ledger (server part on main 233c8a0; ledger time-zone fix round running; review running) - complete on main 2df0802, gate 1747/1747 | billing PROVEN 2026-09-15: session.ended carries session_duration_seconds; recorded from the raw hook (push 38)",
       "files": [],
       "status": "done",
       "agent_id": "a5179f3bae26b2a91",
@@ -2316,13 +2316,13 @@
     },
     {
       "id": "BILLED-SECONDS-ON-SERVER-ENDED-CALL",
-      "title": "verify billed_seconds arrives on a server-ended live call",
+      "title": "verify billed_seconds arrives on a server-ended live call - PROVEN 7:53 AM deploy 37 raw message; wired in push 38",
       "files": [],
-      "status": "held",
+      "status": "done",
       "agent_id": "",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
-      "held_because": "check on the founder first server-ended call tonight whether session.ended carries session_duration_seconds; harness-ended calls close the socket first"
+      "held_because": ""
     },
     {
       "id": "push-36",
@@ -2372,10 +2372,19 @@
     },
     {
       "id": "CASE-11-SCRIPT-AMOUNT",
-      "title": "case 11 script uses 48,500 which fails Dana context check by design of the seed; rewrite scenario, persona, play sheet and plan to misspeak then correct to the real 84,500; approver rule must match authorized/authorizing/approved",
+      "title": "case 11 script uses 48,500 which fails Dana context check by design of the seed; rewrite scenario, persona, play sheet and plan to misspeak then correct to the real 84,500; approver rule must match authorized/authorizing/approved - landed 00ba1ea + 3fc7018, in push 38",
       "files": [],
-      "status": "running",
-      "agent_id": "PENDING",
+      "status": "done",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
+    },
+    {
+      "id": "push-38",
+      "title": "push 38: 9ba19b9..948ff97 (case 11 script to the real $84,500 + approver rule, play sheet, billed_seconds from the late session.ended) - pushed 8:03 AM after triple gate 1822/1822 x3; deploy poll + case 11 re-run running",
+      "files": [],
+      "status": "done",
+      "agent_id": "",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
     }
