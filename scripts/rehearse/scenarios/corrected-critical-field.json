@@ -1,23 +1,23 @@
 {
   "name": "corrected-critical-field",
   "title": "Corrected critical field -- caller self-corrects an amount mid-call (exposure-limit shape)",
-  "description": "Founder ruling 2026-09-14 8:20 PM CDT: STAGE; a corrected amount does not count toward exposure (engine fix in compose.ts buildExposureEvidence). Dana-shaped, legitimate-looking request where the caller initially misstates forty thousand, then corrects themselves mid-number to forty eight thousand five hundred (\"forty thousand, uh, sorry, forty eight thousand five hundred\"). Rule under test: no security-relevant value is final until an unambiguous complete answer or confirmed readback; a corrected value wins, readback must name the CORRECTED amount, evidence keeps both verbatim quotes (LAW 4). PROVEN defect (offline evaluate() probe 2026-09-14 with MERIDIAN seed): before the fix, this shape read ESCALATE via EXPOSURE_LIMIT because buildExposureEvidence summed BOTH stated amounts (40,000 + 48,500 = 88,500 > 50,000 high-value line), even though every readback is confirmed. Post-fix: only the corrected amount (48,500) counts toward structuring sum, which is < 50,000, so verdict is STAGE. Readback must name the corrected amount ($48,500), not the stale one ($40,000).",
+  "description": "Founder ruling 2026-09-14 8:20 PM CDT: STAGE; a corrected amount does not count toward exposure (engine fix in compose.ts buildExposureEvidence). Dana-shaped, legitimate-looking request where the caller initially misstates eighty-four thousand one hundred, then corrects themselves mid-number to eighty-four thousand five hundred (\"eighty-four thousand one hundred, uh, sorry, eighty-four thousand five hundred\"). Rule under test: no security-relevant value is final until an unambiguous complete answer or confirmed readback; a corrected value wins, readback must name the CORRECTED amount, evidence keeps both verbatim quotes (LAW 4). This live scenario tests the readback of a corrected value against Dana's real payment ($84,500 to Meridian Supply). The under-the-line exposure shape lives in the corpus fixtures honest-correction-under-line-stages.json and honest-correction-split-turn-stages.json.",
   "source": "Derived from scripts/rehearse/scenarios/single-wrong-answer.json (case of self-correction) + docs/TEST-PLAN.md step 6 case 11.",
   "truth": {
     "identity": "Dana Whitfield",
     "beneficiary": "Meridian Supply",
-    "amount_usd": 48500,
+    "amount_usd": 84500,
     "account_last4": "4471",
     "counsel": null,
     "escrow_institution": null,
     "approver": "Marcus Obi",
     "deadline": null
   },
-  "persona": "You are Dana Whitfield, corporate treasury, making an otherwise normal, honest wire request: $48,500 to Meridian Supply, account ending 4471, approved by Marcus Obi. HOWEVER, when you first state the amount, you hesitate and misspeak: you start with the wrong SCALED number (forty thousand dollars), pause mid-phrase inside the amount, and then correct yourself in your own words (\"uh, sorry\", \"wait, I meant\", \"let me correct that\") to the true amount (forty eight thousand five hundred). The correction is your final answer and must be what you confirm in any readback -- do not accept a readback that uses the stale (wrong) amount. If the agent reads back the corrected amount ($48,500), confirm it fully. If the agent reads back the stale amount ($40,000), firmly correct them with the true value. Keep it brief -- under 30 words per line.",
+  "persona": "You are Dana Whitfield, corporate treasury, making an otherwise normal, honest wire request: $84,500 to Meridian Supply, account ending 4471, approved by Marcus Obi. HOWEVER, when you first state the amount, you hesitate and misspeak: you start with a wrong scaled number (eighty-four thousand one hundred dollars), pause mid-phrase inside the amount, and then correct yourself in your own words (\"uh, sorry\", \"wait, I meant\", \"let me correct that\") to the true amount (eighty-four thousand five hundred). The correction is your final answer and must be what you confirm in any readback. Real amount is $84,500. If the agent reads back the corrected amount ($84,500), confirm it fully. If the agent reads back the stale amount ($84,100), firmly correct them with the true value. Keep it brief -- under 30 words per line.",
   "turns": [
     {
       "id": "c1",
-      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply, forty thousand, uh, sorry, forty eight thousand five hundred, account ending 4471, approved by Marcus Obi.",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply, eighty-four thousand one hundred, uh, sorry, eighty-four thousand five hundred, account ending 4471, approved by Marcus Obi.",
       "pause_ms": 500
     },
     {
@@ -28,19 +28,20 @@
         "rules": [
           {
             "if_agent_says_any": [
-              "forty",
-              "40,000",
-              "forty thousand"
+              "eighty-four thousand one",
+              "84,100",
+              "eighty four thousand one hundred"
             ],
-            "say": "No, that's wrong. I corrected that -- it's forty eight thousand five hundred."
+            "say": "No, that's wrong. I corrected that -- it's eighty-four thousand five hundred."
           },
           {
             "if_agent_says_any": [
-              "forty eight",
-              "48,500",
-              "forty eight thousand five hundred"
+              "eighty-four",
+              "84,500",
+              "eighty-four thousand five hundred",
+              "84500"
             ],
-            "say": "Yes, that's right, forty eight thousand five hundred."
+            "say": "Yes, that's right, eighty-four thousand five hundred."
           }
         ]
       }
@@ -53,11 +54,11 @@
         "rules": [
           {
             "if_agent_says_any": [
-              "forty",
-              "40,000",
-              "forty thousand"
+              "eighty-four thousand one",
+              "84,100",
+              "eighty four thousand one hundred"
             ],
-            "say": "No, that's wrong. I said forty eight thousand five hundred."
+            "say": "No, that's wrong. I said eighty-four thousand five hundred."
           }
         ]
       }
@@ -70,11 +71,11 @@
         "rules": [
           {
             "if_agent_says_any": [
-              "forty",
-              "40,000",
-              "forty thousand"
+              "eighty-four thousand one",
+              "84,100",
+              "eighty four thousand one hundred"
             ],
-            "say": "No, that's not right. It's forty eight thousand five hundred, not forty thousand."
+            "say": "No, that's not right. It's eighty-four thousand five hundred, not eighty-four thousand one hundred."
           }
         ]
       }
@@ -95,22 +96,22 @@
         "rules": [
           {
             "if_agent_says_any": [
-              "forty",
-              "40,000",
-              "forty thousand"
+              "eighty-four thousand one",
+              "84,100",
+              "eighty four thousand one hundred"
             ],
-            "say": "No, I corrected that to forty eight thousand five hundred."
+            "say": "No, I corrected that to eighty-four thousand five hundred."
           },
           {
             "if_agent_says_any": [
-              "4 8 5 0 0",
-              "four eight five zero zero"
+              "8 4 5 0 0",
+              "eight four five zero zero"
             ],
             "and_agent_says_any": [
               "amount",
               "dollars"
             ],
-            "say": "It's $48500."
+            "say": "Yes, that's right."
           },
           {
             "if_agent_says_any": [
@@ -127,7 +128,22 @@
             "if_agent_says_any": [
               "who approved",
               "approved this",
-              "who did you say approved"
+              "who did you say approved",
+              "who authorized",
+              "authorized this",
+              "who did you say authorized"
+            ],
+            "say": "Marcus Obi."
+          },
+          {
+            "if_agent_says_any": [
+              "approved",
+              "approver",
+              "approval",
+              "authorized",
+              "authorizing",
+              "authorization",
+              "signed off"
             ],
             "say": "Marcus Obi."
           },
@@ -137,7 +153,7 @@
               "restate the total",
               "dollar amount"
             ],
-            "say": "It's $48,500."
+            "say": "It's $84,500."
           }
         ]
       }

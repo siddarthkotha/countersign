@@ -220,20 +220,20 @@ Why: This case reproduces a real bug the founder hit: after stating a new amount
 Card: Dana Whitfield. State a request with an amount, then immediately correct it before the agent even asks:
 
 Say:
-1. "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply, forty thousand, uh, sorry, forty eight thousand five hundred, account ending 4471, approved by Marcus Obi."
+1. "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply, eighty-four thousand one hundred, uh, sorry, eighty-four thousand five hundred, account ending 4471, approved by Marcus Obi."
 2. "Yes, that's right."
 3. "Yes, that's right."
 4. "Yes, that's right."
 5. "Yes, that's right."
 6. "Yes, that's right."
 
-If asked: Confirm all readbacks truthfully. The corrected amount is the one that counts.
+If asked: Confirm all readbacks truthfully. The real amount is $84,500. The corrected amount is the one that counts.
 
 You will hear: "Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye."
 
 You will see: STAGED FOR SECOND APPROVAL banner with checkmark glyph, second approver, and evidence hash.
 
-Why: A self-corrected amount does not count toward the structuring total (founder ruling, 2026-09-14). The caller is being honest and transparent. The final stated amount (48,500 dollars) is under the high-value threshold, so the call stages normally.
+Why: A self-corrected amount does not count toward the structuring total (founder ruling 2026-09-14). The caller is being honest and transparent. The corrected amount ($84,500) is Dana's real payment and the readback must confirm the corrected value, not the misspoken one ($84,100).
 
 ---
 

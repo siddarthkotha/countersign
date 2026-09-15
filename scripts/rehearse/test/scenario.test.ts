@@ -782,24 +782,24 @@ describe('case 11: corrected-critical-field (2026-09-14)', () => {
     expect(s.turns.length).toBeGreaterThan(0);
   });
 
-  it('corrected-critical-field carries a truth block with the correct amount ($48,500, not the stale $40,000)', async () => {
+  it('corrected-critical-field carries a truth block with the correct amount ($84,500, Dana\'s real payment, not the stale $84,100)', async () => {
     const s = await loadScenario('corrected-critical-field');
     expect(s.truth).toBeDefined();
     expect(s.truth?.identity).toBe('Dana Whitfield');
     expect(s.truth?.beneficiary).toBe('Meridian Supply');
-    expect(s.truth?.amount_usd).toBe(48500);
+    expect(s.truth?.amount_usd).toBe(84500);
     expect(s.truth?.account_last4).toBe('4471');
     expect(s.truth?.approver).toBe('Marcus Obi');
   });
 
-  it('corrected-critical-field carries a persona that instructs the caller to correct themselves mid-amount (under high-value line for exposure test)', async () => {
+  it('corrected-critical-field carries a persona that instructs the caller to correct themselves mid-amount to Dana\'s real payment', async () => {
     const s = await loadScenario('corrected-critical-field');
     expect(s.persona).toBeTruthy();
     const personaLower = s.persona!.toLowerCase();
     expect(personaLower).toContain('hesitate');
     expect(personaLower).toContain('correct');
-    expect(personaLower).toMatch(/48.?500|forty eight/);
-    expect(personaLower).toMatch(/40.?000|forty thousand/);
+    expect(personaLower).toContain('84,500');
+    expect(personaLower).toMatch(/84.?100|eighty four thousand one/);
   });
 
   it('corrected-critical-field has respond rules that reject the stale amount and accept the corrected one', async () => {
@@ -807,11 +807,11 @@ describe('case 11: corrected-critical-field (2026-09-14)', () => {
     const turn2 = s.turns[1]!;
     expect(turn2.respond).toBeDefined();
     expect(turn2.respond!.rules.length).toBeGreaterThan(0);
-    // First rule should trigger on stale amount
-    const staleRule = turn2.respond!.rules.find((r) => r.if_agent_says_any.some((phrase) => phrase.includes('forty') || phrase.includes('40')));
+    // First rule should trigger on stale amount (84,100)
+    const staleRule = turn2.respond!.rules.find((r) => r.if_agent_says_any.some((phrase) => phrase.includes('eighty-four thousand one') || phrase.includes('84,100')));
     expect(staleRule).toBeDefined();
     expect(staleRule!.say.toLowerCase()).toContain('wrong');
-    expect(staleRule!.say.toLowerCase()).toMatch(/forty eight|48/);
+    expect(staleRule!.say.toLowerCase()).toContain('eighty-four thousand five');
   });
 
   it('corrected-critical-field carries demo_persona "legitimate"', async () => {
@@ -831,12 +831,32 @@ describe('case 11: corrected-critical-field (2026-09-14)', () => {
     expect(s.free_play!.pause_max_ms).toBe(2000);
   });
 
-  it('corrected-critical-field opening turn includes both the stale amount (40000) and corrected amount (48500) in one line', async () => {
+  it('corrected-critical-field opening turn includes both the stale amount (84,100) and corrected amount (84,500) in one line', async () => {
     const s = await loadScenario('corrected-critical-field');
     const c1 = s.turns[0]!;
     const textLower = c1.text.toLowerCase();
-    expect(textLower).toContain('forty');
-    expect(textLower).toContain('forty eight');
+    expect(textLower).toContain('eighty-four thousand one');
+    expect(textLower).toContain('eighty-four thousand five');
     expect(textLower).toMatch(/sorry|uh|wait|correct/i);
+  });
+
+  it('corrected-critical-field c6 turn has respond rules that match authorizer patterns: approved/approver/authorization/authorized/authorizing', async () => {
+    const s = await loadScenario('corrected-critical-field');
+    const c6 = s.turns.find((t) => t.id === 'c6')!;
+    expect(c6).toBeDefined();
+    expect(c6.respond).toBeDefined();
+    expect(c6.respond!.rules.length).toBeGreaterThan(0);
+
+    // The two exact agent lines from the live run:
+    // "Who did you say authorized this transaction?"
+    // "Please state the name of the authorizing officer."
+    const agentLine1 = 'Who did you say authorized this transaction?';
+    const agentLine2 = 'Please state the name of the authorizing officer.';
+
+    const match1 = matchRespondRules(c6.respond!.rules, agentLine1);
+    const match2 = matchRespondRules(c6.respond!.rules, agentLine2);
+
+    expect(match1).toBe('Marcus Obi.');
+    expect(match2).toBe('Marcus Obi.');
   });
 });
