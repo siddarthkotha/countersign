@@ -98,10 +98,14 @@ describe('CallSession -- server-initiated lookup runner (deadlock bug fix)', () 
     // already computed by then regardless of state, so completing the requirement last still
     // reaches the exact same comprehensive reason set), complete what a fully-fixed live
     // agent would actually have said.
+    // FIX (2026-09-15/16, Dana regression): each challenge only stops being genuinely AWAITING
+    // once `challenge_answer_window_ms` (15s) has elapsed since ITS OWN issuance (challenges.ts's
+    // `challengeReplyWindowStatus`) -- fake clock, so widening this costs nothing in real test
+    // run time.
     for (let i = 0; i < 2 && session.last?.goal.code === 'ASK_CHALLENGE' && session.last.goal.challenge; i++) {
       const sentence = session.last.goal.challenge.speak!;
       const replyId = `challenge-completion-${i}`;
-      clock.now += 100;
+      clock.now += 16000;
       aai.emit({ type: 'reply.started', reply_id: replyId });
       aai.emit({ type: 'transcript.agent', item_id: replyId, text: sentence, reply_id: replyId, interrupted: false });
       aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });

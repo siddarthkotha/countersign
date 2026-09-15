@@ -349,12 +349,33 @@ describe('gradeChallenges — SEED_FACT', () => {
     expect(result['g1-1']?.result).toBe('REFUSED');
   });
 
-  it('UNANSWERED when there is no caller utterance at all', () => {
+  // FIX (2026-09-15/16, Dana regression -- scripts/rehearse/reports/2026-09-15T14-27-39-dana-
+  // patient.diagnostics.json, PROVEN by direct engine reproduction): grading a just-issued
+  // challenge UNANSWERED the INSTANT it's checked, with zero elapsed caller turns, defeated
+  // fsm.ts's `awaitingChallenge` re-ask-verbatim protection on literally the very next tick --
+  // before the caller had any chance to reply -- letting the engine race ahead to a genuinely
+  // NEW challenge (a fresh challenge_id) and then grade the caller's real, on-topic answer FAIL
+  // against the wrong one once it finally arrived. `gradeChallenges` must give the SAME
+  // `challenge_answer_window_ms` grace `compose.ts`'s `computeChallengeAwaitingAnswer` already
+  // grants for the identical "is this still awaiting" question before conceding UNANSWERED for
+  // lack of ANY reply.
+  it('still AWAITING (no entry at all), not UNANSWERED, immediately after issue -- before the answer window has had any time to elapse', () => {
     const result = gradeChallenges([], actions, [spec], SEED, []);
+    expect(result['g1-1']).toBeUndefined();
+  });
+
+  it('UNANSWERED once the full answer window has elapsed with still no caller utterance at all', () => {
+    const windowMs = SEED.thresholds.challenge_answer_window_ms;
+    // Any later event (an agent line, not a caller reply) proves real time/conversation has
+    // moved on past the window -- `challengeReplyWindowStatus` counts every speaker, since the
+    // signal is "has the caller genuinely had the chance", not "did the caller specifically
+    // speak again".
+    const laterAgentLine = utt('a-later', 6000 + windowMs, 'Still on the line?', 'agent');
+    const result = gradeChallenges([laterAgentLine], actions, [spec], SEED, []);
     expect(result['g1-1']).toEqual({ result: 'UNANSWERED', eligible_utterance_ids: [] });
   });
 
-  it('an utterance after a second challenge_issued is NOT eligible for the first', () => {
+  it('an utterance after a second challenge_issued is NOT eligible for the first, and the first grades UNANSWERED right away (a later, different challenge already bounds its window, regardless of elapsed time)', () => {
     const spec2: ChallengeSpec = { ...spec, challenge_id: 'g1-2' };
     const twoActions: AgentAction[] = [issuedAction('a1', 'g1-1', 6000), issuedAction('a2', 'g1-2', 8000)];
     const conversation = [utt('u1', 9000, 'Calder and Finch')];

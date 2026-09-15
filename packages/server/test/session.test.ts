@@ -95,15 +95,20 @@ function driveScenarioBThroughA4(session: CallSession, aai: FakeAaiSocket, clock
     aai.emit({ type: 'transcript.agent', item_id: 'x1', text: sentence1, reply_id: 'x1', interrupted: false });
     aai.emit({ type: 'reply.done', reply_id: 'x1', status: 'completed' });
   }
+  // FIX (2026-09-15/16, Dana regression): sess-b-2 (issued via x1, just above) only stops
+  // being genuinely AWAITING once `challenge_answer_window_ms` has elapsed since ITS OWN
+  // issuance (see challenges.ts's `challengeReplyWindowStatus`) -- x2 must land comfortably
+  // past that window (fake clock, so this costs nothing in real test run time) or the engine
+  // correctly keeps re-asking sess-b-2 verbatim instead of advancing to sess-b-3.
   if (session.last?.goal.code === 'ASK_CHALLENGE' && session.last.goal.challenge) {
-    clock.now = 50200;
+    clock.now = 66200;
     const sentence2 = session.last.goal.challenge.speak!;
     aai.emit({ type: 'reply.started', reply_id: 'x2' });
     aai.emit({ type: 'transcript.agent', item_id: 'x2', text: sentence2, reply_id: 'x2', interrupted: false });
     aai.emit({ type: 'reply.done', reply_id: 'x2', status: 'completed' });
   }
 
-  clock.now = 50500;
+  clock.now = 66500;
   aai.emit({ type: 'reply.started', reply_id: 'tools-1' });
 }
 
@@ -3312,6 +3317,12 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
       aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
       expect(session.last?.state).toBe('CHALLENGE');
 
+      // FIX (2026-09-15/16, Dana regression): each challenge only stops being genuinely
+      // AWAITING once `challenge_answer_window_ms` (15s) has elapsed since ITS OWN issuance
+      // (challenges.ts's `challengeReplyWindowStatus`) -- so, with no caller reply in between,
+      // each loop iteration must land comfortably past that window from the previous one
+      // before the engine will advance `goal.challenge` to the next challenge_id (fake clock,
+      // so this costs nothing in real test run time).
       let t = 1500;
       for (let i = 1; i <= 3; i++) {
         expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
@@ -3321,7 +3332,7 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
         aai.emit({ type: 'transcript.agent', item_id: replyId, text: sentence, reply_id: replyId, interrupted: false });
         clock.now = t += 500;
         aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });
-        clock.now = t += 500;
+        clock.now = t += 16000;
       }
 
       // All three challenges were genuinely issued, and the requirement is now exhausted --

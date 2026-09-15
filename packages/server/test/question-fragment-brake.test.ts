@@ -46,11 +46,21 @@ function replyCreatesOf(aai: FakeAaiSocket): { type?: string; instructions?: str
 }
 
 /** Drives the FIRST ASK_CHALLENGE (sess-b-1, Scenario B's own counsel/escrow question) to
- *  "asked and confirmed" -- exactly the shape design-e-turn-order.test.ts's own (a-1) proves --
- *  which silently advances the engine's own goal to sess-b-2 (a DIFFERENT, fresh QUESTION_GOALS
- *  rendering) on a NON-caller-turn tick (a1's own reply.done), deferred and unsent. By the time
- *  this returns, `lastAskedQuestionKey` is sess-b-1's own key and the current goal is already
- *  sess-b-2, exactly the precondition the fragment brake needs to be meaningfully exercised. */
+ *  "asked and confirmed", then advances the engine's own goal to sess-b-2 (a DIFFERENT, fresh
+ *  QUESTION_GOALS rendering) via ONE caller fragment that does not answer it -- exactly the
+ *  live shape fragment-analysis.md section A/C actually documents (a token-graded challenge,
+ *  e.g. sess-b-1's own SEED_FACT counsel/escrow question, is graded the INSTANT any caller
+ *  reply lands, matching accept_tokens or not -- challenges.ts's `gradeChallenges` never
+ *  defers a token-based grade the way it now defers a content-shaped TRAP_FACT/LIVE_COMMITMENT
+ *  grade -- see `challengeReplyWindowStatus`'s own doc comment, 2026-09-15/16 Dana regression
+ *  fix). By the time this returns, `lastAskedQuestionKey` is sess-b-1's own key,
+ *  `previousCallerTranscriptAtMs` is this fragment's own t_ms, and the current goal is already
+ *  sess-b-2 -- exactly the precondition the fragment brake needs to be meaningfully exercised,
+ *  reached here the same way a real second fragment 2.1-2.3s later than a REAL caller turn
+ *  would (never a phantom event with no caller reply at all, which the Dana-regression fix now
+ *  correctly holds open for the caller's full `challenge_answer_window_ms`). */
+const FIRST_CHALLENGE_CONFIRMED_AT_MS = 1600;
+
 function askAndConfirmFirstChallenge(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
   clock.now = 1000;
   aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
@@ -71,7 +81,16 @@ function askAndConfirmFirstChallenge(session: CallSession, aai: FakeAaiSocket, c
 
   expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(true);
   expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
-  expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-2'); // silently advanced already
+  expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-1'); // still genuinely awaiting
+
+  // A real caller reply that does not answer sess-b-1 (no "calder"/"finch") -- sess-b-1 is
+  // SEED_FACT (accept_tokens-graded), so this grades FAIL immediately, on this same tick,
+  // independent of how much time has elapsed since it was issued.
+  clock.now = FIRST_CHALLENGE_CONFIRMED_AT_MS;
+  aai.emit({ type: 'transcript.user', item_id: 'fragment0', text: 'And make it two point one million.' });
+
+  expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+  expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-2'); // now genuinely advanced
 }
 
 describe('BRAKE (2026-09-15): a fresh question discovered off a fragment landing close to the one before it is held back, not lost', () => {
@@ -90,25 +109,29 @@ describe('BRAKE (2026-09-15): a fresh question discovered off a fragment landing
 
     askAndConfirmFirstChallenge(session, aai, clock);
     const baseline = replyCreatesOf(aai).length; // just sess-b-1's own send
+    // fragment0 (inside the helper above) itself lands close to c1 and is ALSO braked --
+    // only diag events from here on are this test's own subject.
+    const diagBaseline = diagEvents.length;
 
-    // The fragment: 2.2s after c1 (PROVEN gap range from fragment-analysis.md section A),
-    // content that does NOT look like an answer attempt (no name, no confirmation word) --
-    // exactly the shape of the live "And make it $2.1 million." trigger.
-    clock.now = 3200;
+    // The fragment: 2.2s after sess-b-1 was confirmed asked (PROVEN gap range from
+    // fragment-analysis.md section A), content that does NOT look like an answer attempt (no
+    // name, no confirmation word) -- exactly the shape of the live "And make it $2.1 million."
+    // trigger.
+    clock.now = FIRST_CHALLENGE_CONFIRMED_AT_MS + 2200;
     aai.emit({ type: 'transcript.user', item_id: 'frag1', text: 'And make it two point one million.' });
 
     // Braked: nothing new sent, but the brake diagnostic fired for the new challenge.
     expect(replyCreatesOf(aai)).toHaveLength(baseline);
-    const brakeDiags = diagEvents.filter((e) => e.kind === 'question_fragment_brake_applied');
+    const brakeDiags = diagEvents.slice(diagBaseline).filter((e) => e.kind === 'question_fragment_brake_applied');
     expect(brakeDiags).toHaveLength(1);
     expect((brakeDiags[0]!.detail as { goal_code: string }).goal_code).toBe('ASK_CHALLENGE');
 
     // The fragment's own turn still gets an automatic reply from AssemblyAI (unstoppable, per
     // Design E) -- an EMPTY one, per this same task's other fix. Its own reply.done is "the
     // next genuine turn" the brake defers to: the owed sess-b-2 question goes out right after.
-    clock.now = 3250;
+    clock.now = FIRST_CHALLENGE_CONFIRMED_AT_MS + 2250;
     aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
-    clock.now = 3700;
+    clock.now = FIRST_CHALLENGE_CONFIRMED_AT_MS + 2700;
     aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'completed' }); // no transcript.agent at all
 
     expect(replyCreatesOf(aai)).toHaveLength(baseline + 1); // exactly one, now, for sess-b-2
@@ -132,14 +155,18 @@ describe('BRAKE (2026-09-15): a fresh question discovered off a fragment landing
 
     askAndConfirmFirstChallenge(session, aai, clock);
     const baseline = replyCreatesOf(aai).length;
+    // fragment0 (inside the helper above) itself lands close to c1 and is ALSO braked --
+    // only diag events from here on are this test's own subject.
+    const diagBaseline = diagEvents.length;
 
-    // 6s after c1 -- well outside QUESTION_FRAGMENT_WINDOW_MS (2500ms, ESTIMATE).
-    clock.now = 7000;
+    // 6s after sess-b-1 was confirmed asked -- well outside QUESTION_FRAGMENT_WINDOW_MS
+    // (2500ms, ESTIMATE).
+    clock.now = FIRST_CHALLENGE_CONFIRMED_AT_MS + 6000;
     aai.emit({ type: 'transcript.user', item_id: 'frag1', text: 'And make it two point one million.' });
 
     // Sent immediately -- no brake, exactly as before this fix.
     expect(replyCreatesOf(aai)).toHaveLength(baseline + 1);
-    expect(diagEvents.some((e) => e.kind === 'question_fragment_brake_applied')).toBe(false);
+    expect(diagEvents.slice(diagBaseline).some((e) => e.kind === 'question_fragment_brake_applied')).toBe(false);
     expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-2');
     const sent0 = replyCreatesOf(aai).at(-1)!;
     expect(sent0.instructions).toBe(`Say exactly this and nothing else: "${session.last!.goal.challenge!.speak}"`);
@@ -155,13 +182,16 @@ describe('BRAKE (2026-09-15): a fresh question discovered off a fragment landing
 
     askAndConfirmFirstChallenge(session, aai, clock);
     const baseline = replyCreatesOf(aai).length;
+    // fragment0 (inside the helper above) itself lands close to c1 and is ALSO braked --
+    // only diag events from here on are this test's own subject.
+    const diagBaseline = diagEvents.length;
 
     // Same 2.2s gap as the braked case, but this fragment names a firm -- content overrides
     // timing (the caller really is answering something, fast).
-    clock.now = 3200;
+    clock.now = FIRST_CHALLENGE_CONFIRMED_AT_MS + 2200;
     aai.emit({ type: 'transcript.user', item_id: 'frag1', text: 'Baker McKenzie is our counsel of record.' });
 
     expect(replyCreatesOf(aai)).toHaveLength(baseline + 1); // sent immediately, not braked
-    expect(diagEvents.some((e) => e.kind === 'question_fragment_brake_applied')).toBe(false);
+    expect(diagEvents.slice(diagBaseline).some((e) => e.kind === 'question_fragment_brake_applied')).toBe(false);
   });
 });

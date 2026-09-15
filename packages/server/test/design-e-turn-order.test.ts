@@ -257,8 +257,12 @@ describe('Design E: the automatic reply is a holding beat only; the server\'s ow
       aai.emit({ type: 'transcript.agent', item_id: 'ax1', text: s1, reply_id: 'x1', interrupted: false });
       aai.emit({ type: 'reply.done', reply_id: 'x1', status: 'completed' });
     }
+    // FIX (2026-09-15/16, Dana regression): sess-b-2 (issued via x1, just above) only stops
+    // being genuinely AWAITING once `challenge_answer_window_ms` has elapsed since ITS OWN
+    // issuance (challenges.ts's `challengeReplyWindowStatus`) -- fake clock, so this costs
+    // nothing in real test run time.
     if (session.last?.goal.code === 'ASK_CHALLENGE' && session.last.goal.challenge) {
-      clock.now = 50_200;
+      clock.now = 66_200;
       const s2 = session.last.goal.challenge.speak!;
       aai.emit({ type: 'reply.started', reply_id: 'x2' });
       aai.emit({ type: 'transcript.agent', item_id: 'ax2', text: s2, reply_id: 'x2', interrupted: false });

@@ -681,6 +681,65 @@ function eligibleUtterances(
     .slice(0, maxReasks);
 }
 
+/** FIX (2026-09-15/16, Dana regression -- PROVEN by direct engine reproduction, no live call
+ *  needed: scratchpad probes replaying scripts/rehearse/reports/2026-09-15T14-27-39-dana-
+ *  patient.diagnostics.json's own transcript through the real `evaluate()` reproduce its exact
+ *  ev-knowledge cards move-for-move). `gradeChallenges`'s `eligible.length === 0` branch used
+ *  to grade a challenge UNANSWERED the INSTANT it was checked, with no distinction between
+ *  "the caller has had zero real turns to reply yet" (issuedAction.t_ms and the latest known
+ *  event are the SAME instant) and "the caller genuinely never answered" (real time/turns
+ *  passed with nothing from them). `evaluate()` recomputes fresh on every tick, and the server
+ *  re-ticks synchronously off the SAME `reply.done` that just logged the `challenge_issued`
+ *  action (call/session.ts) -- so the very first re-check, milliseconds later and before the
+ *  caller has said a word, already produced a `knowledge_check_result` card. `fsm.ts`'s
+ *  `awaitingChallenge` (and `compose.ts`'s `computeChallengeAwaitingAnswer`, which already uses
+ *  this exact window for the SAME "still awaiting" question, and whose own 15s grace was
+ *  therefore also silently dead code -- always finding `graded: true` a tick after issuance)
+ *  both read a card's mere existence as "no longer awaiting", so the engine raced ahead and
+ *  issued a genuinely NEW, DIFFERENT challenge (a fresh challenge_id) before the caller's real
+ *  reply could ever land in the original challenge's eligible window. On the live bundle this
+ *  cost a TRAP_FACT challenge ("Northgate Partners") its own answer: the caller's correct,
+ *  on-topic rejection ("No." / "That's wrong, it's Meridian Supply.") arrived AFTER the engine
+ *  had already moved on to a RELATIONAL challenge (asking for account digits) and graded the
+ *  caller's real reply FAIL against the WRONG question's `accept_tokens` --
+ *  `at_least_one_challenge_passed` and `challenge_requirement_met` both ended up false, and an
+ *  honest, fully-confirmed call ESCALATEd instead of STAGEd.
+ *
+ *  Fix: give a genuinely-just-issued challenge the SAME `challenge_answer_window_ms` grace
+ *  `computeChallengeAwaitingAnswer` (compose.ts) already grants for the identical "is this
+ *  still awaiting" question, BEFORE conceding UNANSWERED for lack of any reply at all. Purely
+ *  a function of the recorded `conversation`/`actions` timestamps already passed in (no clock
+ *  read, no new parameter, no signature change) -- LAW 3/BRIEF §14 unaffected: still a pure
+ *  (conversation, actions, seed) -> result computation. Once genuine time (measured by the
+ *  latest conversation/action timestamp anywhere in the logs) has actually moved past the
+ *  window with still nothing from the caller, OR a later, genuinely different bounding action
+ *  (another challenge_issued for a DIFFERENT id, or any readback_issued) already exists, this
+ *  returns 'CLOSED' -- the bounding-action check keeps this in exact agreement with
+ *  `eligibleUtterances` below for a scenario where the conversation has structurally moved on
+ *  well within the window, and is never circular in practice: such a later action can only be
+ *  logged by the server once ITS OWN challenge was legitimately selected, which (post-fix)
+ *  only happens after the prior one is no longer OPEN by this same function's own rule. A call
+ *  that later replies, re-asks, or ends normally always accumulates SOME later timestamp, so
+ *  this converges the same way `computeChallengeAwaitingAnswer` already does for the rules
+ *  layer -- never a new deadlock. */
+function challengeReplyWindowStatus(
+  conversation: Utterance[],
+  actions: AgentAction[],
+  issuedAction: AgentAction,
+  windowMs: number,
+): 'OPEN' | 'CLOSED' {
+  const bounded = actions.some(
+    (a) =>
+      a.t_ms > issuedAction.t_ms &&
+      ((a.kind === 'challenge_issued' && a.challenge_id !== issuedAction.challenge_id) || a.kind === 'readback_issued'),
+  );
+  if (bounded) return 'CLOSED';
+  let lastEventT = issuedAction.t_ms;
+  for (const u of conversation) if (u.t_ms > lastEventT) lastEventT = u.t_ms;
+  for (const a of actions) if (a.t_ms > lastEventT) lastEventT = a.t_ms;
+  return lastEventT - issuedAction.t_ms < windowMs ? 'OPEN' : 'CLOSED';
+}
+
 function gradeLiveCommitment(field: ClaimField, claim: Claim | undefined, rawText: string, normText: string): ChallengeResult {
   if (!claim) return 'AMBIGUOUS';
   const committedNorm = normalizeText(String(claim.value));
@@ -835,6 +894,13 @@ export function gradeChallenges(
 
     const eligible = eligibleUtterances(conversation, actions, issuedAction, seed.thresholds.max_challenge_reasks);
     if (eligible.length === 0) {
+      // FIX (2026-09-15/16, Dana regression): give the caller the full answer window (see
+      // `challengeReplyWindowStatus`'s own doc comment) before conceding nobody ever replied --
+      // still AWAITING (no entry at all, same shape as the non-answer-shaped branch below)
+      // while genuinely nothing has had time to arrive yet.
+      if (challengeReplyWindowStatus(conversation, actions, issuedAction, seed.thresholds.challenge_answer_window_ms) === 'OPEN') {
+        continue;
+      }
       out[spec.challenge_id] = { result: 'UNANSWERED', eligible_utterance_ids: [] };
       continue;
     }

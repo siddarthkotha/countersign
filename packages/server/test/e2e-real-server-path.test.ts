@@ -286,6 +286,15 @@ describe('end-to-end: real server path (no recorded corpus context/actions fed t
     // `transcriptAsksQuestion`'s general fallback regardless of which specific challenge is
     // current, so the exact wording here doesn't need to track the engine's own (session-id-
     // dependent) challenge selection the way the unit-level session.test.ts drive does.
+    // FIX (2026-09-15/16, Dana regression, challenges.ts's `challengeReplyWindowStatus`): a
+    // just-issued challenge now stays genuinely AWAITING (re-asked verbatim, never silently
+    // swapped for a different one) until either the caller actually replies or
+    // `challenge_answer_window_ms` (15s) elapses with nothing from them -- so an agent-only
+    // "confirm" line no longer advances to the NEXT distinct challenge by itself. Each
+    // iteration here now also feeds one real (wrong) caller reply, which Scenario B's own
+    // SEED_FACT/RELATIONAL challenges grade (FAIL/REFUSED) the instant it lands, independent
+    // of elapsed time -- keeping this test exactly as fast as its own doc comment promises,
+    // never needing a real 15s wait.
     for (let i = 0; i < 3; i++) {
       try {
         await pollUntil(() => lastStateOf(messages)?.state.verdict === 'FREEZE', 800);
@@ -295,6 +304,7 @@ describe('end-to-end: real server path (no recorded corpus context/actions fed t
         aai.emit({ type: 'reply.started', reply_id: replyId });
         aai.emit({ type: 'transcript.agent', item_id: replyId, text: 'Can you confirm that detail for me?', reply_id: replyId, interrupted: false });
         aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });
+        aai.emit({ type: 'transcript.user', item_id: `challenge-wrong-answer-${i}`, text: 'I do not know that offhand.' });
       }
     }
     await pollUntil(() => lastStateOf(messages)?.state.verdict === 'FREEZE', 3000);
