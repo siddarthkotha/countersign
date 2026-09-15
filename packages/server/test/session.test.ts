@@ -3419,6 +3419,42 @@ describe('CallSession — a CLOSE reply that never completes (no transcript, no 
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
   });
 
+  it('(NEW TEST 1) one audio frame at 30ms then silence: close_reply_stuck fires by 12,100ms not 24s (fix round 2, watchdog re-check bug)', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const call: CallContext = { session_id: 'sess-close-one-frame-timing', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent);
+    (session as any).opts.onDiagnostic = (kind: string, detail: unknown) => diagEvents.push({ kind, detail });
+    session.start();
+    driveScenarioBThroughA4(session, aai, clock);
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    // A reply starts for the close sentence.
+    clock.now = 53000;
+    aai.emit({ type: 'reply.started', reply_id: 'test1-frame-then-silent' });
+
+    // One audio frame arrives at 30ms, then nothing else.
+    clock.now = 53030;
+    aai.emit({ type: 'reply.audio', data: 'audio' });
+
+    // With the FIX: the watchdog initial timer fires at 12000ms, checks lastAudioAge = 11970ms
+    // (< 12000ms), and reschedules for ~30ms more. The check runs again by 12030ms and
+    // declares stuck. On the BUGGY code, the second timer fires a FRESH 12s timer (via
+    // recursive call to armCloseStuckWatchdog), so stuck diagnostic doesn't appear until ~24000ms.
+    //
+    // Advance by 25000ms to test both fix and buggy code paths.
+    // With FIX: fires at ~12030ms.  With buggy code: fires at ~24000ms.
+    // Either way, it should fire within 25000ms.
+    clock.now += 25_000;
+    vi.advanceTimersByTime(25_000);
+    const stuck = diagEvents.find((e) => e.kind === 'close_reply_stuck');
+    expect(stuck).toBeDefined();
+    expect(stuck?.detail).toHaveProperty('reply_id', 'test1-frame-then-silent');
+  });
+
   it('a CLOSE reply with one audio frame at 30ms then silence for 12s fires the watchdog (fix round 2, audio-inactivity)', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
@@ -3449,6 +3485,51 @@ describe('CallSession — a CLOSE reply that never completes (no transcript, no 
     // The stuck watchdog MUST have fired and queued a retry via armCloseRetryTimer.
     // At least one new reply.create should have been sent.
     expect(countReplyCreates()).toBeGreaterThan(replyCreatesAtStart);
+  });
+
+  it('(NEW TEST 4) audio every 100ms until 5,000ms then silence: close_reply_stuck ABSENT at 16,900ms, PRESENT by 17,200ms', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const call: CallContext = { session_id: 'sess-close-audio-then-silent', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent);
+    (session as any).opts.onDiagnostic = (kind: string, detail: unknown) => diagEvents.push({ kind, detail });
+    session.start();
+    driveScenarioBThroughA4(session, aai, clock);
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    // A reply starts for the close sentence.
+    clock.now = 53000;
+    aai.emit({ type: 'reply.started', reply_id: 'test4-audio-then-silent' });
+
+    // Stream audio frames every 100ms for 5 seconds (5000ms total, inclusive).
+    for (let i = 0; i <= 50; i++) {
+      clock.now = 53000 + (i * 100);
+      aai.emit({ type: 'reply.audio', data: 'audio' });
+    }
+    // Last audio at clock.now = 53000 + 5000 = 58000
+
+    // Watchdog timer fires at 53000 + 12000 = 65000 (12s from reply.started).
+    // At that point, lastAudioAge = 65000 - 57900 = 7100ms < 12000ms, so reschedule.
+    // Watchdog fires again at 65000 + (12000-7100) = 65000 + 4900 = 69900.
+    // At that point, lastAudioAge = 69900 - 57900 = 12000ms >= 12000ms, declare stuck.
+
+    // Advance to 16,900ms after reply.started (53000 + 16900 = 69900):
+    // At 69900ms, the second check is just about to fire or has just fired.
+    clock.now = 53000 + 16900;
+    vi.advanceTimersByTime(16900);
+    const stuckAt16900 = diagEvents.find((e) => e.kind === 'close_reply_stuck');
+    expect(stuckAt16900).toBeUndefined(); // Not yet (or just starting to fire)
+
+    // Advance 300ms more to 17200ms after reply.started:
+    // Now the second check MUST have fired with the FIX.
+    clock.now = 53000 + 17200;
+    vi.advanceTimersByTime(300);
+    const stuckAt17200 = diagEvents.find((e) => e.kind === 'close_reply_stuck');
+    expect(stuckAt17200).toBeDefined();
+    expect(stuckAt17200?.detail).toHaveProperty('reply_id', 'test4-audio-then-silent');
   });
 
   it('a CLOSE reply that goes silent for 12+ seconds (no transcript, no reply.done) MUST trigger the stuck watchdog', () => {

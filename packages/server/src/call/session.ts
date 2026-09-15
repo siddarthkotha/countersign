@@ -689,49 +689,63 @@ export class CallSession {
    *  from 79 samples, scripts/rehearse/reports/2026-09-1[234]*.diagnostics.json), so this
    *  inactivity approach avoids false positives from healthy replies that last >12s.
    *
-   *  Mechanism: when the timer fires, check `this.lastReplyAudioAt` (updated on every
-   *  reply.audio frame). If audio arrived recently (within CLOSE_REPLY_STUCK_MS), re-arm for
-   *  the remaining time and return. Only declare stuck when the full 12s passes without any
-   *  audio. Both clear-paths (transcript match and reply.done) outright clear the timer, so
-   *  no re-check needed there. Treats confirmed stuck as dead reply: `this.speaking` is given
-   *  up (same as reply.done would), and a fresh CLOSE reply is asked for via the spaced
-   *  retry (`armCloseRetryTimer`) that every other CLOSE mismatch already uses. The idle
-   *  re-check convention applies: `currentReplyId !== replyId` (newer reply superseded this
-   *  one) and `!this.speaking` (reply.done already ran, racing the timer) both make this a
-   *  no-op. */
+   *  This method arms the initial check at CLOSE_REPLY_STUCK_MS. The check itself is
+   *  implemented in `checkCloseReplyStuck` (below) and is idempotent: when it runs, if audio
+   *  was recent, it reschedules itself for the remaining time; only when the full window
+   *  passes without any audio does it declare stuck. Both clear-paths (transcript match and
+   *  reply.done) outright clear the timer, so no re-check is needed there. Treats confirmed
+   *  stuck as dead reply: `this.speaking` is given up (same as reply.done would), and a
+   *  fresh CLOSE reply is asked for via the spaced retry (`armCloseRetryTimer`) that every
+   *  other CLOSE mismatch already uses. */
   private armCloseStuckWatchdog(replyId: string): void {
     if (this.closeStuckTimer) {
       clearTimeout(this.closeStuckTimer);
       this.closeStuckTimer = null;
     }
     this.closeStuckTimer = setTimeout(() => {
-      this.closeStuckTimer = null;
-      if (this.ended || this.goodbyeConfirmed) return;
-      if (this.currentReplyId !== replyId) return;
-      if (!this.speaking) return;
-      const sentence = this.currentCloseSentence();
-      if (!sentence) return;
-
-      // Audio-inactivity check: if audio arrived recently, re-arm for remaining time.
-      const now = this.opts.now();
-      const lastAudioAge = this.lastReplyAudioAt !== null ? now - this.lastReplyAudioAt : Infinity;
-      if (lastAudioAge < CallSession.CLOSE_REPLY_STUCK_MS) {
-        // Audio was recent; re-arm for remaining time, then return.
-        const remainingMs = CallSession.CLOSE_REPLY_STUCK_MS - lastAudioAge;
-        this.closeStuckTimer = setTimeout(() => {
-          this.armCloseStuckWatchdog(replyId); // Re-check at the next deadline
-        }, remainingMs);
-        this.closeStuckTimer.unref?.();
-        return;
-      }
-
-      // No audio in the full window -- reply is stuck.
-      this.diag('close_reply_stuck', { reply_id: replyId });
-      this.speaking = false;
-      this.closeLastReplyWasEmpty = (this.replyTranscripts.get(replyId) ?? '').trim().length === 0;
-      this.armCloseRetryTimer();
+      this.checkCloseReplyStuck(replyId);
     }, CallSession.CLOSE_REPLY_STUCK_MS);
     this.closeStuckTimer.unref?.();
+  }
+
+  /** Checks whether the CLOSE reply is stuck (no audio for the full CLOSE_REPLY_STUCK_MS
+   *  window). Called initially by `armCloseStuckWatchdog` after CLOSE_REPLY_STUCK_MS, and
+   *  then reschedules itself for any remaining time if audio was recent. On the final check
+   *  (when the full window has passed without audio), declares stuck and arms a retry.
+   *  Idle-check guards (`currentReplyId`, `speaking`) and state guards (`ended`,
+   *  `goodbyeConfirmed`, close sentence) are checked first and make this a no-op if any
+   *  fail (a newer reply started, reply.done already ran, call ended, goodbye confirmed,
+   *  or CLOSE is no longer owed). */
+  private checkCloseReplyStuck(replyId: string): void {
+    if (this.closeStuckTimer) {
+      clearTimeout(this.closeStuckTimer);
+      this.closeStuckTimer = null;
+    }
+
+    if (this.ended || this.goodbyeConfirmed) return;
+    if (this.currentReplyId !== replyId) return;
+    if (!this.speaking) return;
+    const sentence = this.currentCloseSentence();
+    if (!sentence) return;
+
+    // Audio-inactivity check: if audio arrived recently, reschedule for remaining time.
+    const now = this.opts.now();
+    const lastAudioAge = this.lastReplyAudioAt !== null ? now - this.lastReplyAudioAt : Infinity;
+    if (lastAudioAge < CallSession.CLOSE_REPLY_STUCK_MS) {
+      // Audio was recent; reschedule this check for remaining time, then return.
+      const remainingMs = CallSession.CLOSE_REPLY_STUCK_MS - lastAudioAge;
+      this.closeStuckTimer = setTimeout(() => {
+        this.checkCloseReplyStuck(replyId);
+      }, remainingMs);
+      this.closeStuckTimer.unref?.();
+      return;
+    }
+
+    // No audio in the full window -- reply is stuck.
+    this.diag('close_reply_stuck', { reply_id: replyId });
+    this.speaking = false;
+    this.closeLastReplyWasEmpty = (this.replyTranscripts.get(replyId) ?? '').trim().length === 0;
+    this.armCloseRetryTimer();
   }
 
   /** Fired from `reply.done`, and ONLY when the generic force-speak machinery
@@ -1230,11 +1244,12 @@ export class CallSession {
         // Round 5: a frame belonging to a reply that started after the goodbye was already
         // confirmed is dropped instead of relayed -- the suppression diagnostic was already
         // logged once, at that reply's own `reply.started`, above.
+        // Fix round 2 (2026-09-15, audio-inactivity watchdog): record when this reply's
+        // audio frame arrived BEFORE the post-goodbye suppression guard, so the watchdog's
+        // re-check logic has the current audio time even for frames that don't get relayed.
+        this.lastReplyAudioAt = this.opts.now();
         if (this.suppressPostGoodbyeReplyAudio) return;
         this.opts.onServerEvent({ type: 'audio', data: evt.data });
-        // Fix round 2 (2026-09-15, audio-inactivity watchdog): record when this reply's
-        // audio frame arrived for use by `armCloseStuckWatchdog`'s re-arm logic.
-        this.lastReplyAudioAt = this.opts.now();
         // Flight recorder: only the FIRST audio frame of this reply -- a reply can carry
         // dozens of frames, and recording every one was the bulk of what starved the live
         // bundle's event cap (2026-09-03 finding). This is enough to see when audio actually
