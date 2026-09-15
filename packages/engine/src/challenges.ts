@@ -411,7 +411,8 @@ function isAnswerShapedFor(field: ClaimField, rawText: string, seed: SeedConfig)
   const normText = normalizeText(rawText);
 
   if (isNameField(field)) {
-    // Name field: answer-shaped if it contains a name token, negation, or affirmation
+    // Name field: answer-shaped if it contains a name token, negation, or affirmation.
+    // But BARE confirmations (single word affirm like "yes", "okay") are NOT answer-shaped.
 
     // Check for capitalized name pattern
     if (/\b[A-Z][A-Za-z.']*\s+[A-Z][A-Za-z.']*\b/.test(rawText)) return true;
@@ -420,23 +421,36 @@ function isAnswerShapedFor(field: ClaimField, rawText: string, seed: SeedConfig)
     const cued = extractCuedNames(rawText).filter((h) => h.field === field);
     if (cued.length > 0) return true;
 
-    // Check for negation or affirmation — any of these means the caller is answering the name question
-    // (TRAP_FACT will handle the specific grading logic for rules (a/b/c))
+    // Check for negation — objecting to the trap value is answer-shaped
     if (hasLexiconHit(rawText, seed.negate_lexicon)) return true;
-    if (hasLexiconHit(rawText, seed.affirm_lexicon)) return true;
+
+    // Check for affirmation — answer-shaped only if it's NOT bare (has 2+ words or substantive content).
+    // "yes" or "okay" alone → NOT answer-shaped (bare)
+    // "yes, right" or "yes that's right" → answer-shaped (multiple words)
+    const hasAffirm = hasLexiconHit(rawText, seed.affirm_lexicon);
+    if (hasAffirm) {
+      const words = normText.split(' ').filter(Boolean);
+      if (words.length > 1) {
+        // Multiple words with an affirm hit → answer-shaped
+        return true;
+      }
+      // Single word affirm (bare confirmation) → NOT answer-shaped for name challenges
+    }
 
     // No name-shaped content found
     return false;
   }
 
   if (field === 'account_last4') {
-    // Digits field: must contain at least two digits or a spelled digit word
-    // Match 2+ consecutive digits or spelled-out words like "eight", "eight", "three", "zero"
+    // Digits field: must contain at least two digits or a spelled digit word.
+    // Bare confirmations are not answer-shaped.
+
+    // Match 2+ consecutive digits or spelled-out words like "eight", "three", "zero"
     const digitPattern = /\d{2,}|(?:zero|one|two|three|four|five|six|seven|eight|nine|oh)\b/gi;
     const matches = rawText.match(digitPattern);
     if (matches && matches.length >= 2) return true;
 
-    // Also check if extractAccountLast4 finds anything
+    // Also check if extractAccountLast4 finds anything (e.g., "ending in 1234")
     const hit = extractAccountLast4(rawText);
     if (hit) return true;
 
@@ -444,18 +458,22 @@ function isAnswerShapedFor(field: ClaimField, rawText: string, seed: SeedConfig)
   }
 
   if (field === 'amount_usd') {
-    // Amount field: must contain a dollar amount or a number
+    // Amount field: must contain a dollar amount or a number.
+    // Bare confirmations are not answer-shaped.
+
     const hits = extractAmounts(rawText);
     if (hits.length > 0) return true;
 
-    // Also accept bare numbers
+    // Also accept bare numbers (but not bare affirmations)
     if (/\b\d+\b/.test(rawText)) return true;
 
     return false;
   }
 
   if (field === 'deadline') {
-    // Deadline field: must contain a date/deadline pattern
+    // Deadline field: must contain a date/deadline pattern or a number.
+    // Bare confirmations are not answer-shaped.
+
     const hit = extractDeadline(rawText);
     if (hit) return true;
 
@@ -656,19 +674,20 @@ export function gradeChallenges(
     const normText = normalizeText(rawText);
     const quote: Quote = { utterance_id: eligible[0]!.id, text: eligible[0]!.text };
 
-    // FIX (2026-09-15, fragment-shaped challenges): if we have multiple eligible utterances
-    // (likely an AssemblyAI fragment split) and they are not answer-shaped for this specific
-    // challenge field (e.g. "final figure moved this morning" after "And make it $2.1 million,"
-    // for a name challenge), leave the challenge AWAITING (UNANSWERED) rather than grading
-    // the fragments as AMBIGUOUS. This prevents selectChallenge from advancing to the next
-    // field while a probe is still unanswered. For single utterances, apply normal grading.
+    // FIX (2026-09-15, fragment-shaped challenges): a caller utterance is eligible to grade
+    // a pending challenge only if it is answer-shaped for that challenge's field. When
+    // AssemblyAI's endpointing splits a single scripted line (e.g., "And make it $2.1 million,
+    // the final figure moved this morning"), each fragment arrives as a separate transcript.user
+    // event and is independently evaluated. Fragment 1 alone ("And make it $2.1 million") is
+    // not answer-shaped for a name challenge, so leave it AWAITING (UNANSWERED, no FLAG yet)
+    // instead of grading as AMBIGUOUS. selectChallenge will not advance; the FSM re-asks the
+    // same challenge (within re-ask cap) so Fragment 2 ("Marcus Obi") can answer it.
     //
-    // Apply this check only to TRAP_FACT (which grades name fields) and LIVE_COMMITMENT
-    // (which grades various field types). SEED_FACT and RELATIONAL use accept_tokens
-    // (keyword matching) and should not have this restriction.
+    // Apply this check to TRAP_FACT (name fields) and LIVE_COMMITMENT (various fields).
+    // SEED_FACT and RELATIONAL use accept_tokens (keyword matching) and bypass this check.
     const expect = spec.expect;
     const isTokenBased = 'accept_tokens' in expect;
-    if (!isTokenBased && eligible.length > 1 && !isAnswerShapedFor(spec.field, rawText, seed)) {
+    if (!isTokenBased && !isAnswerShapedFor(spec.field, rawText, seed)) {
       out[spec.challenge_id] = { result: 'UNANSWERED', eligible_utterance_ids: eligibleIds };
       continue;
     }
