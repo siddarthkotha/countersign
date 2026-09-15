@@ -2419,9 +2419,9 @@
     },
     {
       "id": "push-40",
-      "title": "push 40: 06368f6..HEAD (injection ruling 6, fragment brake, empty holding reply, awaiting grading with re-ask cap, terse answers, name-token fix, approved recordings) - pushed at close 2026-09-15 with the founder close word",
+      "title": "push 40: 06368f6..HEAD (injection ruling 6, fragment brake, empty holding reply, awaiting grading with re-ask cap, terse answers, name-token fix, approved recordings) - pushed at close 2026-09-15 with the founder close word - deploy 40 verified 2:31 PM",
       "files": [],
-      "status": "running",
+      "status": "done",
       "agent_id": "close",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
@@ -2488,13 +2488,13 @@
     },
     {
       "id": "push-41",
-      "title": "push 41: f3f6ec3..fce67a1 (just-issued challenge gets its answer window before UNANSWERED; Dana trap-negation fixture) - gate 1910/1910 x2 plus one unrelated flake",
+      "title": "push 41: f3f6ec3..fce67a1 (just-issued challenge gets its answer window before UNANSWERED; Dana trap-negation fixture) - gate 1910/1910 x2 plus one unrelated flake - pushed 3:29 PM on the founder word; deploy 41 verified 3:33 PM; Dana STAGE 79.5 s",
       "files": [],
-      "status": "held",
+      "status": "done",
       "agent_id": "",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
-      "held_because": "autopilot off; founder push word needed"
+      "held_because": ""
     }
   ]
 }
