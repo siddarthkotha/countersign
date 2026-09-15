@@ -2396,6 +2396,26 @@
       "agent_id": "",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
+    },
+    {
+      "id": "REWRITE-INJECTION-FIXTURE",
+      "title": "rewrite injection-plus-two-slips-escalates.json as a real ruling-6 proof",
+      "files": [],
+      "status": "held",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
+      "held_because": "new fixture (append-only) with explicit specs on its challenge_issued actions so two wrong answers grade FAIL and the old-tally counter-proof holds; after push 40"
+    },
+    {
+      "id": "COMMIT-APPROVED-RECORDING",
+      "title": "commit the founder-approved regeneration of injection-plus-two-slips-escalates.json",
+      "files": [],
+      "status": "held",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
+      "held_because": "pre-commit gate blocks protected-oracle changes while the autopilot flag is on; founder says \"autopilot stop\", I commit, founder says \"autopilot start\""
     }
   ]
 }
