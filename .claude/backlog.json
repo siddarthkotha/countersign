@@ -2188,11 +2188,11 @@
     },
     {
       "id": "SEQUENCING-E",
-      "title": "design E: automatic reply as holding beat, one instructed reply.create, transcript verify",
+      "title": "design E: automatic reply as holding beat, one instructed reply.create, transcript verify - launched 8:09 AM 2026-09-15 (Sonnet, worktree design-e) with the case 11 close-sequence bundle as evidence",
       "files": [],
-      "status": "held",
-      "held_because": "next session step 3 (docs/TEST-PLAN.md)",
-      "agent_id": "",
+      "status": "running",
+      "held_because": "",
+      "agent_id": "ab1abdb437935dfc0",
       "started_at": ""
     },
     {
@@ -2306,13 +2306,13 @@
     },
     {
       "id": "ROTATE-ADMIN-TOKEN-PREFLIP",
-      "title": "rotate COUNTERSIGN_ADMIN_TOKEN before the public flip",
+      "title": "rotate COUNTERSIGN_ADMIN_TOKEN before the public flip - founder 2026-09-15 8:49 AM: no rotation needed",
       "files": [],
-      "status": "held",
+      "status": "done",
       "agent_id": "",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
-      "held_because": "the current admin token was pasted into the chat transcript 2026-09-14 9:39 PM; rotate in Render + .env before the public flip (founder step, 1 min)"
+      "held_because": ""
     },
     {
       "id": "BILLED-SECONDS-ON-SERVER-ENDED-CALL",
@@ -2344,13 +2344,13 @@
     },
     {
       "id": "INJECTION-TALLY-WEIGHT",
-      "title": "injection marker weight in the freeze tally (founder decision)",
+      "title": "founder ruling 2026-09-15 8:49 AM \"simplify the injection scenario\": injection escalates on its own, no longer counts in the freeze tally; case 8 script shortened",
       "files": [],
-      "status": "held",
-      "agent_id": "",
+      "status": "running",
+      "agent_id": "PENDING",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
-      "held_because": "reopens Ruling B (2026-09-09: injection counts 1 like a failed check); founder case 8 froze via tally>=3 with two knowledge issues plus the injection; bring as one decision with the recommendation to keep the rule and fix knowledge grading on honest calls first"
+      "held_because": ""
     },
     {
       "id": "push-37",
