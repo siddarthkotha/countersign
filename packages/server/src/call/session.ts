@@ -258,19 +258,19 @@ export class CallSession {
   private static readonly CLOSE_DONE_WAIT_MS = 4_000;
   /** PROVEN defect (2026-09-14, scripts/rehearse/reports/2026-09-14T17-58-23-barge-in-
    *  interrupt.md + .diagnostics.json): a CLOSE `reply.create` was sent, `reply.started` and
-   *  `reply.audio.first` both arrived, then NOTHING else -- no `transcript.agent` chunk, no
-   *  `reply.done` -- for the rest of the call. `scheduleCloseIfNeeded` only runs off
-   *  `reply.done` and `maybeArmCloseOnTranscript` only off a `transcript.agent` chunk, so
-   *  neither ever got a chance to notice this reply died and retry; the ONLY thing left
-   *  running was the (idle-deferred) CLOSE_TOTAL_MS hard cap, which duly ended the call 45s
-   *  after CLOSE first rendered, having sent exactly one `reply.create` for it the entire
-   *  time. `armCloseStuckWatchdog` (below) is the missing third leg: armed at that reply's
-   *  own `reply.started`, it fires only if NEITHER a matching transcript NOR a `reply.done`
-   *  showed up first (both paths cancel it) -- treats the reply as dead, gives up "speaking"
-   *  it, and asks for a fresh one via the SAME spaced retry (`armCloseRetryTimer`) every
-   *  other CLOSE mismatch already uses. Left well inside CLOSE_TOTAL_MS (45s) so a stuck
-   *  reply still gets several retries before the hard cap would otherwise be the only thing
-   *  to fire. */
+   *  `reply.audio.first` both arrived, then NOTHING else for the rest of the call (no further
+   *  audio, no `transcript.agent` chunk, no `reply.done`). The stuck watchdog (below) is an
+   *  audio-INACTIVITY timer (fix round 2, 2026-09-15): it fires only when no reply.audio
+   *  frame arrived for this reply within 12 s of the LAST audio frame (or reply.started if
+   *  no audio yet). This avoids false positives: live CLOSE replies (PROVEN from 79 samples,
+   *  scripts/rehearse/reports/2026-09-1[234]*.diagnostics.json) take p50 3952ms, p95 9070ms,
+   *  max 12668ms -- so a transcript-less reply lasting longer than the old 12s-from-start
+   *  would wrongly fire (one live max already exceeded 12s). The mechanism: `lastReplyAudioAt`
+   *  is updated on each reply.audio frame; when the timer fires, if audio arrived recently
+   *  (within CLOSE_REPLY_STUCK_MS), re-arm for remaining time; only declare stuck when the
+   *  full window passes without any audio. `scheduleCloseIfNeeded` (reply.done path) and
+   *  `maybeArmCloseOnTranscript` still clear it outright (both indicate the reply is healthy).
+   *  Left well inside CLOSE_TOTAL_MS (45s) so a stuck reply still gets several retries. */
   private static readonly CLOSE_REPLY_STUCK_MS = 12_000;
   private closeGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private closeHardCapTimer: ReturnType<typeof setTimeout> | null = null;
@@ -323,6 +323,13 @@ export class CallSession {
   /** True while `currentReplyId` is a reply that started AFTER `goodbyeConfirmed` went true
    *  and is not the confirmed reply itself -- see the `goodbyeConfirmed` doc comment above. */
   private suppressPostGoodbyeReplyAudio = false;
+  /** Fix round 2 (2026-09-15, audio-inactivity watchdog): the server's own clock time when
+   *  the most recent reply.audio frame for `currentReplyId` arrived -- used to detect audio
+   *  inactivity. Updated on every reply.audio frame, never cleared except when a new reply
+   *  starts. `armCloseStuckWatchdog` uses this to implement a deadline-driven watchdog that
+   *  re-arms if audio was recent, rather than firing immediately at a fixed offset from
+   *  reply.started. See that method's own doc comment for the full semantics. */
+  private lastReplyAudioAt: number | null = null;
   /** Round 4, requirement 8: whether the CLOSE reply that most recently completed (matched or
    *  not) carried an empty/whitespace-only accumulated transcript -- read once by the retry
    *  this triggers (`armCloseRetryTimer`/`sendReplyCreate`) so that retry does NOT bump the
@@ -673,20 +680,24 @@ export class CallSession {
     this.closeRetryTimer.unref?.();
   }
 
-  /** PROVEN defect (2026-09-14, barge-in-interrupt bundle -- see `CLOSE_REPLY_STUCK_MS`'s own
-   *  class-field doc comment for the full incident): fires only when a CLOSE reply's own
-   *  `reply.started` arrived but NEITHER a transcript match (`maybeArmCloseOnTranscript`) NOR
-   *  its `reply.done` (`scheduleCloseIfNeeded`) ever followed within the watchdog window --
-   *  both of those clear this timer the instant they run, so a reply that finishes normally,
-   *  however it finishes, never reaches this callback at all. Treats the reply as dead: there
-   *  is nothing left to wait for from IT specifically, so `this.speaking` is given up here
-   *  (the same release `reply.done` itself would have done) and a fresh CLOSE reply is asked
-   *  for via the SAME spaced retry (`armCloseRetryTimer`) every other CLOSE mismatch already
-   *  uses -- never a direct `sendReplyCreate` here, so the existing 400ms spacing and
-   *  in-flight guards still apply. `currentReplyId !== replyId` (a newer reply has already
-   *  superseded this one) and `!this.speaking` (reply.done already ran for this exact reply,
-   *  racing this timer) both make this a no-op, matching every other CLOSE timer's own
-   *  re-check-everything-at-fire-time convention. */
+  /** Audio-inactivity watchdog (fix round 2, 2026-09-15, PROVEN defect from 2026-09-14
+   *  barge-in-interrupt bundle): fires only when CLOSE reply's `reply.started` arrived but
+   *  no reply.audio frame for this reply has arrived in the past 12s, AND neither a transcript
+   *  match (`maybeArmCloseOnTranscript`) NOR its `reply.done` (`scheduleCloseIfNeeded`) have
+   *  cleared the timer. Live CLOSE replies are p50 3952ms, p95 9070ms, max 12668ms (PROVEN
+   *  from 79 samples, scripts/rehearse/reports/2026-09-1[234]*.diagnostics.json), so this
+   *  inactivity approach avoids false positives from healthy replies that last >12s.
+   *
+   *  Mechanism: when the timer fires, check `this.lastReplyAudioAt` (updated on every
+   *  reply.audio frame). If audio arrived recently (within CLOSE_REPLY_STUCK_MS), re-arm for
+   *  the remaining time and return. Only declare stuck when the full 12s passes without any
+   *  audio. Both clear-paths (transcript match and reply.done) outright clear the timer, so
+   *  no re-check needed there. Treats confirmed stuck as dead reply: `this.speaking` is given
+   *  up (same as reply.done would), and a fresh CLOSE reply is asked for via the spaced
+   *  retry (`armCloseRetryTimer`) that every other CLOSE mismatch already uses. The idle
+   *  re-check convention applies: `currentReplyId !== replyId` (newer reply superseded this
+   *  one) and `!this.speaking` (reply.done already ran, racing the timer) both make this a
+   *  no-op. */
   private armCloseStuckWatchdog(replyId: string): void {
     if (this.closeStuckTimer) {
       clearTimeout(this.closeStuckTimer);
@@ -699,6 +710,21 @@ export class CallSession {
       if (!this.speaking) return;
       const sentence = this.currentCloseSentence();
       if (!sentence) return;
+
+      // Audio-inactivity check: if audio arrived recently, re-arm for remaining time.
+      const now = this.opts.now();
+      const lastAudioAge = this.lastReplyAudioAt !== null ? now - this.lastReplyAudioAt : Infinity;
+      if (lastAudioAge < CallSession.CLOSE_REPLY_STUCK_MS) {
+        // Audio was recent; re-arm for remaining time, then return.
+        const remainingMs = CallSession.CLOSE_REPLY_STUCK_MS - lastAudioAge;
+        this.closeStuckTimer = setTimeout(() => {
+          this.armCloseStuckWatchdog(replyId); // Re-check at the next deadline
+        }, remainingMs);
+        this.closeStuckTimer.unref?.();
+        return;
+      }
+
+      // No audio in the full window -- reply is stuck.
       this.diag('close_reply_stuck', { reply_id: replyId });
       this.speaking = false;
       this.closeLastReplyWasEmpty = (this.replyTranscripts.get(replyId) ?? '').trim().length === 0;
@@ -1156,6 +1182,9 @@ export class CallSession {
         // Skipping it would leave the browser showing "not speaking" for the whole reply.
         this.speaking = true;
         this.replyFirstAudioRecorded = false;
+        // Fix round 2 (2026-09-15, audio-inactivity watchdog): reset audio timestamp for the
+        // new reply so that `armCloseStuckWatchdog` starts fresh (no audio yet for this one).
+        this.lastReplyAudioAt = null;
         // reply.create fix, round 2 (Critical 1, 2026-09-13 review): label this reply with
         // what was actually REQUESTED, never with whatever `this.last` happens to read by
         // now. If a `reply.create` is outstanding, `pendingRequestedGoal` is the goal it
@@ -1202,6 +1231,9 @@ export class CallSession {
         // logged once, at that reply's own `reply.started`, above.
         if (this.suppressPostGoodbyeReplyAudio) return;
         this.opts.onServerEvent({ type: 'audio', data: evt.data });
+        // Fix round 2 (2026-09-15, audio-inactivity watchdog): record when this reply's
+        // audio frame arrived for use by `armCloseStuckWatchdog`'s re-arm logic.
+        this.lastReplyAudioAt = this.opts.now();
         // Flight recorder: only the FIRST audio frame of this reply -- a reply can carry
         // dozens of frames, and recording every one was the bulk of what starved the live
         // bundle's event cap (2026-09-03 finding). This is enough to see when audio actually
