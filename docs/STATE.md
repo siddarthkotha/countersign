@@ -1,6 +1,6 @@
 # Countersign, session snapshot (overwritten at every close; never appended)
 
-Last close: Tuesday 2026-09-15, 2:25 PM CDT (Day 8, which ran Monday 7:37 PM to Tuesday
+Last close: Tuesday 2026-09-15, 3:28 PM CDT (Day 8, which ran Monday 7:37 PM to Tuesday
 2:25 PM with two API-limit outages, 10:34 PM to 11:40 PM and 10:41 AM to 11:30 AM; autopilot
 on 10:29 PM to 1:30 PM). Autopilot is OFF. No lanes in flight.
 
@@ -33,7 +33,10 @@ whose numbers changed under the new grading are approved; the admin token stays.
   harness time since (ESTIMATE); npm run credits:ledger reads billed seconds from deploy 38 on.
 
 ## Open, in the order to take them
-1. Verify deploy 40, then the second six-call confirmation (miller, dana, miller-silent,
+0. Push 41 first: main is two commits ahead of origin with the challenge grace-window fix
+   (fce67a1, gated 1910/1910 twice plus one unrelated flake, review PASS); the founder chose
+   not to push at close. Push, verify, prove Dana once.
+1. Then the second six-call confirmation (miller, dana, miller-silent,
    case 11, miller, dana) against deploy 36 on goodbye delay, agent lines, wall time. If it
    beats deploy 36, the founder plays cases 5, 7, 8, 11 (he is ready; about 20 min).
 2. Free-play batch (45 min) once the confirmation passes; regrade; classify non-passes.
@@ -63,7 +66,7 @@ GET /api/session/<id or 8-char code>/diagnostics.
 
 ## Next session
 "Day 9 resume: read docs/STATE.md, docs/RERUN-2026-09-15.md, then the tail of
-docs/AUTOPILOT_LOG.md. Nothing is in flight. Start by confirming deploy 40 is served, run the
-six-call confirmation, compare with deploy 36, then hand the founder cases 5, 7, 8, 11. Live
+docs/AUTOPILOT_LOG.md. Nothing is in flight. Start by pushing the gated grace-window fix as
+push 41 with the founder word, verify the deploy, prove Dana once, run the six-call confirmation, compare with deploy 36, then hand the founder cases 5, 7, 8, 11. Live
 tests only; fetch every founder record before any push; Haiku by default, Sonnet for server
 timing and reviews."

@@ -406,3 +406,4 @@ Every completed or parked item, with local time, gates run, confidence, and what
   Triple gate on the grace fix on the next line.
   Triple gate 3:25 PM at fce67a1: typecheck clean; run 1 1909/1910 with one flake in scripts/rehearse/test/creditsLedger.test.ts ("handles missing reports directory gracefully", the 5 s timeout seen earlier under load), runs 2 and 3 1910/1910; corpus 169/169. Board: FLAKE-CREDITS-LEDGER-TEST added.
 - 2026-09-15 3:27 PM CDT — REVIEW of fce67a1 (challenge grace window): PASS, no findings; pure; bounded; seven server tests adjusted for timing only; new fixture faithful and STAGE; no existing fixture touched. Push 41 ready on the founder word.
+- 2026-09-15 3:28 PM CDT — CLOSE FINAL (founder: autopilot stop, no push 41). Main two commits ahead of origin: the grace-window fix fce67a1 (gated, reviewed) and its log; live site stays on deploy 40 (f3f6ec3), which staged Dana on the repeat call. Day 9 item 0: push 41 with the founder word.
