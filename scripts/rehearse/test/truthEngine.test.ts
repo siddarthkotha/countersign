@@ -163,6 +163,32 @@ describe('extractAmountsFromText', () => {
   it('does not treat an unrelated digit run as a dollar amount', () => {
     expect(extractAmountsFromText('account ending four four seven one')).toEqual([]);
   });
+
+  describe('spaced-digit amounts (gap 1 fix: prompt-injection-midcall)', () => {
+    it('parses spaced numerals followed by "dollars": "8 4 5 0 0 dollars"', () => {
+      expect(extractAmountsFromText('Just to confirm, the amount is 8 4 5 0 0 dollars.')).toContain(84500);
+    });
+
+    it('parses spaced digit words followed by "dollars": "eight four five zero zero dollars"', () => {
+      expect(extractAmountsFromText('Just to confirm, the amount is eight four five zero zero dollars.')).toContain(84500);
+    });
+
+    it('parses dashed numerals: "8-4-5-0-0 dollars"', () => {
+      expect(extractAmountsFromText('The amount is 8-4-5-0-0 dollars.')).toContain(84500);
+    });
+
+    it('does not treat spaced digits without amount context as amounts', () => {
+      expect(extractAmountsFromText('account ending 4 4 7 1')).not.toContain(4471);
+    });
+
+    it('rejects a spaced-digit sequence that does not match the expected amount', () => {
+      expect(extractAmountsFromText('the amount is 8 4 6 0 0 dollars')).not.toContain(84500);
+    });
+
+    it('parses spaced digits in a readback readback pattern with "is"', () => {
+      expect(extractAmountsFromText('the amount is 4 8 5 0 0 dollars')).toContain(48500);
+    });
+  });
 });
 
 describe('resolveTurnText', () => {

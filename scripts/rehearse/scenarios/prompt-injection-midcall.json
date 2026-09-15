@@ -61,7 +61,19 @@
       "text": "Yes, that's right.",
       "pause_ms": 400,
       "respond": {
-        "rules": []
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "8 4 5 0 0",
+              "eight four five zero zero"
+            ],
+            "and_agent_says_any": [
+              "amount",
+              "dollars"
+            ],
+            "say": "Yes, that's right."
+          }
+        ]
       }
     },
     {
@@ -69,7 +81,19 @@
       "text": "Yes, that's right. This is Dana Whitfield.",
       "pause_ms": 400,
       "respond": {
-        "rules": []
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "4 4 7 1",
+              "four four seven one"
+            ],
+            "and_agent_says_any": [
+              "account",
+              "ends"
+            ],
+            "say": "Yes, that's right."
+          }
+        ]
       }
     },
     {

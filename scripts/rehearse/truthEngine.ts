@@ -258,11 +258,72 @@ function extractSpokenWordAmounts(text: string): number[] {
   return out;
 }
 
+/** Digit sequences spoken or written as separate tokens, e.g. "8 4 5 0 0" or "8-4-5-0-0",
+ *  gated on being followed by "dollars"/"dollar" or appearing after "is" / "the amount is" /
+ *  similar readback patterns, so a stray digit sequence elsewhere in the sentence is never
+ *  mistaken for a dollar amount. */
+function extractSpacedDigitAmounts(text: string): number[] {
+  const out: number[] = [];
+  // Look for patterns like "8 4 5 0 0 dollars" or "is 8 4 5 0 0" or "8-4-5-0-0 dollars"
+  const lowerText = text.toLowerCase();
+
+  // Replace dashes with spaces to normalize both forms
+  const normalized = lowerText.replace(/-/g, ' ');
+
+  // Look for sequences of digit words/numerals surrounded by spaces
+  const tokens = normalized.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+
+  for (let i = 0; i < tokens.length; i++) {
+    // Check if this token is a digit word or numeral
+    if (!(tokens[i] in DIGIT_WORD) && !/^\d$/.test(tokens[i]!)) continue;
+
+    // Try to collect consecutive digit tokens
+    let j = i;
+    const digits: string[] = [];
+    while (j < tokens.length && (tokens[j] in DIGIT_WORD || /^\d$/.test(tokens[j]!))) {
+      digits.push(tokens[j]!);
+      j++;
+    }
+
+    // Only process if we have at least 3 consecutive digits (minimum for amount like "4 4 7")
+    if (digits.length < 3) {
+      i = j - 1;
+      continue;
+    }
+
+    // Check if followed by "dollars" or "dollar"
+    const followedByDollars = j < tokens.length && (tokens[j] === 'dollars' || tokens[j] === 'dollar');
+
+    // Also check if preceded by amount-related words (amount, is, costs, etc.)
+    let precededByAmountWord = false;
+    if (i > 0) {
+      const prevToken = tokens[i - 1]!;
+      precededByAmountWord = /^(amount|is|costs?|was|equals?|equals?)$/.test(prevToken);
+    }
+
+    // Process if it looks like an amount context
+    if (followedByDollars || precededByAmountWord || (i > 0 && tokens[i - 1] === 'amount')) {
+      // Convert digit words to numerals and join to form the amount
+      const digitStrings = digits.map((d) => {
+        if (d in DIGIT_WORD) return DIGIT_WORD[d];
+        return d;
+      });
+      const numberStr = digitStrings.join('');
+      const value = Number(numberStr);
+      if (!isNaN(value)) out.push(value);
+    }
+
+    i = j - 1;
+  }
+
+  return out;
+}
+
 /** Every dollar-amount mention found in `text`, numeral and spoken forms merged. May contain
  *  duplicates or unrelated extra numbers from ambiguous phrasing -- callers only ever check
  *  "does the true amount appear anywhere in here", never treat this as a single value. */
 export function extractAmountsFromText(text: string): number[] {
-  return [...extractNumeralAmounts(text), ...extractSpokenPointAmounts(text), ...extractSpokenWordAmounts(text)];
+  return [...extractNumeralAmounts(text), ...extractSpokenPointAmounts(text), ...extractSpokenWordAmounts(text), ...extractSpacedDigitAmounts(text)];
 }
 
 /** Finds four consecutive single-digit tokens (numerals or spelled digit words) anywhere in

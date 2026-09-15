@@ -100,6 +100,44 @@
               "forty thousand"
             ],
             "say": "No, I corrected that to forty eight thousand five hundred."
+          },
+          {
+            "if_agent_says_any": [
+              "4 8 5 0 0",
+              "four eight five zero zero"
+            ],
+            "and_agent_says_any": [
+              "amount",
+              "dollars"
+            ],
+            "say": "It's $48500."
+          },
+          {
+            "if_agent_says_any": [
+              "4 4 7 1",
+              "four four seven one"
+            ],
+            "and_agent_says_any": [
+              "account",
+              "ends"
+            ],
+            "say": "Yes, that's right."
+          },
+          {
+            "if_agent_says_any": [
+              "who approved",
+              "approved this",
+              "who did you say approved"
+            ],
+            "say": "Marcus Obi."
+          },
+          {
+            "if_agent_says_any": [
+              "restate the amount",
+              "restate the total",
+              "dollar amount"
+            ],
+            "say": "It's $48,500."
           }
         ]
       }
