@@ -2335,9 +2335,9 @@
     },
     {
       "id": "DEAD-AIR-FIX",
-      "title": "late goodbye transcript after reply.done starts close grace immediately (Sonnet review finding); re-applied on main base in worktree dead-air-2; push 37",
+      "title": "late goodbye transcript after reply.done starts close grace immediately (Sonnet review finding); re-applied on main base in worktree dead-air-2; push 37 - landed c6a2e0b, in push 37",
       "files": [],
-      "status": "running",
+      "status": "done",
       "agent_id": "a18d0b0a3ce2592ea",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
@@ -2351,6 +2351,33 @@
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
       "held_because": "reopens Ruling B (2026-09-09: injection counts 1 like a failed check); founder case 8 froze via tally>=3 with two knowledge issues plus the injection; bring as one decision with the recommendation to keep the rule and fix knowledge grading on honest calls first"
+    },
+    {
+      "id": "push-37",
+      "title": "push 37: b288838..9ba19b9 (dead-air fix, billing diagnostics) - pushed 8:26 AM after triple gate 1817/1817 x3; deploy poll running",
+      "files": [],
+      "status": "done",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
+    },
+    {
+      "id": "RERUN-11-DEPLOY-36",
+      "title": "eleven-scenario harness re-run on deploy 36 (2026-09-15 7:30 to 7:50 AM): 10 of 11 PASS; case 11 ESCALATE (context check FAIL: 48,500 is not Dana seeded payment; approver question phrased \"authorized\" unmatched by the scenario rule)",
+      "files": [],
+      "status": "done",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
+    },
+    {
+      "id": "CASE-11-SCRIPT-AMOUNT",
+      "title": "case 11 script uses 48,500 which fails Dana context check by design of the seed; rewrite scenario, persona, play sheet and plan to misspeak then correct to the real 84,500; approver rule must match authorized/authorizing/approved",
+      "files": [],
+      "status": "running",
+      "agent_id": "PENDING",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
     }
   ]
 }
