@@ -217,6 +217,21 @@ export interface SeedConfig {
     // fixed for that one specific caller shape by the restatement fix, main 4fe3345, but
     // still open for any other non-confirming reply).
     max_readback_reasks: number; // v2: 3
+    // Founder-approved default (row 13, 2026-09-12 readback-cap precedent) -- how many
+    // caller utterances after a `challenge_issued` action may fail to be answer-shaped for
+    // that challenge's field before the engine stops re-asking the SAME challenge and grades
+    // it UNANSWERED. Fixes a PROVEN live defect (2026-09-15, bundle
+    // scripts/rehearse/reports/2026-09-15T08-56-33-miller-silent-after-amount.diagnostics.json):
+    // AssemblyAI's endpointing split one scripted caller line ("And make it $2.1 million." /
+    // "final figure moved this morning.") into two transcript.user turns; with no re-ask
+    // budget, the pending counsel-of-record challenge was silently abandoned and
+    // `selectChallenge` raced through two more questions in 17 seconds. See
+    // src/challenges.ts's `isAnswerShapedFor`/`selectChallenge`/`gradeChallenges` for the
+    // mechanism -- same "hold the line, then escalate/move on at the cap" shape as
+    // `max_readback_reasks` above, deliberately not shared with it: a challenge re-ask and a
+    // readback re-ask are different phases of the call (challenge budget vs. critical-field
+    // confirmation) and are counted independently.
+    max_challenge_reasks: number; // v2: 2
   };
   pressure_lexicon: string[]; // lower-case phrases
   out_of_scope_lexicon: string[]; // lower-case phrases

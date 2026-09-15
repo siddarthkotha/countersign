@@ -386,10 +386,25 @@ describe('gradeChallenges — LIVE_COMMITMENT', () => {
     expect(result['g2-1']?.result).toBe('FAIL');
   });
 
-  it('AMBIGUOUS when the caller neither confirms nor states a number', () => {
+  // FIX (2026-09-15, fragment-shaped challenges): "why do you need that" carries no amount
+  // signal at all (no digits, no dollar figure) -- `isAnswerShapedFor` now leaves a reply
+  // like this AWAITING rather than grading it AMBIGUOUS the instant it lands, so a caller
+  // line AssemblyAI's endpointing splits mid-sentence doesn't burn the pending challenge on
+  // its first, content-free fragment. With only one such reply recorded (under
+  // `seed.thresholds.max_challenge_reasks`), gradeChallenges omits this challenge_id from
+  // its output entirely -- see test/fsm.test.ts's "still awaiting" cases for the
+  // re-ask-the-same-question behavior this feeds, and the "exhausts the re-ask budget" case
+  // below for what happens once the cap is reached.
+  it('leaves the challenge AWAITING (no entry at all) when the caller neither confirms nor states a number', () => {
     const conversation = [utt('u1', 3000, 'why do you need that')];
     const result = gradeChallenges(conversation, actions, [spec], SEED, [amountClaim]);
-    expect(result['g2-1']?.result).toBe('AMBIGUOUS');
+    expect(result['g2-1']).toBeUndefined();
+  });
+
+  it('exhausts the re-ask budget: two non-answer-shaped replies grade UNANSWERED, not AMBIGUOUS', () => {
+    const twoReplies = [utt('u1', 3000, 'why do you need that'), utt('u2', 3200, 'seriously, why')];
+    const result = gradeChallenges(twoReplies, actions, [spec], SEED, [amountClaim]);
+    expect(result['g2-1']?.result).toBe('UNANSWERED');
   });
 });
 
@@ -416,10 +431,15 @@ describe('gradeChallenges — TRAP_FACT', () => {
     expect(result['g3-1']?.result).toBe('FAIL');
   });
 
-  it('AMBIGUOUS when the caller neither affirms nor objects', () => {
+  // FIX (2026-09-15, fragment-shaped challenges): "hmm" carries none of the signals
+  // `isAnswerShapedFor` checks for a TRAP_FACT reply (the true value, the trap value, a
+  // negation, or an affirm-lexicon hit) -- it leaves the challenge AWAITING (no entry at
+  // all) rather than grading it AMBIGUOUS immediately, same reasoning as the LIVE_COMMITMENT
+  // case above.
+  it('leaves the challenge AWAITING (no entry at all) when the caller neither affirms nor objects', () => {
     const conversation = [utt('u1', 3000, 'hmm')];
     const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
-    expect(result['g3-1']?.result).toBe('AMBIGUOUS');
+    expect(result['g3-1']).toBeUndefined();
   });
 
   // Fix round 1 (reviewer finding, Important): the old `lexiconHit` was a raw substring
@@ -432,10 +452,14 @@ describe('gradeChallenges — TRAP_FACT', () => {
     expect(result['g3-1']?.result).toBe('PASS');
   });
 
-  it('AMBIGUOUS for "Alright, that\'s fine" — no genuine affirm word (not "right" inside "alright")', () => {
+  // FIX (2026-09-15, fragment-shaped challenges): same word-boundary point as before ("right"
+  // inside "alright" is not a genuine affirm hit), but "Alright, that's fine" carries no OTHER
+  // answer signal either (no true/trap value, no negation) -- so it now leaves the challenge
+  // AWAITING rather than reaching AMBIGUOUS grading at all.
+  it('leaves the challenge AWAITING for "Alright, that\'s fine" — no genuine affirm word (not "right" inside "alright") and no other answer signal', () => {
     const conversation = [utt('u1', 3000, "Alright, that's fine")];
     const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
-    expect(result['g3-1']?.result).toBe('AMBIGUOUS');
+    expect(result['g3-1']).toBeUndefined();
   });
 
   it('FAIL for "yes, right" — a genuine whole-word affirm', () => {
@@ -450,10 +474,15 @@ describe('gradeChallenges — TRAP_FACT', () => {
   // PASS rules (true value present; negate hit within 4 words of the trap value; or the
   // reply is nothing but a negation) — anything else with an affirm hit is FAIL, anything
   // else at all is AMBIGUOUS.
-  it('AMBIGUOUS (not PASS) for "I\'m not sure but sure, go ahead" — a bare negate word buried in an otherwise non-committal reply', () => {
+  // FIX (2026-09-15, fragment-shaped challenges): "sure" is not in affirm_lexicon and "not"
+  // here strips to a multi-word remainder (not a pure negation), so this reply still carries
+  // no answer signal for `isAnswerShapedFor` -- it now leaves the challenge AWAITING (never
+  // reaching AMBIGUOUS grading) rather than PASS, same never-PASS guarantee as before, one
+  // step earlier in the pipeline.
+  it('leaves the challenge AWAITING (never PASS) for "I\'m not sure but sure, go ahead" — a bare negate word buried in an otherwise non-committal reply', () => {
     const conversation = [utt('u1', 3000, "I'm not sure but sure, go ahead")];
     const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
-    expect(result['g3-1']?.result).toBe('AMBIGUOUS');
+    expect(result['g3-1']).toBeUndefined();
   });
 
   it('PASS for "no" alone — rule (c): the reply is nothing but a negation', () => {

@@ -256,6 +256,82 @@ describe('phrasingGoal -- CHALLENGE-SPEAKABLE: ASK_CHALLENGE prefers the compose
   });
 });
 
+describe('phrasingGoal -- CHALLENGE re-asks the SAME spec while genuinely awaiting (2026-09-15 fragment-shaped-challenge fix)', () => {
+  const awaitingSpec: import('../src/types').ChallengeSpec = {
+    challenge_id: 'sess-frag-1',
+    kind: 'TRAP_FACT',
+    field: 'counsel',
+    ask: 'Confirm the request back to the caller as if summarizing, but say "Calder & Finch" in place of their counsel, then pause.',
+    speak: 'Just to confirm, our counsel of record is Calder & Finch. Is that correct?',
+    expect: { trap_value: 'Calder & Finch', true_claim_id: 'c-cns' },
+  };
+  const differentSpec: import('../src/types').ChallengeSpec = {
+    challenge_id: 'sess-frag-2',
+    kind: 'LIVE_COMMITMENT',
+    field: 'amount_usd',
+    ask: 'Ask the caller to restate the amount_usd they gave earlier. Do not say the value yourself.',
+    speak: 'Can you restate the amount in dollars you gave me earlier?',
+    expect: { commitment_claim_id: 'c-amt' },
+  };
+  const issuedAction: import('../src/types').AgentAction = {
+    id: 'ch1',
+    kind: 'challenge_issued',
+    t_ms: 1000,
+    challenge_id: 'sess-frag-1',
+    spec: awaitingSpec,
+  };
+
+  function input(evidence: import('../src/types').Evidence[], nextChallenge: import('../src/types').ChallengeSpec | null) {
+    return {
+      state: 'CHALLENGE' as const,
+      decideResult: stubDecideResult(4),
+      evidence,
+      ledger: [],
+      seed: MERIDIAN,
+      tools: [],
+      actions: [issuedAction],
+      nextChallenge,
+    };
+  }
+
+  // A single non-answer-shaped fragment (challenges.ts's gradeChallenges) leaves no
+  // knowledge_check_result card for the challenge at all -- exactly the "still AWAITING,
+  // under the re-ask budget" state. `nextChallenge` here stands in for whatever
+  // selectChallenge would otherwise pick next (a DIFFERENT question) -- the goal must
+  // re-ask the SAME challenge (same challenge_id, same speak sentence) instead of moving on.
+  it('single non-answer fragment: no evidence card yet -> re-asks the SAME challenge as the next goal, not `nextChallenge`', () => {
+    const out = phrasingGoal(input([], differentSpec));
+    expect(out.code).toBe('ASK_CHALLENGE');
+    expect(out.challenge?.challenge_id).toBe('sess-frag-1');
+    expect(out.hint).toBe(awaitingSpec.speak);
+  });
+
+  // Once the re-ask budget is exhausted, gradeChallenges grades a real UNANSWERED result and
+  // buildKnowledgeEvidence (compose.ts) builds a real `ev-knowledge-${challenge_id}` FLAG
+  // card for it (see challenges.test.ts's "exhausts the re-ask budget" cases for that half of
+  // the mechanism) -- once that card exists, the CHALLENGE goal must stop re-asking the
+  // exhausted question and use `nextChallenge` (selectChallenge's own pick) instead.
+  it('after the re-ask budget is exhausted (a knowledge_check_result card now exists): selection moves on to `nextChallenge`', () => {
+    const flagCard: import('../src/types').Evidence = {
+      id: 'ev-knowledge-sess-frag-1',
+      kind: 'knowledge_check_result',
+      t_ms: 1000,
+      label: 'Consistency probe (deliberate misstatement)',
+      status: 'FLAG',
+      detail: 'Consistency probe (deliberate misstatement of counsel): caller gave no clear answer.',
+      facts: { kind: 'TRAP_FACT', result: 'UNANSWERED', field: 'counsel' },
+      quotes: [],
+      source: 'transcript',
+      provenance: 'POLICY_DERIVED',
+      request_version: 1,
+    };
+    const out = phrasingGoal(input([flagCard], differentSpec));
+    expect(out.code).toBe('ASK_CHALLENGE');
+    expect(out.challenge?.challenge_id).toBe('sess-frag-2');
+    expect(out.hint).toBe(differentSpec.speak);
+  });
+});
+
 describe('READBACK closes the loop: readback + affirm actually confirms the field (regression for the 2026-09-03 CONSISTENCY_CHECK stall)', () => {
   /** Mirrors exactly what call/session.ts's `recordGoalCompletionAction` does when the
    *  agent's reply for a READBACK goal completes: writes a `readback_issued` action from the

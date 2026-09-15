@@ -124,6 +124,17 @@ describe('seed invariant: the challenge pool never runs dry before the budget do
         const issued: ChallengeSpec[] = [];
         const sessionId = `sess-budget-${identity.id}`;
 
+        // FIX (2026-09-15, fragment-shaped challenges): a bare one-word reply like "Sure."
+        // is no longer graded the instant it lands for a TRAP_FACT/LIVE_COMMITMENT challenge
+        // (src/challenges.ts's `isAnswerShapedFor` -- it carries no answer content for any
+        // field) -- it leaves the challenge AWAITING for up to `max_challenge_reasks` replies
+        // before grading a real (never-PASS) result. Repeating it `REASKS` times per
+        // challenge exhausts that budget before `selectChallenge` is asked for the next one,
+        // matching what a live re-ask loop (fsm.ts's phrasingGoal CHALLENGE branch) would
+        // actually produce, and keeping this guard's "every issued spec gets graded, never
+        // PASS" check meaningful. SEED_FACT/RELATIONAL (accept_tokens-graded) grade "Sure."
+        // immediately regardless -- consuming the extra reply here is a no-op for them.
+        const REASKS = SEED.thresholds.max_challenge_reasks;
         for (let i = 0; i < MAX; i++) {
           const t_ms = 5000 + i * 1000;
           const spec = selectChallenge(claims, issued, {}, SEED, sessionId, conversation);
@@ -134,10 +145,14 @@ describe('seed invariant: the challenge pool never runs dry before the budget do
           //  - accept_tokens (SEED_FACT/RELATIONAL): "sure" is never one of the seed's
           //    accept tokens -> allPresent is false -> FAIL.
           //  - trap_value (TRAP_FACT): not the true value, no negation near the trap value,
-          //    not a pure negation, and "sure" is not in affirm_lexicon -> AMBIGUOUS.
+          //    not a pure negation, and "sure" is not in affirm_lexicon -> AMBIGUOUS (once the
+          //    re-ask budget is exhausted -- graded UNANSWERED below that).
           //  - commitment_claim_id (LIVE_COMMITMENT): no digits, no two-capitalized-word
-          //    name, no date -> AMBIGUOUS for every field kind. Never PASS, either way.
-          conversation = [...conversation, utt(`u-reply-${i}`, t_ms + 500, 'Sure.')];
+          //    name, no date -> AMBIGUOUS for every field kind (same exhaustion caveat).
+          //  Never PASS, either way.
+          for (let r = 0; r < REASKS; r++) {
+            conversation = [...conversation, utt(`u-reply-${i}-${r}`, t_ms + 500 + r * 100, 'Sure.')];
+          }
         }
 
         // The budget is genuinely spent, not just "asked" -- one more call returns null.

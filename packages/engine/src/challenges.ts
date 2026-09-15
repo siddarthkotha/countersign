@@ -335,13 +335,29 @@ function selectRelational(claims: Claim[], issued: ChallengeSpec[], seed: SeedCo
  *  the CALLER named -- and so ranks above the seeded, non-conversational SEED_FACT
  *  question; otherwise RELATIONAL was dead code against the shipping seed, since SEED_FACT
  *  would always exhaust the challenge budget first.) Null once
- *  `seed.thresholds.max_challenges` have been issued, or nothing applies.
+ *  `seed.thresholds.max_challenges` have been issued, or nothing applies. `results` is
+ *  accepted for interface symmetry with the grading side; nothing here changes selection
+ *  based on past results (a FAILED/AMBIGUOUS/UNANSWERED challenge is still "issued" and thus
+ *  excluded from re-selection via `issued`) -- this function answers "what is the next
+ *  question, structurally, given what's already been asked", the same question every
+ *  existing caller of it (the ~30 unit tests in test/challenges.test.ts and
+ *  test/seed-budget.test.ts that pass hand-built `issued` arrays with `results: {}`, plus
+ *  `reconstructIssued` in compose.ts) has always asked it.
  *
- *  FIX (2026-09-15, fragment-shaped challenges): `results` is now used to check if any
- *  issued challenge is still UNANSWERED (awaiting a caller response). If so, return null
- *  and do not select a new challenge — selectChallenge must not move on while one is
- *  awaiting, else a fragmented utterance (like "final figure moved this morning" arriving
- *  as a separate AssemblyAI turn) is silently abandoned and replaced with a new challenge. */
+ *  FIX (2026-09-15, fragment-shaped challenges) -- NOT handled here: an earlier version of
+ *  this fix tried to make `selectChallenge` itself refuse to advance while the
+ *  most-recently-issued challenge was still AWAITING a caller reply, keyed off
+ *  `results[last.challenge_id]` being absent. That broke ~30 pre-existing tests across this
+ *  file and test/seed-budget.test.ts, every one of which calls this function directly with a
+ *  hand-built `issued` history and `results: {}` to test pure selection ORDER -- `results`
+ *  being empty there was never meant to mean "nothing has been answered yet"; it meant "this
+ *  test doesn't care." Since real grading can't be told apart from "test doesn't care" from
+ *  inside this function, the awaiting-recovery logic instead lives in `fsm.ts`'s
+ *  `phrasingGoal` (the CHALLENGE branch there re-asks the last-issued spec verbatim, in
+ *  place of whatever this function returns, whenever that challenge has no
+ *  knowledge_check_result evidence card yet -- see that function's doc comment for why that
+ *  signal is safe and where it comes from). This function's own contract and behavior are
+ *  therefore UNCHANGED from before this fix. */
 export function selectChallenge(
   claims: Claim[],
   issued: ChallengeSpec[],
@@ -350,12 +366,7 @@ export function selectChallenge(
   session_id: string,
   conversation?: Utterance[],
 ): ChallengeSpec | null {
-  // Do not advance if any issued challenge is still awaiting a caller response
-  for (const spec of issued) {
-    const result = results[spec.challenge_id];
-    if (result === 'UNANSWERED') return null;
-  }
-
+  void results;
   if (issued.length >= seed.thresholds.max_challenges) return null;
   const challengeId = `${session_id}-${issued.length + 1}`;
 
@@ -387,123 +398,117 @@ function isNameField(field: ClaimField): field is 'beneficiary' | 'approver' | '
   return (NAME_FIELDS as ClaimField[]).includes(field);
 }
 
-/** FIX (2026-09-15, fragment-shaped challenges): Check if text is answer-shaped for a
- *  specific challenge field. A fragment with no answer content leaves the challenge
- *  AWAITING (not graded); selectChallenge must not move on while awaiting.
- *
- *  Answer-shaped for each field type:
- *  - name fields (approver, counsel, escrow_institution, beneficiary): contains a
- *    capitalized name token or explicit refusal (via REFUSAL_RE)
- *  - account_last4: contains at least two digits or a spelled digit word
- *  - deadline: contains a date/deadline pattern (via extractDeadline) or a number
- *  - amount_usd: contains a dollar amount (via extractAmounts) or a number
- *  - other fields: any non-empty text after refusal check
- *
- *  Bare confirmations ("yes", "that's right", "correct") or text with none of the
- *  above patterns are not answer-shaped and leave the challenge awaiting. */
-function isAnswerShapedFor(field: ClaimField, rawText: string, seed: SeedConfig): boolean {
-  if (rawText.trim().length === 0) return false;
-  const rawLower = rawText.toLowerCase();
+/** True when `rawText` contains a plausible name-answer signal for `field`: a cued name
+ *  extraction for this exact field, or a bare two-capitalized-word span (a raw-text check,
+ *  never normalized -- capitalization is the only cheap signal a name span has once it's
+ *  outside a recognized cue pattern like "counsel is X"). Shared by the TRAP_FACT and
+ *  LIVE_COMMITMENT name-field branches of `isAnswerShapedFor` below. */
+function hasNameSignal(field: ClaimField, rawText: string): boolean {
+  if (/\b[A-Z][A-Za-z.']*\s+[A-Z][A-Za-z.']*\b/.test(rawText)) return true;
+  return extractCuedNames(rawText).some((h) => h.field === field);
+}
 
-  // Explicit refusal is always answer-shaped (handled separately in gradeChallenges)
-  if (REFUSAL_RE.test(rawLower)) return true;
-
-  const normText = normalizeText(rawText);
-
-  if (isNameField(field)) {
-    // Name field: answer-shaped if it contains a name token, negation, or affirmation.
-    // But BARE confirmations (single word affirm like "yes", "okay") are NOT answer-shaped.
-
-    // Check for capitalized name pattern
-    if (/\b[A-Z][A-Za-z.']*\s+[A-Z][A-Za-z.']*\b/.test(rawText)) return true;
-
-    // Check for cued-name extraction
-    const cued = extractCuedNames(rawText).filter((h) => h.field === field);
-    if (cued.length > 0) return true;
-
-    // Check for negation — objecting to the trap value is answer-shaped
-    if (hasLexiconHit(rawText, seed.negate_lexicon)) return true;
-
-    // Check for affirmation — answer-shaped only if it's NOT bare (has 2+ words or substantive content).
-    // "yes" or "okay" alone → NOT answer-shaped (bare)
-    // "yes, right" or "yes that's right" → answer-shaped (multiple words)
-    const hasAffirm = hasLexiconHit(rawText, seed.affirm_lexicon);
-    if (hasAffirm) {
-      const words = normText.split(' ').filter(Boolean);
-      if (words.length > 1) {
-        // Multiple words with an affirm hit → answer-shaped
-        return true;
-      }
-      // Single word affirm (bare confirmation) → NOT answer-shaped for name challenges
-    }
-
-    // No name-shaped content found
-    return false;
-  }
-
+/** True when `rawText` contains a plausible answer signal for a non-name `field` --
+ *  the same shape of content `gradeLiveCommitment` itself would extract, checked generically
+ *  (not required to MATCH the committed value: a wrong restatement must still reach grading
+ *  so it can FAIL, not stay stuck awaiting). */
+function hasFieldSignal(field: ClaimField, rawText: string): boolean {
   if (field === 'account_last4') {
-    // Digits field: must contain at least two digits or a spelled digit word.
-    // Bare confirmations are not answer-shaped.
-
-    // Match 2+ consecutive digits or spelled-out words like "eight", "three", "zero"
+    // 2+ consecutive digits, or 2+ spelled-out digit words (a lone spelled digit reads as
+    // filler more often than an answer attempt -- "oh" alone, "zero" alone).
     const digitPattern = /\d{2,}|(?:zero|one|two|three|four|five|six|seven|eight|nine|oh)\b/gi;
     const matches = rawText.match(digitPattern);
     if (matches && matches.length >= 2) return true;
-
-    // Also check if extractAccountLast4 finds anything (e.g., "ending in 1234")
-    const hit = extractAccountLast4(rawText);
-    if (hit) return true;
-
-    return false;
+    return extractAccountLast4(rawText) !== null;
   }
-
   if (field === 'amount_usd') {
-    // Amount field: must contain a dollar amount or a number.
-    // Bare confirmations are not answer-shaped.
-
-    const hits = extractAmounts(rawText);
-    if (hits.length > 0) return true;
-
-    // Also accept bare numbers (but not bare affirmations)
-    if (/\b\d+\b/.test(rawText)) return true;
-
-    return false;
+    if (extractAmounts(rawText).length > 0) return true;
+    return /\b\d+\b/.test(rawText);
   }
-
   if (field === 'deadline') {
-    // Deadline field: must contain a date/deadline pattern or a number.
-    // Bare confirmations are not answer-shaped.
-
-    const hit = extractDeadline(rawText);
-    if (hit) return true;
-
-    // Also accept numbers (day of month, year, etc.)
+    if (extractDeadline(rawText)) return true;
     if (/\b\d+\b/.test(rawText)) return true;
+    return /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|tonight|eod|end\s+of\s+day)\b/i.test(rawText);
+  }
+  return false;
+}
 
-    // Accept weekday names or relative time words
-    if (/\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|tonight|eod|end\s+of\s+day)\b/i.test(rawText)) {
-      return true;
+/** FIX (2026-09-15, fragment-shaped challenges): is `rawText` shaped like an attempt to
+ *  ANSWER `spec`'s challenge, as opposed to a fragment/filler/off-topic reply carrying no
+ *  signal at all? A caller line AssemblyAI's endpointing splits into two `transcript.user`
+ *  turns (PROVEN live, bundle
+ *  scripts/rehearse/reports/2026-09-15T08-56-33-miller-silent-after-amount.diagnostics.json:
+ *  "And make it $2.1 million." / "final figure moved this morning.") must not burn the
+ *  pending challenge on the first, content-free fragment -- `gradeChallenges` leaves the
+ *  challenge AWAITING (result UNANSWERED, no FLAG, no tally -- see that function) rather
+ *  than grading it AMBIGUOUS the instant ANY caller utterance lands in the eligible window.
+ *
+ *  Reuses the SAME content signals the real graders (`gradeTrapFact`/`gradeLiveCommitment`
+ *  below) key off -- the true claim's value, the trap value, a negate-lexicon hit near the
+ *  trap value, a pure negation, a whole-word affirm hit, or (for LIVE_COMMITMENT) the
+ *  already-committed value -- rather than a second, independent guess at what an answer
+ *  "looks like"; this is what correctly recognizes a real (if untidy) answer like "I know
+ *  it's Whitmore & Bass" as answer-shaped even though it doesn't fit a bare capitalized-name
+ *  pattern. A bare confirmation/refusal-adjacent filler ("sure", "yeah", "hmm", "alright,
+ *  that's fine" -- none of which carry any of the above signals) is NOT answer-shaped and
+ *  leaves the challenge awaiting. `SEED_FACT`/`RELATIONAL` (`accept_tokens`-graded) never
+ *  reach this function -- `gradeChallenges` checks `isTokenBased` first and bypasses this
+ *  gate for them entirely (token matching already tolerates an unrelated reply by just
+ *  failing to match every token). */
+function isAnswerShapedFor(spec: ChallengeSpec, rawText: string, seed: SeedConfig, claims: Claim[]): boolean {
+  if (rawText.trim().length === 0) return false;
+  if (REFUSAL_RE.test(rawText.toLowerCase())) return true;
+
+  const normText = normalizeText(rawText);
+  const expect = spec.expect;
+
+  if ('trap_value' in expect) {
+    const trueClaim = claims.find((c) => c.id === expect.true_claim_id);
+    const trueVal = trueClaim ? normalizeText(String(trueClaim.value)) : '';
+    if (trueVal.length > 0 && normText.includes(trueVal)) return true;
+    const trapValueNorm = normalizeText(expect.trap_value);
+    if (trapValueNorm.length > 0 && normText.includes(trapValueNorm)) return true;
+    if (negateNearTrapValue(normText, trapValueNorm, seed)) return true;
+    if (isPureNegation(normText, seed)) return true;
+    if (hasLexiconHit(rawText, seed.affirm_lexicon)) return true;
+    // Every TRAP_FACT field is a name field (TRAP_FIELD_ORDER), but fall back to the
+    // generic field-signal check too in case that invariant is ever loosened.
+    return isNameField(spec.field) ? hasNameSignal(spec.field, rawText) : hasFieldSignal(spec.field, rawText);
+  }
+
+  if ('commitment_claim_id' in expect) {
+    if (isNameField(spec.field)) {
+      const claim = claims.find((c) => c.id === expect.commitment_claim_id);
+      const committedNorm = claim ? normalizeText(String(claim.value)) : '';
+      if (committedNorm.length > 0 && normText.includes(committedNorm)) return true;
+      return hasNameSignal(spec.field, rawText);
     }
-
-    return false;
+    return hasFieldSignal(spec.field, rawText);
   }
 
-  // For SEED_FACT and RELATIONAL (accept_tokens): any non-empty text is answer-shaped
-  // unless it's just bare confirmation
-  if (hasLexiconHit(rawText, seed.affirm_lexicon) && normText.length <= 10) {
-    // "yes", "correct", "that's right" alone → not answer-shaped for most facts
-    return false;
-  }
-
-  // Default: any non-empty, non-bare-confirmation text is answer-shaped
+  // accept_tokens (SEED_FACT/RELATIONAL): never actually reached -- gradeChallenges checks
+  // isTokenBased before calling this -- kept only so the union is exhaustively handled.
   return normText.length > 0;
 }
 
 /** Caller utterances strictly after `issuedAction.t_ms` and strictly before the next
- *  agent action (challenge_issued or readback_issued) after it, capped at 2. */
+ *  agent action (challenge_issued for a DIFFERENT challenge, or any readback_issued) after
+ *  it, capped at 2.
+ *
+ *  FIX (2026-09-15, fragment-shaped challenges): a `challenge_issued` action sharing
+ *  `issuedAction`'s OWN `challenge_id` is a re-ask of the SAME still-awaiting challenge
+ *  (`recordGoalCompletionAction`, call/session.ts, logs a fresh action every time a re-ask
+ *  is actually spoken, same `challenge_id` unchanged) -- it must not close this window early,
+ *  or a caller's later fragments (arriving after the re-ask was spoken) would fall outside
+ *  it and never get graded at all. Only a challenge_issued action for a genuinely DIFFERENT
+ *  challenge, or any readback_issued action, still bounds the window. */
 function eligibleUtterances(conversation: Utterance[], actions: AgentAction[], issuedAction: AgentAction): Utterance[] {
   const nextAgentActionT = actions
-    .filter((a) => (a.kind === 'challenge_issued' || a.kind === 'readback_issued') && a.t_ms > issuedAction.t_ms)
+    .filter(
+      (a) =>
+        a.t_ms > issuedAction.t_ms &&
+        ((a.kind === 'challenge_issued' && a.challenge_id !== issuedAction.challenge_id) || a.kind === 'readback_issued'),
+    )
     .reduce<number | undefined>((min, a) => (min === undefined || a.t_ms < min ? a.t_ms : min), undefined);
   return conversation
     .filter(
@@ -645,7 +650,13 @@ function gradeTrapFact(trueClaim: Claim | undefined, rawText: string, seed: Seed
  *  the transcript — never from the LLM's own account of what happened. `claims` resolves
  *  the claim ids referenced by LIVE_COMMITMENT (`commitment_claim_id`) and TRAP_FACT
  *  (`true_claim_id`) specs; it is required for correct grading and is passed alongside the
- *  four arguments named in the task brief's interface sketch. */
+ *  four arguments named in the task brief's interface sketch.
+ *
+ *  FIX (2026-09-15, fragment-shaped challenges): the returned record is NOT guaranteed to
+ *  have an entry for every `challenge_id` in `issued` -- a challenge whose eligible reply so
+ *  far is still non-answer-shaped and under `seed.thresholds.max_challenge_reasks` is left
+ *  out entirely (still AWAITING, not yet graded). See `isAnswerShapedFor`'s doc comment for
+ *  why, and `selectChallenge`'s for how the absence is read on the other end. */
 export function gradeChallenges(
   conversation: Utterance[],
   actions: AgentAction[],
@@ -674,21 +685,31 @@ export function gradeChallenges(
     const normText = normalizeText(rawText);
     const quote: Quote = { utterance_id: eligible[0]!.id, text: eligible[0]!.text };
 
-    // FIX (2026-09-15, fragment-shaped challenges): a caller utterance is eligible to grade
-    // a pending challenge only if it is answer-shaped for that challenge's field. When
-    // AssemblyAI's endpointing splits a single scripted line (e.g., "And make it $2.1 million,
-    // the final figure moved this morning"), each fragment arrives as a separate transcript.user
-    // event and is independently evaluated. Fragment 1 alone ("And make it $2.1 million") is
-    // not answer-shaped for a name challenge, so leave it AWAITING (UNANSWERED, no FLAG yet)
-    // instead of grading as AMBIGUOUS. selectChallenge will not advance; the FSM re-asks the
-    // same challenge (within re-ask cap) so Fragment 2 ("Marcus Obi") can answer it.
-    //
-    // Apply this check to TRAP_FACT (name fields) and LIVE_COMMITMENT (various fields).
-    // SEED_FACT and RELATIONAL use accept_tokens (keyword matching) and bypass this check.
+    // FIX (2026-09-15, fragment-shaped challenges): the eligible reply is graded only once
+    // it is answer-shaped for this challenge's field (TRAP_FACT/LIVE_COMMITMENT only --
+    // SEED_FACT/RELATIONAL's accept_tokens matching already tolerates an unrelated reply by
+    // simply failing to match). AssemblyAI's endpointing can split a single scripted caller
+    // line into multiple `transcript.user` turns (PROVEN live, bundle
+    // scripts/rehearse/reports/2026-09-15T08-56-33-miller-silent-after-amount.diagnostics.json:
+    // "And make it $2.1 million." then "final figure moved this morning." -- neither
+    // fragment alone, nor joined, is answer-shaped for the pending counsel-of-record
+    // challenge). Each caller utterance in the eligible window that still leaves the JOINED
+    // text non-answer-shaped counts one re-ask (`eligible.length`, already capped at 2 by
+    // `eligibleUtterances`, matching the seeded default `max_challenge_reasks`). Under the
+    // cap: AWAITING -- this challenge_id is deliberately left OUT of `out` entirely (no
+    // entry at all, not even 'UNANSWERED') so `buildKnowledgeEvidence` (compose.ts) builds
+    // no card and nothing is added to the tally; `selectChallenge` reads that same absence
+    // to re-ask the identical spec rather than moving to a new question (see its own doc
+    // comment). At the cap: exhausted -- graded 'UNANSWERED' exactly like a challenge nobody
+    // ever replied to at all (FLAG 0.5 in buildKnowledgeEvidence, same as RT-10's existing
+    // call-end grading), and `selectChallenge` is then free to move on.
     const expect = spec.expect;
     const isTokenBased = 'accept_tokens' in expect;
-    if (!isTokenBased && !isAnswerShapedFor(spec.field, rawText, seed)) {
-      out[spec.challenge_id] = { result: 'UNANSWERED', eligible_utterance_ids: eligibleIds };
+    if (!isTokenBased && !isAnswerShapedFor(spec, rawText, seed, claims)) {
+      if (eligible.length < seed.thresholds.max_challenge_reasks) {
+        continue; // still awaiting: no entry written for this challenge_id
+      }
+      out[spec.challenge_id] = { result: 'UNANSWERED', quote, eligible_utterance_ids: eligibleIds };
       continue;
     }
 

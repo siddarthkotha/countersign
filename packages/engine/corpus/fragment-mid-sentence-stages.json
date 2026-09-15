@@ -1,0 +1,189 @@
+{
+  "title": "Dana Whitfield: an AssemblyAI mid-sentence split answers the challenge across two fragments",
+  "description": "FIX (2026-09-15, fragment-shaped challenges, PROVEN live defect: bundle scripts/rehearse/reports/2026-09-15T08-56-33-miller-silent-after-amount.diagnostics.json). A caller line AssemblyAI's endpointing can split into two transcript.user turns must not burn the pending verification challenge. Dana Whitfield states her identity and that the request was approved by Marcus Obi first (c1), ages that approver claim past selectLiveCommitment's 2-caller-turn gate with the request itself (c2) and a neutral filler line (c3), so the engine's LIVE_COMMITMENT challenge picks the approver field ahead of amount/beneficiary/account (those claims are still too fresh to be eligible). The caller's reply to 'restate the approver you gave earlier' arrives in two AssemblyAI fragments with no agent action between them: 'and it should go out today' (frag-1, no name at all -- not answer-shaped for the approver field) then 'That's Marcus Obi.' (frag-2, matches the committed value). Before this fix, the first fragment alone would have graded AMBIGUOUS immediately and selectChallenge would have raced ahead to a different question, silently abandoning the real answer that arrived one turn later. With the fix: frag-1 alone leaves the challenge AWAITING (no evidence card, no tally -- see src/challenges.ts's isAnswerShapedFor/gradeChallenges); once frag-2 lands (no agent action closed the eligible window in between), the JOINED text is graded as a whole and PASSes because it contains the committed value -- see gradeLiveCommitment's isNameField branch. Every readback is then confirmed normally and every lookup PASSes (registered device, SSO active, out-of-band confirmed, matches an existing scheduled payment), so the call reaches STAGE with exactly one knowledge_check_result card, PASS, quoting frag-1 (eligible_utterance_ids includes both fragments; the recorded quote is the first eligible utterance's text, same convention every other challenge card uses). DOUBT/CAVEAT (out of this lane's scope, src/extract/personQuestion.ts, NOT a LANE-FILE -- read-only): frag2 is deliberately 'That's Marcus Obi.' rather than a bare 'Marcus Obi.' -- `answersToPersonQuestion` (extract/personQuestion.ts, by design) only exempts the FIRST caller utterance after a person-shaped challenge/readback action from `extractIdentityClaim`'s self-identification heuristic; frag2 here is the SECOND caller utterance after the challenge_issued action, so a bare 'Marcus Obi.' opening the utterance would be misread as Dana switching identity to Marcus Obi (a real, independent, pre-existing gap this lane cannot fix -- personQuestion.ts is out of scope). 'That's Marcus Obi.' sidesteps it cleanly: `startsUtteranceValidly` (extract/identity.ts) requires the name to open the utterance with only leading punctuation, which 'That's ' breaks, and 'that's' is not one of `BEFORE_CUES`/`AFTER_CUES` either -- verified live via `npm run replay`, not asserted. expected block generated via `npm run replay -w packages/engine -- corpus/fragment-mid-sentence-stages.json` (2026-09-15).",
+  "call": {
+    "session_id": "sess-frag",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury. This was approved by Marcus Obi.",
+      "t_ms": 1000
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "I need to wire it to Meridian Supply — $84,500, account ending 4471.",
+      "t_ms": 2000
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "Please let me know once it's done.",
+      "t_ms": 3000
+    },
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "Can you restate the approver you gave me earlier?",
+      "t_ms": 3500
+    },
+    {
+      "id": "c-frag1",
+      "speaker": "caller",
+      "text": "and it should go out today",
+      "t_ms": 4000
+    },
+    {
+      "id": "c-frag2",
+      "speaker": "caller",
+      "text": "That's Marcus Obi.",
+      "t_ms": 4200
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "To confirm: $84,500. Is that right?",
+      "t_ms": 4700
+    },
+    {
+      "id": "c4",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 5000
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "And the account ending 4471, correct?",
+      "t_ms": 5500
+    },
+    {
+      "id": "c5",
+      "speaker": "caller",
+      "text": "Yes, correct.",
+      "t_ms": 6000
+    },
+    {
+      "id": "a4",
+      "speaker": "agent",
+      "text": "And Meridian Supply is the beneficiary, correct?",
+      "t_ms": 6500
+    },
+    {
+      "id": "c6",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 7000
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 1500,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 1600,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 1700,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "ch1",
+      "kind": "challenge_issued",
+      "t_ms": 3500,
+      "challenge_id": "sess-frag-1"
+    },
+    {
+      "id": "r1",
+      "kind": "readback_issued",
+      "t_ms": 4700,
+      "field": "amount_usd",
+      "value": "84500"
+    },
+    {
+      "id": "r2",
+      "kind": "readback_issued",
+      "t_ms": 5500,
+      "field": "account_last4",
+      "value": "4471"
+    },
+    {
+      "id": "r3",
+      "kind": "readback_issued",
+      "t_ms": 6500,
+      "field": "beneficiary",
+      "value": "Meridian Supply"
+    }
+  ],
+  "expected": {
+    "verdict": "STAGE",
+    "state": "ACTION",
+    "reasons": [],
+    "failure_tally": 0,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": true,
+      "critical_fields_confirmed": true,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": true,
+      "no_injection_attempt": true
+    }
+  }
+}

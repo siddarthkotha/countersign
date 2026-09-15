@@ -131,6 +131,17 @@ export function reconstructIssued(
   const issuedActions = actions.filter((a) => a.kind === 'challenge_issued').sort((a, b) => a.t_ms - b.t_ms);
   const issued: ChallengeSpec[] = [];
   for (const action of issuedActions) {
+    // FIX (2026-09-15, fragment-shaped challenges): while a challenge is still AWAITING a
+    // caller reply (see fsm.ts's phrasingGoal CHALLENGE branch), the server re-asks the
+    // SAME spec -- and `recordGoalCompletionAction` (call/session.ts) logs a FRESH
+    // `challenge_issued` action every time that re-ask is actually spoken, still carrying
+    // the identical `challenge_id`. A repeat of a `challenge_id` already reconstructed is
+    // exactly that -- a re-ask, not a new challenge -- and is skipped here rather than
+    // re-processed (it would otherwise look like a second issuance of the same id one
+    // position later than `selectChallenge` could ever legally produce, and get misclassified
+    // as log drift).
+    if (issued.some((s) => s.challenge_id === action.challenge_id)) continue;
+
     const claimsAsOf = claims.filter((c) => c.t_ms <= action.t_ms);
     const conversationAsOf = conversation.filter((u) => u.t_ms <= action.t_ms);
 

@@ -335,8 +335,37 @@ function goal(code: GoalCode, hint: string, keyterms: string[], patient: boolean
   return { code, hint, keyterms, turn_detection_hint: patient ? 'patient' : 'default', ...extra };
 }
 
+/** FIX (2026-09-15, fragment-shaped challenges, PROVEN live defect -- bundle
+ *  scripts/rehearse/reports/2026-09-15T08-56-33-miller-silent-after-amount.diagnostics.json):
+ *  the most-recently-issued challenge's own spec, ONLY when it is still genuinely AWAITING a
+ *  caller reply -- i.e. `challenges.ts`'s `gradeChallenges` has not yet written a
+ *  `knowledge_check_result` evidence card for it (that function deliberately omits one while
+ *  a non-answer-shaped reply is still under `seed.thresholds.max_challenge_reasks` -- see its
+ *  own doc comment). `selectChallenge` (challenges.ts) intentionally does NOT track this
+ *  itself (its own doc comment explains why: too many existing unit tests call it directly
+ *  with a hand-built `issued` history and pass `results: {}` to mean "selection order only,
+ *  I don't care about grading" -- baking an awaiting-check into that function broke ~30 of
+ *  them). So the CHALLENGE branch below asks here FIRST, and falls back to
+ *  `nextChallenge` (`selectChallenge`'s own pick) only when nothing is awaiting -- keeping
+ *  the caller on the SAME question (same `challenge_id`, same `speak`) across AssemblyAI
+ *  endpointing splitting one scripted line into multiple `transcript.user` turns, instead of
+ *  racing ahead to a different one the instant any caller utterance (fragment or not) lands.
+ *
+ *  Requires the action's own recorded `spec` (real server calls always set this --
+ *  call/session.ts's `recordGoalCompletionAction` writes `spec: goal.challenge` on every
+ *  `challenge_issued` action); a hand-built action with no recorded spec has nothing to
+ *  re-ask verbatim and falls through to `nextChallenge` like before this fix. */
+function awaitingChallenge(actions: AgentAction[], evidence: Evidence[]): ChallengeSpec | null {
+  const lastIssued = actions
+    .filter((a): a is AgentAction & { challenge_id: string } => a.kind === 'challenge_issued' && a.challenge_id !== undefined)
+    .reduce<(AgentAction & { challenge_id: string }) | null>((latest, a) => (!latest || a.t_ms > latest.t_ms ? a : latest), null);
+  if (!lastIssued || !lastIssued.spec) return null;
+  const hasCard = evidence.some((e) => e.id === `ev-knowledge-${lastIssued.challenge_id}`);
+  return hasCard ? null : lastIssued.spec;
+}
+
 export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
-  const { state, decideResult, evidence, ledger, seed, tools, nextChallenge, conversation = [] } = input;
+  const { state, decideResult, evidence, ledger, seed, tools, actions, nextChallenge, conversation = [] } = input;
   const keyterms = buildKeyterms(seed, ledger, evidence);
   const patient = state === 'CHALLENGE' || (state === 'CONSISTENCY_CHECK' && decideResult.rule_hit === 5);
 
@@ -463,8 +492,13 @@ export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
     // case still reads `goal.challenge.ask` and tells the model to paraphrase it, not
     // `goal.hint`/`goal.challenge.speak` verbatim -- flipping that is a separate, deliberately
     // un-taken step (see this task's report and prompt.ts's "Parked follow-up" comment).
-    return goal('ASK_CHALLENGE', nextChallenge?.speak ?? nextChallenge?.ask ?? 'Ask the caller a verification question.', keyterms, patient, {
-      ...(nextChallenge ? { challenge: nextChallenge } : {}),
+    //
+    // FIX (2026-09-15, fragment-shaped challenges): re-ask the SAME challenge, verbatim,
+    // while it is still genuinely AWAITING a caller reply -- see `awaitingChallenge`'s doc
+    // comment above for why this check lives here rather than in `selectChallenge`.
+    const challenge = awaitingChallenge(actions, evidence) ?? nextChallenge;
+    return goal('ASK_CHALLENGE', challenge?.speak ?? challenge?.ask ?? 'Ask the caller a verification question.', keyterms, patient, {
+      ...(challenge ? { challenge } : {}),
     });
   }
 

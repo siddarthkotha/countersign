@@ -159,6 +159,11 @@ export const MERIDIAN: SeedConfig = {
     challenge_answer_window_ms: 15_000, // ruling 2026-09-09 (item 21)
     approximate_jump_ratio: 2, // fix-round-2: red team item 2
     max_readback_reasks: 3, // founder decision 2026-09-12 9:00 AM
+    // Founder-approved default per the readback-cap precedent (row 13, 2026-09-12): the same
+    // "hold the line, then move on" shape as max_readback_reasks above, sized for a
+    // challenge's much shorter fragment-recovery window (src/challenges.ts's
+    // isAnswerShapedFor/selectChallenge/gradeChallenges, fix 2026-09-15).
+    max_challenge_reasks: 2,
   },
   pressure_lexicon: [
     'minutes', 'right now', 'immediately', 'fired', 'do not loop', "don't loop", "don't tell",
