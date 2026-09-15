@@ -162,6 +162,15 @@ function renderDiagnostics(r: RunResult): string {
   const evals = d.evaluate_events.length
     ? d.evaluate_events.map((e) => `- t=${fmtMs(e.t_ms)} ${summarizeEvaluateDetail(e.detail)} ${JSON.stringify(e.detail)}`).join('\n')
     : '_none recorded_';
+  const transcript = d.transcript_events.length
+    ? d.transcript_events.map((e) => {
+        const detail = e.detail as Record<string, unknown> | null;
+        if (detail && typeof detail.text === 'string') {
+          return `- t=${fmtMs(e.t_ms)} ${detail.role}: ${detail.text}`;
+        }
+        return `- t=${fmtMs(e.t_ms)} ${detail?.role ?? 'unknown'} (length: ${detail?.length ?? 'unknown'})`;
+      }).join('\n')
+    : '_none recorded_';
   return [
     `Deployed commit: ${d.deployed_commit ?? 'unknown (local dev, RENDER_GIT_COMMIT not set)'}`,
     `Server-side end reason: ${d.end_reason ?? 'not ended per the bundle'}`,
@@ -172,6 +181,9 @@ function renderDiagnostics(r: RunResult): string {
     // with the attacker persona and nothing in the bundle could say why.
     `Session minted: ${d.session_minted_event ? JSON.stringify(d.session_minted_event.detail) : 'not recorded'}`,
     `Call context: ${d.call_context_event ? JSON.stringify(d.call_context_event.detail) : 'not recorded'}`,
+    '',
+    '**Transcript (from the flight recorder)**',
+    transcript,
     '',
     '**Event kind counts**',
     counts || '_none_',

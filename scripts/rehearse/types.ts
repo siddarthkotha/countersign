@@ -289,6 +289,7 @@ export interface DiagnosticsSummary {
   event_kind_counts: Record<string, number>;
   tool_events: RehearseDiagnosticEvent[];
   evaluate_events: RehearseDiagnosticEvent[];
+  transcript_events: RehearseDiagnosticEvent[];
   deployed_commit: string | null;
   ended_at_ms: number | null;
   end_reason: string | null;

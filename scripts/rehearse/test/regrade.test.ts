@@ -35,6 +35,7 @@ function baseResult(overrides: Partial<RunResult> = {}): RunResult {
       event_kind_counts: { evaluate: 1 },
       tool_events: [],
       evaluate_events: [],
+      transcript_events: [],
       deployed_commit: null,
       ended_at_ms: 42000,
       end_reason: 'agent_closed',

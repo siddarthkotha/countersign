@@ -19,12 +19,18 @@ const TOOL_KINDS = new Set([
   'terminal_action_abandoned',
 ]);
 
+const TRANSCRIPT_KINDS = new Set([
+  'transcript',
+  'post_goodbye_transcript_dropped',
+]);
+
 export function summarizeDiagnostics(bundle: RehearseDiagnosticBundle | null): DiagnosticsSummary | DiagnosticsFailure {
   if (!bundle) return { ok: false, error: 'diagnostics bundle unavailable (fetch failed or session not found)' };
 
   const counts: Record<string, number> = {};
   const toolEvents: RehearseDiagnosticEvent[] = [];
   const evaluateEvents: RehearseDiagnosticEvent[] = [];
+  const transcriptEvents: RehearseDiagnosticEvent[] = [];
   let sessionMintedEvent: RehearseDiagnosticEvent | null = null;
   let callContextEvent: RehearseDiagnosticEvent | null = null;
   let greetingConfigured: boolean | null = null;
@@ -33,6 +39,7 @@ export function summarizeDiagnostics(bundle: RehearseDiagnosticBundle | null): D
     counts[e.kind] = (counts[e.kind] ?? 0) + 1;
     if (TOOL_KINDS.has(e.kind)) toolEvents.push(e);
     if (e.kind === 'evaluate') evaluateEvents.push(e);
+    if (TRANSCRIPT_KINDS.has(e.kind)) transcriptEvents.push(e);
     // Fix (2026-09-09, PROVEN live-call regression): the first of each -- there's only ever
     // one 'session_minted' (mint time) and one 'call_context' (first WS attach) per bundle.
     if (e.kind === 'session_minted' && sessionMintedEvent === null) sessionMintedEvent = e;
@@ -51,6 +58,7 @@ export function summarizeDiagnostics(bundle: RehearseDiagnosticBundle | null): D
     event_kind_counts: counts,
     tool_events: toolEvents,
     evaluate_events: evaluateEvents,
+    transcript_events: transcriptEvents,
     deployed_commit: bundle.deployed_commit,
     ended_at_ms: bundle.ended_at,
     end_reason: bundle.end_reason,
