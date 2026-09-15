@@ -1,0 +1,113 @@
+{
+  "name": "corrected-critical-field",
+  "title": "Corrected critical field -- caller self-corrects an amount mid-call",
+  "description": "OPEN FOUNDER QUESTION (2026-09-14): Expected verdict TBD, using STAGE as the test expectation pending founder ruling. Dana-shaped, legitimate-looking request where the caller initially states a wrong amount, then corrects themselves mid-number with a pause inside the phrase (\"seventy-five, uh, sorry, eighty-four thousand five hundred\"). Rule under test: no security-relevant value is final until an unambiguous complete answer or a confirmed readback; a corrected value wins, the readback must name the CORRECTED amount, and evidence keeps both verbatim quotes (LAW 4). Free-play mode includes a seeded pause INSIDE the amount phrase to test the pause mechanism. Readback must name the corrected amount ($84,500), not the stale one ($75,000).",
+  "source": "Derived from scripts/rehearse/scenarios/single-wrong-answer.json (case of self-correction) + docs/TEST-PLAN.md step 6 case 11.",
+  "truth": {
+    "identity": "Dana Whitfield",
+    "beneficiary": "Meridian Supply",
+    "amount_usd": 84500,
+    "account_last4": "4471",
+    "counsel": null,
+    "escrow_institution": null,
+    "approver": "Marcus Obi",
+    "deadline": null
+  },
+  "persona": "You are Dana Whitfield, corporate treasury, making an otherwise normal, honest wire request: $84,500 to Meridian Supply, account ending 4471, approved by Marcus Obi. HOWEVER, when you first state the amount, you hesitate and misspeak: you start with the wrong number ($75,000), pause mid-phrase inside the amount, and then correct yourself in your own words (\"uh, sorry\", \"wait, I meant\", \"let me correct that\") to the true amount. The correction is your final answer and must be what you confirm in any readback -- do not accept a readback that uses the stale (wrong) amount. If the agent reads back the corrected amount ($84,500), confirm it fully. If the agent reads back the stale amount ($75,000), firmly correct them with the true value. Keep it brief -- under 30 words per line.",
+  "turns": [
+    {
+      "id": "c1",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply, seventy-five, uh, sorry, eighty-four thousand five hundred, account ending 4471, approved by Marcus Obi.",
+      "pause_ms": 500
+    },
+    {
+      "id": "c2",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "seventy-five",
+              "75,000"
+            ],
+            "say": "No, that's wrong. I corrected that -- it's eighty-four thousand five hundred."
+          },
+          {
+            "if_agent_says_any": [
+              "eighty-four",
+              "84,500"
+            ],
+            "say": "Yes, that's right, eighty-four thousand five hundred."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c3",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "seventy-five",
+              "75,000"
+            ],
+            "say": "No, that's wrong. I said eighty-four thousand five hundred."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c4",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "seventy-five",
+              "75,000"
+            ],
+            "say": "No, that's not right. It's eighty-four thousand five hundred, not seventy-five thousand."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c5",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": []
+      }
+    },
+    {
+      "id": "c6",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "seventy-five",
+              "75,000"
+            ],
+            "say": "No, I corrected that to eighty-four thousand five hundred."
+          }
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "verdict": "STAGE",
+    "max_wall_ms": 240000
+  },
+  "demo_persona": "legitimate",
+  "caller_style": "patient",
+  "free_play": {
+    "pause_min_ms": 300,
+    "pause_max_ms": 2000
+  }
+}

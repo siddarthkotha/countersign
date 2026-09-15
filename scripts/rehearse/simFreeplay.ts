@@ -28,7 +28,7 @@ const REPO_ROOT = join(HERE, '..', '..');
 const RUN_TS_PATH = join(HERE, 'run.ts');
 const REPORTS_DIR = join(HERE, 'reports');
 
-/** The ten judge-facing free-play cases named in the founder's spec (2026-09-14), verbatim --
+/** The eleven judge-facing free-play cases (original ten plus case 11 "corrected-critical-field", 2026-09-14), verbatim --
  *  every one already carries a `persona` rich enough to improvise (scripts/rehearse/scenarios/
  *  *.json), and hangup-after-request/miller-silent-after-amount's personas include the
  *  explicit instruction to go silent at their defined point. */
@@ -43,6 +43,7 @@ export const FREEPLAY_JUDGE_CASES = [
   'prompt-injection-midcall',
   'structuring-two-wires',
   'miller-silent-after-amount',
+  'corrected-critical-field',
 ] as const;
 
 // ---------- pure: argument parsing ----------

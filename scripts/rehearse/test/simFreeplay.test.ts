@@ -18,6 +18,17 @@ import {
 } from '../simFreeplay.js';
 import type { FreeplayCaseExecutor, FreeplayPlannedRun, FreeplayRunRow, SimFreeplayArgs } from '../simFreeplay.js';
 
+describe('FREEPLAY_JUDGE_CASES', () => {
+  it('includes eleven cases: the original ten plus case 11 corrected-critical-field (2026-09-14)', () => {
+    expect(FREEPLAY_JUDGE_CASES).toHaveLength(11);
+    expect(FREEPLAY_JUDGE_CASES).toContain('corrected-critical-field');
+  });
+
+  it('corrected-critical-field is the last case in the list', () => {
+    expect(FREEPLAY_JUDGE_CASES[FREEPLAY_JUDGE_CASES.length - 1]).toBe('corrected-critical-field');
+  });
+});
+
 describe('parseSimFreeplayArgs', () => {
   it('requires --url', () => {
     const result = parseSimFreeplayArgs(['--model', 'x', '--runs', '1']);
@@ -69,7 +80,7 @@ function args(overrides: Partial<SimFreeplayArgs> = {}): SimFreeplayArgs {
 }
 
 describe('buildFreeplayPlan', () => {
-  it('plans exactly the 10 fixed judge cases, once each, for runsPerCase 1', () => {
+  it('plans the fixed judge cases (11 total including case 11 corrected-critical-field), once each, for runsPerCase 1', () => {
     const plan = buildFreeplayPlan(args({ runsPerCase: 1 }));
     expect(plan).toHaveLength(FREEPLAY_JUDGE_CASES.length);
     expect(plan.map((p) => p.case)).toEqual([...FREEPLAY_JUDGE_CASES]);

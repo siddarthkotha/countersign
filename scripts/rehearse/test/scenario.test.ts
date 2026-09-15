@@ -773,3 +773,70 @@ describe('the two judge-sim mechanics scenarios (finding 2026-09-11)', () => {
     }
   });
 });
+
+describe('case 11: corrected-critical-field (2026-09-14)', () => {
+  it('corrected-critical-field loads and validates', async () => {
+    const s = await loadScenario('corrected-critical-field');
+    expect(s.name).toBe('corrected-critical-field');
+    expect(s.expected.verdict).toBe('STAGE');
+    expect(s.turns.length).toBeGreaterThan(0);
+  });
+
+  it('corrected-critical-field carries a truth block with the correct amount ($84,500, not the stale $75,000)', async () => {
+    const s = await loadScenario('corrected-critical-field');
+    expect(s.truth).toBeDefined();
+    expect(s.truth?.identity).toBe('Dana Whitfield');
+    expect(s.truth?.beneficiary).toBe('Meridian Supply');
+    expect(s.truth?.amount_usd).toBe(84500);
+    expect(s.truth?.account_last4).toBe('4471');
+    expect(s.truth?.approver).toBe('Marcus Obi');
+  });
+
+  it('corrected-critical-field carries a persona that instructs the caller to correct themselves mid-amount', async () => {
+    const s = await loadScenario('corrected-critical-field');
+    expect(s.persona).toBeTruthy();
+    const personaLower = s.persona!.toLowerCase();
+    expect(personaLower).toContain('hesitate');
+    expect(personaLower).toContain('correct');
+    expect(personaLower).toMatch(/84.?500|eighty-four/);
+    expect(personaLower).toMatch(/75.?000|seventy-five/);
+  });
+
+  it('corrected-critical-field has respond rules that reject the stale amount and accept the corrected one', async () => {
+    const s = await loadScenario('corrected-critical-field');
+    const turn2 = s.turns[1]!;
+    expect(turn2.respond).toBeDefined();
+    expect(turn2.respond!.rules.length).toBeGreaterThan(0);
+    // First rule should trigger on stale amount
+    const staleRule = turn2.respond!.rules.find((r) => r.if_agent_says_any.some((phrase) => phrase.includes('seventy-five') || phrase.includes('75')));
+    expect(staleRule).toBeDefined();
+    expect(staleRule!.say.toLowerCase()).toContain('wrong');
+    expect(staleRule!.say.toLowerCase()).toMatch(/eighty-four|84/);
+  });
+
+  it('corrected-critical-field carries demo_persona "legitimate"', async () => {
+    const s = await loadScenario('corrected-critical-field');
+    expect(s.demo_persona).toBe('legitimate');
+  });
+
+  it('corrected-critical-field carries caller_style "patient" for proper turn sequencing', async () => {
+    const s = await loadScenario('corrected-critical-field');
+    expect(s.caller_style).toBe('patient');
+  });
+
+  it('corrected-critical-field carries free_play tuning for seeded pauses in the range 300-2000ms', async () => {
+    const s = await loadScenario('corrected-critical-field');
+    expect(s.free_play).toBeDefined();
+    expect(s.free_play!.pause_min_ms).toBe(300);
+    expect(s.free_play!.pause_max_ms).toBe(2000);
+  });
+
+  it('corrected-critical-field opening turn includes both the stale amount (75000) and corrected amount (84500) in one line', async () => {
+    const s = await loadScenario('corrected-critical-field');
+    const c1 = s.turns[0]!;
+    const textLower = c1.text.toLowerCase();
+    expect(textLower).toContain('seventy-five');
+    expect(textLower).toContain('eighty-four');
+    expect(textLower).toMatch(/sorry|uh|wait|correct/i);
+  });
+});
