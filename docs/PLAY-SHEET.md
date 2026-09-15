@@ -227,7 +227,7 @@ Say:
 5. "Yes, that's right."
 6. "Yes, that's right."
 
-If asked: Confirm all readbacks truthfully. The real amount is $84,500. The corrected amount is the one that counts.
+If asked: Confirm all readbacks truthfully. The real amount is $84,500. The corrected amount is the one that counts. If asked who approved or authorized it, answer "Marcus Obi." If asked to restate the amount, say "It's $84,500."
 
 You will hear: "Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye."
 
