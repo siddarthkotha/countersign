@@ -409,3 +409,52 @@ export function populateBilledSeconds(bundle: DiagnosticBundle): void {
     }
   }
 }
+
+/** Defect 2 fix (2026-09-15): record aai_session_terminated event when a late session.ended
+ *  arrives after the bundle has already been ended (e.g. browser hung up first). This helper:
+ *  - Records the aai_session_terminated event with billing fields
+ *  - Sets billed_seconds on the bundle directly (whether or not it's been ended)
+ *  - Guards against duplicate recording (only records once per session)
+ *  Used by index.ts's onSessionEnded hook when a real session.ended arrives with numeric
+ *  session_duration_seconds. The call/session.ts path records aai_session_terminated the
+ *  normal way (before the bundle ends); this path handles the late-arrival case. */
+export function recordTerminationEvent(
+  state: DiagnosticsState,
+  session_id: string,
+  now: number,
+  detail: Record<string, unknown>,
+): void {
+  const bundle = state.bundles.get(session_id);
+  if (!bundle) return;
+
+  // Extract numeric session_duration_seconds and audio_duration_seconds from the detail
+  const session_duration_seconds = detail.session_duration_seconds;
+  const audio_duration_seconds = detail.audio_duration_seconds;
+
+  // Only record aai_session_terminated if session_duration_seconds is numeric
+  if (typeof session_duration_seconds === 'number') {
+    // Guard against duplicate recording - check if we already have an aai_session_terminated event
+    const alreadyRecorded = bundle.server_events.some(
+      (e) =>
+        e.kind === 'aai_session_terminated' &&
+        typeof e.detail === 'object' &&
+        e.detail !== null &&
+        'session_duration_seconds' in e.detail,
+    );
+    if (!alreadyRecorded) {
+      // Record the aai_session_terminated event with the numeric fields
+      if (bundle.server_events.length < MAX_SERVER_EVENTS_PER_BUNDLE) {
+        bundle.server_events.push({
+          t_ms: now - bundle.started_at,
+          kind: 'aai_session_terminated',
+          detail: {
+            session_duration_seconds,
+            ...(typeof audio_duration_seconds === 'number' ? { audio_duration_seconds } : {}),
+          },
+        });
+      }
+      // Set billed_seconds on the bundle directly
+      bundle.billed_seconds = session_duration_seconds;
+    }
+  }
+}

@@ -6,7 +6,7 @@ import { loadConfig } from './config.js';
 import { createHttpServer } from './http.js';
 import { createStaticServer } from './static.js';
 import { reapIdle, markLiveCallsUnavailable, recordMintSuccess } from './caps.js';
-import { newDiagnosticsState, recordServerEvent } from './diagnostics.js';
+import { newDiagnosticsState, recordServerEvent, recordTerminationEvent } from './diagnostics.js';
 import { attachWebSocketServer } from './ws/browser.js';
 import { FakeAaiSocket } from './aai/fake.js';
 import type { AaiEvent, AaiSocket } from './aai/types.js';
@@ -229,7 +229,10 @@ function createAai(session_id: string): AaiSocket {
     // Defect 2 fix (2026-09-15): every time a raw session.ended arrives, record its
     // top-level keys and numeric fields (no transcript text, no audio), so a bundle proves
     // what AssemblyAI sent for billing -- or that it sent nothing (aai_terminate_timeout
-    // fired instead).
+    // fired instead). Also, when the message carries numeric session_duration_seconds,
+    // record aai_session_terminated with the billing fields and set billed_seconds on the
+    // bundle, so a late-arriving message (after the browser hung up and ended the bundle)
+    // still lands in the diagnostics.
     onSessionEnded: (msg) => {
       const detail: Record<string, unknown> = { keys: Object.keys(msg) };
       // Extract numeric fields (session_duration_seconds, audio_duration_seconds, timestamp)
@@ -239,6 +242,8 @@ function createAai(session_id: string): AaiSocket {
         }
       }
       recordServerEvent(diagnostics, session_id, Date.now(), 'aai_session_ended_raw', detail);
+      // If this message carries billing data, record it as aai_session_terminated and set billed_seconds
+      recordTerminationEvent(diagnostics, session_id, Date.now(), msg);
     },
   });
 
