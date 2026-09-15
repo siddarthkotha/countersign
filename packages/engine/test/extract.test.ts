@@ -86,6 +86,29 @@ describe('extractIdentityClaim', () => {
     const hit = extractIdentityClaim(text, MERIDIAN);
     expect(hit?.identity_id ?? null).toBe(identity_id);
   });
+
+  // Fix (bare-name-challenge-answer, 2026-09-14): a bare name opening an utterance is NOT
+  // a self-identification when that utterance is an answer to a pending question about a
+  // person (challenge_issued or readback for approver, counsel, beneficiary, escrow_institution).
+  // The caller responding "Marcus Obi." to "who approved this payment?" is naming an approver,
+  // not identifying themselves. Explicit self-identification cues still work (e.g. "this is X").
+  it('treats a bare opening name as non-self-id when answering a person challenge', () => {
+    // Without answeringPersonQuestion flag: bare name opening utterance is a self-id
+    expect(extractIdentityClaim('Marcus Obi.', MERIDIAN))
+      .toEqual({ identity_id: 'marcus-obi', quote: 'Marcus Obi' });
+
+    // With answeringPersonQuestion=true: bare name opening is NOT a self-id
+    expect(extractIdentityClaim('Marcus Obi.', MERIDIAN, true))
+      .toBeNull();
+
+    // Even when answering a person challenge, explicit self-id cues still work
+    expect(extractIdentityClaim('This is Marcus Obi.', MERIDIAN, true))
+      .toEqual({ identity_id: 'marcus-obi', quote: 'Marcus Obi' });
+
+    // "actually this is X" after a challenge still triggers identity switch
+    expect(extractIdentityClaim('Actually, hold on, this is Robert Miller speaking', MERIDIAN, true))
+      .toEqual({ identity_id: 'robert-miller', quote: 'Robert Miller' });
+  });
 });
 
 describe('extractPressure', () => {

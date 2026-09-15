@@ -1,0 +1,180 @@
+{
+  "title": "Dana answers an approver challenge with a bare name, no false identity switch",
+  "description": "Dana calls about the existing Meridian Supply payment, states the amount and account, then is challenged about the internal approver. She answers 'Marcus Obi.' (bare name) which is the correct answer to the dana_internal_approver knowledge challenge. DEFECT (2026-09-14): before the fix, extractIdentityClaim treated the bare name opening the utterance as a self-identification, recorded a CONTRADICTED identity claim (switching from dana-whitfield to marcus-obi), and the FSM entered RE_ELICIT_AFTER_SWITCH, looping and freezing. FIX: when there's a pending readback for a person-shaped field (approver, counsel, etc), pass answeringPersonQuestion=true to extractIdentityClaim so it skips rule (b) and doesn't treat the bare name as a self-id. Dana's identity remains consistent; before the fix this would freeze with an identity switch, after the fix no false switch occurs. Core fix verified by unit tests in ledger.test.ts and extract.test.ts.",
+  "call": {
+    "session_id": "sess-bare-name",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire eighty four thousand five hundred to Meridian Supply, account ending 4471.",
+      "t_ms": 1000
+    },
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "Which internal approver signed off on this Meridian Supply payment?",
+      "t_ms": 2000
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "Marcus Obi.",
+      "t_ms": 3000
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "To confirm: $84,500 to Meridian Supply, account ending 4471. Correct?",
+      "t_ms": 4000
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 4500
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "And the account ending 4471, correct?",
+      "t_ms": 5000
+    },
+    {
+      "id": "c4",
+      "speaker": "caller",
+      "text": "Yes, correct.",
+      "t_ms": 5500
+    },
+    {
+      "id": "a4",
+      "speaker": "agent",
+      "text": "And Meridian Supply is the beneficiary, correct?",
+      "t_ms": 6000
+    },
+    {
+      "id": "c5",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 6500
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 7000,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 7100,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 7200,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 1500,
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "ch1",
+      "kind": "challenge_issued",
+      "t_ms": 2000,
+      "challenge_id": "sess-bare-name-1",
+      "spec": {
+        "challenge_id": "sess-bare-name-1",
+        "kind": "SEED_FACT",
+        "field": "approver",
+        "ask": "Ask which internal approver signed off on this payment.",
+        "speak": "Which internal approver signed off on this Meridian Supply payment?",
+        "expect": { "accept_tokens": ["marcus", "obi"] },
+        "fact_id": "dana_internal_approver"
+      }
+    },
+    {
+      "id": "r1",
+      "kind": "readback_issued",
+      "t_ms": 4000,
+      "field": "amount_usd",
+      "value": "84500"
+    },
+    {
+      "id": "r2",
+      "kind": "readback_issued",
+      "t_ms": 5000,
+      "field": "account_last4",
+      "value": "4471"
+    },
+    {
+      "id": "r3",
+      "kind": "readback_issued",
+      "t_ms": 6000,
+      "field": "beneficiary",
+      "value": "Meridian Supply"
+    }
+  ],
+  "expected": {
+    "verdict": "PENDING",
+    "state": "CLAIM",
+    "reasons": [],
+    "failure_tally": 0,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": true,
+      "critical_fields_confirmed": false,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": false,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": false,
+      "no_injection_attempt": true
+    }
+  }
+}

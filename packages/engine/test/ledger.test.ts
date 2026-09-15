@@ -448,4 +448,52 @@ describe('buildLedger', () => {
     expect(approverClaims[1]).toMatchObject({ kind: 'CORRECTED', value: 'elena park', supersedes: approverClaims[0]!.id });
     expect(currentClaim(claims, 'approver')?.value).toBe('elena park');
   });
+
+  // Bare-name-challenge-answer fix (2026-09-14): a bare name opening an utterance is NOT a
+  // self-identification when that utterance answers a pending readback for a person-shaped
+  // field. Dana identifies as Dana Whitfield, then when asked "which internal approver signed
+  // off", she answers "Marcus Obi." The bare name should NOT create an identity claim
+  // (contradicting the caller's original identity). Instead, it's recorded as an answer to
+  // the approver readback question. Before the fix, this would create a CONTRADICTED identity
+  // claim and freeze the call in RE_ELICIT_AFTER_SWITCH.
+  it('12. bare name answering a person-readback does not trigger false identity switch', () => {
+    const conversation = [
+      u('u1', 'This is Dana Whitfield, corporate treasury. I need to wire $84,500 to Meridian Supply, account ending 4471.', 0),
+      // Challenge issued by agent (not modeled as utterance, just as action below)
+      u('u2', 'Marcus Obi.', 3000),
+      // Readback and confirmations (not shown for brevity, but would follow in real scenario)
+    ];
+    const actions: AgentAction[] = [
+      {
+        id: 'ch1',
+        kind: 'challenge_issued',
+        t_ms: 1000,
+        challenge_id: 'sess-test-1',
+        spec: {
+          challenge_id: 'sess-test-1',
+          kind: 'SEED_FACT',
+          field: 'approver',
+          ask: 'Ask which approver.',
+          expect: { accept_tokens: ['marcus', 'obi'] },
+          fact_id: 'dana_internal_approver',
+        },
+      },
+      {
+        id: 'r1',
+        kind: 'readback_issued',
+        t_ms: 2000,
+        field: 'approver',
+        value: 'Marcus Obi',
+      },
+    ];
+    const { claims } = buildLedger(conversation, actions, MERIDIAN);
+    const identityClaims = claims.filter((c) => c.field === 'identity');
+    // Only Dana's original identity should be claimed, not Marcus Obi
+    expect(identityClaims).toHaveLength(1);
+    expect(identityClaims[0]).toMatchObject({ kind: 'STATED', value: 'dana-whitfield' });
+    // The approver value should have been extracted (in a real scenario, this would be from
+    // a cued pattern "approved by Marcus Obi" or from a challenge answer). For this test,
+    // we just verify that no false identity switch occurred.
+    expect(currentClaim(claims, 'identity')?.value).toBe('dana-whitfield');
+  });
 });

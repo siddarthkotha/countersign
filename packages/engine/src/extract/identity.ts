@@ -111,12 +111,14 @@ function overlapsAnySpan(start: number, end: number, spans: { start: number; end
 }
 
 /** True when the name occurrence at [start, end) in `text` reads as the CALLER
- *  self-identifying, per the ruling above. */
-function isSelfIdentification(text: string, lowerText: string, start: number, end: number): boolean {
+ *  self-identifying, per the ruling above. When `answeringPersonQuestion` is true,
+ *  skip rule (b) (startsUtteranceValidly) since the name is likely answering a
+ *  person-focused challenge or readback, not self-identifying. */
+function isSelfIdentification(text: string, lowerText: string, start: number, end: number, answeringPersonQuestion?: boolean): boolean {
   return (
     hasPrecedingCue(text, lowerText, start) ||
     hasFollowingCue(text, lowerText, end) ||
-    startsUtteranceValidly(text, start, end)
+    (!answeringPersonQuestion && startsUtteranceValidly(text, start, end))
   );
 }
 
@@ -125,6 +127,7 @@ function firstValidHit(
   lowerText: string,
   excludedSpans: { start: number; end: number }[],
   candidates: { identity_id: string; value: string; fullName?: string }[],
+  answeringPersonQuestion?: boolean,
 ): IdentityHit | null {
   for (const { identity_id, value, fullName } of candidates) {
     const lowerCandidate = value.toLowerCase();
@@ -137,7 +140,7 @@ function firstValidHit(
       // different (wrong) answer, e.g. "Marcus Obi approved it" (rejected as full name)
       // must not fall through to "Marcus" (alias) reading as a bare self-id.
       if (lowerFullName && lowerFullName !== lowerCandidate && lowerText.startsWith(lowerFullName, span.start)) continue;
-      if (isSelfIdentification(text, lowerText, span.start, span.end)) {
+      if (isSelfIdentification(text, lowerText, span.start, span.end, answeringPersonQuestion)) {
         return { identity_id, quote: text.slice(span.start, span.end) };
       }
     }
@@ -148,8 +151,10 @@ function firstValidHit(
 /** Full names take priority over aliases: try every identity's `name` first, then every
  *  identity's aliases, both in seed order. Returns the first match found that reads as a
  *  self-identification (see the ruling in the file header) and is not itself the X of a
- *  cued-name pattern (approved by X, counsel is X, escrow ... X, ... to X). */
-export function extractIdentityClaim(text: string, seed: SeedConfig): IdentityHit | null {
+ *  cued-name pattern (approved by X, counsel is X, escrow ... X, ... to X).
+ *  When `answeringPersonQuestion` is true, skip rule (b) (bare name opening utterance)
+ *  since this utterance is an answer to a pending person-focused question. */
+export function extractIdentityClaim(text: string, seed: SeedConfig, answeringPersonQuestion?: boolean): IdentityHit | null {
   const lowerText = text.toLowerCase();
   const excludedSpans = cuedNameSpans(text);
 
@@ -158,6 +163,7 @@ export function extractIdentityClaim(text: string, seed: SeedConfig): IdentityHi
     lowerText,
     excludedSpans,
     seed.identities.map((identity) => ({ identity_id: identity.id, value: identity.name })),
+    answeringPersonQuestion,
   );
   if (nameHit) return nameHit;
 
@@ -165,5 +171,5 @@ export function extractIdentityClaim(text: string, seed: SeedConfig): IdentityHi
   for (const identity of seed.identities) {
     for (const alias of identity.aliases) aliasCandidates.push({ identity_id: identity.id, value: alias, fullName: identity.name });
   }
-  return firstValidHit(text, lowerText, excludedSpans, aliasCandidates);
+  return firstValidHit(text, lowerText, excludedSpans, aliasCandidates, answeringPersonQuestion);
 }

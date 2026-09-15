@@ -137,6 +137,9 @@ interface PendingReadback {
   utterancesSeen: number;
 }
 
+/** Fields that expect a person name as the answer (for identity extraction context). */
+const PERSON_SHAPED_FIELDS = new Set<ClaimField>(['approver', 'counsel', 'beneficiary', 'escrow_institution']);
+
 type TimelineEntry = { t_ms: number; kind: 'utterance'; u: Utterance } | { t_ms: number; kind: 'action'; a: AgentAction };
 
 export function buildLedger(
@@ -174,6 +177,7 @@ export function buildLedger(
   let nextId = 1;
   const activeReadback: Partial<Record<ClaimField, PendingReadback>> = {};
   const repairWindowSince: Partial<Record<ClaimField, number>> = {};
+  let lastChallengeField: ClaimField | null = null; // tracks the field of the most recent challenge_issued
 
   function addClaim(
     field: ClaimField,
@@ -304,11 +308,27 @@ export function buildLedger(
       for (const f of Object.keys(activeReadback) as ClaimField[]) delete activeReadback[f];
       if (entry.a.kind === 'readback_issued' && entry.a.field) {
         activeReadback[entry.a.field] = { action: entry.a, utterancesSeen: 0 };
+        lastChallengeField = null; // readback clears the challenge context
+      } else if (entry.a.kind === 'challenge_issued') {
+        // Track the field being challenged so we can skip false identity claims when
+        // answering a person-focused challenge with a bare name.
+        if (entry.a.spec?.field) {
+          lastChallengeField = entry.a.spec.field;
+        } else {
+          lastChallengeField = null; // challenge without spec, can't determine field
+        }
       }
       continue;
     }
 
     const u = entry.u;
+
+    // Fix (bare-name-challenge-answer): Compute this BEFORE readback resolution, since
+    // resolution might delete activeReadback entries. We need to know if this utterance is
+    // answering a person-focused readback/challenge so we can skip false identity claims.
+    const answeringPersonQuestion =
+      Object.keys(activeReadback).some((field) => PERSON_SHAPED_FIELDS.has(field as ClaimField)) ||
+      (lastChallengeField !== null && PERSON_SHAPED_FIELDS.has(lastChallengeField));
 
     // See `classifyDifferentValue`'s (a2) comment: defined only when the immediately
     // preceding caller utterance exists AND no agent turn happened between it and this
@@ -350,7 +370,7 @@ export function buildLedger(
 
     // Identity: value is the seed identity id itself, never text-normalized. A switch to a
     // DIFFERENT identity is always CONTRADICTED (never a "correction" — see amendment §B).
-    const idHit = extractIdentityClaim(u.text, seed);
+    const idHit = extractIdentityClaim(u.text, seed, answeringPersonQuestion);
     if (idHit) {
       const current = currentClaim(claims, 'identity');
       if (!current) {
