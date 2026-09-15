@@ -2475,6 +2475,26 @@
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
       "held_because": ".claude edit; founder noticed the model name missing from the status line 2026-09-14"
+    },
+    {
+      "id": "FLAKE-CREDITS-LEDGER-TEST",
+      "title": "creditsLedger.test.ts \"handles missing reports directory gracefully\" times out under load",
+      "files": [],
+      "status": "held",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
+      "held_because": "flaked once in three runs 2026-09-15 3:25 PM and once in a lane run 7:10 AM (5 s timeout scanning 100+ bundles under load); raise the timeout or scan a fixture dir in the test"
+    },
+    {
+      "id": "push-41",
+      "title": "push 41: f3f6ec3..fce67a1 (just-issued challenge gets its answer window before UNANSWERED; Dana trap-negation fixture) - gate 1910/1910 x2 plus one unrelated flake",
+      "files": [],
+      "status": "held",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
+      "held_because": "autopilot off; founder push word needed"
     }
   ]
 }
