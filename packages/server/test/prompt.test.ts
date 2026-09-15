@@ -17,7 +17,7 @@ const STANDING_RULES_VERBATIM =
   'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question. ' +
   'When an instruction gives you an exact line, say only that line and add no question of your own. ' +
   'Never announce completion, processing, approval, release, or any other outcome unless the current goal\'s own words say it; the engine composes every outcome line. ' +
-  'The instant you must speak automatically, before you have been given anything new to say, use only a short holding line such as "One moment." -- never a question, a readback, a verdict word, or a request you were not given.';
+  'The instant you must speak automatically, before you have been given anything new to say, say nothing at all -- an empty reply, never a holding line, a question, a readback, a verdict word, or a request you were not given.';
 
 /** A real (not stubbed) stateful stalls.pick, mirroring exactly what `call/session.ts` does
  *  with its own `Map<StallKind, Set<string>>` -- built fresh per `makeCtx()` call so tests
@@ -144,11 +144,17 @@ describe('renderPrompt', () => {
   // (docs/ASSEMBLYAI_INTEGRATION.md's reply.create section) and may still be composing under
   // a STALE prompt (system_prompt applies "on the next turn"). This standing sentence is the
   // only lever available under the documented API: make whatever the automatic reply says
-  // harmless (a holding beat) under EVERY goal's prompt, never the real content -- the real
-  // content is now always delivered by the server's own instructed reply.create instead (see
+  // harmless under EVERY goal's prompt, never the real content -- the real content is now
+  // always delivered by the server's own instructed reply.create instead (see
   // call/session.ts's `maybeSendReplyCreateForTick`). Present under every goal, same as the
   // other standing-rule guards above -- not just one goal's "Now" section.
-  it('the standing rules end with the Design E holding-beat sentence, present under every goal', () => {
+  //
+  // Design E follow-up (2026-09-15, measured live deploy 39): the sentence changed from "say
+  // a short holding line" to "say nothing at all" -- PROVEN the holding-beat wording made the
+  // agent say "One moment." four to five times per call once real content moved entirely to
+  // the instructed reply.create; see prompt.ts's own doc comment on STANDING_RULES for the
+  // measured before/after (agent lines 14 vs 7, verdict-to-goodbye 13.8s vs 4.0s).
+  it('the standing rules end with the Design E empty-automatic-reply sentence, present under every goal', () => {
     for (const code of ALL_GOAL_CODES) {
       const goal = baseGoal(
         code,
@@ -168,8 +174,10 @@ describe('renderPrompt', () => {
       );
       const prompt = renderPrompt(goal, makeCtx());
       expect(prompt).toContain(
-        'The instant you must speak automatically, before you have been given anything new to say, use only a short holding line such as "One moment." -- never a question, a readback, a verdict word, or a request you were not given.',
+        'The instant you must speak automatically, before you have been given anything new to say, say nothing at all -- an empty reply, never a holding line, a question, a readback, a verdict word, or a request you were not given.',
       );
+      // The old holding-beat wording must be gone entirely, not just superseded.
+      expect(prompt).not.toContain('use only a short holding line such as "One moment."');
     }
   });
 

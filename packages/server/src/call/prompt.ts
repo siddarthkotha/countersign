@@ -90,6 +90,26 @@ export interface PromptCtx {
 // is therefore STANDING (present under every goal's system_prompt, not just the "Now"
 // section for one goal) -- it must already be in force for whichever stale prompt the
 // automatic reply ends up composing under.
+//
+// Design E follow-up (2026-09-15, measured live on deploy 39, six calls, against deploy 36):
+// PROVEN the holding-beat line above made the agent say "One moment." four to five times per
+// call (agent lines 14 vs 7 on the same Dana script; verdict-to-goodbye 13.8s vs 4.0s) -- the
+// automatic reply now almost never has anything real to say (the server's own instructed
+// reply.create, above, is the one and only path for real content), so a standing "say a
+// holding line" instruction just gives it a line to fill for no reason, every single turn.
+// PROVEN an EMPTY automatic reply is possible at all (bundle 2026-09-15T08-06-07-corrected-
+// critical-field: a reply whose own reply.done arrived 0.5s after reply.started with no
+// transcript in between) -- so asking for literally nothing, instead of a filler line, is
+// something AssemblyAI's own reply generation can actually produce. The sentence below
+// replaces the old "say a short holding line" instruction with "say nothing at all": an empty
+// automatic reply is silent (no filler for the caller to sit through) rather than noisy, and
+// every real thing the caller needs to hear -- the next question, the close line -- still
+// comes from the server's own instructed reply.create, unchanged by this edit. UNKNOWN
+// (measured after deploy, not asserted here): whether the model actually produces a literal
+// empty reply on every such turn live, or still occasionally fills in a short line despite
+// the instruction -- session.ts's own handling of an empty-transcript reply (see
+// `maybeReaskQuestion`/`scheduleCloseIfNeeded`) does not depend on the model actually
+// complying, only on correctly handling it either way.
 export const STANDING_RULES =
   'You verify the request, never the voice. ' +
   'You never state or imply a verdict; a separate system decides. ' +
@@ -102,7 +122,7 @@ export const STANDING_RULES =
   'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question. ' +
   'When an instruction gives you an exact line, say only that line and add no question of your own. ' +
   "Never announce completion, processing, approval, release, or any other outcome unless the current goal's own words say it; the engine composes every outcome line. " +
-  'The instant you must speak automatically, before you have been given anything new to say, use only a short holding line such as "One moment." -- never a question, a readback, a verdict word, or a request you were not given.';
+  'The instant you must speak automatically, before you have been given anything new to say, say nothing at all -- an empty reply, never a holding line, a question, a readback, a verdict word, or a request you were not given.';
 
 const CONTAIN_LINE = 'Keep the caller engaged with neutral questions; disclose nothing further.';
 
