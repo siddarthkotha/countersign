@@ -131,15 +131,22 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
     const session = newSession(clock, { ...CALL, session_id: 'sess-transcript-a' }, aai, sent, diagEvents);
     session.start();
     driveToSealedStage(session, aai, clock);
+    // Design E (2026-09-15): `driveToSealedStage`'s own c1..c4 caller turns each land on a
+    // fresh READBACK-family rendering and send their own proactive reply.create along the way
+    // (see packages/server/test/session.test.ts's own dedicated proof of this mechanism) --
+    // this test's subject is the CLOSE-specific transcript-wait mechanics, so every count
+    // below is expressed relative to the baseline right after the drive (which already
+    // includes the one CLOSE send, same as before this fix).
     const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
-    expect(replyCreates()).toHaveLength(1); // the original send (attempt 1, tick_end)
+    const baseline = replyCreates().length;
+    expect(replyCreates()).toHaveLength(baseline); // the original send (attempt 1, tick_end)
 
     // reply.done fires with NO transcript recorded yet for this reply at all.
     clock.now = 7500;
     aai.emit({ type: 'reply.started', reply_id: 'a5' });
     clock.now = 7700;
     aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' });
-    expect(replyCreates()).toHaveLength(1); // no retry sent synchronously
+    expect(replyCreates()).toHaveLength(baseline); // no retry sent synchronously
 
     // The close line's own transcript.agent chunk lands 400ms later -- well inside the
     // CLOSE_TRANSCRIPT_WAIT_MS (1500ms) window this fix adds.
@@ -148,7 +155,7 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
     aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
 
     // No retry was ever sent -- the late transcript confirmed the goodbye instead.
-    expect(replyCreates()).toHaveLength(1);
+    expect(replyCreates()).toHaveLength(baseline);
 
     // goodbye-tail lane, review fix (2026-09-15, Important): reply.done for 'a5' already fired
     // BEFORE this transcript completed the match, so there is no reply.done left to wait for --
@@ -160,7 +167,7 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
     vi.advanceTimersByTime(1);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
-    expect(replyCreates()).toHaveLength(1);
+    expect(replyCreates()).toHaveLength(baseline);
   });
 
   it('(d) matching transcript 200ms BEFORE its own reply.done: unaffected by the repliesWithDone fix -- reply.done still wins the race and starts the grace period immediately (existing behaviour, session.test.ts tests (d)/(e))', () => {
@@ -172,8 +179,11 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
     const session = newSession(clock, { ...CALL, session_id: 'sess-transcript-d' }, aai, sent, diagEvents);
     session.start();
     driveToSealedStage(session, aai, clock);
+    // Design E (2026-09-15): see test (a)'s own doc comment above -- the drive itself now
+    // also sends one proactive reply.create per caller turn (c1..c4) before reaching CLOSE.
     const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
-    expect(replyCreates()).toHaveLength(1);
+    const baseline = replyCreates().length;
+    expect(replyCreates()).toHaveLength(baseline);
 
     clock.now = 7500;
     aai.emit({ type: 'reply.started', reply_id: 'a5' });
@@ -195,7 +205,7 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
     vi.advanceTimersByTime(1);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
-    expect(replyCreates()).toHaveLength(1);
+    expect(replyCreates()).toHaveLength(baseline);
   });
 
   it('(b) no transcript within the window: retry as today (spaced CLOSE_RETRY_MIN_GAP_MS after the wait elapses)', () => {
@@ -207,8 +217,11 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
     const session = newSession(clock, { ...CALL, session_id: 'sess-transcript-b' }, aai, sent, diagEvents);
     session.start();
     driveToSealedStage(session, aai, clock);
+    // Design E (2026-09-15): see test (a)'s own doc comment above -- the drive itself now
+    // also sends one proactive reply.create per caller turn (c1..c4) before reaching CLOSE.
     const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
-    expect(replyCreates()).toHaveLength(1);
+    const baseline = replyCreates().length;
+    expect(replyCreates()).toHaveLength(baseline);
 
     clock.now = 7500;
     aai.emit({ type: 'reply.started', reply_id: 'a5' });
@@ -217,9 +230,9 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
 
     // Nothing ever arrives -- the window elapses with no match.
     vi.advanceTimersByTime(1_500); // CLOSE_TRANSCRIPT_WAIT_MS
-    expect(replyCreates()).toHaveLength(1); // wait just elapsed; retry timer now arming, not yet fired
+    expect(replyCreates()).toHaveLength(baseline); // wait just elapsed; retry timer now arming, not yet fired
     vi.advanceTimersByTime(400); // CLOSE_RETRY_MIN_GAP_MS
-    expect(replyCreates()).toHaveLength(2); // the retry, sent exactly as it would have been "today"
+    expect(replyCreates()).toHaveLength(baseline + 1); // the retry, sent exactly as it would have been "today"
 
     const retryMsg = aai.sent.at(-1) as { type: string; instructions?: string };
     expect(retryMsg.instructions).toContain('Say exactly this');

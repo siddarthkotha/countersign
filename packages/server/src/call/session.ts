@@ -519,6 +519,98 @@ export class CallSession {
   private questionReaskArmedInstructions: string | null = null;
   private questionReaskLastReplyWasEmpty = false;
 
+  /** Design E (2026-09-15, turn-order design change -- docs/TEST-PLAN.md "The turn order
+   *  design change (E)"): the JSON key (`JSON.stringify(goal)`, same convention
+   *  `questionReaskGoalKey`/`previousGoalKey` already use) of the last QUESTION_GOALS
+   *  rendering this class has already proactively sent an instructed `reply.create` for.
+   *  `mustForceSpeak` alone is CODE-based (correct for CLOSE/ANNOUNCE_*, which only ever
+   *  render once) and deliberately does NOT force-speak a same-code re-render (STALL's own
+   *  varying holding line, historically left to the caller-turn-driven automatic reply to
+   *  pick up). A fresh QUESTION_GOALS rendering under the SAME code (the next challenge, a
+   *  new readback field/value) is common -- fsm.ts's own repeated-ASK_CHALLENGE shape -- and,
+   *  now that the standing holding-beat rule (prompt.ts's STANDING_RULES) means the automatic
+   *  reply can never be relied on to speak the real question any more, this key tracks
+   *  "already explicitly asked" per QUESTION_GOALS rendering so `maybeSendReplyCreateForTick`/
+   *  `maybeSendReplyCreateAfterReplyDone` send exactly one proactive instructed reply.create
+   *  per rendering, not one per tick this same rendering happens to still be current for
+   *  (tick() runs on every AAI event, not just caller turns). Null whenever nothing has been
+   *  proactively asked yet. */
+  private lastAskedQuestionKey: string | null = null;
+
+  /** Design E: the JSON key of a QUESTION_GOALS rendering a CALLER-TURN-TRIGGERED tick found
+   *  fresh but could not send proactively because a reply was already in flight
+   *  (`this.speaking`/`replyCreateAwaitingStart`) -- the ONLY key
+   *  `maybeSendReplyCreateAfterReplyDone` is allowed to catch up on for QUESTION_GOALS. Set by
+   *  `maybeSendReplyCreateForTick` the instant it computes a fresh caller-turn-triggered
+   *  question, REGARDLESS of whether it goes on to actually send (busy or not); cleared the
+   *  moment either method actually sends for that exact key. Without this narrower key (as
+   *  opposed to `maybeSendReplyCreateAfterReplyDone` simply re-checking `isFreshQuestionGoal`
+   *  unconditionally, which this fix replaces): a fresh QUESTION_GOALS key that emerges from a
+   *  NON-caller-turn tick's own internal cascade -- PROVEN reachable, packages/server/test/
+   *  design-e-turn-order.test.ts's own "(c)" test, 2026-09-15 -- (fsm.ts can select and render
+   *  the engine's own NEXT challenge in the SAME tick a prior reply's `reply.done` logs
+   *  `challenge_issued`, before the caller has said anything new; `maybeSendReplyCreateForTick`
+   *  correctly defers it, per `tickTriggeredByCallerTurn`'s own doc comment) would otherwise
+   *  get caught and sent by a LATER, UNRELATED reply's own `reply.done` -- observed to fire
+   *  with STALE `this.last` data (evaluate() has not yet rerun for that event) and, worse, to
+   *  set `replyCreateAwaitingStart` right before that SAME event's own trailing `tick()`
+   *  discovers CLOSE, silently blocking the real CLOSE `reply.create` behind the busy guard for
+   *  the rest of the call. Null whenever nothing caller-turn-triggered is currently owed. */
+  private owedQuestionGoalKey: string | null = null;
+
+  /** Design E (2026-09-15): true only for the ONE `tick()` immediately following a
+   *  `transcript.user` event -- set by `dispatchAaiEvent`'s own `transcript.user` branch,
+   *  consumed and cleared inside `tick()` itself so it can never leak into a LATER, unrelated
+   *  tick() call (from a `reply.done`/`tool.call`/etc. event, from `start()`, or from
+   *  `recoverFromDispatchError`'s own retry). Scopes `isFreshQuestionGoal`'s force-speak
+   *  effect (in `maybeSendReplyCreateForTick` only -- NOT `maybeSendReplyCreateAfterReplyDone`,
+   *  whose whole job is catching up a send a caller turn already earned but deferred because a
+   *  reply was busy) to genuine caller turns: PROVEN necessary (packages/server/test/
+   *  session.test.ts's own debug trace, 2026-09-15) -- without this, an engine tick landing on
+   *  a FRESH QUESTION_GOALS key purely because a PRIOR reply's own `reply.done` just logged
+   *  `challenge_issued`/`readback_issued` (fsm.ts can select and render the NEXT challenge in
+   *  the very same tick, before the caller has said anything new) would fire a second,
+   *  back-to-back proactive ask with no caller turn in between -- violating STANDING_RULES's
+   *  own "one question at a time" and leaving `replyCreateAwaitingStart` owed against a reply
+   *  nothing in the live call is yet generating. Deferring that fresh key to the NEXT tick that
+   *  IS caller-turn-triggered (`isFreshQuestionGoal` itself never resets -- the key is simply
+   *  still fresh next time this flag is true) asks it exactly once, still without ever losing
+   *  it. */
+  private tickTriggeredByCallerTurn = false;
+
+  /** Design E: the one-shot `reply.create.instructions` text for a QUESTION_GOALS `goal` --
+   *  the exact sentence the caller must hear, wrapped the same "say exactly this and nothing
+   *  else" way prompt.ts's own READBACK / ELICIT_MISSING_CRITICAL / RE_ELICIT_AFTER_SWITCH
+   *  cases already render into `system_prompt` (never re-derived independently, so the
+   *  instructed reply and the standing prompt can never disagree on wording). For a
+   *  QUESTION_GOALS code with no single verbatim sentence (`verbatimQuestionSentence` returns
+   *  null for ELICIT_IDENTITY/PROBE_CONSISTENCY/ELICIT_REQUEST -- their `hint` is a
+   *  paraphrase instruction, not a line a person would say), falls back to the same
+   *  paraphrase-instruction wrapper `maybeReaskQuestion` already used before this fix (now
+   *  shared, not duplicated, between the proactive send and the reactive reask). Undefined
+   *  for a non-QUESTION_GOALS code -- CLOSE's own instructed wrapper is a distinct,
+   *  unchanged mechanism (`scheduleCloseIfNeeded`'s close_retry path, `currentCloseSentence`)
+   *  that this fix deliberately leaves alone: CLOSE's tick_end send stays bare (relying on
+   *  the standing `system_prompt` alone, exactly as before this fix) so its own tail-wait/
+   *  transcript-wait/stuck-watchdog machinery and its tests are untouched. */
+  private instructedSentenceFor(goal: PhrasingGoal): string | undefined {
+    if (!QUESTION_GOALS.has(goal.code)) return undefined;
+    const sentence = verbatimQuestionSentence(goal);
+    return sentence
+      ? `Say exactly this and nothing else: "${sentence}"`
+      : `Ask the caller this question now, in one sentence: ${goal.hint}`;
+  }
+
+  /** Design E: true when `goal` is a QUESTION_GOALS rendering this class has not yet
+   *  proactively asked (its own JSON key differs from `lastAskedQuestionKey`) -- see that
+   *  field's own doc comment for why this is a NECESSARY addition to `mustForceSpeak`'s
+   *  CODE-based check, not a replacement for it. Never true for CLOSE, ANNOUNCE_*, STALL, etc:
+   *  those stay exactly as `mustForceSpeak` alone already decided before this fix. */
+  private isFreshQuestionGoal(goal: PhrasingGoal): boolean {
+    if (!QUESTION_GOALS.has(goal.code)) return false;
+    return JSON.stringify(goal) !== this.lastAskedQuestionKey;
+  }
+
   private clearCloseTimers(): void {
     if (this.closeGraceTimer) {
       clearTimeout(this.closeGraceTimer);
@@ -1329,7 +1421,14 @@ export class CallSession {
         // idle clock (the agent finishing its reply, `reply.done` below, is what starts the
         // caller's own silence window; the agent's transcript can land before or after that
         // and would otherwise let a stalled reply mask real caller silence).
-        if (evt.type === 'transcript.user') this.opts.onActivity?.();
+        if (evt.type === 'transcript.user') {
+          this.opts.onActivity?.();
+          // Design E (2026-09-15): marks the tick this event's trailing `this.tick()` (below)
+          // runs as caller-turn-triggered -- see `tickTriggeredByCallerTurn`'s own doc
+          // comment for why the proactive QUESTION_GOALS send is scoped to this, not to
+          // every tick.
+          this.tickTriggeredByCallerTurn = true;
+        }
         // reply.create fix, round 3 (2026-09-13): accumulate this AAI reply's own spoken
         // text, in memory only (never diagnostics -- LAW 4) -- `scheduleCloseIfNeeded` reads
         // this at the reply's own `reply.done` to decide whether the CLOSE sentence was
@@ -1704,9 +1803,12 @@ export class CallSession {
     const sentence = verbatimQuestionSentence(goal);
     if (transcriptAsksQuestion(transcript, sentence)) return;
 
-    const instructions = sentence
-      ? `Say exactly this and nothing else: "${sentence}"`
-      : `Ask the caller this question now, in one sentence: ${goal.hint}`;
+    // Design E (2026-09-15): reuses `instructedSentenceFor` (shared with the proactive
+    // tick-end/after-reply-done sends) instead of re-deriving the same "say exactly this" /
+    // paraphrase-instruction wrapper independently -- the reask and the original ask can
+    // never drift apart in wording. Non-null here: `goal.code` is already confirmed a
+    // QUESTION_GOALS member above.
+    const instructions = this.instructedSentenceFor(goal)!;
     // Unconditionally refreshed even when `armQuestionReaskTimer` below turns out to be a
     // no-op (a timer from an earlier reply of this SAME rendering is already pending) -- the
     // latest reply's own emptiness/instructions are what should fire, same convention
@@ -1858,10 +1960,15 @@ export class CallSession {
     // throw, or `recoverFromDispatchError`'s own retry of `tick()` gives up before
     // `applyEvaluate()` ever gets a chance to restore a real goal.
     const goalAtTickStart: GoalCode | null = this.last?.goal?.code ?? null;
+    // Design E: consumed (read then cleared) here, before any of this tick's own work runs,
+    // so it reflects only whether THIS tick was triggered by a `transcript.user` event -- see
+    // `tickTriggeredByCallerTurn`'s own doc comment.
+    const callerTurnTick = this.tickTriggeredByCallerTurn;
+    this.tickTriggeredByCallerTurn = false;
     this.applyEvaluate();
     this.runLookupsIfNeeded();
     this.runTerminalActionsIfNeeded();
-    this.maybeSendReplyCreateForTick(goalAtTickStart);
+    this.maybeSendReplyCreateForTick(goalAtTickStart, callerTurnTick);
     this.emitState();
   }
 
@@ -2110,13 +2217,47 @@ export class CallSession {
    *  see the class-field doc comment above `replyGoalAtStart` for why this is the correct,
    *  race-proof design and not merely a simplification. Never sends while a reply
    *  is in flight or our own prior `reply.create` is still awaiting its `reply.started`
-   *  -- `maybeSendReplyCreateAfterReplyDone` is what catches up once that clears. */
-  private maybeSendReplyCreateForTick(goalAtTickStart: GoalCode | null): void {
+   *  -- `maybeSendReplyCreateAfterReplyDone` is what catches up once that clears.
+   *
+   *  Design E (2026-09-15, turn-order design change): also fires for a FRESH QUESTION_GOALS
+   *  rendering (`isFreshQuestionGoal`) discovered on a CALLER-TURN-TRIGGERED tick
+   *  (`callerTurnTick`, see `tickTriggeredByCallerTurn`'s own doc comment for exactly why this
+   *  guard is necessary -- without it, a challenge/readback the engine advances to WITHIN the
+   *  same tick as a prior reply's own `reply.done` -- before the caller has said anything new
+   *  -- would fire a second, back-to-back ask), on top of the original `mustForceSpeak`
+   *  (CODE-change) check -- see that method's own doc comment. Every send now also carries
+   *  `instructedSentenceFor`'s one-shot instructions (CLOSE included, not just
+   *  QUESTION_GOALS): the standing `system_prompt` alone is not enough any more, now that the
+   *  automatic reply this same caller turn triggers is standing-rule-bound to a holding beat
+   *  and may still be composing under a stale prompt either way (docs/TEST-PLAN.md:
+   *  "system_prompt applies on the next turn"). `lastAskedQuestionKey` is updated here,
+   *  before the send, so a reply.done for whichever reply happens to answer first (ours or
+   *  AssemblyAI's own automatic one -- see `sendReplyCreate`'s own doc comment on why the two
+   *  cannot be told apart from labelling alone) does not re-trigger a second proactive send
+   *  for the SAME rendering from `maybeSendReplyCreateAfterReplyDone` below;
+   *  `maybeReaskQuestion` (verified against the reply's own transcript) is what covers a
+   *  rendering the first send did not land. A fresh QUESTION_GOALS key discovered on a
+   *  NON-caller-turn tick is simply left for the next caller-turn tick to pick up (the key
+   *  itself never expires -- `isFreshQuestionGoal` stays true until something actually asks
+   *  it), never lost.
+   *
+   *  `owedQuestionGoalKey` is recorded (or cleared) BEFORE the busy guard, on every
+   *  caller-turn-triggered fresh question, whether or not this call actually gets to send --
+   *  see that field's own doc comment for exactly why `maybeSendReplyCreateAfterReplyDone`
+   *  needs this narrower signal rather than re-deriving `isFreshQuestionGoal` on its own. */
+  private maybeSendReplyCreateForTick(goalAtTickStart: GoalCode | null, callerTurnTick: boolean): void {
     if (this.ended || !this.last) return;
+    const goal = this.last.goal;
+    const finalGoal = goal.code;
+    const freshQuestion = callerTurnTick && this.isFreshQuestionGoal(goal);
+    if (freshQuestion) this.owedQuestionGoalKey = JSON.stringify(goal);
     if (this.speaking || this.replyCreateAwaitingStart) return;
-    const finalGoal = this.last.goal.code;
-    if (!this.mustForceSpeak(goalAtTickStart, finalGoal)) return;
-    this.sendReplyCreate(finalGoal, 'tick_end');
+    if (!this.mustForceSpeak(goalAtTickStart, finalGoal) && !freshQuestion) return;
+    if (freshQuestion) {
+      this.lastAskedQuestionKey = JSON.stringify(goal);
+      this.owedQuestionGoalKey = null;
+    }
+    this.sendReplyCreate(finalGoal, 'tick_end', this.instructedSentenceFor(goal));
   }
 
   /** Sends the actual `reply.create` (never here without going through this one method --
@@ -2126,12 +2267,13 @@ export class CallSession {
    *  `pendingRequestedGoal` so the very next `reply.started` labels itself correctly (see
    *  that case's own comment and the class-field doc comment on `replyGoalAtStart`).
    *
-   *  `instructions` (reply.create fix, round 3): a one-shot payload passed straight through
-   *  to AssemblyAI's own `reply.create.instructions` field (VERIFY-AT-BUILD, docs/
-   *  ASSEMBLYAI_INTEGRATION.md -- "does not modify system_prompt") -- only
-   *  `scheduleCloseIfNeeded`'s close_retry path supplies one today, carrying the exact
-   *  wrapper prompt.ts's own CLOSE case already uses. Every other call site omits it and
-   *  relies on the standing `system_prompt`, unchanged from before this fix.
+   *  `instructions` (reply.create fix, round 3; Design E, 2026-09-15, extends every caller
+   *  site to supply one, not just `scheduleCloseIfNeeded`'s close_retry path -- see
+   *  `instructedSentenceFor`): a one-shot payload passed straight through to AssemblyAI's own
+   *  `reply.create.instructions` field (VERIFY-AT-BUILD, docs/ASSEMBLYAI_INTEGRATION.md --
+   *  "does not modify system_prompt"). A caller that has no exact sentence for the current
+   *  goal (ANNOUNCE_*, STALL, CONTAIN*, GREET) omits it and relies on the standing
+   *  `system_prompt` alone, unchanged from before this fix.
    *
    *  CLOSE is no longer bounded by an attempt count (round 4: CLOSE_REPLY_ATTEMPTS is gone --
    *  see the class-field doc comment on `closeReplySendCount`/CLOSE_TOTAL_MS for why). Every
@@ -2212,14 +2354,33 @@ export class CallSession {
    *  || this.replyCreateAwaitingStart` guard: `this.speaking` was just set false by the
    *  caller and nothing else in this handler can set `replyCreateAwaitingStart`, so this
    *  should never actually be true here, but "never send while busy" is cheap to keep
-   *  airtight at every call site. */
+   *  airtight at every call site.
+   *
+   *  Design E (2026-09-15): also catches up a FRESH QUESTION_GOALS rendering, but ONLY when
+   *  it is the SPECIFIC key `owedQuestionGoalKey` records (a caller-turn-triggered tick found
+   *  it fresh but could not send because a reply was in flight) -- deliberately NOT a bare
+   *  `isFreshQuestionGoal(goal)` re-check. See `owedQuestionGoalKey`'s own doc comment for the
+   *  PROVEN failure mode a bare re-check has: a fresh key that emerged from a NON-caller-turn
+   *  tick's own internal cascade (e.g. this SAME reply's own `reply.done`, just above, logging
+   *  `challenge_issued` and letting the engine render its own next challenge before the caller
+   *  has said anything) would otherwise be caught here too, using `this.last` that is STILL
+   *  STALE relative to that just-logged action (evaluate() has not rerun for this event yet),
+   *  asking a question the caller was never actually owed yet -- and setting
+   *  `replyCreateAwaitingStart` right before this SAME event's own trailing `tick()` might
+   *  discover CLOSE, silently blocking the real CLOSE `reply.create` behind the busy guard. */
   private maybeSendReplyCreateAfterReplyDone(replyId: string): void {
     if (this.ended || !this.last) return;
     if (this.speaking || this.replyCreateAwaitingStart) return;
+    const goal = this.last.goal;
     const label = this.replyGoalAtStart.get(replyId) ?? null;
-    const current = this.last.goal.code;
-    if (!this.mustForceSpeak(label, current)) return;
-    this.sendReplyCreate(current, 'reply_done_goal_diverged');
+    const current = goal.code;
+    const owedQuestion = this.owedQuestionGoalKey !== null && this.owedQuestionGoalKey === JSON.stringify(goal);
+    if (!this.mustForceSpeak(label, current) && !owedQuestion) return;
+    if (owedQuestion) {
+      this.lastAskedQuestionKey = JSON.stringify(goal);
+      this.owedQuestionGoalKey = null;
+    }
+    this.sendReplyCreate(current, 'reply_done_goal_diverged', this.instructedSentenceFor(goal));
   }
 
   /** LAW 2: STAGE is the ceiling this ever reaches on its own. The server runs the owed

@@ -1503,12 +1503,22 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       driveThroughC4AndStartA4(session, aai, clock);
       expect(session.last?.goal.code).toBe('READBACK'); // 'a4' is still speaking, phrased under this goal
 
+      // Design E (2026-09-15): c1..c4 each land on a fresh READBACK-family rendering, so
+      // `driveThroughC4AndStartA4` itself already sent one proactive, instructed reply.create
+      // per caller turn (`isFreshQuestionGoal`) -- see this describe block's own new "(e)"
+      // test below for a dedicated, isolated proof of that mechanism. This test's own subject
+      // is the CLOSE-specific deferral race, so it counts reply.create sends from THIS point
+      // forward, not the whole drive.
+      const replyCreateCount = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+      const countBeforeStray = replyCreateCount();
+
       // The stray tool.call ticks the engine straight to SEALED/CLOSE while 'a4' is still
       // in flight (same mechanism the CLOSE-race tests above exercise).
       clock.now = 6200;
       aai.emit({ type: 'tool.call', call_id: 'stray-1', name: 'check_sso_context', arguments: {} });
       expect(session.last?.goal.code).toBe('CLOSE');
-      expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(false);
+      // CLOSE itself is deferred while 'a4' still speaks -- no NEW reply.create yet.
+      expect(replyCreateCount()).toBe(countBeforeStray);
 
       // 'a4' completes: reply.create goes out NOW (its recorded goal, READBACK, differs from
       // the current goal, CLOSE) -- and this reply.done must NOT end the call.
@@ -1530,8 +1540,9 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       vi.advanceTimersByTime(1500);
       expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
 
-      // Exactly one reply.create for this whole CLOSE rendering (c).
-      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+      // Exactly one reply.create for this whole CLOSE rendering (c) -- the READBACK-family
+      // sends from c1..c4 (before this point) are unaffected/unrelated to this count.
+      expect(replyCreateCount()).toBe(countBeforeStray + 1);
     });
 
     it('(b) sends reply.create immediately, right after the session.update, when no reply is in progress', () => {
@@ -1576,9 +1587,16 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       // than stacking a second one. Since 'tools-1' (the reply that actually lands the close
       // line) starts and completes before that single pending retry ever fires, the retry is
       // superseded and cancelled the moment the match is found -- so this drive costs exactly
-      // ONE reply.create for the whole call (the original tick_end send), not three: the old
-      // "cap reached at 3" framing no longer applies (there is no cap), and coalescing +
-      // supersession are what actually decide the count here, not exhaustion.
+      // ONE reply.create FOR CLOSE for the whole call (the original tick_end send), not three:
+      // the old "cap reached at 3" framing no longer applies (there is no cap), and coalescing
+      // + supersession are what actually decide the count here, not exhaustion.
+      //
+      // Design E (2026-09-15): c1..c4/x1/x2 each land on a fresh ASK_CHALLENGE rendering, so
+      // (unlike before this fix) `driveScenarioBThroughA4` itself now ALSO sends one proactive,
+      // instructed reply.create per caller turn along the way (`isFreshQuestionGoal`) -- this
+      // test's own subject is the CLOSE-specific coalescing/supersession behaviour, so the
+      // assertions below count reply.create sends from the point CLOSE is first reached
+      // onward, not the whole drive's total.
       //
       // Question-reask fix (2026-09-14, spaced round): a2's own scripted line ("Pulling the
       // Hartwell file now…") never actually asks the SECOND SEED_FACT challenge the engine
@@ -1593,7 +1611,11 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       driveScenarioBThroughA4(session, aai, clock);
       expect(session.last?.state).toBe('SEALED');
       expect(session.last?.goal.code).toBe('CLOSE');
-      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+      const replyCreateCount = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+      // The CLOSE send is already part of this total (ANNOUNCE_FROZEN coalesced into CLOSE in
+      // the same tick, inside the drive) -- this is the baseline the rest of the test proves
+      // does NOT grow by more than the one already-sent CLOSE reply.create.
+      const totalAfterDrive = replyCreateCount();
       expect(sent.some((e) => e.type === 'ended')).toBe(false); // not ended before 'tools-1' completes
 
       // Drive 'tools-1' (already speaking, started inside the helper) to completion, this
@@ -1609,10 +1631,11 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       // cancelled, not merely not-yet-due: it does not fire a spurious extra send here. It
       // also elapses the (never-refreshed) reask timer armed above -- its own fire-time check
       // finds the goal no longer matches (CLOSE, not the ASK_CHALLENGE rendering it was armed
-      // for) and cancels silently, contributing nothing here either.
+      // for) and cancels silently, contributing nothing here either. No NEW reply.create (for
+      // CLOSE or anything else) is sent from this point on.
       vi.advanceTimersByTime(1500);
       expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
-      expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+      expect(replyCreateCount()).toBe(totalAfterDrive);
     });
 
     it("(d) GREET is a real exclusion branch, not a coincidence of nothing else happening yet: zero reply.create before the caller's first turn, one once a genuinely force-spoken goal is reached in the SAME session (Important 5, 2026-09-13 review)", () => {
@@ -1757,9 +1780,16 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       // any reply.started ever fires) -- so the intermediate ANNOUNCE_STAGED rendering is
       // coalesced into CLOSE and never gets its own reply.create; reason 'tick_end' marks
       // this as the immediate (not-busy) send path, same shape test (b)/(c) exercise.
+      //
+      // Design E (2026-09-15): c1..c4 each land on a fresh READBACK-family rendering along
+      // the way, so `driveToSealedStage` now ALSO produces one proactive reply_create_sent
+      // diag per caller turn before this final one -- this test's own subject is the CLOSE
+      // diag's own shape (goal_code/reason), so it filters down to CLOSE specifically rather
+      // than asserting a total count for the whole drive.
       const replyCreateDiags = diagEvents.filter((e) => e.kind === 'reply_create_sent');
-      expect(replyCreateDiags).toHaveLength(1);
-      const detail = replyCreateDiags[0]!.detail as { goal_code: string; reason: string };
+      const closeDiags = replyCreateDiags.filter((e) => (e.detail as { goal_code: string }).goal_code === 'CLOSE');
+      expect(closeDiags).toHaveLength(1);
+      const detail = closeDiags[0]!.detail as { goal_code: string; reason: string };
       expect(detail.goal_code).toBe('CLOSE');
       expect(detail.reason).toBe('tick_end');
 
@@ -1857,7 +1887,13 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     driveToFreezeCloseWithFirstSend(session, aai, clock);
     expect(session.last?.state).toBe('SEALED');
     expect(session.last?.goal.code).toBe('CLOSE');
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    // Design E (2026-09-15): c1/c2 each land on a fresh ASK_CHALLENGE-family rendering, so
+    // the drive itself now also sends one proactive reply.create per caller turn before
+    // reaching CLOSE -- this test's own subject is CLOSE's own retry mechanics, so every
+    // count below is expressed relative to the baseline right after the drive returns
+    // (which already includes the one CLOSE send, same as before this fix).
+    const replyCreateCount = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+    const baseline = replyCreateCount();
 
     // reply.started arrives implausibly fast, and its transcript is AssemblyAI's OWN
     // turn-driven text, not the close line -- the PROVEN sequence's own "Please provide the".
@@ -1876,17 +1912,17 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
     // The retry does not go out immediately -- it waits the transcript window, then the
     // spacing gap.
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    expect(replyCreateCount()).toBe(baseline);
     vi.advanceTimersByTime(1500); // CLOSE_TRANSCRIPT_WAIT_MS -- no late chunk arrives
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    expect(replyCreateCount()).toBe(baseline);
     vi.advanceTimersByTime(399);
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    expect(replyCreateCount()).toBe(baseline);
     vi.advanceTimersByTime(1);
     // A second reply.create went out, reason close_retry, this being CLOSE's 2nd attempt.
     const closeRetryDiags = diagEvents.filter((e) => e.kind === 'reply_create_sent' && (e.detail as { reason: string }).reason === 'close_retry');
     expect(closeRetryDiags).toHaveLength(1);
     expect(closeRetryDiags[0]!.detail).toMatchObject({ goal_code: 'CLOSE', reason: 'close_retry', attempt: 2 });
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(2);
+    expect(replyCreateCount()).toBe(baseline + 1);
     const retryMsg = aai.sent.at(-1) as { type: string; instructions?: string };
     expect(retryMsg.type).toBe('reply.create');
     expect(retryMsg.instructions).toContain(ENGINE_CLOSE_SENTENCES.FREEZE);
@@ -1901,8 +1937,9 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
     vi.advanceTimersByTime(1500); // CLOSE_GRACE_MS
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
-    // Still exactly two reply.create for the whole call: the initial one and the one retry.
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(2);
+    // Still exactly two reply.create FOR CLOSE for the whole call: the initial one and the
+    // one retry (the baseline already covers any earlier QUESTION_GOALS sends).
+    expect(replyCreateCount()).toBe(baseline + 1);
   });
 
   it('(b) happy path: the reply prompted by the first reply.create already says the close line -- ends agent_closed with exactly one reply.create, no retry', () => {
@@ -1914,7 +1951,15 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     session.start();
     driveToFreezeCloseWithFirstSend(session, aai, clock);
     expect(session.last?.goal.code).toBe('CLOSE');
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    // Design E (2026-09-15): the drive's own c1/c2 caller turns each land on a fresh
+    // ASK_CHALLENGE-family rendering and send their own proactive reply.create along the way
+    // -- see this describe block's own "(a) reproduces the PROVEN live sequence" test above
+    // for the dedicated proof of that mechanism. This test's subject (no CLOSE retry needed
+    // when the first CLOSE reply already lands the line) is unaffected -- baseline is
+    // whatever the drive already sent (already includes the one CLOSE send), and it must not
+    // grow by any more than that.
+    const replyCreateCount = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+    const baseline = replyCreateCount();
 
     clock.now = 4100;
     aai.emit({ type: 'reply.started', reply_id: 'r1' });
@@ -1925,7 +1970,7 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
     vi.advanceTimersByTime(1500);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    expect(replyCreateCount()).toBe(baseline); // no retry needed
   });
 
   // Round 4 (2026-09-14, time-budget fix): CLOSE_REPLY_ATTEMPTS (a fixed cap of 3) is gone --
@@ -1946,7 +1991,13 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     session.start();
     driveToFreezeCloseWithFirstSend(session, aai, clock); // attempt 1 (tick_end), hard cap armed for real
     const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
-    expect(replyCreates()).toHaveLength(1);
+    // Design E (2026-09-15): the drive's own c1/c2 caller turns each send their own proactive
+    // reply.create along the way (see the round-3 describe block's own dedicated test) -- this
+    // test's subject is CLOSE's own uncapped retry count, so every count below is expressed
+    // relative to the baseline right after the drive (which already includes the one CLOSE
+    // send, same as before this fix).
+    const baseline = replyCreates().length;
+    expect(replyCreates()).toHaveLength(baseline);
 
     clock.now = 4100;
     aai.emit({ type: 'reply.started', reply_id: 'r1' });
@@ -1954,11 +2005,11 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     clock.now = 4200;
     aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
     // Not sent yet -- waits the transcript window, then the spacing gap.
-    expect(replyCreates()).toHaveLength(1);
+    expect(replyCreates()).toHaveLength(baseline);
     vi.advanceTimersByTime(1500); // CLOSE_TRANSCRIPT_WAIT_MS -- no late chunk arrives
-    expect(replyCreates()).toHaveLength(1);
+    expect(replyCreates()).toHaveLength(baseline);
     vi.advanceTimersByTime(400);
-    expect(replyCreates()).toHaveLength(2); // attempt 2 (close_retry)
+    expect(replyCreates()).toHaveLength(baseline + 1); // attempt 2 (close_retry)
 
     clock.now = 4300;
     aai.emit({ type: 'reply.started', reply_id: 'r2' });
@@ -1967,7 +2018,7 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     aai.emit({ type: 'reply.done', reply_id: 'r2', status: 'completed' });
     vi.advanceTimersByTime(1500);
     vi.advanceTimersByTime(400);
-    expect(replyCreates()).toHaveLength(3); // attempt 3 (close_retry) -- still no cap
+    expect(replyCreates()).toHaveLength(baseline + 2); // attempt 3 (close_retry) -- still no cap
 
     clock.now = 4500;
     aai.emit({ type: 'reply.started', reply_id: 'r3' });
@@ -1976,8 +2027,8 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     aai.emit({ type: 'reply.done', reply_id: 'r3', status: 'completed' });
     vi.advanceTimersByTime(1500);
     vi.advanceTimersByTime(400);
-    // A FOURTH reply.create goes out -- proof there is no attempt cap anymore.
-    expect(replyCreates()).toHaveLength(4);
+    // A FOURTH CLOSE reply.create goes out -- proof there is no attempt cap anymore.
+    expect(replyCreates()).toHaveLength(baseline + 3);
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
 
     // Nothing ever answers the outstanding (4th) request again -- the "lost" reply.create
@@ -2033,7 +2084,12 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       expect(session.last?.goal.code).toBe('CLOSE');
       const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
       const closeRetryDiags = () => diagEvents.filter((e) => e.kind === 'reply_create_sent' && (e.detail as { reason: string }).reason === 'close_retry');
-      expect(replyCreates()).toHaveLength(1); // attempt 1, tick_end
+      // Design E (2026-09-15): the drive's own c1/c2 caller turns each send their own
+      // proactive reply.create along the way (see the round-3 describe block's own dedicated
+      // test) -- this test's subject is CLOSE's own attempt counter/uncapped retries, so every
+      // count below is expressed relative to the baseline right after the drive.
+      const baseline = replyCreates().length;
+      expect(replyCreates()).toHaveLength(baseline); // attempt 1, tick_end, already included
 
       // AssemblyAI's own turn-driven reply, under the previous prompt -- mismatched, non-empty.
       aai.emit({ type: 'reply.started', reply_id: 'r1' });
@@ -2042,13 +2098,13 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       // Never sends immediately -- must wait the transcript window, then the spacing gap
       // (Defect B fix, 2026-09-15: `armCloseTranscriptWait`'s CLOSE_TRANSCRIPT_WAIT_MS, 1500ms,
       // then CLOSE_RETRY_MIN_GAP_MS, 400ms -- no further chunk ever arrives for r1).
-      expect(replyCreates()).toHaveLength(1);
+      expect(replyCreates()).toHaveLength(baseline);
       vi.advanceTimersByTime(1500); // CLOSE_TRANSCRIPT_WAIT_MS
-      expect(replyCreates()).toHaveLength(1);
+      expect(replyCreates()).toHaveLength(baseline);
       vi.advanceTimersByTime(399);
-      expect(replyCreates()).toHaveLength(1);
+      expect(replyCreates()).toHaveLength(baseline);
       vi.advanceTimersByTime(1);
-      expect(replyCreates()).toHaveLength(2); // attempt 2
+      expect(replyCreates()).toHaveLength(baseline + 1); // attempt 2
       expect(closeRetryDiags().at(-1)!.detail).toMatchObject({ attempt: 2 });
 
       // An empty reply (no transcript.agent at all) -- must not stop retries, and must not
@@ -2057,7 +2113,7 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       aai.emit({ type: 'reply.done', reply_id: 'r2', status: 'completed' });
       vi.advanceTimersByTime(1500);
       vi.advanceTimersByTime(400);
-      expect(replyCreates()).toHaveLength(3);
+      expect(replyCreates()).toHaveLength(baseline + 2);
       expect(closeRetryDiags().at(-1)!.detail).toMatchObject({ attempt: 2 }); // reused, not bumped
 
       // A partial, interrupted reply that starts toward the close line but is cut off before
@@ -2069,7 +2125,8 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       aai.emit({ type: 'reply.done', reply_id: 'r3', status: 'interrupted' });
       vi.advanceTimersByTime(1500);
       vi.advanceTimersByTime(400);
-      expect(replyCreates()).toHaveLength(4); // a 4th send -- the old design would have refused this
+      // A 4th CLOSE send goes out -- proof there is no attempt cap anymore.
+      expect(replyCreates()).toHaveLength(baseline + 3);
       expect(closeRetryDiags().at(-1)!.detail).toMatchObject({ attempt: 3 });
 
       // Nothing else responds for a while -- well past the OLD 15s/3-attempt cap. The call
@@ -2131,6 +2188,13 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       driveToFreezeCloseWithFirstSend(session, aai, clock);
       const internals = session as unknown as { replyCreateAwaitingStart: boolean };
       expect(internals.replyCreateAwaitingStart).toBe(true); // the first (tick_end) send is outstanding
+      // Design E (2026-09-15): the drive's own c1/c2 caller turns each send their own
+      // proactive reply.create along the way (see the round-3 describe block's own dedicated
+      // test) -- this test's subject is the lost-reply.create recovery for the CLOSE send
+      // specifically, so every count below is expressed relative to the baseline right after
+      // the drive.
+      const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+      const baseline = replyCreates().length;
 
       vi.advanceTimersByTime(1499);
       expect(internals.replyCreateAwaitingStart).toBe(true); // not lost yet
@@ -2141,10 +2205,9 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       expect(diagEvents.some((e) => e.kind === 'reply_create_lost')).toBe(true);
 
       // A fresh reply.create supersedes it, after the retry gap.
-      const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
-      expect(replyCreates()).toHaveLength(1);
+      expect(replyCreates()).toHaveLength(baseline);
       vi.advanceTimersByTime(400);
-      expect(replyCreates()).toHaveLength(2);
+      expect(replyCreates()).toHaveLength(baseline + 1);
 
       // The reply.started that eventually arrives (for the superseding request) is accepted
       // normally, and a matching close line still ends the call.
@@ -3073,6 +3136,20 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
     expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-1'); // PROVEN reproduction's own shape
     const sessB1Sentence = session.last!.goal.challenge!.speak!;
 
+    // Design E (2026-09-15): c1 itself is a caller turn landing on a fresh ASK_CHALLENGE
+    // rendering, so it already sent ONE proactive, instructed reply.create synchronously
+    // (`isFreshQuestionGoal`, gated to caller-turn ticks -- see `tickTriggeredByCallerTurn`'s
+    // own doc comment) -- carrying sess-b-1's own sentence, same wording the reask below
+    // checks. This is new, correct behaviour (not something this test's own subject, the
+    // reask fix, needs to re-prove), so it is captured as a baseline here rather than
+    // re-asserted; everything below is still about what happens once a1's reply (prompted by
+    // that send, and labelled with it) turns out not to have asked the question.
+    const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    const replyCreateCount = () => replyCreates().length;
+    expect(replyCreateCount()).toBe(1);
+    expect((replyCreates()[0] as { instructions?: string }).instructions).toBe(`Say exactly this and nothing else: "${sessB1Sentence}"`);
+    const baseline = replyCreateCount();
+
     // "Checking the record." -- the PROVEN live text, no question at all.
     clock.now = 1500;
     aai.emit({ type: 'reply.started', reply_id: 'a1' });
@@ -3082,17 +3159,17 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
 
     // No challenge_issued was logged -- the reply never actually asked it (the fix).
     expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(false);
-    // Nothing sent synchronously at reply.done.
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+    // Nothing NEW sent synchronously at reply.done (the baseline send above is unaffected).
+    expect(replyCreateCount()).toBe(baseline);
     // The engine's own goal is STILL sess-b-1, unadvanced -- the bug this fix closes.
     expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
     expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-1');
 
     // The spaced reask fires at +400ms, carrying the ENGINE's own sentence verbatim.
     vi.advanceTimersByTime(REASK_GAP_MS);
-    const replyCreates = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
-    expect(replyCreates).toHaveLength(1);
-    expect((replyCreates[0] as { instructions?: string }).instructions).toBe(`Say exactly this and nothing else: "${sessB1Sentence}"`);
+    expect(replyCreateCount()).toBe(baseline + 1);
+    const reaskMsg = aai.sent.at(-1) as { instructions?: string };
+    expect(reaskMsg.instructions).toBe(`Say exactly this and nothing else: "${sessB1Sentence}"`);
     expect(diagEvents.find((e) => e.kind === 'question_reask_sent')?.detail).toEqual({ goal_code: 'ASK_CHALLENGE', attempt: 1 });
 
     // The reask's own reply.create is now outstanding -- a real reply.started clears it.
@@ -3108,8 +3185,11 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
     expect(issued[0]!.challenge_id).toBe('sess-b-1');
 
     // No further reply.create for sess-b-1 -- well past another spacing gap, to be sure.
+    // (a2 is not itself a caller turn, so even if the engine cascades to a further challenge
+    // in the same tick, `tickTriggeredByCallerTurn`'s own gate leaves it for the next real
+    // caller turn to pick up -- see that field's doc comment.)
     vi.advanceTimersByTime(1000);
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    expect(replyCreateCount()).toBe(baseline + 1);
     expect(diagEvents.filter((e) => e.kind === 'question_reask_sent')).toHaveLength(1);
   });
 
@@ -3131,6 +3211,12 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
     });
     expect(session.last?.state).toBe('CHALLENGE');
 
+    // Design E (2026-09-15): c1 is itself a caller turn landing on a fresh ASK_CHALLENGE
+    // rendering, so it already sent one proactive reply.create synchronously (same mechanism
+    // test (a) above proves directly) -- irrelevant to THIS test's own subject (READBACK), so
+    // it is folded into the baseline below rather than re-asserted.
+    const replyCreateCount = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+
     clock.now = 1500;
     aai.emit({ type: 'reply.started', reply_id: 'a1' });
     aai.emit({ type: 'transcript.agent', item_id: 'a1', text: session.last!.goal.hint, reply_id: 'a1', interrupted: false });
@@ -3142,6 +3228,12 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
     expect(session.last?.state).toBe('CONSISTENCY_CHECK');
     expect(session.last?.goal.code).toBe('READBACK');
     const readbackSentence = session.last!.goal.hint;
+    // c2 is ALSO a caller turn landing on a fresh (READBACK) rendering -- one more proactive
+    // send, carrying this same readback sentence, already went out synchronously here. This
+    // is the baseline the rest of the test (about the NEXT reply, a2, not asking it) is
+    // scoped against.
+    const baseline = replyCreateCount();
+    expect((aai.sent.at(-1) as { instructions?: string }).instructions).toBe(`Say exactly this and nothing else: "${readbackSentence}"`);
 
     // a2: a non-question reply for the READBACK goal.
     clock.now = 3000;
@@ -3151,16 +3243,15 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
     aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
 
     expect(session.logs.actions.some((a) => a.kind === 'readback_issued')).toBe(false);
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+    expect(replyCreateCount()).toBe(baseline);
     // READBACK's own field-advancement is caller-confirmation-driven, not issuance-driven
     // (the review's own point) -- the SAME field is still pending, unadvanced.
     expect(session.last?.goal.code).toBe('READBACK');
     expect(session.last?.goal.hint).toBe(readbackSentence);
 
     vi.advanceTimersByTime(REASK_GAP_MS);
-    const replyCreates = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
-    expect(replyCreates).toHaveLength(1);
-    expect((replyCreates[0] as { instructions?: string }).instructions).toBe(`Say exactly this and nothing else: "${readbackSentence}"`);
+    expect(replyCreateCount()).toBe(baseline + 1);
+    expect((aai.sent.at(-1) as { instructions?: string }).instructions).toBe(`Say exactly this and nothing else: "${readbackSentence}"`);
 
     // a3: the real readback sentence.
     clock.now = 4000;
@@ -3173,7 +3264,7 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
     expect(readbackActions).toHaveLength(1);
 
     vi.advanceTimersByTime(1000);
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    expect(replyCreateCount()).toBe(baseline + 1);
   });
 
   it('(c) a reply that asks the question on the FIRST try logs the issued action immediately and never arms a reask', () => {
@@ -3188,6 +3279,10 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
     expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
     const sentence = session.last!.goal.challenge!.speak!;
+    // Design E (2026-09-15): c1 itself already sent one proactive reply.create synchronously
+    // (same mechanism test (a) above proves directly) -- irrelevant to this test's own
+    // subject (no reask needed when the first try already asks it), so it is the baseline.
+    const baseline = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
 
     clock.now = 1500;
     aai.emit({ type: 'reply.started', reply_id: 'a1' });
@@ -3198,7 +3293,7 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
     expect(session.logs.actions.filter((a) => a.kind === 'challenge_issued')).toHaveLength(1);
 
     vi.advanceTimersByTime(REASK_GAP_MS + 1000);
-    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(0);
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(baseline); // no reask
     expect(diagEvents.some((e) => e.kind === 'question_reask_sent')).toBe(false);
   });
 
