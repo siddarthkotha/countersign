@@ -102,6 +102,7 @@ The nine non-passes, classified from the transcripts and the server bundles:
 ## Next session, in this order (nothing else first)
 
 1. Read this file, docs/STATE.md, the tail of docs/AUTOPILOT_LOG.md. Check the three evening lanes (P1 server, P2+P3 engine, harness persona/holding) landed on main and gated; if any did not, land it first (cherry-pick, gate, scoped review).
+1b. Three narrow follow-ups from the 2026-09-14 7:11 PM review of the P1 to P4 commits (none blocking, all Haiku-sized, test-first): (i) freezeAtSeal in packages/engine/src/evaluate.ts truncates by timestamp inclusively; truncate by the seal entry's array position instead so a same-millisecond caller chunk cannot leak in; (ii) the reversed approver cue in packages/engine/src/extract/claims.ts captures capitalised department words ("Corporate Treasury approved this", "Compliance approved it"); require a person-shaped name or exclude a small department stoplist; (iii) add the boundary test for the 12 s stuck-reply watchdog with a healthy 9 s goodbye streaming in, so it provably does not fire on a long goodbye.
 2. Push and verify the deploy.
 3. The turn-order change E (section above), test-first, one lane, scoped review; push; verify.
 4. The 30 minute live confirmation on the three known races (scripted miller-patient, dana-patient, and the silent case), one call at a time. Stop and reason if any shape recurs; do not iterate blind.
