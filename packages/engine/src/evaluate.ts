@@ -112,6 +112,10 @@ export function evaluate(rawInput: EngineInput, overrides?: Record<string, Evide
   const beneficiaryClaim = currentClaim(claims, 'beneficiary');
   const beneficiary = beneficiaryClaim ? String(beneficiaryClaim.value) : null;
 
+  // 3. Challenges: reconstruct what was issued, grade it, build knowledge_check_result cards.
+  // (moved before evidence collection to provide specs for extended person-question window)
+  const issued = reconstructIssued(claims, actions, seed, call.session_id, conversation);
+
   // 2. Transcript evidence, re-stamped with the ledger's request_version (the ledger owns
   // versioning; evidenceFromTranscript always tags its own cards version 1). Founder decision
   // 2026-09-11 10:15 PM (option B): resolveIdentitySwitch then demotes ev-identity-switch off
@@ -119,17 +123,19 @@ export function evaluate(rawInput: EngineInput, overrides?: Record<string, Evide
   // unchanged or re-confirmed -- see compose.ts for the exact conditions and why this never
   // erases the switch's own contradiction weight (ev-consistency-identity, built below at
   // step 5, is untouched either way).
-  const personQuestionAnswers = answersToPersonQuestion(conversation, actions);
+  //
+  // FIX (2026-09-15, fragment-shaped challenges): compute personQuestionAnswers with seed,
+  // claims, AND the reconstructed issued specs (to handle fixtures where action.spec may not be
+  // populated), so it can use the extended exemption window (all utterances from challenge until
+  // first answer-shaped) rather than just the first caller utterance after the challenge.
+  const personQuestionAnswers = answersToPersonQuestion(conversation, actions, seed, claims, issued);
   const transcriptEv: Evidence[] = resolveIdentitySwitch(
-    evidenceFromTranscript(conversation, seed, actions).map((e) => ({ ...e, request_version })),
+    evidenceFromTranscript(conversation, seed, actions, personQuestionAnswers).map((e) => ({ ...e, request_version })),
     conversation,
     claims,
     seed,
     personQuestionAnswers,
   );
-
-  // 3. Challenges: reconstruct what was issued, grade it, build knowledge_check_result cards.
-  const issued = reconstructIssued(claims, actions, seed, call.session_id, conversation);
   const results = gradeChallenges(conversation, actions, issued, seed, claims);
   const knowledgeEv = buildKnowledgeEvidence(issued, results, actions, request_version, seed);
 

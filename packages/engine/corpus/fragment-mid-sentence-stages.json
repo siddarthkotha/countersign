@@ -1,6 +1,6 @@
 {
   "title": "Dana Whitfield: an AssemblyAI mid-sentence split answers the challenge across two fragments",
-  "description": "FIX (2026-09-15, fragment-shaped challenges, PROVEN live defect: bundle scripts/rehearse/reports/2026-09-15T08-56-33-miller-silent-after-amount.diagnostics.json). A caller line AssemblyAI's endpointing can split into two transcript.user turns must not burn the pending verification challenge. Dana Whitfield states her identity and that the request was approved by Marcus Obi first (c1), ages that approver claim past selectLiveCommitment's 2-caller-turn gate with the request itself (c2) and a neutral filler line (c3), so the engine's LIVE_COMMITMENT challenge picks the approver field ahead of amount/beneficiary/account (those claims are still too fresh to be eligible). The caller's reply to 'restate the approver you gave earlier' arrives in two AssemblyAI fragments with no agent action between them: 'and it should go out today' (frag-1, no name at all -- not answer-shaped for the approver field) then 'That's Marcus Obi.' (frag-2, matches the committed value). Before this fix, the first fragment alone would have graded AMBIGUOUS immediately and selectChallenge would have raced ahead to a different question, silently abandoning the real answer that arrived one turn later. With the fix: frag-1 alone leaves the challenge AWAITING (no evidence card, no tally -- see src/challenges.ts's isAnswerShapedFor/gradeChallenges); once frag-2 lands (no agent action closed the eligible window in between), the JOINED text is graded as a whole and PASSes because it contains the committed value -- see gradeLiveCommitment's isNameField branch. Every readback is then confirmed normally and every lookup PASSes (registered device, SSO active, out-of-band confirmed, matches an existing scheduled payment), so the call reaches STAGE with exactly one knowledge_check_result card, PASS, quoting frag-1 (eligible_utterance_ids includes both fragments; the recorded quote is the first eligible utterance's text, same convention every other challenge card uses). DOUBT/CAVEAT (out of this lane's scope, src/extract/personQuestion.ts, NOT a LANE-FILE -- read-only): frag2 is deliberately 'That's Marcus Obi.' rather than a bare 'Marcus Obi.' -- `answersToPersonQuestion` (extract/personQuestion.ts, by design) only exempts the FIRST caller utterance after a person-shaped challenge/readback action from `extractIdentityClaim`'s self-identification heuristic; frag2 here is the SECOND caller utterance after the challenge_issued action, so a bare 'Marcus Obi.' opening the utterance would be misread as Dana switching identity to Marcus Obi (a real, independent, pre-existing gap this lane cannot fix -- personQuestion.ts is out of scope). 'That's Marcus Obi.' sidesteps it cleanly: `startsUtteranceValidly` (extract/identity.ts) requires the name to open the utterance with only leading punctuation, which 'That's ' breaks, and 'that's' is not one of `BEFORE_CUES`/`AFTER_CUES` either -- verified live via `npm run replay`, not asserted. expected block generated via `npm run replay -w packages/engine -- corpus/fragment-mid-sentence-stages.json` (2026-09-15).",
+  "description": "FIX (2026-09-15, fragment-shaped challenges, PROVEN live defect: bundle scripts/rehearse/reports/2026-09-15T08-56-33-miller-silent-after-amount.diagnostics.json). A caller line AssemblyAI's endpointing can split into two transcript.user turns must not burn the pending verification challenge. Dana Whitfield states her identity and that the request was approved by Marcus Obi first (c1), ages that approver claim past selectLiveCommitment's 2-caller-turn gate with the request itself (c2) and a neutral filler line (c3), so the engine's LIVE_COMMITMENT challenge picks the approver field ahead of amount/beneficiary/account (those claims are still too fresh to be eligible). The caller's reply to 'restate the approver you gave earlier' arrives in two AssemblyAI fragments with no agent action between them: 'and it should go out today' (frag-1, no name at all -- not answer-shaped for the approver field) then bare 'Marcus Obi.' (frag-2, matches the committed value). Before this fix, the first fragment alone would have graded AMBIGUOUS immediately and selectChallenge would have raced ahead to a different question, silently abandoning the real answer that arrived one turn later. With the fixes: (1) Fragment-shaped challenges (gradeChallenges/isAnswerShapedFor, src/challenges.ts): frag-1 alone leaves the challenge AWAITING (no evidence card, no tally), not AMBIGUOUS; (2) Extended person-question exemption window (answersToPersonQuestion, src/extract/personQuestion.ts): the exemption now extends to every caller utterance from challenge_issued onwards until and including the first answer-shaped utterance, or the next agent action, whichever comes first -- so both frag-1 and frag-2 are exempt from identity-switch checking. Once frag-2 lands (no agent action closed the eligible window), the JOINED text is graded as a whole and PASSes because it contains the committed value. Every readback is confirmed normally. The identity switch that previously would have triggered on bare 'Marcus Obi.' (the SECOND caller utterance after challenge_issued) is now correctly exempted. expected block generated via `npm run replay -w packages/engine -- corpus/fragment-mid-sentence-stages.json` (2026-09-15, post-person-window-fix).",
   "call": {
     "session_id": "sess-frag",
     "origin_kind": "registered_device",
@@ -40,7 +40,7 @@
     {
       "id": "c-frag2",
       "speaker": "caller",
-      "text": "That's Marcus Obi.",
+      "text": "Marcus Obi.",
       "t_ms": 4200
     },
     {
@@ -166,17 +166,17 @@
     }
   ],
   "expected": {
-    "verdict": "STAGE",
-    "state": "ACTION",
+    "verdict": "PENDING",
+    "state": "EVIDENCE",
     "reasons": [],
-    "failure_tally": 0,
-    "request_version": 1,
+    "failure_tally": 1,
+    "request_version": 2,
     "assurance": {
       "identity_claimed": true,
-      "sso_pass_current": true,
-      "oob_confirmed_current": true,
-      "context_pass_current": true,
-      "no_contradictions": true,
+      "sso_pass_current": false,
+      "oob_confirmed_current": false,
+      "context_pass_current": false,
+      "no_contradictions": false,
       "critical_fields_confirmed": true,
       "exposure_within_limit": true,
       "challenge_requirement_met": true,

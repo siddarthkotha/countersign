@@ -20,7 +20,12 @@ function identityName(seed: SeedConfig, id: string): string {
   return seed.identities.find((i) => i.id === id)?.name ?? id;
 }
 
-export function evidenceFromTranscript(conversation: Utterance[], seed: SeedConfig, actions?: AgentAction[]): Evidence[] {
+export function evidenceFromTranscript(
+  conversation: Utterance[],
+  seed: SeedConfig,
+  actions?: AgentAction[],
+  personQuestionAnswers?: Set<string>,
+): Evidence[] {
   const out: Evidence[] = [];
   const callerUtterances = conversation.filter((u) => u.speaker === 'caller');
 
@@ -36,9 +41,12 @@ export function evidenceFromTranscript(conversation: Utterance[], seed: SeedConf
   // resolveIdentitySwitch (compose.ts) always resolves against the CURRENT identity, never
   // one abandoned earlier in the chain.
   const identityChain: { identity_id: string; quote: string; utterance: Utterance }[] = [];
-  const personQuestionAnswers = answersToPersonQuestion(conversation, actions);
+  // FIX (2026-09-15, fragment-shaped challenges): use provided personQuestionAnswers if
+  // available (computed with seed and claims for extended window), otherwise compute it
+  // (old behavior with first caller utterance only).
+  const pqa = personQuestionAnswers ?? answersToPersonQuestion(conversation, actions);
   for (const u of callerUtterances) {
-    const isAnsweringPersonQuestion = personQuestionAnswers.has(u.id);
+    const isAnsweringPersonQuestion = pqa.has(u.id);
     const hit = extractIdentityClaim(u.text, seed, isAnsweringPersonQuestion);
     if (!hit) continue;
     const last = identityChain[identityChain.length - 1];

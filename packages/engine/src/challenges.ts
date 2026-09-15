@@ -455,7 +455,7 @@ function hasFieldSignal(field: ClaimField, rawText: string): boolean {
  *  reach this function -- `gradeChallenges` checks `isTokenBased` first and bypasses this
  *  gate for them entirely (token matching already tolerates an unrelated reply by just
  *  failing to match every token). */
-function isAnswerShapedFor(spec: ChallengeSpec, rawText: string, seed: SeedConfig, claims: Claim[]): boolean {
+export function isAnswerShapedFor(spec: ChallengeSpec, rawText: string, seed: SeedConfig, claims: Claim[]): boolean {
   if (rawText.trim().length === 0) return false;
   if (REFUSAL_RE.test(rawText.toLowerCase())) return true;
 
