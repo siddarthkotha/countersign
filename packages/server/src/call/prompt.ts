@@ -68,6 +68,28 @@ export interface PromptCtx {
 // class of guard as the two above: never announce completion/processing/approval/
 // release/outcome unless the CURRENT GOAL's own words say so -- the engine, never the
 // model, composes every outcome line.
+// Design E (2026-09-15, turn-order design change -- docs/TEST-PLAN.md "The turn order
+// design change (E)"): PROVEN from a live call (scripts/rehearse/reports/2026-09-15T08-06-
+// 07-corrected-critical-field.diagnostics.json): the engine rendered the STAGE verdict and
+// the server sent its CLOSE reply.create at 84.49-84.50s, but AssemblyAI's own AUTOMATIC
+// reply -- generated for the caller's just-finished turn, and undocumented/unstoppable per
+// docs/ASSEMBLYAI_INTEGRATION.md's "VERIFY-AT-BUILD: reply.create schema" section -- spoke
+// first, twice: a stale readback ("Just to confirm, the approver is Marcus Obi...") at
+// 87.6s, then an invented question ("Please state the current date and time.") at 91.6s.
+// The real goodbye was not heard until 98.9s, 14.4s after the verdict and three CLOSE
+// reply.create sends. docs/TEST-PLAN.md's "What the AssemblyAI docs settle" section (fetched
+// live, PANEL-2026-09-14-TEST-PLAN.md citation): system_prompt updates apply "on the next
+// turn" (too late for the automatic reply already generating for THIS turn) and reply.create
+// is the only "speak now" event -- there is no documented way to stop or pre-empt the
+// automatic reply itself. The fix cannot make the automatic reply say the right thing (the
+// docs rule that out); it can only make it say something HARMLESS -- a generic holding beat
+// -- every time, so the server's own instructed reply.create (call/session.ts's
+// `maybeSendReplyCreateForTick`/`maybeSendReplyCreateAfterReplyDone`, extended by this same
+// change to cover QUESTION_GOALS the same way CLOSE already works) is what the caller
+// actually hears the real content from, verified against its own transcript. This sentence
+// is therefore STANDING (present under every goal's system_prompt, not just the "Now"
+// section for one goal) -- it must already be in force for whichever stale prompt the
+// automatic reply ends up composing under.
 export const STANDING_RULES =
   'You verify the request, never the voice. ' +
   'You never state or imply a verdict; a separate system decides. ' +
@@ -79,7 +101,8 @@ export const STANDING_RULES =
   'You are professional and unyielding, not chatty. ' +
   'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question. ' +
   'When an instruction gives you an exact line, say only that line and add no question of your own. ' +
-  "Never announce completion, processing, approval, release, or any other outcome unless the current goal's own words say it; the engine composes every outcome line.";
+  "Never announce completion, processing, approval, release, or any other outcome unless the current goal's own words say it; the engine composes every outcome line. " +
+  'The instant you must speak automatically, before you have been given anything new to say, use only a short holding line such as "One moment." -- never a question, a readback, a verdict word, or a request you were not given.';
 
 const CONTAIN_LINE = 'Keep the caller engaged with neutral questions; disclose nothing further.';
 
