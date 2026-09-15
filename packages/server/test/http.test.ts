@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHttpServer } from '../src/http.js';
 import { createStaticServer } from '../src/static.js';
-import { newDiagnosticsState, type DiagnosticsState } from '../src/diagnostics.js';
+import { newDiagnosticsState, type DiagnosticsState, type DiagnosticBundle } from '../src/diagnostics.js';
 import { markLiveCallsUnavailable, type CapsState } from '../src/caps.js';
 import type { ServerConfig } from '../src/config.js';
 
@@ -658,6 +658,117 @@ describe('http server', () => {
       expect(r.status).toBe(204);
       expect(calls).toEqual([UUID]);
     });
+  });
+
+  it('GET /api/admin/sessions returns 404 when COUNTERSIGN_ADMIN_TOKEN is unset', async () => {
+    const { base } = await start();
+    const r = await fetch(`${base}/api/admin/sessions`);
+    expect(r.status).toBe(404);
+    const body = await r.json();
+    expect(body).toEqual({ error: 'not_found' });
+  });
+
+  it('GET /api/admin/sessions returns 401 when token is wrong', async () => {
+    const { base } = await start({ admin_token: 'secret-token' });
+    const r = await fetch(`${base}/api/admin/sessions`, {
+      headers: { Authorization: 'Bearer wrong-token' },
+    });
+    expect(r.status).toBe(401);
+    const body = await r.json();
+    expect(body).toEqual({ error: 'unauthorized' });
+  });
+
+  it('GET /api/admin/sessions returns sessions metadata with correct token', async () => {
+    const adminToken = 'secret-token';
+    const { base, diagnostics } = await start({ admin_token: adminToken });
+
+    // Manually add some bundles to diagnostics state
+    const bundle1 = {
+      session_id: '11111111-1111-1111-1111-111111111111',
+      started_at: 1000,
+      ended_at: 2000,
+      end_reason: 'caller_ended',
+      deployed_commit: null,
+      server_events: [
+        { t_ms: 0, kind: 'session_minted', detail: { persona_resolved: 'legitimate' } },
+        { t_ms: 500, kind: 'evaluate', detail: { verdict: 'STAGE', state: 'EVIDENCE' } },
+      ],
+      client_events: [],
+      client_bytes: 0,
+      client_post_times: [],
+      billed_seconds: 30,
+    };
+    const bundle2 = {
+      session_id: '22222222-2222-2222-2222-222222222222',
+      started_at: 3000,
+      ended_at: null,
+      end_reason: null,
+      deployed_commit: null,
+      server_events: [
+        { t_ms: 0, kind: 'session_minted', detail: { persona_resolved: 'attacker' } },
+      ],
+      client_events: [],
+      client_bytes: 0,
+      client_post_times: [],
+    } as DiagnosticBundle;
+    diagnostics.bundles.set(bundle1.session_id, bundle1);
+    diagnostics.bundles.set(bundle2.session_id, bundle2);
+    diagnostics.order = [bundle1.session_id, bundle2.session_id];
+
+    const r = await fetch(`${base}/api/admin/sessions`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { sessions: unknown[] };
+    expect(body.sessions).toHaveLength(2);
+    // Newest first
+    expect(body.sessions[0]).toEqual({
+      session_id: '22222222-2222-2222-2222-222222222222',
+      started_at: 3000,
+      ended_at: null,
+      end_reason: null,
+      verdict: null,
+      persona: 'attacker',
+      billed_seconds: null,
+    });
+    expect(body.sessions[1]).toEqual({
+      session_id: '11111111-1111-1111-1111-111111111111',
+      started_at: 1000,
+      ended_at: 2000,
+      end_reason: 'caller_ended',
+      verdict: 'STAGE',
+      persona: 'legitimate',
+      billed_seconds: 30,
+    });
+  });
+
+  it('GET /api/admin/sessions respects limit parameter', async () => {
+    const adminToken = 'secret-token';
+    const { base, diagnostics } = await start({ admin_token: adminToken });
+
+    // Add 5 bundles
+    for (let i = 0; i < 5; i++) {
+      const bundle = {
+        session_id: `${i}1111111-1111-1111-1111-111111111111`,
+        started_at: 1000 + i * 100,
+        ended_at: null,
+        end_reason: null,
+        deployed_commit: null,
+        server_events: [],
+        client_events: [],
+        client_bytes: 0,
+        client_post_times: [],
+      };
+      diagnostics.bundles.set(bundle.session_id, bundle);
+      diagnostics.order.push(bundle.session_id);
+    }
+
+    const r = await fetch(`${base}/api/admin/sessions?limit=2`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { sessions: unknown[] };
+    expect(body.sessions).toHaveLength(2);
   });
 });
 

@@ -237,6 +237,41 @@ export function lookupBundleResult(
   return null;
 }
 
+/** Extract verdict from bundle: look for the last evaluate or terminal_action event */
+export function extractVerdict(bundle: DiagnosticBundle): string | null {
+  // Check if bundle already has verdict (though it currently doesn't in the type)
+  // Look through server_events in reverse to find the last evaluate or terminal_action
+  for (let i = bundle.server_events.length - 1; i >= 0; i--) {
+    const event = bundle.server_events[i];
+    if (event && (event.kind === 'evaluate' || event.kind === 'terminal_action')) {
+      const verdict = (event.detail as Record<string, unknown>)?.verdict;
+      if (typeof verdict === 'string') {
+        return verdict;
+      }
+    }
+  }
+  return null;
+}
+
+/** Extract persona from bundle: look for session_minted or call_context event */
+export function extractPersona(bundle: DiagnosticBundle): string | null {
+  for (const event of bundle.server_events) {
+    if (event.kind === 'session_minted') {
+      const persona = (event.detail as Record<string, unknown>)?.persona_resolved;
+      if (typeof persona === 'string') {
+        return persona;
+      }
+    }
+    if (event.kind === 'call_context') {
+      const persona = (event.detail as Record<string, unknown>)?.persona;
+      if (typeof persona === 'string') {
+        return persona;
+      }
+    }
+  }
+  return null;
+}
+
 export type ClientPostRateResult = 'ok' | 'not_found' | 'rate_limited';
 
 /** Fix round 1: the per-session sliding-window POST rate limit -- call ONCE per POST,

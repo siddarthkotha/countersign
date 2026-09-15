@@ -18,6 +18,8 @@ import {
   checkClientPostRate,
   getBundle,
   lookupBundleResult,
+  extractVerdict,
+  extractPersona,
   recordPendingServerEvent,
   MAX_CLIENT_BODY_BYTES,
   type DiagnosticsState,
@@ -442,6 +444,41 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
         return;
       }
       sendJson(res, 200, { ok: true, accepted: result.accepted });
+      return;
+    }
+
+    // List all sessions with metadata: session_id, started_at, ended_at, end_reason, verdict,
+    // persona, billed_seconds. Gated with same token as POST /api/admin/live-calls/reset.
+    // Newest first, optional ?limit=N (default 50, max 200).
+    if (req.method === 'GET' && path === '/api/admin/sessions') {
+      if (!cfg.admin_token) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      const authHeader = req.headers.authorization;
+      if (authHeader !== `Bearer ${cfg.admin_token}`) {
+        sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
+
+      const limit = Math.min(
+        parseInt(url.searchParams.get('limit') ?? '50', 10) || 50,
+        200,
+      );
+      const sessions = Array.from(deps.diagnostics.bundles.values())
+        .sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))
+        .slice(0, limit)
+        .map((bundle) => ({
+          session_id: bundle.session_id,
+          started_at: bundle.started_at,
+          ended_at: bundle.ended_at,
+          end_reason: bundle.end_reason,
+          verdict: extractVerdict(bundle),
+          persona: extractPersona(bundle),
+          billed_seconds: bundle.billed_seconds ?? null,
+        }));
+
+      sendJson(res, 200, { sessions });
       return;
     }
 
