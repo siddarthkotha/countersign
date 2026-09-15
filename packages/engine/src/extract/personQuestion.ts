@@ -17,7 +17,13 @@ function fieldForFactId(fact_id: string): ClaimField | null {
 /** Returns the set of caller utterance ids that are the first caller utterance after
  *  a challenge_issued or readback_issued action for a person-shaped field, with no other
  *  caller utterance in between. Used to detect when a bare name is answering a person
- *  question and should not be treated as a self-identification. */
+ *  question and should not be treated as a self-identification.
+ *
+ *  DESIGN: Only the FIRST caller utterance after the action gets the exemption. If the
+ *  caller says "um" or any filler utterance, that consumes the exemption, and a
+ *  subsequent bare name reverts to normal rules (rule b applies). This prevents a
+ *  caller from saying "um, Marcus Obi approved it" (two turns) where the second turn
+ *  would get a false exemption -- the "um" consumed it by design. */
 export function answersToPersonQuestion(
   conversation: Utterance[] | undefined,
   actions: AgentAction[] | undefined,

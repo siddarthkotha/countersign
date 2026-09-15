@@ -8,6 +8,7 @@ import { buildLedger, currentClaim } from './ledger.js';
 import { gradeChallenges, selectChallenge } from './challenges.js';
 import { evidenceFromTranscript } from './evidence/fromTranscript.js';
 import { evidenceFromTools } from './evidence/fromTools.js';
+import { answersToPersonQuestion } from './extract/personQuestion.js';
 import { decide } from './rules.js';
 import type { RuleMutant } from './rules.js';
 import { allowedTools, deriveState, phrasingGoal, requiredActions } from './fsm.js';
@@ -118,11 +119,13 @@ export function evaluate(rawInput: EngineInput, overrides?: Record<string, Evide
   // unchanged or re-confirmed -- see compose.ts for the exact conditions and why this never
   // erases the switch's own contradiction weight (ev-consistency-identity, built below at
   // step 5, is untouched either way).
+  const personQuestionAnswers = answersToPersonQuestion(conversation, actions);
   const transcriptEv: Evidence[] = resolveIdentitySwitch(
     evidenceFromTranscript(conversation, seed, actions).map((e) => ({ ...e, request_version })),
     conversation,
     claims,
     seed,
+    personQuestionAnswers,
   );
 
   // 3. Challenges: reconstruct what was issued, grade it, build knowledge_check_result cards.

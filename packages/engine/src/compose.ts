@@ -5,6 +5,7 @@
 import { buildLedger, currentClaim, isConfirmed } from './ledger.js';
 import { gradeChallenges, selectChallenge, seedFieldForEntry } from './challenges.js';
 import { extractIdentityClaim } from './extract/identity.js';
+import { answersToPersonQuestion } from './extract/personQuestion.js';
 import { normalizeValue } from './normalize.js';
 import { money } from './util.js';
 import type { RuleContext } from './rules.js';
@@ -487,6 +488,7 @@ export function resolveIdentitySwitch(
   conversation: Utterance[],
   claims: Claim[],
   seed: SeedConfig,
+  personQuestionAnswers?: Set<string>,
 ): Evidence[] {
   const switchEv = transcriptEv.find((e) => e.kind === 'identity_switch');
   if (!switchEv || switchEv.status !== 'FLAG') return transcriptEv;
@@ -499,7 +501,8 @@ export function resolveIdentitySwitch(
 
   const reclaimed = conversation.some((u) => {
     if (u.speaker !== 'caller' || u.id === switchUtterance.id || u.t_ms <= switchT) return false;
-    return extractIdentityClaim(u.text, seed)?.identity_id === laterId;
+    const isAnsweringPersonQuestion = personQuestionAnswers?.has(u.id) ?? false;
+    return extractIdentityClaim(u.text, seed, isAnsweringPersonQuestion)?.identity_id === laterId;
   });
   if (!reclaimed) return transcriptEv;
 
