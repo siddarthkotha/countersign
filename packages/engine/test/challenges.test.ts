@@ -3,7 +3,7 @@
 // only ever produces a phrasing goal (`ask`) that never leaks the expected answer;
 // `gradeChallenges` is the sole, deterministic grader, from plain transcript text.
 import { describe, expect, it } from 'vitest';
-import { fnv1a, gradeChallenges, selectChallenge } from '../src/challenges';
+import { fnv1a, gradeChallenges, isAnswerShapedFor, selectChallenge } from '../src/challenges';
 import { MERIDIAN } from '../src/seed/meridian';
 import type { AgentAction, Claim, ChallengeResult, ChallengeSpec, Utterance } from '../src/types';
 
@@ -501,6 +501,166 @@ describe('gradeChallenges — TRAP_FACT', () => {
     const conversation = [utt('u1', 3000, "that's not right")];
     const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
     expect(result['g3-1']?.result).toBe('PASS');
+  });
+});
+
+// FIX (finding 1, Sonnet review, 2026-09-15/16): `isAnswerShapedFor` (via `hasNameSignal`)
+// now also recognizes a single word matching any seed-known identity/alias/first name/last
+// name/place/institution token, and (via `hasFieldSignal`) a compound/doubled digit-word
+// reading of an account-style number -- catching genuine but cue-less/terse replies that
+// were previously left permanently AWAITING (never graded at all, wasting the re-ask
+// budget). These call `isAnswerShapedFor` directly since the account_last4 case is not
+// reachable through a real `selectChallenge`-produced LIVE_COMMITMENT/TRAP_FACT spec today
+// (account_last4 is never one of `LIVE_COMMITMENT_FIELDS`/`TRAP_FIELD_ORDER`) -- exercised
+// here as a defensive/exhaustiveness fix per the function's own comment ("in case that
+// invariant is ever loosened").
+describe('isAnswerShapedFor — finding 1 (Sonnet review, 2026-09-15/16): seed-known name/place tokens and compound digit words', () => {
+  it('TRAP_FACT: "it was Marcus" is answer-shaped (single known first name, no cue verb) -- was previously left AWAITING', () => {
+    const trueClaim = claim('c-appr', 'approver', 'STATED', 'marcus obi', 1000, 'Marcus Obi');
+    const spec: ChallengeSpec = {
+      challenge_id: 'nm-1',
+      kind: 'TRAP_FACT',
+      field: 'approver',
+      ask: 'x',
+      expect: { trap_value: 'Northgate Partners', true_claim_id: 'c-appr' },
+    };
+    expect(isAnswerShapedFor(spec, 'It was Marcus.', SEED, [trueClaim])).toBe(true);
+
+    // End-to-end through gradeChallenges: the challenge is now actually GRADED (a real
+    // AMBIGUOUS card -- the bare first name still doesn't match the full committed "Marcus
+    // Obi" well enough for gradeTrapFact to PASS it) instead of silently staying AWAITING
+    // forever with no evidence card at all.
+    const actions: AgentAction[] = [issuedAction('a1', 'nm-1', 2000)];
+    const conversation = [utt('u1', 3000, 'It was Marcus.')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, [trueClaim]);
+    expect(result['nm-1']?.result).toBe('AMBIGUOUS');
+  });
+
+  it('LIVE_COMMITMENT: "the one in Zurich" is answer-shaped (single known seed place, no cue verb) -- was previously left AWAITING', () => {
+    const committed = claim('c-esc', 'escrow_institution', 'STATED', 'first meridian trust', 1000, 'First Meridian Trust');
+    const spec: ChallengeSpec = {
+      challenge_id: 'nm-2',
+      kind: 'LIVE_COMMITMENT',
+      field: 'escrow_institution',
+      ask: 'x',
+      expect: { commitment_claim_id: 'c-esc' },
+    };
+    expect(isAnswerShapedFor(spec, 'The one in Zurich.', SEED, [committed])).toBe(true);
+  });
+
+  // LIVE_COMMITMENT (not TRAP_FACT): TRAP_FACT's affirm-lexicon shortcut already makes a
+  // bare "yes" answer-shaped for an unrelated, pre-existing reason (it affirms the trap
+  // value) -- LIVE_COMMITMENT's name-field branch has no such shortcut, so it isolates
+  // whether the seedNameTokens addition itself introduces a false positive.
+  it('does not loosen so far that a bare "yes" or unrelated prose becomes answer-shaped', () => {
+    const committed = claim('c-appr2', 'approver', 'STATED', 'marcus obi', 1000, 'Marcus Obi');
+    const spec: ChallengeSpec = {
+      challenge_id: 'nm-3',
+      kind: 'LIVE_COMMITMENT',
+      field: 'approver',
+      ask: 'x',
+      expect: { commitment_claim_id: 'c-appr2' },
+    };
+    expect(isAnswerShapedFor(spec, 'yes', SEED, [committed])).toBe(false);
+    expect(isAnswerShapedFor(spec, 'the final figure moved this morning', SEED, [committed])).toBe(false);
+  });
+
+  it('account_last4 field-signal: a compound tens+ones digit-word reading ("eighty-eight thirty") is answer-shaped, not just literal digits or single spelled digits', () => {
+    const committed = claim('c-acct', 'account_last4', 'STATED', '8830', 1000, '8830');
+    const spec: ChallengeSpec = {
+      challenge_id: 'nm-4',
+      kind: 'LIVE_COMMITMENT',
+      field: 'account_last4',
+      ask: 'x',
+      expect: { commitment_claim_id: 'c-acct' },
+    };
+    // Old behavior: neither the bare `\d{2,}` numeral check nor the single-spelled-digit
+    // check fires on tens words like "eighty"/"thirty" at all.
+    expect(isAnswerShapedFor(spec, 'Eighty-eight, thirty.', SEED, [committed])).toBe(true);
+    expect(isAnswerShapedFor(spec, 'Double eight, three oh.', SEED, [committed])).toBe(true);
+  });
+});
+
+describe('gradeChallenges — accept_tokens digit-word matching (finding 1, Sonnet review, 2026-09-15/16)', () => {
+  it('RELATIONAL account challenge PASSes when the digits are read back as compound number words ("forty-four seventy-one" -> 4471)', () => {
+    const beneficiaryClaim = claim('c-ben3', 'beneficiary', 'STATED', 'meridian supply', 1000, 'Meridian Supply');
+    const spec: ChallengeSpec = {
+      challenge_id: 'dg-1',
+      kind: 'RELATIONAL',
+      field: 'account_last4',
+      ask: 'Ask for the last four digits of the account attached to the beneficiary they named.',
+      expect: { accept_tokens: ['4471'] },
+    };
+    const actions: AgentAction[] = [issuedAction('a1', 'dg-1', 2000)];
+    const conversation = [utt('u1', 3000, 'Forty-four, seventy-one.')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, [beneficiaryClaim]);
+    expect(result['dg-1']?.result).toBe('PASS');
+  });
+
+  it('RELATIONAL account challenge PASSes when the digits are read back as single spelled-out digits ("double four seven one" -> 4471)', () => {
+    const beneficiaryClaim = claim('c-ben4', 'beneficiary', 'STATED', 'meridian supply', 1000, 'Meridian Supply');
+    const spec: ChallengeSpec = {
+      challenge_id: 'dg-2',
+      kind: 'RELATIONAL',
+      field: 'account_last4',
+      ask: 'Ask for the last four digits of the account attached to the beneficiary they named.',
+      expect: { accept_tokens: ['4471'] },
+    };
+    const actions: AgentAction[] = [issuedAction('a1', 'dg-2', 2000)];
+    const conversation = [utt('u1', 3000, 'Double four, seven one.')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, [beneficiaryClaim]);
+    expect(result['dg-2']?.result).toBe('PASS');
+  });
+
+  it('still FAILs a wrong digit-word reading, not a vacuous PASS', () => {
+    const beneficiaryClaim = claim('c-ben5', 'beneficiary', 'STATED', 'meridian supply', 1000, 'Meridian Supply');
+    const spec: ChallengeSpec = {
+      challenge_id: 'dg-3',
+      kind: 'RELATIONAL',
+      field: 'account_last4',
+      ask: 'Ask for the last four digits of the account attached to the beneficiary they named.',
+      expect: { accept_tokens: ['4471'] },
+    };
+    const actions: AgentAction[] = [issuedAction('a1', 'dg-3', 2000)];
+    const conversation = [utt('u1', 3000, 'Ninety-nine, twelve.')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, [beneficiaryClaim]);
+    expect(result['dg-3']?.result).toBe('FAIL');
+  });
+});
+
+// FIX (finding 2, Sonnet review, 2026-09-15/16): `max_challenge_reasks` now actually controls
+// both the eligible-utterance window size and the grading cap, wired to the same seeded
+// value. Proven with the seed value overridden to 3: under the old hardcoded-window-of-2 bug,
+// `eligibleUtterances` could never collect a 3rd caller utterance no matter how many
+// non-answer-shaped fragments arrived, so `eligible.length` could never reach a
+// `max_challenge_reasks` of 3 and the challenge would stay AWAITING forever -- this exact
+// scenario (3 non-answer-shaped fragments, cap 3) is only reachable/exhaustible with the fix.
+describe('gradeChallenges — max_challenge_reasks is live, not cosmetic (finding 2, Sonnet review, 2026-09-15/16)', () => {
+  const SEED_CAP3 = { ...SEED, thresholds: { ...SEED.thresholds, max_challenge_reasks: 3 } };
+  const amountClaim = claim('c-amt2', 'amount_usd', 'STATED', 1_800_000, 1000, '1.8 million');
+  const spec: ChallengeSpec = {
+    challenge_id: 'cap-1',
+    kind: 'LIVE_COMMITMENT',
+    field: 'amount_usd',
+    ask: 'x',
+    expect: { commitment_claim_id: 'c-amt2' },
+  };
+  const actions: AgentAction[] = [issuedAction('a1', 'cap-1', 2000)];
+
+  it('with a seed cap of 3, two non-answer-shaped fragments still leave the challenge AWAITING (window not exhausted yet)', () => {
+    const conversation = [utt('u1', 3000, 'why do you need that'), utt('u2', 3200, 'seriously, why')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED_CAP3, [amountClaim]);
+    expect(result['cap-1']).toBeUndefined();
+  });
+
+  it('with a seed cap of 3, a THIRD non-answer-shaped fragment exhausts the window to UNANSWERED -- only reachable because the window itself is now sized to the seeded cap, not hardcoded to 2', () => {
+    const conversation = [
+      utt('u1', 3000, 'why do you need that'),
+      utt('u2', 3200, 'seriously, why'),
+      utt('u3', 3400, 'come on, really'),
+    ];
+    const result = gradeChallenges(conversation, actions, [spec], SEED_CAP3, [amountClaim]);
+    expect(result['cap-1']?.result).toBe('UNANSWERED');
   });
 });
 

@@ -254,13 +254,31 @@ describe('deriveRuleContext -- challenge_awaiting_answer (ruling C, 2026-09-09, 
     expect(ctx.challenge_awaiting_answer).toBe(true);
   });
 
-  it('false once a caller utterance follows the most recent challenge_issued action (answered)', () => {
+  // FIX (finding 3, Sonnet review, 2026-09-15/16): a bare caller utterance no longer flips
+  // this false by itself -- only a `knowledge_check_result` evidence card for the SAME
+  // challenge_id (i.e. `gradeChallenges` has actually graded it: answer-shaped and PASS/
+  // FAIL/AMBIGUOUS/REFUSED, or the max_challenge_reasks cap forced it UNANSWERED) does.
+  it('STILL true once a caller utterance follows the challenge but no knowledge_check_result card exists yet (a content-free fragment, still under the reask cap)', () => {
     const actions: AgentAction[] = [{ id: 'ch1', kind: 'challenge_issued', t_ms: 10_000, challenge_id: 'sess-1' }];
     const conversation: Utterance[] = [
       u('c1', 'caller', 'This is Robert Miller.', 1_000),
-      u('c2', 'caller', 'Zurich.', 10_500), // reply after the challenge was issued
+      u('c2', 'caller', 'Um.', 10_500), // a fragment reply -- gradeChallenges leaves this AWAITING, no card
     ];
+    // No evidenceMerged card for ev-knowledge-sess-1 -- still awaiting, same as before any reply.
     const ctx = deriveRuleContext([], 1, [], [], conversation, actions, 1, SEED);
+    expect(ctx.challenge_awaiting_answer).toBe(true);
+  });
+
+  it('false once a knowledge_check_result card exists for the last-issued challenge_id (the reply has actually been graded)', () => {
+    const actions: AgentAction[] = [{ id: 'ch1', kind: 'challenge_issued', t_ms: 10_000, challenge_id: 'sess-1' }];
+    const conversation: Utterance[] = [
+      u('c1', 'caller', 'This is Robert Miller.', 1_000),
+      u('c2', 'caller', 'Zurich.', 10_500),
+    ];
+    const evidenceMerged = [
+      { id: 'ev-knowledge-sess-1', kind: 'knowledge_check_result' as const, t_ms: 10_500, label: 'Knowledge check', status: 'PASS' as const, detail: '', facts: {}, quotes: [], source: 'transcript' as const, provenance: 'POLICY_DERIVED' as const, request_version: 1 },
+    ];
+    const ctx = deriveRuleContext([], 1, evidenceMerged, [], conversation, actions, 1, SEED);
     expect(ctx.challenge_awaiting_answer).toBe(false);
   });
 

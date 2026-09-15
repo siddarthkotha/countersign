@@ -240,6 +240,30 @@ describe('decide -- rule table (first match wins)', () => {
     expect(r.rule_hit).toBe(14);
   });
 
+  // Test the reviewer flagged as missing (finding 3, Sonnet review, 2026-09-15/16): on the
+  // LAST allowed challenge (challenges_issued === max_challenges, so row 4's
+  // `challengesRemaining` guard can no longer hold PENDING), a content-free caller fragment
+  // must not push the rule table straight to row 14's catch-all ESCALATE while
+  // `gradeChallenges` (challenges.ts) still has that reply's grading in flight -- row 12's
+  // `ctx.challenge_awaiting_answer` disjunct exists exactly to hold PENDING through this
+  // window. Same evidence/tally as the row-14 test directly above (a FAILing context check
+  // is the tally source, independent of the still-pending challenge itself) -- the ONLY
+  // difference is `challenge_awaiting_answer`, proving it alone is what keeps this at row
+  // 12 instead of falling through to row 14. `compose.ts`'s `computeChallengeAwaitingAnswer`
+  // is what must correctly compute `true` here from the raw logs (see compose.test.ts) --
+  // this test proves why that correctness matters downstream.
+  it('row 12 holds PENDING (not row 14) while challenge_awaiting_answer is true, even with challenges exhausted', () => {
+    const evidence = [
+      ...stageEvidence({ context: 'FAIL' }),
+      ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
+    ];
+    const r = decide(evidence, SEED, ctx({ challenges_issued: 3, challenge_awaiting_answer: true }));
+    expect(r.verdict).toBe('PENDING');
+    expect(r.rule_hit).toBe(12);
+    expect(r.failure_tally).toBeGreaterThan(0);
+    expect(r.failure_tally).toBeLessThan(3);
+  });
+
   it('row 13 (founder decision 2026-09-12): a critical field\'s readback re-ask cap is exhausted -> ESCALATE naming the field, reachable ahead of row 14', () => {
     const evidence = [
       ...stageEvidence(),

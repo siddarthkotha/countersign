@@ -22,7 +22,7 @@ import type {
   SeedConfig,
   Utterance,
 } from './types.js';
-import { hasLexiconHit, normalizeText } from './normalize.js';
+import { hasLexiconHit, normalizeSpokenDigits, normalizeText } from './normalize.js';
 import { currentClaim } from './ledger.js';
 import { extractAmounts } from './extract/amounts.js';
 import { extractAccountLast4, extractCuedNames, extractDeadline } from './extract/claims.js';
@@ -398,14 +398,64 @@ function isNameField(field: ClaimField): field is 'beneficiary' | 'approver' | '
   return (NAME_FIELDS as ClaimField[]).includes(field);
 }
 
+/** Every seed-known single-word name/alias/place/institution token, normalized (lower-case,
+ *  punctuation-stripped) -- built from identity names/aliases, every seed.knowledge entry's
+ *  own `accept_tokens` (already single lower-case name/place words -- "marcus", "obi",
+ *  "zurich", "calder", "finch", "first", "meridian", "trust", ...), and payment vendors/
+ *  vendor aliases. Used by `hasNameSignal` (below) to recognize a genuine but cue-less
+ *  answer like "it was Marcus" or "the one in Zurich": a single capitalized word that IS a
+ *  real seeded name has no cue verb ("approved by", "counsel is") to anchor an
+ *  `extractCuedNames` hit, and (being one word) never matches the bare-two-capitalized-word
+ *  span either, so it was previously missed entirely (finding 1, Sonnet review,
+ *  2026-09-15/16). Deliberately never built from TRAP_DECOYS: a decoy is a FALSE value --
+ *  the caller repeating it is already caught by the trap-value substring check earlier in
+ *  `isAnswerShapedFor`'s TRAP_FACT branch, and treating a decoy as a positive "this looks
+ *  like an answer" signal here would blur "answered" with "accepted the wrong value".
+ *  Rebuilt per call (the seed is small; not worth caching across calls for a pure function).
+ */
+function seedNameTokens(seed: SeedConfig): Set<string> {
+  const tokens = new Set<string>();
+  const addWords = (s: string) => {
+    for (const w of normalizeText(s).split(' ')) {
+      if (w.length >= 2) tokens.add(w);
+    }
+  };
+  for (const identity of seed.identities) {
+    addWords(identity.name);
+    for (const alias of identity.aliases) addWords(alias);
+  }
+  for (const fact of seed.knowledge) {
+    for (const tok of fact.accept_tokens) addWords(tok);
+  }
+  for (const payment of seed.payments) {
+    addWords(payment.vendor);
+    for (const alias of payment.vendor_aliases) addWords(alias);
+  }
+  return tokens;
+}
+
 /** True when `rawText` contains a plausible name-answer signal for `field`: a cued name
- *  extraction for this exact field, or a bare two-capitalized-word span (a raw-text check,
+ *  extraction for this exact field, a bare two-capitalized-word span (a raw-text check,
  *  never normalized -- capitalization is the only cheap signal a name span has once it's
- *  outside a recognized cue pattern like "counsel is X"). Shared by the TRAP_FACT and
- *  LIVE_COMMITMENT name-field branches of `isAnswerShapedFor` below. */
-function hasNameSignal(field: ClaimField, rawText: string): boolean {
+ *  outside a recognized cue pattern like "counsel is X"), or (finding 1, Sonnet review,
+ *  2026-09-15/16) a single word matching any seed-known identity/alias/first name/last
+ *  name/place/institution token (`seedNameTokens`) -- catches a genuine cue-less, single-
+ *  word answer like "it was Marcus" or "the one in Zurich" that neither earlier check
+ *  recognizes. This is a SIGNAL check only (does this look like an attempt to answer at
+ *  all), never a correctness check -- `gradeLiveCommitment`/`gradeTrapFact` still decide
+ *  PASS/FAIL/AMBIGUOUS from the actual content once grading proceeds; a signal-shaped but
+ *  incomplete answer (e.g. a first name where the full name was committed) can still grade
+ *  AMBIGUOUS, same as today -- the fix only stops it from being silently left AWAITING
+ *  forever (never graded at all) when no further caller utterance ever arrives. Shared by
+ *  the TRAP_FACT and LIVE_COMMITMENT name-field branches of `isAnswerShapedFor` below. */
+function hasNameSignal(field: ClaimField, rawText: string, seed: SeedConfig): boolean {
   if (/\b[A-Z][A-Za-z.']*\s+[A-Z][A-Za-z.']*\b/.test(rawText)) return true;
-  return extractCuedNames(rawText).some((h) => h.field === field);
+  if (extractCuedNames(rawText).some((h) => h.field === field)) return true;
+  const known = seedNameTokens(seed);
+  return normalizeText(rawText)
+    .split(' ')
+    .filter(Boolean)
+    .some((w) => known.has(w));
 }
 
 /** True when `rawText` contains a plausible answer signal for a non-name `field` --
@@ -419,7 +469,14 @@ function hasFieldSignal(field: ClaimField, rawText: string): boolean {
     const digitPattern = /\d{2,}|(?:zero|one|two|three|four|five|six|seven|eight|nine|oh)\b/gi;
     const matches = rawText.match(digitPattern);
     if (matches && matches.length >= 2) return true;
-    return extractAccountLast4(rawText) !== null;
+    if (extractAccountLast4(rawText) !== null) return true;
+    // FIX (finding 1, Sonnet review, 2026-09-15/16): the checks above only catch a bare
+    // digit run or 2+ SEPARATE single-digit words -- a compound/doubled digit-word reading
+    // of an account/phone-style number ("eighty-eight thirty", "double eight three oh")
+    // resolves to 2+ digits under `normalizeSpokenDigits` even though neither prior check
+    // fires on it (a tens word like "eighty" or "thirty" isn't in the single-digit-word
+    // list, and "double eight" isn't 2 separate digit words at all).
+    return /\d{2,}/.test(normalizeSpokenDigits(rawText));
   }
   if (field === 'amount_usd') {
     if (extractAmounts(rawText).length > 0) return true;
@@ -473,7 +530,7 @@ export function isAnswerShapedFor(spec: ChallengeSpec, rawText: string, seed: Se
     if (hasLexiconHit(rawText, seed.affirm_lexicon)) return true;
     // Every TRAP_FACT field is a name field (TRAP_FIELD_ORDER), but fall back to the
     // generic field-signal check too in case that invariant is ever loosened.
-    return isNameField(spec.field) ? hasNameSignal(spec.field, rawText) : hasFieldSignal(spec.field, rawText);
+    return isNameField(spec.field) ? hasNameSignal(spec.field, rawText, seed) : hasFieldSignal(spec.field, rawText);
   }
 
   if ('commitment_claim_id' in expect) {
@@ -481,7 +538,7 @@ export function isAnswerShapedFor(spec: ChallengeSpec, rawText: string, seed: Se
       const claim = claims.find((c) => c.id === expect.commitment_claim_id);
       const committedNorm = claim ? normalizeText(String(claim.value)) : '';
       if (committedNorm.length > 0 && normText.includes(committedNorm)) return true;
-      return hasNameSignal(spec.field, rawText);
+      return hasNameSignal(spec.field, rawText, seed);
     }
     return hasFieldSignal(spec.field, rawText);
   }
@@ -493,7 +550,7 @@ export function isAnswerShapedFor(spec: ChallengeSpec, rawText: string, seed: Se
 
 /** Caller utterances strictly after `issuedAction.t_ms` and strictly before the next
  *  agent action (challenge_issued for a DIFFERENT challenge, or any readback_issued) after
- *  it, capped at 2.
+ *  it, capped at `maxReasks` (`seed.thresholds.max_challenge_reasks`).
  *
  *  FIX (2026-09-15, fragment-shaped challenges): a `challenge_issued` action sharing
  *  `issuedAction`'s OWN `challenge_id` is a re-ask of the SAME still-awaiting challenge
@@ -501,8 +558,20 @@ export function isAnswerShapedFor(spec: ChallengeSpec, rawText: string, seed: Se
  *  is actually spoken, same `challenge_id` unchanged) -- it must not close this window early,
  *  or a caller's later fragments (arriving after the re-ask was spoken) would fall outside
  *  it and never get graded at all. Only a challenge_issued action for a genuinely DIFFERENT
- *  challenge, or any readback_issued action, still bounds the window. */
-function eligibleUtterances(conversation: Utterance[], actions: AgentAction[], issuedAction: AgentAction): Utterance[] {
+ *  challenge, or any readback_issued action, still bounds the window.
+ *
+ *  FIX (finding 2, Sonnet review, 2026-09-15/16): `maxReasks` now bounds the slice instead
+ *  of a hardcoded `2` -- previously the cap `gradeChallenges` compared `eligible.length`
+ *  against was the seeded `max_challenge_reasks`, but the window this function collected
+ *  was always capped at literal 2 regardless of what the seed said, so a seed configured
+ *  with a different `max_challenge_reasks` had no actual effect on either the window size
+ *  or the grading cap it feeds. */
+function eligibleUtterances(
+  conversation: Utterance[],
+  actions: AgentAction[],
+  issuedAction: AgentAction,
+  maxReasks: number,
+): Utterance[] {
   const nextAgentActionT = actions
     .filter(
       (a) =>
@@ -518,7 +587,7 @@ function eligibleUtterances(conversation: Utterance[], actions: AgentAction[], i
         (nextAgentActionT === undefined || u.t_ms < nextAgentActionT),
     )
     .sort((a, b) => a.t_ms - b.t_ms)
-    .slice(0, 2);
+    .slice(0, maxReasks);
 }
 
 function gradeLiveCommitment(field: ClaimField, claim: Claim | undefined, rawText: string, normText: string): ChallengeResult {
@@ -673,7 +742,7 @@ export function gradeChallenges(
       continue;
     }
 
-    const eligible = eligibleUtterances(conversation, actions, issuedAction);
+    const eligible = eligibleUtterances(conversation, actions, issuedAction, seed.thresholds.max_challenge_reasks);
     if (eligible.length === 0) {
       out[spec.challenge_id] = { result: 'UNANSWERED', eligible_utterance_ids: [] };
       continue;
@@ -721,7 +790,19 @@ export function gradeChallenges(
     let result: ChallengeResult;
     if ('accept_tokens' in expect) {
       const words = normText.split(' ');
-      const allPresent = expect.accept_tokens.every((tok) => words.includes(normalizeText(tok)));
+      // FIX (finding 1, Sonnet review, 2026-09-15/16): a purely-numeric accept_token (an
+      // account/cost-centre/invoice digit string, e.g. "4471") also matches when it appears
+      // as a token in the SAME reply's digit-normalized form -- so "forty-four seventy-one"
+      // or "double four seven one" pass a RELATIONAL/SEED_FACT digit challenge exactly like
+      // the literal digits "4471" already do. Computed lazily (only when at least one token
+      // is purely numeric) since it re-tokenizes rawText. Never applied to a non-numeric
+      // token (a name/place accept_token like "marcus" must still appear as itself -- this
+      // never lets prose "stand in" for a name).
+      const hasDigitToken = expect.accept_tokens.some((tok) => /^\d+$/.test(tok));
+      const digitWords = hasDigitToken ? normalizeText(normalizeSpokenDigits(rawText)).split(' ') : [];
+      const allPresent = expect.accept_tokens.every(
+        (tok) => words.includes(normalizeText(tok)) || (/^\d+$/.test(tok) && digitWords.includes(tok)),
+      );
       result = allPresent ? 'PASS' : 'FAIL';
     } else if ('commitment_claim_id' in expect) {
       const commitmentClaimId = expect.commitment_claim_id;

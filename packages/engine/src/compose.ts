@@ -594,18 +594,39 @@ export function computeEvaluationIncomplete(
  *  seed.thresholds.challenge_answer_window_ms of when that challenge was asked. Purely a
  *  function of the recorded logs (no clock read), so a silent/abandoned caller eventually
  *  ages out of "awaiting" once the window elapses, rather than holding the engine open
- *  forever on a caller who never answers. */
+ *  forever on a caller who never answers.
+ *
+ *  FIX (finding 3, Sonnet review, 2026-09-15/16): the "has anyone replied yet" test used to
+ *  be ANY caller utterance after the last-issued challenge, which disagrees with the
+ *  fragment-shaped-challenges gate `challenges.ts`'s `gradeChallenges`/`isAnswerShapedFor`
+ *  now enforce -- a content-free fragment (AssemblyAI endpointing split) must not flip this
+ *  false before the reply has actually been graded, or row 12 (rules.ts) falls through to
+ *  the catch-all escalate/readback rows while the challenge is still legitimately awaiting
+ *  a real answer. The challenge is closed (no longer "awaiting") only once
+ *  `buildKnowledgeEvidence` has actually produced its `knowledge_check_result` card for
+ *  this exact challenge_id -- which happens only when the reply was answer-shaped (graded
+ *  PASS/FAIL/AMBIGUOUS/REFUSED) or the `max_challenge_reasks` cap forced it to UNANSWERED
+ *  (see `gradeChallenges`). Absence of that card means `gradeChallenges` deliberately left
+ *  it out (still AWAITING, under cap, non-answer-shaped so far) -- the same signal
+ *  `selectChallenge`'s own re-ask recovery (via `fsm.ts`'s `phrasingGoal`) reads to decide
+ *  whether to re-ask the same spec. `evidenceMerged` already carries every
+ *  `knowledge_check_result` card built this evaluation (evaluate.ts computes `knowledgeEv`
+ *  and folds it into `merged` before calling `deriveRuleContext`), so no new grading pass is
+ *  needed here -- this reads the same result `gradeChallenges` already produced. */
 export function computeChallengeAwaitingAnswer(
   tools: ToolLogEntry[],
   conversation: Utterance[],
   actions: AgentAction[],
   seed: SeedConfig,
+  evidenceMerged: Evidence[],
 ): boolean {
   const issuedActions = actions.filter((a) => a.kind === 'challenge_issued');
   if (issuedActions.length === 0) return false;
   const lastIssued = issuedActions.reduce((latest, a) => (a.t_ms > latest.t_ms ? a : latest));
-  const answered = conversation.some((u) => u.speaker === 'caller' && u.t_ms > lastIssued.t_ms);
-  if (answered) return false;
+  const graded = evidenceMerged.some(
+    (e) => e.kind === 'knowledge_check_result' && e.id === `ev-knowledge-${lastIssued.challenge_id}`,
+  );
+  if (graded) return false;
   const lastEventT = latestEventT(tools, conversation, actions);
   return lastEventT - lastIssued.t_ms <= seed.thresholds.challenge_answer_window_ms;
 }
@@ -640,7 +661,7 @@ export function deriveRuleContext(
     evaluation_incomplete: computeEvaluationIncomplete(tools, conversation, actions, seed),
     critical_confirmed: computeCriticalConfirmed(claims),
     identity_switch_stale: identitySwitchEv?.status === 'FLAG',
-    challenge_awaiting_answer: computeChallengeAwaitingAnswer(tools, conversation, actions, seed),
+    challenge_awaiting_answer: computeChallengeAwaitingAnswer(tools, conversation, actions, seed, evidenceMerged),
     // Founder decision 2026-09-12 9:00 AM: see computeReadbackReaskExhausted above and
     // rules.ts's new row 13.
     readback_reask_exhausted_field: computeReadbackReaskExhausted(claims, actions, seed),
