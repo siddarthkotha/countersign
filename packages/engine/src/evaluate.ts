@@ -77,7 +77,7 @@ function freezeAtSeal(input: EngineInput): EngineInput {
   // applies to all three arrays:
   // - tools: keep tools[0..seal_index], so tool entries placed AFTER the seal in the array
   //   are excluded, even if they share the seal's timestamp. The seal_evidence_record is
-  //   always the LAST required action before terminal actions may cease (see REQUIRED_ACTIONS
+  //   always the LAST required action before terminal actions may cease (see ACTION_ALLOWLIST
   //   in fsm.ts and terminalActions.ts), so no sibling terminal-action entry (freeze, incident,
   //   alert, seal) is ever cut.
   // - conversation/actions: if seal args carry conversation_count/actions_count (from newer
