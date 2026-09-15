@@ -111,6 +111,7 @@ export interface Claim {
   t_ms: number;
   supersedes?: string; // claim id this one corrected or contradicted
   request_version: number; // version this claim belongs to
+  entered_as?: ClaimKind; // original kind when claim was first created (e.g., CORRECTED before later CONFIRMED via readback)
 }
 
 // ---------- Challenges (v2: the LLM may ask, never grade) ----------

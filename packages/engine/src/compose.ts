@@ -389,10 +389,34 @@ export function buildReadbackEvidence(claims: Claim[], actions: AgentAction[], s
 }
 
 /** Sum of every DISTINCT amount ever stated (any version) -- the anti-structuring check.
- *  Only emitted as a card when >=2 distinct amounts exist across the call. */
+ *  Only emitted as a card when >=2 distinct amounts exist across the call.
+ *  FOUNDER RULING (2026-09-14): a self-corrected amount does not count toward exposure.
+ *  Amounts withdrawn via a self-correction within a single utterance (e.g., "forty thousand,
+ *  uh sorry, forty eight thousand five hundred") are excluded from the structuring sum.
+ *  Amounts in separate utterances (including separate transactions introduced with
+ *  "Actually") still count (that is the structuring defense). */
 export function buildExposureEvidence(claims: Claim[], seed: SeedConfig, request_version: number): Evidence | null {
   const amountClaims = claims.filter((c) => c.field === 'amount_usd');
-  const distinct = [...new Set(amountClaims.map((c) => Number(c.value)))];
+
+  // Identify amounts that were superseded by a self-correction: a CORRECTED claim that
+  // appears in the same utterance as the claim it supersedes. A CORRECTED claim is identified
+  // by either kind='CORRECTED' or kind='CONFIRMED' with entered_as='CORRECTED' (the latter
+  // occurs when a correction is later confirmed via readback).
+  // Do NOT exclude amounts superseded by CONTRADICTED claims or by CORRECTED claims from
+  // different utterances (those represent separate transactions, the anti-structuring signals).
+  const correctionSupersedes = new Set<string>();
+  for (const claim of amountClaims) {
+    if (claim.supersedes && (claim.kind === 'CORRECTED' || claim.entered_as === 'CORRECTED')) {
+      // Only exclude if both claims are from the same utterance (self-correction in one breath).
+      const priorClaim = amountClaims.find((c) => c.id === claim.supersedes);
+      if (priorClaim && priorClaim.quote.utterance_id === claim.quote.utterance_id) {
+        correctionSupersedes.add(claim.supersedes);
+      }
+    }
+  }
+
+  const relevantClaims = amountClaims.filter((c) => !correctionSupersedes.has(c.id));
+  const distinct = [...new Set(relevantClaims.map((c) => Number(c.value)))];
   if (distinct.length < 2) return null;
   const exposure_usd = distinct.reduce((a, b) => a + b, 0);
   const current = currentClaim(claims, 'amount_usd');

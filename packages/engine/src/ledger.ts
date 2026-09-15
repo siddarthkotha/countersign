@@ -193,6 +193,9 @@ export function buildLedger(
       t_ms,
       request_version,
       ...(supersedes !== undefined ? { supersedes } : {}),
+      // entered_as records the original kind when the claim was first created,
+      // preserved if the kind later changes (e.g., CORRECTED → CONFIRMED via readback)
+      entered_as: kind,
     };
     nextId += 1;
     claims = [...claims, claim];
@@ -322,7 +325,8 @@ export function buildLedger(
             repairWindowSince[field] = pending.action.t_ms;
           } else {
             // affirmed (lexicon hit) or restated (bare exact repeat of the value) both
-            // resolve the readback the same way.
+            // resolve the readback the same way. Preserve entered_as so we can later tell
+            // if this was originally a CORRECTED claim.
             const currentId = current.id;
             claims = claims.map((c) => (c.id === currentId ? { ...c, kind: 'CONFIRMED' as ClaimKind } : c));
           }
