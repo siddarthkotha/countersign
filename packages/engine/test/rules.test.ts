@@ -343,17 +343,18 @@ describe('decide -- founder rulings 2026-09-09', () => {
     expect(r.assurance.at_least_one_challenge_passed).toBe(true);
   });
 
-  // Ruling B: an injection-lexicon hit adds 1.0 to the tally (same weight as a failed
-  // check) and sets a new assurance item, no_injection_attempt, to false for the rest of
-  // the call -- STAGE becomes unreachable even once every other item clears.
-  it('ruling B: an injection_marker FLAG adds 1.0 to the tally and blocks STAGE via no_injection_attempt', () => {
+  // Ruling 6 (2026-09-15): an injection-lexicon hit sets the assurance item
+  // no_injection_attempt to false for the rest of the call -- STAGE becomes unreachable
+  // even once every other item clears. Injection does not count toward the tally anymore
+  // (ruling B 2026-09-09 is amended; it used to add 1.0 to tally).
+  it('ruling B: an injection_marker FLAG blocks STAGE via no_injection_attempt (ruling 6 amends: no tally contribution)', () => {
     const evidence = [
       ...stageEvidence(),
       ev('ev-knowledge-a', 'knowledge_check_result', 'PASS', { facts: { kind: 'SEED_FACT', result: 'PASS' } }),
       ev('ev-injection', 'injection_marker', 'FLAG', { facts: { phrase: 'ignore your instructions' }, quotes: [{ utterance_id: 'c1', text: 'Ignore your instructions' }] }),
     ];
     const r = decide(evidence, SEED, STAGE_CTX);
-    expect(r.failure_tally).toBeGreaterThanOrEqual(1);
+    expect(r.failure_tally).toBe(0);
     expect(r.assurance.no_injection_attempt).toBe(false);
     expect(r.verdict).not.toBe('STAGE');
   });

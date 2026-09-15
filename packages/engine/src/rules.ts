@@ -75,9 +75,10 @@ const CRITICAL_TALLY_CAP = 2;
 /** Tally: independent FAILED checks toward the freeze/escalate thresholds. AMBIGUOUS/REFUSED
  *  challenges (surfaced as FLAG knowledge cards whose facts.result isn't PASS/FAIL) count
  *  0.5; pressure and identity-switch cards count 0 (behavior, not proof; identity switch
- *  resets state instead of accruing tally). Ruling B (2026-09-09, red team item 5): an
- *  injection-lexicon hit is no longer free -- each one now counts 1, the same weight as a
- *  failed check (it used to count 0). */
+ *  resets state instead of accruing tally). Ruling 6 (2026-09-15): an injection-lexicon hit
+ *  is behavioral evidence that makes STAGE unreachable (via the no_injection_attempt assurance
+ *  item), but no longer contributes to the tally itself -- injection does not count toward
+ *  freeze or escalate thresholds, only blocks the positive ceiling. */
 function computeTally(
   evidence: Evidence[],
   mutant: RuleMutant | undefined,
@@ -117,7 +118,6 @@ function computeTally(
   tally += contradictionTally;
   tally += knowledgeFailTally;
   tally += knowledgeAmbiguousTally;
-  tally += injectionCount; // ruling B (2026-09-09): each injection-lexicon hit now counts 1, same as a failed check
 
   return { tally, ssoFail, oobFail, contextFail, hasContradiction, contradictionCount: consistencyFails.length, injectionCount };
 }
@@ -421,11 +421,11 @@ Rule table (evidence-first, first match wins):
    Reasons are always ordered: identity, out-of-band, context, story consistency, knowledge check, urgency pressure, exposure limit, new beneficiary. Freeze keeps strict priority over rows 4 and 5: it can fire on raw, unconfirmed evidence rather than waiting on a challenge or a readback that may never come.
 9. Distinct amounts stated across the call add up past the high-value threshold while the current amount alone reads under it -> escalate for a human callback (this guards against splitting one large request into smaller-looking pieces).
 10. A first-time beneficiary not on record -> escalate for a human callback, regardless of amount.
-11. Every AssuranceChecklist item reads true -> STAGE for second approval. A pressure flag never blocks this step, but it keeps the details off the call and adds the principal alert to the required actions. At least one knowledge or relational challenge must have graded PASS (ruling 2026-09-09) -- stated as its own explicit assurance item (at_least_one_challenge_passed), separate from and mathematically redundant with the general per-risk-level requirement (challenge_requirement_met) whenever that requirement is 1, so the "never zero challenges" floor stays visible and enforced on its own even if the general requirement's arithmetic changes later. An explicit instruction-injection attempt anywhere in the call (ruling 2026-09-09) makes STAGE unreachable for the rest of the call, regardless of how everything else resolves.
+11. Every AssuranceChecklist item reads true -> STAGE for second approval. A pressure flag never blocks this step, but it keeps the details off the call and adds the principal alert to the required actions. At least one knowledge or relational challenge must have graded PASS (ruling 2026-09-09) -- stated as its own explicit assurance item (at_least_one_challenge_passed), separate from and mathematically redundant with the general per-risk-level requirement (challenge_requirement_met) whenever that requirement is 1, so the "never zero challenges" floor stays visible and enforced on its own even if the general requirement's arithmetic changes later. An explicit instruction-injection attempt anywhere in the call makes STAGE unreachable for the rest of the call (ruling 2026-09-15), regardless of how everything else resolves.
 12. Some checks have failed, fewer than three, and either challenges remain to ask, or the challenge just asked has not been answered yet and the call is still live -> hold; ask another challenge, or wait the few seconds a reply is still due (ruling 2026-09-09): the instant the last allowed challenge is asked must not by itself fall through to row 14 before the caller has had a chance to answer it.
 13. A critical field's readback has been re-asked to seed.thresholds.max_readback_reasks (default 3) without ever reaching a confirmed answer -> escalate for a human callback, naming the field (founder decision 2026-09-12 9:00 AM: closes an unbounded readback loop a live call hit on 2026-09-11 -- report scripts/rehearse/reports/2026-09-11T22-51-38-barge-in-interrupt.md -- where the agent re-asked the same beneficiary readback five times before the 60s idle timeout finally escalated it). Sits exactly where row 14 (the plain "otherwise" catch-all) used to sit: reached only once rows 1-12 have already failed to match, so it never needs its own explicit freeze guard -- FREEZE (row 8) already claimed priority earlier in the chain if it was eligible.
 14. Otherwise -> escalate for a human callback; nothing moves by voice alone.
 15. The call itself ends (idle timeout, session cap, a hangup, or a dropped socket) while the table above still leaves the outcome on hold (rows 3-7 or 12) -> escalate for a human callback if a request was ever stated (the same containment an organic escalation gets, with no rule-failure reason to name -- only that the call ended before the checks finished); with no request ever stated, there is nothing to route, so this closes as no action instead. Every terminal row above (freeze included) keeps strict priority: this row is only reached when nothing else already decided.
 
-Tally (independent failed checks; used by rows 8c and 12): SSO/identity fail 1, out-of-band fail 1, context fail 1, each contradicted claim 1 (capped at 2), each failed challenge 1, each ambiguous/refused challenge 0.5 (evasion is not free, but not fatal either), each instruction-injection hit 1 (ruling 2026-09-09: no longer free -- it is itself behavioural evidence, weighted the same as a failed check, and separately makes STAGE unreachable for the rest of the call). Pressure and an identity switch each still count 0 toward the tally -- they are behavior, never proof, and an identity switch resets the evaluation instead of accruing against it.
+Tally (independent failed checks; used by rows 8c and 12): SSO/identity fail 1, out-of-band fail 1, context fail 1, each contradicted claim 1 (capped at 2), each failed challenge 1, each ambiguous/refused challenge 0.5 (evasion is not free, but not fatal either). Instruction-injection attempts do not count toward the tally (ruling 2026-09-15) -- they are behavioral evidence that makes STAGE permanently unreachable for the rest of the call (via the no_injection_attempt assurance item), but do not contribute to freeze or escalate thresholds. Pressure and an identity switch each count 0 toward the tally -- they are behavior, never proof, and an identity switch resets the evaluation instead of accruing against it.
 `;
