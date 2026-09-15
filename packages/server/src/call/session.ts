@@ -35,7 +35,7 @@ import { validateToolArgs } from './validate.js';
 import { stallKindFor, stallLineFor, type StallKind } from './stalls.js';
 import { argsForTerminalTool } from './terminalActions.js';
 import { transcriptMatchesCloseSentence } from './closeMatch.js';
-import { QUESTION_GOALS, verbatimQuestionSentence, transcriptAsksQuestion } from './questionMatch.js';
+import { QUESTION_GOALS, verbatimQuestionSentence, transcriptAsksQuestion, looksLikeAnswerAttempt } from './questionMatch.js';
 
 export interface CallSessionOpts {
   session_id: string;
@@ -577,6 +577,80 @@ export class CallSession {
    *  still fresh next time this flag is true) asks it exactly once, still without ever losing
    *  it. */
   private tickTriggeredByCallerTurn = false;
+
+  /** BRAKE (2026-09-15, e-followup task, PROVEN live: fragment-analysis.md sections A/C --
+   *  see `shouldBrakeFreshQuestion`'s own doc comment for the full incident and design). How
+   *  close together (ms) two CONSECUTIVE caller transcript events have to land for the second
+   *  to be treated as a likely continuation of the first's own sentence rather than a genuine
+   *  new turn. ESTIMATE, labelled: derived from the PROVEN 2.1-2.3s gaps measured across three
+   *  live bundles (fragment-analysis.md section A) where AssemblyAI's own endpointer split one
+   *  scripted line into two `transcript.user` events -- 2500ms gives real margin above the
+   *  measured range without being so wide it would swallow a caller's own genuine fast
+   *  two-beat answer (the "6s apart yield two as today" test case is well clear of it). */
+  private static readonly QUESTION_FRAGMENT_WINDOW_MS = 2_500;
+
+  /** BRAKE: true once a caller transcript fragment that `looksLikeAnswerAttempt` has arrived
+   *  since the CURRENT `lastAskedQuestionKey` was actually sent -- reset to false every time a
+   *  fresh instructed question is sent (both `maybeSendReplyCreateForTick`'s immediate branch
+   *  and `maybeSendReplyCreateAfterReplyDone`'s catch-up branch, the only two places
+   *  `lastAskedQuestionKey` is ever updated). Read only by `shouldBrakeFreshQuestion`: once
+   *  true, the brake never re-applies for the CURRENTLY pending instructed question, even if a
+   *  later fragment lands close to the one that set this -- see that method's own doc comment
+   *  for why content, once seen, always outranks timing (test: "a fragment that IS an answer
+   *  ... proceeds as today"). */
+  private pendingQuestionAnswerAttemptSeen = false;
+
+  /** BRAKE: the `t_ms` (server clock, `nowT()`) of the most recently logged CALLER
+   *  utterance, captured the instant BEFORE the current one is appended in
+   *  `dispatchAaiEvent`'s `transcript.user` case -- i.e. always the fragment immediately
+   *  PRECEDING whichever one is about to trigger this tick. Null before the call's first
+   *  caller utterance, or once nothing is left to compare against. Kept as its own field
+   *  (rather than re-deriving from `this.logs.conversation` on every check) so the "previous"
+   *  side of the comparison is always exactly the fragment that came before the one currently
+   *  being processed, never re-computed after a LATER fragment has already been appended. */
+  private previousCallerTranscriptAtMs: number | null = null;
+
+  /** BRAKE (2026-09-15, e-followup task -- see scratchpad/fragment-analysis.md sections A/C
+   *  and D(3), the design E follow-up task this closes): PROVEN live (a fresh sample against
+   *  deploy 39, six calls, and the 08-56-33-miller-silent-after-amount bundle specifically): a
+   *  mid-sentence pause splits ONE caller line into two AssemblyAI `transcript.user` turns
+   *  2.1-2.3s apart; each fragment is its own caller-turn tick, and once the engine has moved
+   *  the current goal to a DIFFERENT question (fsm.ts's own `selectChallenge` advances the
+   *  instant a challenge is confirmed ASKED, independent of whether it was ever answered --
+   *  see the analysis doc's section B/C), the SECOND fragment alone was enough for
+   *  `maybeSendReplyCreateForTick`'s existing freshQuestion path to proactively ask that new
+   *  question immediately -- three questions asked in 17s on one live bundle, an engine-lane
+   *  bug (fragment-analysis.md option (1), a DIFFERENT worktree/lane) compounded by this
+   *  server sending as fast as the engine hands it something fresh.
+   *
+   *  This is the independent SERVER-side brake (fragment-analysis.md option (3), recommended
+   *  alongside, not instead of, the engine-lane fix): true when ALL of --
+   *   1. there IS a previous instructed question already asked (`lastAskedQuestionKey` is not
+   *      null) -- nothing to brake against for the call's very first question;
+   *   2. it is still UNANSWERED -- no caller fragment since it was sent has looked like an
+   *      answer attempt (`pendingQuestionAnswerAttemptSeen` is false; see
+   *      `looksLikeAnswerAttempt`'s own doc comment for why content always wins over timing);
+   *   3. the fragment that triggered THIS tick landed within `QUESTION_FRAGMENT_WINDOW_MS` of
+   *      the one immediately before it (`previousCallerTranscriptAtMs`) -- the fragmentation
+   *      signature itself.
+   *  Deliberately scoped to `maybeSendReplyCreateForTick`'s IMMEDIATE (caller-turn-triggered)
+   *  send only, never `maybeSendReplyCreateAfterReplyDone`'s catch-up path: braking there too
+   *  would re-check the SAME now-stale fragment-gap forever once the caller falls silent
+   *  waiting for the very question this brake is holding back -- a real deadlock risk (the
+   *  gap between two already-logged utterances never shrinks just because time passes with no
+   *  THIRD fragment arriving). Suppressing only the immediate send, while leaving
+   *  `owedQuestionGoalKey` set exactly as the ordinary busy-deferral case already does,
+   *  reuses the EXISTING catch-up mechanism unmodified: the very next reply.done (typically
+   *  the fragment's own automatic reply finishing, seconds away, never bounded by this
+   *  brake's own window) delivers the owed question once, "on the next genuine turn," per the
+   *  task's own framing -- no new timer needed. */
+  private shouldBrakeFreshQuestion(): boolean {
+    if (this.lastAskedQuestionKey === null) return false;
+    if (this.pendingQuestionAnswerAttemptSeen) return false;
+    if (this.previousCallerTranscriptAtMs === null) return false;
+    const gap = this.nowT() - this.previousCallerTranscriptAtMs;
+    return gap <= CallSession.QUESTION_FRAGMENT_WINDOW_MS;
+  }
 
   /** Design E: the one-shot `reply.create.instructions` text for a QUESTION_GOALS `goal` --
    *  the exact sentence the caller must hear, wrapped the same "say exactly this and nothing
@@ -1355,6 +1429,12 @@ export class CallSession {
   }
 
   private dispatchAaiEvent(evt: AaiEvent): void {
+    // BRAKE (2026-09-15): captured here, read only after `tick()` (below) has already run and
+    // consulted `previousCallerTranscriptAtMs` for whatever it was BEFORE this event -- see
+    // that field's own doc comment for why the update must happen strictly after the tick that
+    // processes this fragment, never before or during it (comparing a fragment against itself
+    // would always read a zero gap).
+    let newCallerTranscriptAtMs: number | null = null;
     switch (evt.type) {
       // PROVEN flight-recorder bug fix (2026-09-03): `tick()` re-runs the full engine
       // `evaluate(this.buildEngineInput())` and logs a diagnostics `evaluate` event -- worth
@@ -1428,6 +1508,15 @@ export class CallSession {
           // comment for why the proactive QUESTION_GOALS send is scoped to this, not to
           // every tick.
           this.tickTriggeredByCallerTurn = true;
+          // BRAKE (2026-09-15): recorded BEFORE the trailing `tick()` runs, so
+          // `shouldBrakeFreshQuestion` (called from inside that tick) sees whether THIS
+          // fragment itself already looks like an answer attempt. Never cleared once true for
+          // the currently pending instructed question -- see the field's own doc comment.
+          if (looksLikeAnswerAttempt(evt.text)) this.pendingQuestionAnswerAttemptSeen = true;
+          // The field itself is only advanced to THIS fragment's own timestamp once this
+          // event's tick has finished consulting the PRIOR value -- see the local variable's
+          // own doc comment just above the switch statement.
+          newCallerTranscriptAtMs = this.nowT();
         }
         // reply.create fix, round 3 (2026-09-13): accumulate this AAI reply's own spoken
         // text, in memory only (never diagnostics -- LAW 4) -- `scheduleCloseIfNeeded` reads
@@ -1661,6 +1750,11 @@ export class CallSession {
         break;
     }
     this.tick();
+    // BRAKE (2026-09-15): only now -- after this event's own tick has already consulted
+    // `previousCallerTranscriptAtMs` for whatever it was BEFORE this fragment -- does the
+    // field advance to this fragment's own timestamp, ready for the NEXT one to compare
+    // against. A no-op for every event type other than transcript.user.
+    if (newCallerTranscriptAtMs !== null) this.previousCallerTranscriptAtMs = newCallerTranscriptAtMs;
   }
 
   /** When the agent's reply for an ASK_CHALLENGE/READBACK/ELICIT_MISSING_CRITICAL goal
@@ -2252,9 +2346,20 @@ export class CallSession {
     const freshQuestion = callerTurnTick && this.isFreshQuestionGoal(goal);
     if (freshQuestion) this.owedQuestionGoalKey = JSON.stringify(goal);
     if (this.speaking || this.replyCreateAwaitingStart) return;
-    if (!this.mustForceSpeak(goalAtTickStart, finalGoal) && !freshQuestion) return;
+    const forceSpeak = this.mustForceSpeak(goalAtTickStart, finalGoal);
+    // BRAKE (2026-09-15): only ever holds back the freshQuestion path itself -- a `forceSpeak`
+    // transition (leaving a holding pattern for a genuinely new goal) is a different mechanism
+    // than the fragmentation problem this brake exists for, and is never suppressed by it. See
+    // `shouldBrakeFreshQuestion`'s own doc comment for the full incident and why this is
+    // deliberately scoped to THIS method only, never the reply-done catch-up path.
+    if (freshQuestion && !forceSpeak && this.shouldBrakeFreshQuestion()) {
+      this.diag('question_fragment_brake_applied', { goal_code: finalGoal });
+      return;
+    }
+    if (!forceSpeak && !freshQuestion) return;
     if (freshQuestion) {
       this.lastAskedQuestionKey = JSON.stringify(goal);
+      this.pendingQuestionAnswerAttemptSeen = false;
       this.owedQuestionGoalKey = null;
     }
     this.sendReplyCreate(finalGoal, 'tick_end', this.instructedSentenceFor(goal));
@@ -2378,6 +2483,13 @@ export class CallSession {
     if (!this.mustForceSpeak(label, current) && !owedQuestion) return;
     if (owedQuestion) {
       this.lastAskedQuestionKey = JSON.stringify(goal);
+      // BRAKE (2026-09-15): deliberately NOT re-checked here -- see
+      // `shouldBrakeFreshQuestion`'s own doc comment for why re-applying the timing brake in
+      // this catch-up path risks a real deadlock (the fragment-gap it would compare against
+      // never shrinks once the caller falls silent waiting for exactly this question). This
+      // IS "the next genuine turn" the brake defers to -- always allowed to deliver the owed
+      // question, unconditionally, once reached.
+      this.pendingQuestionAnswerAttemptSeen = false;
       this.owedQuestionGoalKey = null;
     }
     this.sendReplyCreate(current, 'reply_done_goal_diverged', this.instructedSentenceFor(goal));

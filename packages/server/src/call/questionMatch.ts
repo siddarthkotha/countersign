@@ -135,3 +135,150 @@ export function transcriptAsksQuestion(accumulatedTranscript: string, verbatimSe
   const normalized = stripKnownLeadIn(normalizeForCloseMatch(accumulatedTranscript));
   return QUESTION_IMPERATIVE_STARTS.some((start) => normalized.startsWith(start));
 }
+
+/** Fragment-brake fix (2026-09-15, PROVEN live from a fresh sample against deploy 39 --
+ *  scratchpad/fragment-analysis.md sections A/C/D(3)): a mid-sentence pause splits one
+ *  caller line into two separate AssemblyAI `transcript.user` turns (PROVEN 2.1-2.3s apart on
+ *  three bundles); the server treats each fragment as its own genuine caller turn, and once
+ *  the engine has moved on to a DIFFERENT question goal in between (fsm.ts auto-advances the
+ *  instant a challenge is confirmed asked, independent of whether it was ever answered -- see
+ *  the fragment-analysis doc's section B/C), the second fragment alone was enough to make
+ *  `call/session.ts` proactively ask that new question immediately -- three questions in 17s
+ *  on one live bundle. `call/session.ts`'s own brake (`shouldBrakeFreshQuestion`) needs a
+ *  cheap, SERVER-ONLY (LANE-FILES: packages/server/** only for this task; the engine's own
+ *  answer-shaped gate, fragment-analysis.md option (1), is a DIFFERENT lane and untouched
+ *  here) signal for "does this caller fragment look like it's actually trying to answer
+ *  something" -- so a caller who genuinely answers fast (two clean, quick beats) is never
+ *  held back, only a caller whose own sentence got chopped in half by AssemblyAI's
+ *  endpointer.
+ *
+ *  Deliberately NOT "contains digits": the PROVEN fragmentation trigger itself ("And make it
+ *  $2.1 million.") contains digits despite answering nothing that was asked of it. A
+ *  capitalized, non-sentence-initial-function-word token is a better, cheap proxy for "the
+ *  caller is naming something" (a person, firm, or institution) -- exactly the shape of
+ *  answer the ASK_CHALLENGE/READBACK/ELICIT_* goals this brake guards are usually fishing
+ *  for. This is a PACING heuristic only, never a grading one (LAW 3 unaffected: nothing here
+ *  ever decides a challenge PASS/FAIL/AMBIGUOUS -- that stays exclusively the engine's own
+ *  `gradeChallenges`, untouched); it only ever decides whether the SERVER holds back its own
+ *  next proactive `reply.create`, never what the engine's verdict is. ESTIMATE, not PROVEN:
+ *  this heuristic will sometimes be wrong in both directions on a live call (a genuine answer
+ *  starting with a common word, or a filler phrase that happens to contain a capitalized
+ *  word) -- acceptable because a false negative here only delays the next question to the
+ *  next genuine turn or the existing re-ask timer (never loses it), and a false positive only
+ *  lets a real fragment-driven double-ask slip through occasionally, no worse than today. */
+const ANSWER_ATTEMPT_LEAD_WORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'and',
+  'but',
+  'or',
+  'so',
+  'if',
+  'please',
+  'what',
+  'which',
+  'who',
+  'when',
+  'where',
+  'why',
+  'how',
+  'can',
+  'could',
+  'would',
+  'will',
+  'is',
+  'are',
+  'was',
+  'were',
+  'do',
+  'does',
+  'did',
+  'yes',
+  'no',
+  'i',
+  'you',
+  'we',
+  'they',
+  'he',
+  'she',
+  'it',
+  'that',
+  'this',
+  'these',
+  'those',
+  'make',
+  'let',
+  'ok',
+  'okay',
+  'well',
+  'um',
+  'uh',
+  'listen',
+  'look',
+  'now',
+  'then',
+  'also',
+  'just',
+  'still',
+  'final',
+  'thank',
+  'thanks',
+]);
+
+/** Second signal for `looksLikeAnswerAttempt`, alongside the name-shaped check above:
+ *  fix (2026-09-15, PROVEN reachable -- the very corpus fixture `packages/server/test/
+ *  close-transcript-wait.test.ts`'s own `driveToSealedStage` already exercises, unmodified):
+ *  READBACK's own confirmation loop is answered "Yes, that's right." / "No, that's wrong.
+ *  It's Meridian Supply." -- plain yes/no, never a name -- and those turns land back-to-back
+ *  every ~1500ms (fragment-analysis.md's own "Other near-3s user-pairs found (NOT the same
+ *  bug)" section documents this exact pattern live: ten near-identical readback-confirmation
+ *  turns in a row, each a genuinely separate, fully-answered turn, not a fragmented one). A
+ *  name-only check would misclassify every one of those as still-unanswered and brake a
+ *  legitimate fast confirmation cadence. A clear confirmation/refusal word is just as strong
+ *  a signal that the caller is actually answering as a name is -- checked case-insensitively,
+ *  anywhere in the fragment (unlike the name check, position never matters for these: "Yes"
+ *  is exactly as much an answer at the start of a sentence as anywhere else). */
+const CONFIRMATION_WORDS = new Set([
+  'yes',
+  'yeah',
+  'yep',
+  'no',
+  'nope',
+  'correct',
+  'incorrect',
+  'wrong',
+  'right',
+  'confirmed',
+  'confirm',
+  'agreed',
+  'agree',
+  'disagree',
+  'sure',
+  'exactly',
+  'indeed',
+  'affirmative',
+  'negative',
+]);
+
+function isCapitalizedWord(word: string): boolean {
+  return word.length >= 2 && /^[A-Z][a-z]+$/.test(word);
+}
+
+/** True when `text` (one caller transcript fragment) either contains a clear confirmation or
+ *  refusal word (a "yes"/"no"-shaped answer -- see `CONFIRMATION_WORDS`'s own doc comment) or
+ *  a token that plausibly names something -- a person, firm, or institution -- rather than
+ *  being pure filler or a sentence-initial capital. See `ANSWER_ATTEMPT_LEAD_WORDS`'s own doc
+ *  comment above for the full reasoning behind the name-shaped check and its exclusions. */
+export function looksLikeAnswerAttempt(text: string): boolean {
+  const words = text.match(/[A-Za-z']+/g) ?? [];
+  for (const word of words) {
+    if (CONFIRMATION_WORDS.has(word.toLowerCase())) return true;
+  }
+  for (const word of words) {
+    if (!isCapitalizedWord(word)) continue;
+    if (ANSWER_ATTEMPT_LEAD_WORDS.has(word.toLowerCase())) continue;
+    return true;
+  }
+  return false;
+}
