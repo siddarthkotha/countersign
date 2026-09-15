@@ -331,6 +331,50 @@ describe('ws/browser — /ws/call/:id', () => {
     ws1.close();
   });
 
+  // Defect 1 fix (timing-analysis.md §C, PROVEN case 7 / bundle 859b6d60: 90.5s of dead
+  // air never tripped the 30s idle timer): raw browser->server messages -- including the
+  // continuous stream of `{type:'audio', ...}` frames a live open mic sends the WHOLE
+  // call, whether or not the caller is saying anything -- used to touch the idle clock on
+  // EVERY single one (`ws.on('message', ...)` calling `touch()` unconditionally), so
+  // `idle_timeout_ms` measured "is the socket sending anything" rather than real
+  // conversational silence. Proves the fix directly against the caps state the real idle
+  // reaper reads (`state.active.get(id).last_activity_at`): a burst of raw `audio`
+  // messages leaves it untouched, while a genuine AAI conversational event (routed through
+  // `CallSession`'s own `onActivity` hook, unchanged by this fix) still updates it.
+  it('raw browser audio frames never touch the idle-activity clock; a caller AAI event does (Defect 1 fix)', async () => {
+    const { base, wsBase, state, aaiInstances } = await start();
+    const startRes = await fetch(`${base}/api/session/start`, { method: 'POST' });
+    const { session_id, ws_path } = (await startRes.json()) as { session_id: string; ws_path: string };
+
+    const { ws, messages } = await connectAndCollect(`${wsBase}${ws_path}`);
+    ws.send(JSON.stringify({ type: 'start' }));
+    await pollUntil(() => messages.some((m) => m.type === 'state'));
+
+    const afterStart = state.active.get(session_id)!.last_activity_at;
+
+    // A burst of raw audio frames -- exactly what a live open mic streams continuously,
+    // independent of whether AssemblyAI's own VAD ever detects speech in them.
+    for (let i = 0; i < 20; i++) {
+      ws.send(JSON.stringify({ type: 'audio', data: 'QUJD' }));
+    }
+    // Real wait, not a poll: proving a NEGATIVE (nothing touched it) needs to let real time
+    // pass so a still-present bug (touch() still wired to the message handler) would show
+    // up as a changed timestamp -- there is no condition to poll toward here.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Untouched: raw audio frames no longer reach `touch()` at all.
+    expect(state.active.get(session_id)!.last_activity_at).toBe(afterStart);
+
+    // A genuine conversational event on the AAI leg -- the caller's final transcript --
+    // still updates it, via CallSession's own `onActivity` hook (unchanged by this fix,
+    // wired in `handleCallSocket`).
+    const aai = aaiInstances.get(session_id)!;
+    aai.emit({ type: 'transcript.user', item_id: 'u1', text: 'hello' });
+    await pollUntil(() => state.active.get(session_id)!.last_activity_at > afterStart);
+
+    ws.close();
+  });
+
   // Round 4, requirement 9 (2026-09-14, session lane): `endCall(..., 'idle_timeout')` no
   // longer closes the socket the instant it's called -- nothing was ever said on this call,
   // so `CallSession.end('idle_timeout')` finds verdict NO_ACTION (row 15) and now speaks a

@@ -1172,7 +1172,12 @@ export class CallSession {
         }
         // Changes `conversation`, part of EngineInput -- must tick.
         this.logs.conversation.push(utteranceFromTranscript(evt, this.nowT()));
-        this.opts.onActivity?.();
+        // Idle-timing fix (timing-analysis.md §C): only the CALLER's own final transcript
+        // counts as conversational activity here -- `transcript.agent` does not touch the
+        // idle clock (the agent finishing its reply, `reply.done` below, is what starts the
+        // caller's own silence window; the agent's transcript can land before or after that
+        // and would otherwise let a stalled reply mask real caller silence).
+        if (evt.type === 'transcript.user') this.opts.onActivity?.();
         // reply.create fix, round 3 (2026-09-13): accumulate this AAI reply's own spoken
         // text, in memory only (never diagnostics -- LAW 4) -- `scheduleCloseIfNeeded` reads
         // this at the reply's own `reply.done` to decide whether the CLOSE sentence was
@@ -1264,6 +1269,12 @@ export class CallSession {
 
       case 'reply.done':
         this.speaking = false;
+        // Idle-timing fix (timing-analysis.md §C): the agent finishing a reply is
+        // conversational activity too -- this is what lets the 30s idle window start
+        // counting from the moment the agent stops talking (asking a question, saying the
+        // goodbye, whatever), rather than never starting at all because raw audio frames
+        // (removed, ws/browser.ts) or a mid-reply event kept resetting it early.
+        this.opts.onActivity?.();
         // A reply.done for this reply means it is no longer at risk of being "stuck" --
         // `scheduleCloseIfNeeded` (below) is the authoritative next step for a CLOSE reply,
         // whether it matched or not; the watchdog's own job (catching a reply that ends
@@ -1317,6 +1328,11 @@ export class CallSession {
         // EngineInput field -- no reason to re-run evaluate too.
         this.opts.onServerEvent({ type: 'flush' });
         this.diag('input.speech.started', {});
+        // Idle-timing fix (timing-analysis.md §C): the caller starting to speak is real
+        // conversational activity even before AssemblyAI finalizes a transcript for it --
+        // touching here (not just at `transcript.user`) matters for a caller mid-utterance
+        // when the idle reaper's own tick lands.
+        this.opts.onActivity?.();
         return;
 
       case 'input.speech.stopped':

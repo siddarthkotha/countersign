@@ -253,7 +253,18 @@ function startGrace(session_id: string, deps: BrowserWsDeps, activeCalls: Map<st
  *  for a socket a reattach already replaced. */
 function wireSocketHandlers(ws: WebSocket, session_id: string, deps: BrowserWsDeps, activeCalls: Map<string, CallEntry>, entry: CallEntry): void {
   ws.on('message', (data) => {
-    touch(deps.caps, session_id, deps.now());
+    // Defect 1 fix (timing-analysis.md §C, PROVEN live case 7 / bundle 859b6d60: 90.5s of
+    // dead air never tripped the 30s idle timer): this used to `touch()` on EVERY raw
+    // browser->server message, including the continuous stream of `{type:'audio', ...}`
+    // frames the mic sends the whole call (open-mic capture, not gated by speech
+    // detection) -- so `idle_timeout_ms` measured "is the browser socket sending
+    // anything," which for a live call is always true, never actual conversational
+    // silence. Idle activity is now touched ONLY from `call/session.ts`'s own
+    // `onActivity` hook, on the three events that actually mean someone said something:
+    // the caller starting to speak (`input.speech.started`), a caller's final transcript
+    // (`transcript.user`), and the agent finishing a reply (`reply.done` -- so the 30s of
+    // caller silence the reaper measures starts counting after the agent stops talking,
+    // not mid-question). Raw audio frames, pings, and state messages never touch it.
     let msg: BrowserEvent;
     try {
       msg = JSON.parse(data.toString()) as BrowserEvent;

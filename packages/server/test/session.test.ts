@@ -3561,3 +3561,180 @@ describe('CallSession — a CLOSE reply that never completes (no transcript, no 
     expect(countReplyCreates()).toBeGreaterThan(replyCreatesAtStart);
   });
 });
+
+// Defect 1 fix (timing-analysis.md §C, PROVEN case 7 / bundle 859b6d60: 90.5s of dead air
+// never tripped the 30s idle timer -- the founder had to manually end the call). Root cause
+// (PROVEN, ws/browser.ts): `touch()` used to fire on EVERY raw browser->server websocket
+// message, including the continuous audio-frame stream a live open mic sends the whole
+// call, so the idle clock could never actually go idle for a real, mic-open call regardless
+// of whether the caller was saying anything. Fix: `onActivity` (this file's own hook,
+// wired by ws/browser.ts into `touch()`) is now called ONLY for the three AaiEvents that
+// mean someone actually said something -- `input.speech.started` (caller starts talking),
+// `transcript.user` (caller's final transcript), and `reply.done` (the agent finished
+// talking, so the caller's own 30s silence window starts counting from there). Every other
+// AaiEvent this dispatch handles -- `transcript.agent`, `reply.started`, `reply.audio`,
+// `input.speech.stopped` -- must never touch it.
+describe('CallSession — idle-activity touch points (Defect 1 fix, timing-analysis.md §C)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('touches onActivity for input.speech.started, transcript.user, and reply.done only -- never for transcript.agent, reply.started, reply.audio, or input.speech.stopped', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const activityTouches: number[] = [];
+    const call: CallContext = { session_id: 'sess-idle-activity', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = new CallSession({
+      session_id: call.session_id,
+      seed: MERIDIAN,
+      call,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onActivity: () => activityTouches.push(clock.now),
+    });
+    session.start();
+    expect(activityTouches).toEqual([]); // start() alone never touches activity
+
+    clock.now = 1000;
+    aai.emit({ type: 'input.speech.started' });
+    expect(activityTouches).toEqual([1000]);
+
+    clock.now = 1500;
+    aai.emit({ type: 'input.speech.stopped' });
+    expect(activityTouches).toEqual([1000]); // unchanged
+
+    clock.now = 2000;
+    aai.emit({ type: 'transcript.user', item_id: 'u1', text: 'hello' });
+    expect(activityTouches).toEqual([1000, 2000]);
+
+    clock.now = 3000;
+    aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    expect(activityTouches).toEqual([1000, 2000]); // unchanged
+
+    clock.now = 3200;
+    aai.emit({ type: 'reply.audio', data: 'QUJD' });
+    expect(activityTouches).toEqual([1000, 2000]); // unchanged
+
+    clock.now = 3400;
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: 'hi there', reply_id: 'r1', interrupted: false });
+    expect(activityTouches).toEqual([1000, 2000]); // unchanged -- the agent's own transcript never touches it
+
+    clock.now = 4000;
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+    expect(activityTouches).toEqual([1000, 2000, 4000]);
+  });
+
+  // (a) from the lane brief: 40s of continuous audio frames with no speech event ends by
+  // idle timeout 30s after the agent's last reply.done. `caps.ts`'s `touch()`/`reapIdle()`
+  // (not this lane's file) are exercised directly here, driven the same way index.ts's real
+  // 5s-interval reaper would, but on-demand rather than waiting 40 real seconds -- what this
+  // proves is the MECHANISM: raw audio frames (simulated as never calling `onActivity`, the
+  // Defect 1 fix's whole point) leave `last_activity_at` exactly where the agent's last
+  // `reply.done` left it, so a reaper tick 30s later correctly finds the session idle and
+  // ends it through the existing idle-timeout goodbye path (`end('idle_timeout')` defers,
+  // speaks a goodbye, then finishes as `idle_timeout`, see the RT-4 describe block above).
+  it('(a) 40s of continuous audio frames with no speech event: idle-reaping 30s after the agent last reply.done ends the call through the existing idle-timeout goodbye path', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-idle-40s-audio', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    let lastActivityAt = 0;
+    const session = new CallSession({
+      session_id: call.session_id,
+      seed: MERIDIAN,
+      call,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onActivity: () => {
+        lastActivityAt = clock.now;
+      },
+    });
+    session.start();
+
+    // The agent's last reply.done -- everything after this is dead air.
+    clock.now = 5000;
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+    expect(lastActivityAt).toBe(5000);
+
+    // 40s of raw audio frames every 20ms, simulated the way ws/browser.ts's (fixed) message
+    // handler now behaves: never calling onActivity, whether or not real time passes. No AAI
+    // conversational event of any kind occurs in this window (matches case 7's own 90.5s of
+    // total silence).
+    for (let t = 5020; t <= 45000; t += 20) {
+      clock.now = t;
+      // Deliberately NOT calling onActivity -- this loop stands in for the continuous
+      // browser->server audio-frame stream, which the fix ensures never touches it.
+    }
+    expect(lastActivityAt).toBe(5000); // still exactly the last reply.done, 40s later
+
+    // The real reaper (index.ts, outside this lane) would have fired multiple 5s-interval
+    // ticks by now; simulate the one that actually crosses the 30s idle threshold measured
+    // from the last real activity (5000 + 30000 = 35000, already passed at t=45000).
+    expect(clock.now - lastActivityAt).toBeGreaterThan(30_000);
+    clock.now = 45020;
+    session.end('idle_timeout');
+
+    // Deferred idle-timeout goodbye path (RT-4, requirement 9): not ended yet -- nothing
+    // was ever said on this call (verdict NO_ACTION), so a goodbye is requested and must
+    // actually be spoken before the call finishes, same as the existing
+    // "idle-timeout end() with NO request ever stated" test above drives it.
+    expect(session.last?.verdict).toBe('NO_ACTION');
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+
+    clock.now = 45100;
+    aai.emit({ type: 'reply.started', reply_id: 'goodbye-1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: 'Thank you for calling. Goodbye.', reply_id: 'goodbye-1', interrupted: false });
+    clock.now = 45200;
+    aai.emit({ type: 'reply.done', reply_id: 'goodbye-1', status: 'completed' });
+
+    vi.advanceTimersByTime(1500); // CLOSE_GRACE_MS after the goodbye is transcript-confirmed
+
+    const ended = sent.find((e) => e.type === 'ended');
+    expect(ended).toBeDefined();
+    if (ended?.type === 'ended') expect(ended.reason).toBe('idle_timeout');
+  });
+
+  // (b) from the lane brief: a caller speech event at 25s resets the idle clock.
+  it('(b) a caller speech event at 25s resets the idle clock -- the call does not idle out at 30s from an earlier reply.done', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-idle-25s-reset', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    let lastActivityAt = 0;
+    const session = new CallSession({
+      session_id: call.session_id,
+      seed: MERIDIAN,
+      call,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onActivity: () => {
+        lastActivityAt = clock.now;
+      },
+    });
+    session.start();
+
+    clock.now = 5000;
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+    expect(lastActivityAt).toBe(5000);
+
+    // A caller speech event at 25s after that reply.done (t=30000) resets the clock.
+    clock.now = 30_000;
+    aai.emit({ type: 'input.speech.started' });
+    expect(lastActivityAt).toBe(30_000);
+
+    // A reaper tick at what would have been the original 30s-from-reply.done deadline
+    // (t=35000) now measures only 5s of idle time from the reset, not 30s -- must NOT be
+    // idle yet.
+    clock.now = 35_000;
+    expect(clock.now - lastActivityAt).toBeLessThan(30_000);
+  });
+});
