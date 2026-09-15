@@ -304,6 +304,19 @@ export class CallSession {
    *  waiting on -- see `armCloseTranscriptWait`'s own doc comment. */
   private closeTranscriptWaitTimer: ReturnType<typeof setTimeout> | null = null;
   private closeTranscriptWaitReplyId: string | null = null;
+  /** goodbye-tail lane, review fix (2026-09-15, Important -- FAIL on this lane's own two prior
+   *  commits): reply ids whose `reply.done` has already fired, read by
+   *  `maybeArmCloseOnTranscript` to tell the routine case (final `transcript.agent` chunk
+   *  arrives AFTER its own reply.done, PROVEN 6 of 8 live calls, 2026-09-14 sample) apart from
+   *  the rarer reverse order (chunk arrives BEFORE reply.done). In the routine case,
+   *  `scheduleCloseIfNeeded` has already run for this reply (no match yet) and armed
+   *  `armCloseTranscriptWait`'s 1500ms fallback; when the late chunk then completes the match
+   *  here, there is no `reply.done` left to wait for -- arming `closeDoneWaitTimer`
+   *  (CLOSE_DONE_WAIT_MS, 4000ms) in that case waits out a full moot timer before
+   *  `beginCloseGrace()` ever runs, so the caller hears the goodbye and then four to six
+   *  seconds of silence before the line drops. Never pruned -- bounded by the session's own
+   *  reply count, same convention as `replyTranscripts` above. */
+  private readonly repliesWithDone = new Set<string>();
   /** Defect A fix: bytes of `reply.audio` actually RELAYED to the browser (post-suppression),
    *  and the server clock time the first relayed frame went out, keyed by AAI reply id --
    *  never pruned (same convention `replyTranscripts` above already uses: one call's total
@@ -726,6 +739,15 @@ export class CallSession {
       clearTimeout(this.closeTranscriptWaitTimer);
       this.closeTranscriptWaitTimer = null;
       this.closeTranscriptWaitReplyId = null;
+    }
+    // goodbye-tail lane, review fix (2026-09-15, Important): if `reply.done` for THIS reply
+    // already fired (the routine live case -- see `repliesWithDone`'s own doc comment), there
+    // is nothing left to wait for: `beginCloseGrace` directly instead of arming a
+    // `CLOSE_DONE_WAIT_MS` timer that can only ever expire, never be pre-empted by a
+    // `reply.done` that has already happened.
+    if (this.repliesWithDone.has(replyId)) {
+      this.beginCloseGrace();
+      return;
     }
     this.closeDoneWaitTimer = setTimeout(() => {
       this.closeDoneWaitTimer = null;
@@ -1412,6 +1434,11 @@ export class CallSession {
 
       case 'reply.done':
         this.speaking = false;
+        // goodbye-tail lane, review fix (2026-09-15, Important): record that THIS reply's
+        // `reply.done` has now fired, before anything below can call
+        // `maybeArmCloseOnTranscript` (indirectly, via a later `transcript.agent` event) for
+        // it -- see `repliesWithDone`'s own doc comment.
+        this.repliesWithDone.add(evt.reply_id);
         // Idle-timing fix (timing-analysis.md §C): the agent finishing a reply is
         // conversational activity too -- this is what lets the 30s idle window start
         // counting from the moment the agent stops talking (asking a question, saying the

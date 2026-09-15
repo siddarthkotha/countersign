@@ -346,6 +346,23 @@ describe('connectAai', () => {
     expect(aai.debugForceDrop?.()).toBe(false);
   });
 
+  it('second close() is idempotent -- session.end is sent exactly once', async () => {
+    // goodbye-tail lane (2026-09-15 review, Minor): `close()` (above) already guards on
+    // `this.closed` before sending `session.end` or touching the socket again -- this test
+    // makes that idempotency an explicit, executable assertion rather than an unverified
+    // property of the source.
+    const { deps, sockets } = makeDeps();
+    const aai = await connectAndReady(deps, sockets, 'sess-1');
+
+    aai.close();
+    const sendsAfterFirstClose = sockets[0]!.sent.filter((m) => JSON.parse(m).type === 'session.end').length;
+    expect(sendsAfterFirstClose).toBe(1);
+
+    aai.close();
+    const sendsAfterSecondClose = sockets[0]!.sent.filter((m) => JSON.parse(m).type === 'session.end').length;
+    expect(sendsAfterSecondClose).toBe(1); // the second close() sent nothing further
+  });
+
   it('does not attempt a resume on a close the caller itself requested', async () => {
     const { deps, sockets } = makeDeps();
     const aai = await connectAndReady(deps, sockets, 'sess-1');

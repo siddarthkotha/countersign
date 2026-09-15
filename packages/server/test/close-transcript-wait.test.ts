@@ -11,6 +11,22 @@
 // Fix (session.ts `scheduleCloseIfNeeded` / `armCloseTranscriptWait`): the retry decision now
 // waits CLOSE_TRANSCRIPT_WAIT_MS (1500ms) for a possible late chunk before concluding the
 // goodbye was not spoken; a matching transcript inside the window cancels the retry.
+//
+// goodbye-tail lane, review fix (2026-09-15, Important -- FAIL on this lane's own two prior
+// commits): cancelling the retry was not the whole story. When the late chunk lands and
+// completes the match, it runs through `maybeArmCloseOnTranscript`, which used to arm
+// `closeDoneWaitTimer` for CLOSE_DONE_WAIT_MS (4000ms) UNCONDITIONALLY, waiting for a
+// `reply.done` that, in this routine case, has already fired (that is how
+// `scheduleCloseIfNeeded` got to `armCloseTranscriptWait` at all). `beginCloseGrace()` was then
+// only ever reached when that moot 4s timer expired -- the caller heard the goodbye and then
+// four to six seconds of silence before the line dropped. Fix: `session.ts` now tracks which
+// reply ids have already had their own `reply.done` fire (`repliesWithDone`); when the
+// late-arriving transcript completes the match for one of those, `maybeArmCloseOnTranscript`
+// calls `beginCloseGrace()` directly instead of arming the moot wait. Test (a) below is
+// tightened to assert this (previously needed a 10s advance to reach `ended` at all -- now ends
+// within CLOSE_GRACE_MS of the match). Test (d) is the reverse order (transcript before its own
+// reply.done), unaffected by this fix -- the pre-existing CLOSE_DONE_WAIT_MS/"reply.done wins
+// the race" behaviour (session.test.ts's own tests (d)/(e)) still applies there.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { MERIDIAN, mockToolResult } from '@countersign/engine';
 import type { CallContext, ServerEvent } from '@countersign/engine';
@@ -106,7 +122,7 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
     vi.useRealTimers();
   });
 
-  it('(a) reply.done at t, matching transcript at t+400ms: exactly one CLOSE reply.create for the whole call', () => {
+  it('(a) reply.done at t, matching transcript at t+400ms: exactly one CLOSE reply.create, and the call ends promptly (no reply.done left to wait for)', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
@@ -128,20 +144,56 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
     // The close line's own transcript.agent chunk lands 400ms later -- well inside the
     // CLOSE_TRANSCRIPT_WAIT_MS (1500ms) window this fix adds.
     vi.advanceTimersByTime(400);
+    clock.now = 8100;
     aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
 
     // No retry was ever sent -- the late transcript confirmed the goodbye instead.
     expect(replyCreates()).toHaveLength(1);
 
-    // Advancing well past the transcript-wait window (which is now moot -- goodbyeConfirmed
-    // is already true) must not produce a retry either.
-    vi.advanceTimersByTime(1_500);
+    // goodbye-tail lane, review fix (2026-09-15, Important): reply.done for 'a5' already fired
+    // BEFORE this transcript completed the match, so there is no reply.done left to wait for --
+    // the hang-up begins right here (the unchanged flat CLOSE_GRACE_MS, no audio was ever
+    // relayed for this reply), not after a moot CLOSE_DONE_WAIT_MS (4000ms) timer that no
+    // reply.done can ever satisfy. Upper bound: ends within CLOSE_GRACE_MS of the match -- well
+    // under the pre-fix 4000ms + 1500ms = 5500ms of silence the caller used to sit through.
+    vi.advanceTimersByTime(1_499);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+    expect(replyCreates()).toHaveLength(1);
+  });
+
+  it('(d) matching transcript 200ms BEFORE its own reply.done: unaffected by the repliesWithDone fix -- reply.done still wins the race and starts the grace period immediately (existing behaviour, session.test.ts tests (d)/(e))', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, { ...CALL, session_id: 'sess-transcript-d' }, aai, sent, diagEvents);
+    session.start();
+    driveToSealedStage(session, aai, clock);
+    const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
     expect(replyCreates()).toHaveLength(1);
 
-    // The call still ends normally (no audio was ever relayed for this reply, so the grace
-    // period is the unchanged flat CLOSE_GRACE_MS off the transcript match -- confirmed via
-    // CLOSE_DONE_WAIT_MS, since reply.done already happened before the match was seen).
-    vi.advanceTimersByTime(10_000);
+    clock.now = 7500;
+    aai.emit({ type: 'reply.started', reply_id: 'a5' });
+    // The matching transcript arrives FIRST this time -- reply.done for 'a5' has not fired
+    // yet, so `repliesWithDone` does not have it: `maybeArmCloseOnTranscript` takes the
+    // unchanged CLOSE_DONE_WAIT_MS branch (nothing this fix touches).
+    clock.now = 7700;
+    aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+
+    // reply.done for the SAME reply arrives 200ms later -- well inside the 4s
+    // CLOSE_DONE_WAIT_MS window -- and wins the race: the grace period starts now, not 4s
+    // after the transcript match.
+    vi.advanceTimersByTime(200);
+    clock.now = 7900;
+    aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' });
+
+    vi.advanceTimersByTime(1_499);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    vi.advanceTimersByTime(1);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
     expect(replyCreates()).toHaveLength(1);
   });
