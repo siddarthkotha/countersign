@@ -145,6 +145,10 @@ async function parseCreditsFile(): Promise<FounderReading[]> {
 }
 
 async function main(): Promise<void> {
+  // Parse command-line arguments
+  const args = process.argv.slice(2);
+  const verbose = args.includes('--verbose');
+
   // Read all diagnostics bundles
   let files: string[] = [];
   try {
@@ -250,6 +254,29 @@ async function main(): Promise<void> {
       }
     }
 
+    // Calculate seconds for ONLY the bundles in the window
+    let windowProvenSeconds = 0;
+    let windowEstimateSeconds = 0;
+    for (const bundle of bundlesInWindow) {
+      if (bundle.billed_seconds !== undefined && typeof bundle.billed_seconds === 'number') {
+        windowProvenSeconds += bundle.billed_seconds;
+      } else {
+        const estimatedSeconds = (bundle.ended_at! - bundle.started_at) / 1000;
+        windowEstimateSeconds += estimatedSeconds;
+      }
+    }
+
+    if (verbose) {
+      console.log('\nIn-window bundles:');
+      for (const bundle of bundlesInWindow) {
+        const duration = bundle.billed_seconds ?? (bundle.ended_at! - bundle.started_at) / 1000;
+        const minutes = (duration / 60).toFixed(1);
+        const method = bundle.billed_seconds !== undefined ? 'PROVEN' : 'ESTIMATE';
+        console.log(`  ${bundle.session_id}: ${minutes}m (${method})`);
+      }
+      console.log('');
+    }
+
     const dashboardHoursDiff = last.hoursUsed - first.hoursUsed;
     const dashboardDollarsDiff = first.dollarsRemaining - last.dollarsRemaining;
     const impliedDollarPerHour = dashboardHoursDiff > 0 ? dashboardDollarsDiff / dashboardHoursDiff : 0;
@@ -265,10 +292,10 @@ async function main(): Promise<void> {
     console.log(`Window (Chicago): ${windowStartChicago} to ${windowEndChicago}`);
     console.log('');
     console.log(`Dashboard moved: ${dashboardHoursDiff.toFixed(2)}h (avg $${impliedDollarPerHour.toFixed(2)}/h)`);
-    console.log(`Ledger billed:   ${(totalProvenSeconds / 3600).toFixed(2)}h PROVEN`);
-    if (totalEstimateSeconds > 0) {
-      console.log(`                 ${(totalEstimateSeconds / 3600).toFixed(2)}h ESTIMATE (wall clock)`);
-      console.log(`                 ${((totalProvenSeconds + totalEstimateSeconds) / 3600).toFixed(2)}h total`);
+    console.log(`Ledger billed:   ${(windowProvenSeconds / 3600).toFixed(2)}h PROVEN`);
+    if (windowEstimateSeconds > 0) {
+      console.log(`                 ${(windowEstimateSeconds / 3600).toFixed(2)}h ESTIMATE (wall clock)`);
+      console.log(`                 ${((windowProvenSeconds + windowEstimateSeconds) / 3600).toFixed(2)}h total`);
     }
     console.log('');
   } else {
