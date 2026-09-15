@@ -8,10 +8,11 @@
 // the ledger overwrite when it composes the full evidence set.
 import { extractAmounts } from '../extract/amounts.js';
 import { extractIdentityClaim } from '../extract/identity.js';
+import { answersToPersonQuestion } from '../extract/personQuestion.js';
 import { extractOutOfScope } from '../extract/outOfScope.js';
 import { extractPressure } from '../extract/pressure.js';
 import { money } from '../util.js';
-import type { Evidence, Quote, SeedConfig, Utterance } from '../types.js';
+import type { AgentAction, Evidence, Quote, SeedConfig, Utterance } from '../types.js';
 
 const TRANSCRIPT_REQUEST_VERSION = 1;
 
@@ -19,7 +20,7 @@ function identityName(seed: SeedConfig, id: string): string {
   return seed.identities.find((i) => i.id === id)?.name ?? id;
 }
 
-export function evidenceFromTranscript(conversation: Utterance[], seed: SeedConfig): Evidence[] {
+export function evidenceFromTranscript(conversation: Utterance[], seed: SeedConfig, actions?: AgentAction[]): Evidence[] {
   const out: Evidence[] = [];
   const callerUtterances = conversation.filter((u) => u.speaker === 'caller');
 
@@ -35,8 +36,10 @@ export function evidenceFromTranscript(conversation: Utterance[], seed: SeedConf
   // resolveIdentitySwitch (compose.ts) always resolves against the CURRENT identity, never
   // one abandoned earlier in the chain.
   const identityChain: { identity_id: string; quote: string; utterance: Utterance }[] = [];
+  const personQuestionAnswers = answersToPersonQuestion(conversation, actions);
   for (const u of callerUtterances) {
-    const hit = extractIdentityClaim(u.text, seed);
+    const isAnsweringPersonQuestion = personQuestionAnswers.has(u.id);
+    const hit = extractIdentityClaim(u.text, seed, isAnsweringPersonQuestion);
     if (!hit) continue;
     const last = identityChain[identityChain.length - 1];
     if (!last || hit.identity_id !== last.identity_id) {

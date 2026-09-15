@@ -119,7 +119,7 @@ export function evaluate(rawInput: EngineInput, overrides?: Record<string, Evide
   // erases the switch's own contradiction weight (ev-consistency-identity, built below at
   // step 5, is untouched either way).
   const transcriptEv: Evidence[] = resolveIdentitySwitch(
-    evidenceFromTranscript(conversation, seed).map((e) => ({ ...e, request_version })),
+    evidenceFromTranscript(conversation, seed, actions).map((e) => ({ ...e, request_version })),
     conversation,
     claims,
     seed,

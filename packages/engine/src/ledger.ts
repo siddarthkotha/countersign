@@ -21,6 +21,7 @@ import { extractAccountLast4, extractCuedNames, extractDeadline } from './extrac
 import { extractAmounts } from './extract/amounts.js';
 import { extractSpokenAmounts } from './extract/spokenNumbers.js';
 import { extractIdentityClaim } from './extract/identity.js';
+import { answersToPersonQuestion } from './extract/personQuestion.js';
 import { hasLexiconHit, normalizeText, normalizeValue } from './normalize.js';
 import { escapeRegExp } from './util.js';
 import type { AgentAction, Claim, ClaimField, ClaimKind, SeedConfig, Utterance } from './types.js';
@@ -177,7 +178,9 @@ export function buildLedger(
   let nextId = 1;
   const activeReadback: Partial<Record<ClaimField, PendingReadback>> = {};
   const repairWindowSince: Partial<Record<ClaimField, number>> = {};
-  let lastChallengeField: ClaimField | null = null; // tracks the field of the most recent challenge_issued
+
+  // Compute which caller utterances are answers to person-shaped questions (approver, counsel, etc)
+  const personQuestionAnswers = answersToPersonQuestion(conversation, actions);
 
   function addClaim(
     field: ClaimField,
@@ -308,27 +311,18 @@ export function buildLedger(
       for (const f of Object.keys(activeReadback) as ClaimField[]) delete activeReadback[f];
       if (entry.a.kind === 'readback_issued' && entry.a.field) {
         activeReadback[entry.a.field] = { action: entry.a, utterancesSeen: 0 };
-        lastChallengeField = null; // readback clears the challenge context
-      } else if (entry.a.kind === 'challenge_issued') {
-        // Track the field being challenged so we can skip false identity claims when
-        // answering a person-focused challenge with a bare name.
-        if (entry.a.spec?.field) {
-          lastChallengeField = entry.a.spec.field;
-        } else {
-          lastChallengeField = null; // challenge without spec, can't determine field
-        }
       }
       continue;
     }
 
     const u = entry.u;
 
-    // Fix (bare-name-challenge-answer): Compute this BEFORE readback resolution, since
-    // resolution might delete activeReadback entries. We need to know if this utterance is
-    // answering a person-focused readback/challenge so we can skip false identity claims.
+    // Fix (bare-name-challenge-answer): Determine if this utterance is answering a
+    // person-focused readback/challenge so we can skip false identity claims (rule b).
+    // Check both active readbacks AND the precomputed set of challenge answers.
     const answeringPersonQuestion =
       Object.keys(activeReadback).some((field) => PERSON_SHAPED_FIELDS.has(field as ClaimField)) ||
-      (lastChallengeField !== null && PERSON_SHAPED_FIELDS.has(lastChallengeField));
+      personQuestionAnswers.has(u.id);
 
     // See `classifyDifferentValue`'s (a2) comment: defined only when the immediately
     // preceding caller utterance exists AND no agent turn happened between it and this

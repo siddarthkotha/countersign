@@ -130,7 +130,12 @@
         "field": "approver",
         "ask": "Ask which internal approver signed off on this payment.",
         "speak": "Which internal approver signed off on this Meridian Supply payment?",
-        "expect": { "accept_tokens": ["marcus", "obi"] },
+        "expect": {
+          "accept_tokens": [
+            "marcus",
+            "obi"
+          ]
+        },
         "fact_id": "dana_internal_approver"
       }
     },
@@ -157,10 +162,10 @@
     }
   ],
   "expected": {
-    "verdict": "PENDING",
-    "state": "CLAIM",
+    "verdict": "STAGE",
+    "state": "ACTION",
     "reasons": [],
-    "failure_tally": 0.5,
+    "failure_tally": 0,
     "request_version": 1,
     "assurance": {
       "identity_claimed": true,
@@ -170,10 +175,10 @@
       "no_contradictions": true,
       "critical_fields_confirmed": true,
       "exposure_within_limit": true,
-      "challenge_requirement_met": false,
-      "no_identity_switch": false,
-      "at_least_one_challenge_passed": false,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
       "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": true,
       "no_injection_attempt": true
     }
   }

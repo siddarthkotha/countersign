@@ -176,6 +176,7 @@ function spokenField(field: string): string {
 export function seedFieldForEntry(id: string): ClaimField {
   if (id === 'counsel_of_record') return 'counsel';
   if (id === 'escrow_institution') return 'escrow_institution';
+  if (id === 'dana_internal_approver') return 'approver';
   return 'purpose';
 }
 
