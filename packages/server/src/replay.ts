@@ -135,7 +135,9 @@ export async function runReplay(corpus: CorpusFile, opts: RunReplayOpts): Promis
       const verdictBeforeActions = output.verdict;
       // Mutates `logs.tools` in place -- `engineInput.tools` is that same array reference,
       // so re-evaluating `engineInput` below already sees the newly-appended entries.
-      runOwedTerminalActions(logs.tools, output, MERIDIAN, mockToolResult, mockCtx, nextTerminalToolId, () => evt.t_ms);
+      // Capture conversation and actions counts at this instant for position-based truncation.
+      const counts = { conversation_count: logs.conversation.length, actions_count: logs.actions.length };
+      runOwedTerminalActions(logs.tools, output, MERIDIAN, mockToolResult, mockCtx, nextTerminalToolId, () => evt.t_ms, counts);
       const reEvaluated = evaluate(engineInput);
       let export_hash: string | null = null;
       try {

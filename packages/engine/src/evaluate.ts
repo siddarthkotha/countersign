@@ -55,26 +55,44 @@ function freezeAtSeal(input: EngineInput): EngineInput {
   // in order, so we can get both its timestamp AND its array position.
   let sealedAtMs: number | null = null;
   let sealIndexInTools = -1;
+  let conversationCount: number | null = null;
+  let actionsCount: number | null = null;
   for (let i = 0; i < input.tools.length; i++) {
     const t = input.tools[i]!;
     if (t.name === 'seal_evidence_record' && t.result !== undefined && t.result.error === undefined) {
       sealedAtMs = t.t_ms;
       sealIndexInTools = i;
-      break; // Take the first one; if there are multiple seals, the first chronologically is the earliest
+      // Extract conversation and actions counts from args if present (new bundles).
+      if (typeof t.args === 'object' && t.args !== null) {
+        const args = t.args as any;
+        if (typeof args.conversation_count === 'number') conversationCount = args.conversation_count;
+        if (typeof args.actions_count === 'number') actionsCount = args.actions_count;
+      }
+      break;
     }
   }
   if (sealedAtMs === null) return input;
 
-  // Truncate by array position: the seal entry marks a boundary, and only tool entries up to
-  // and including the seal's position are kept. For conversation and actions, truncate by
-  // timestamp (keep all entries at or before the seal timestamp), since these arrays aren't
-  // directly ordered relative to tool entries. The position-based truncation for tools
-  // ensures that tool entries placed AFTER the seal (even at the same timestamp) are excluded.
+  // Truncate by array position: the seal entry marks a boundary. Position-based truncation
+  // applies to all three arrays:
+  // - tools: keep tools[0..seal_index], so tool entries placed AFTER the seal in the array
+  //   are excluded, even if they share the seal's timestamp. The seal_evidence_record is
+  //   always the LAST required action before terminal actions may cease (see REQUIRED_ACTIONS
+  //   in fsm.ts and terminalActions.ts), so no sibling terminal-action entry (freeze, incident,
+  //   alert, seal) is ever cut.
+  // - conversation/actions: if seal args carry conversation_count/actions_count (from newer
+  //   server bundles), truncate by array position using those counts. This prevents the leak:
+  //   a caller utterance appended after the seal at the exact same millisecond (e.g., a
+  //   websocket handler firing right after the tick) would pass timestamp-based filtering
+  //   but is excluded by count-based truncation.
+  // - Fallback (old corpus fixtures, legacy bundles): if counts are absent, truncate
+  //   conversation/actions by timestamp (t_ms <= sealedAtMs). This maintains backward
+  //   compatibility with 128 corpus fixtures that never have counts in seal args.
   return {
     ...input,
-    conversation: input.conversation.filter((u) => u.t_ms <= sealedAtMs),
+    conversation: conversationCount !== null ? input.conversation.slice(0, conversationCount) : input.conversation.filter((u) => u.t_ms <= sealedAtMs),
     tools: input.tools.slice(0, sealIndexInTools + 1),
-    actions: input.actions.filter((a) => a.t_ms <= sealedAtMs),
+    actions: actionsCount !== null ? input.actions.slice(0, actionsCount) : input.actions.filter((a) => a.t_ms <= sealedAtMs),
   };
 }
 

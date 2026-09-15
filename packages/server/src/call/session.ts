@@ -182,6 +182,7 @@ export class CallSession {
   private static readonly MAX_TERMINAL_ACTION_ATTEMPTS = 3;
   private terminalActionsOwed: ToolName[] | null = null;
   private terminalVerdictSnapshot: Verdict | null = null;
+  private terminalActionCounts: { conversation_count: number; actions_count: number } | null = null;
   private readonly terminalActionSucceeded = new Set<ToolName>();
   private readonly terminalActionAttempts = new Map<ToolName, number>();
   private readonly terminalActionsAbandoned = new Set<ToolName>();
@@ -2037,9 +2038,14 @@ export class CallSession {
       // this whole retry loop works from (see the class-field doc comment on why this is
       // never re-read from a later `evaluate()`), and freeze which verdict "recomputed"
       // means matching -- `this.last` itself is not reassigned again until (if ever) every
-      // owed action actually succeeds.
+      // owed action actually succeeds. Also capture conversation and actions counts at this
+      // instant for position-based truncation in the seal entry (P1 leak fix).
       this.terminalActionsOwed = [...output.required_actions];
       this.terminalVerdictSnapshot = output.verdict;
+      this.terminalActionCounts = {
+        conversation_count: this.logs.conversation.length,
+        actions_count: this.logs.actions.length,
+      };
       this.diag('terminal_action', { verdict: output.verdict, actions: this.terminalActionsOwed });
     }
 
@@ -2048,7 +2054,7 @@ export class CallSession {
 
     for (const name of stillOwed) {
       try {
-        const args = argsForTerminalTool(name, this.opts.seed, output);
+        const args = argsForTerminalTool(name, this.opts.seed, output, this.terminalActionCounts ?? undefined);
         const result = this.opts.mock(name, args, this.opts.seed, this.mockCtx);
         if (name === 'open_incident') this.mockCtx.incident_index += 1;
         this.logs.tools.push({ id: this.nextToolId(), name, t_ms: this.nowT(), args, result });

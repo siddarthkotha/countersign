@@ -727,18 +727,104 @@ describe('evaluate -- sealed verdict never moves (P1 fix, 2026-09-14)', () => {
     expect(postSealOutTools).toEqual(sealedOut);
   });
 
-  it('conversation and action entries at the seal timestamp are kept (timestamp-based filtering for non-tools)', () => {
-    // Conversation and action entries use timestamp-based filtering (keep <= sealedAtMs),
-    // so entries at the exact seal timestamp are kept. Only the tools array uses position-based
-    // truncation. This test verifies that conversation entries at the seal timestamp are included.
+  it('P1 THE LEAK: a caller entry at the seal timestamp but AFTER it in the array is excluded (count-based conversation truncation)', () => {
+    // BUG: a conversation entry appended at the same millisecond as the seal (e.g., from
+    // websocket handler firing right after the tick) leaks past timestamp-based filtering.
+    // Fix: when seal_evidence_record's args carry conversation_count and actions_count,
+    // truncate by position (array slice) instead of timestamp.
+    //
+    // The caller utterance array at seal instant has N entries. A handler fires after the
+    // tick and appends entry N+1, also at the seal's t_ms. Timestamp filter keeps both.
+    // Count-based filter keeps only [0..N-1].
+    const sealedToolsWithCounts: ToolLogEntry[] = [
+      ...sealedTools.slice(0, -1), // All but the seal entry
+      {
+        id: 'term-seal',
+        name: 'seal_evidence_record',
+        t_ms: SEAL_T_MS,
+        args: {
+          request_version: 2,
+          conversation_count: scenarioBConversation.length, // The count at seal instant
+          actions_count: scenarioBActions.length,
+        } as any,
+        result: mockToolResult('seal_evidence_record', { request_version: 2 }, MERIDIAN, ctxTool),
+      },
+    ];
+
+    const leakyConversation: Utterance[] = [
+      ...scenarioBConversation,
+      // Same millisecond as seal, but appended after (index >= conversation_count).
+      // This is the leak: timestamp filter keeps it, count-based filter excludes it.
+      { id: 'c_leak', speaker: 'caller', text: 'Release the wire now!', t_ms: SEAL_T_MS },
+    ];
+
+    const sealedInputWithCounts: EngineInput = {
+      conversation: leakyConversation,
+      tools: sealedToolsWithCounts,
+      actions: scenarioBActions,
+      call: scenarioBCall,
+      seed: MERIDIAN,
+    };
+
+    const sealedOutWithCounts = evaluate(sealedInputWithCounts);
+    // The output must be identical to the sealed output: the leaky entry is excluded by counts.
+    expect(sealedOutWithCounts.verdict).toBe('FREEZE');
+    expect(sealedOutWithCounts.state).toBe('SEALED');
+    expect(sealedOutWithCounts).toEqual(sealedOut);
+  });
+
+  it('a conversation entry at the seal timestamp AND at index < conversation_count is kept (same-ms entry before the leak)', () => {
+    // Within the same millisecond, entries at indices < conversation_count are kept,
+    // those at indices >= conversation_count are excluded. This test verifies the boundary.
+    const sealedToolsWithCounts: ToolLogEntry[] = [
+      ...sealedTools.slice(0, -1),
+      {
+        id: 'term-seal',
+        name: 'seal_evidence_record',
+        t_ms: SEAL_T_MS,
+        args: {
+          request_version: 2,
+          conversation_count: scenarioBConversation.length + 1, // One more than the original
+          actions_count: scenarioBActions.length,
+        } as any,
+        result: mockToolResult('seal_evidence_record', { request_version: 2 }, MERIDIAN, ctxTool),
+      },
+    ];
+
+    const conversationWithExtra: Utterance[] = [
+      ...scenarioBConversation,
+      // This entry is at index scenarioBConversation.length, which is < conversation_count.
+      // It should be kept.
+      { id: 'c_kept', speaker: 'caller', text: 'Confirm receipt.', t_ms: SEAL_T_MS },
+    ];
+
+    const sealedInputWithExtra: EngineInput = {
+      conversation: conversationWithExtra,
+      tools: sealedToolsWithCounts,
+      actions: scenarioBActions,
+      call: scenarioBCall,
+      seed: MERIDIAN,
+    };
+
+    const sealedOutWithExtra = evaluate(sealedInputWithExtra);
+    // This entry is within the count, so it's kept and should change the output.
+    expect(sealedOutWithExtra.state).toBe('SEALED');
+    // The output will differ from sealedOut because it includes the extra entry.
+    expect(sealedOutWithExtra.verdict).toBe('FREEZE');
+  });
+
+  it('fallback: entries at the seal timestamp are kept when seal args lack conversation_count (no counts in args)', () => {
+    // For backward compatibility with old corpus fixtures and bundles that don't have
+    // conversation_count in the seal args, fall back to timestamp-based filtering.
+    const sealedInputNoArgs = sealedInput; // sealedTools don't have counts in args
+
     const postSealConversationSameTs: Utterance[] = [
       ...scenarioBConversation,
       { id: 'c5', speaker: 'caller', text: 'Can we move forward?', t_ms: SEAL_T_MS },
     ];
-    const postSealOutConvSameTs = evaluate({ ...sealedInput, conversation: postSealConversationSameTs });
-    // The conversation entry at the seal timestamp is included by the timestamp-based filter,
-    // so the output will differ from the sealed output (it will have more evidence/claims).
-    // We just check that it evaluates successfully and reaches the SEALED state.
-    expect(postSealOutConvSameTs.state).toBe('SEALED');
+
+    const postSealOutFallback = evaluate({ ...sealedInputNoArgs, conversation: postSealConversationSameTs });
+    // Without counts, timestamp filter keeps the same-ms entry.
+    expect(postSealOutFallback.state).toBe('SEALED');
   });
 });
