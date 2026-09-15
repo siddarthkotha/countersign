@@ -73,6 +73,4 @@ export type AaiEvent =
   // `attempt` is the 1-indexed resume attempt this event belongs to -- resume is bounded
   // (MAX_RESUME_ATTEMPTS in session.ts), so this also tells a viewer how close to giving up
   // the call is.
-  | { type: 'link'; state: 'lost' | 'restored'; attempt: number }
-  // AssemblyAI Termination event (session end): carries billing duration from the server
-  | { type: 'session.termination'; session_duration_seconds: number; audio_duration_seconds?: number };
+  | { type: 'link'; state: 'lost' | 'restored'; attempt: number };

@@ -1336,10 +1336,13 @@ export class CallSession {
         // bounded resume-on-drop gives up; a genuine AssemblyAI-originated session.ended
         // never carries one, so this still falls back to the existing 'aai_ended' reason.
         // The Termination event carries session_duration_seconds and audio_duration_seconds for billing.
-        this.diag('aai_session_terminated', {
-          session_duration_seconds: evt.session_duration_seconds,
-          audio_duration_seconds: evt.audio_duration_seconds,
-        });
+        // Only record aai_session_terminated if session_duration_seconds is present and numeric.
+        if (typeof evt.session_duration_seconds === 'number') {
+          this.diag('aai_session_terminated', {
+            session_duration_seconds: evt.session_duration_seconds,
+            audio_duration_seconds: evt.audio_duration_seconds,
+          });
+        }
         this.diag('aai_session_ended', { reason: evt.reason ?? 'aai_ended' });
         this.end(evt.reason ?? 'aai_ended');
         return;

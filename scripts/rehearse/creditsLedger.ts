@@ -3,9 +3,11 @@
 // `npm run credits:ledger` -- reads EVERY *.diagnostics.json bundle under
 // scripts/rehearse/reports/ (gitignored; not part of this repo's tracked history, see
 // docs/REHEARSAL-HARNESS.md's "what is not committed"), sums billed seconds per calendar day
-// (falling back to wall clock when billed_seconds is absent, labeled as ESTIMATE), and prints
-// a table showing: day, calls, billed minutes, cost at $4.50/h, method (PROVEN vs ESTIMATE).
-// Also reads docs/CREDITS.md for founder dashboard readings and prints a reconciliation line.
+// in America/Chicago timezone (falling back to wall clock when billed_seconds is absent,
+// labeled as ESTIMATE), and prints a table showing: day, calls, billed minutes, cost at $4.50/h,
+// method (PROVEN vs ESTIMATE). Also reads docs/CREDITS.md for founder dashboard readings
+// (parsed as America/Chicago time, handling CDT/CST timezone) and prints a reconciliation line
+// with bundle count and UTC bounds.
 //
 // This is read-only against the reports directory (never writes a report, never touches a
 // server, never calls the live API -- BRIEF LAW 5 scope fence) and pure math otherwise.
@@ -18,6 +20,7 @@ const REPORTS_DIR = join(HERE, 'reports');
 const CREDITS_PATH = join(HERE, '..', '..', 'docs', 'CREDITS.md');
 
 const RATE_PER_HOUR = 4.50;
+const CHICAGO_TZ = 'America/Chicago';
 
 interface DiagnosticBundle {
   started_at: number;
@@ -35,8 +38,71 @@ interface DailyRecord {
 
 interface FounderReading {
   timestamp: string;
+  timestampMs: number; // UTC milliseconds
   hoursUsed: number;
   dollarsRemaining: number;
+}
+
+/** Parse a Chicago-time timestamp like "2026-09-14 5:34 PM CDT" to UTC milliseconds.
+ *  Handles CDT (UTC-5) and CST (UTC-6) suffixes. */
+function parseChicagoTimestamp(str: string): number | null {
+  // Pattern: YYYY-MM-DD H:MM AM/PM CDT/CST
+  const match = /(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})\s+(AM|PM)\s+(CDT|CST)/.exec(str);
+  if (!match) return null;
+
+  const [, yearStr, monthStr, dayStr, hourStr, minStr, ampm, tzSuffix] = match;
+  let hour = parseInt(hourStr, 10);
+  const min = parseInt(minStr, 10);
+
+  // Convert to 24-hour format
+  if (ampm === 'AM' && hour === 12) hour = 0;
+  if (ampm === 'PM' && hour !== 12) hour += 12;
+
+  // Create a date in UTC, but interpret it as if it's Chicago time first
+  // Then apply the offset correction
+  const utcDate = new Date(Date.UTC(
+    parseInt(yearStr, 10),
+    parseInt(monthStr, 10) - 1,
+    parseInt(dayStr, 10),
+    hour,
+    min,
+    0
+  ));
+
+  // CDT is UTC-5, CST is UTC-6, so we need to ADD those hours to convert Chicago->UTC
+  const offsetHours = tzSuffix === 'CDT' ? 5 : 6;
+  const utcMs = utcDate.getTime() + offsetHours * 60 * 60 * 1000;
+
+  return utcMs;
+}
+
+/** Format UTC timestamp as local Chicago time string (for display) */
+function formatChicagoTime(utcMs: number): string {
+  const date = new Date(utcMs);
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZone: CHICAGO_TZ,
+    hour12: false,
+  }).format(date);
+}
+
+/** Get the Chicago calendar day for a UTC timestamp (e.g., "2026-09-14") */
+function getChicagoDayKey(utcMs: number): string {
+  const date = new Date(utcMs);
+  // Swedish locale (sv) produces YYYY-MM-DD format directly
+  const formatted = new Intl.DateTimeFormat('sv', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: CHICAGO_TZ,
+  }).format(date);
+
+  return formatted;
 }
 
 async function parseCreditsFile(): Promise<FounderReading[]> {
@@ -60,9 +126,11 @@ async function parseCreditsFile(): Promise<FounderReading[]> {
         const dollarStr = parts[3]!.replace('$', '');
         const dollarsNum = parseFloat(dollarStr);
 
-        if (timestamp && !isNaN(hoursNum) && !isNaN(dollarsNum)) {
+        const timestampMs = parseChicagoTimestamp(timestamp || '');
+        if (timestamp && !isNaN(hoursNum) && !isNaN(dollarsNum) && timestampMs !== null) {
           readings.push({
             timestamp,
+            timestampMs,
             hoursUsed: hoursNum,
             dollarsRemaining: dollarsNum,
           });
@@ -78,7 +146,14 @@ async function parseCreditsFile(): Promise<FounderReading[]> {
 
 async function main(): Promise<void> {
   // Read all diagnostics bundles
-  const files = await readdir(REPORTS_DIR);
+  let files: string[] = [];
+  try {
+    files = await readdir(REPORTS_DIR);
+  } catch {
+    // Reports directory doesn't exist or can't be read
+    console.log('No reports directory found. Run rehearsals first to generate diagnostics bundles.\n');
+    return;
+  }
   const diagnosticsFiles = files.filter((f) => f.endsWith('.diagnostics.json'));
 
   const dailyMap = new Map<string, DailyRecord>();
@@ -92,9 +167,8 @@ async function main(): Promise<void> {
 
       if (!bundle.started_at || !bundle.ended_at) continue;
 
-      // Extract day from started_at (epoch ms)
-      const date = new Date(bundle.started_at);
-      const dayKey = date.toISOString().split('T')[0]!;
+      // Extract day using Chicago timezone
+      const dayKey = getChicagoDayKey(bundle.started_at);
 
       // Get or create daily record
       let record = dailyMap.get(dayKey);
@@ -125,7 +199,7 @@ async function main(): Promise<void> {
   const sortedDays = Array.from(dailyMap.values()).sort((a, b) => a.day.localeCompare(b.day));
 
   // Print table
-  console.log('\nCredit Ledger\n');
+  console.log('\nCredit Ledger (America/Chicago timezone)\n');
   console.log('| Day        | Calls | Billed Minutes | Cost ($) | Method          |');
   console.log('|:-----------|------:|---------------:|---------:|:----------------|');
 
@@ -160,13 +234,35 @@ async function main(): Promise<void> {
     const first = readings[0]!;
     const last = readings[readings.length - 1]!;
 
+    // Collect bundles that started within the reading window
+    const bundlesInWindow: DiagnosticBundle[] = [];
+    for (const file of diagnosticsFiles) {
+      try {
+        const content = await readFile(join(REPORTS_DIR, file), 'utf-8');
+        const bundle: DiagnosticBundle = JSON.parse(content);
+
+        // Bundle's start time must be between first and last reading (in UTC)
+        if (bundle.started_at >= first.timestampMs && bundle.started_at <= last.timestampMs) {
+          bundlesInWindow.push(bundle);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     const dashboardHoursDiff = last.hoursUsed - first.hoursUsed;
     const dashboardDollarsDiff = first.dollarsRemaining - last.dollarsRemaining;
     const impliedDollarPerHour = dashboardHoursDiff > 0 ? dashboardDollarsDiff / dashboardHoursDiff : 0;
 
+    const windowStartChicago = formatChicagoTime(first.timestampMs);
+    const windowEndChicago = formatChicagoTime(last.timestampMs);
+
     console.log('Reconciliation with Founder Dashboard\n');
     console.log(`First reading:  ${first.timestamp} (${first.hoursUsed}h used, $${first.dollarsRemaining} remaining)`);
     console.log(`Last reading:   ${last.timestamp} (${last.hoursUsed}h used, $${last.dollarsRemaining} remaining)`);
+    console.log('');
+    console.log(`Window (UTC):   ${first.timestampMs} to ${last.timestampMs} (${bundlesInWindow.length} bundles in window)`);
+    console.log(`Window (Chicago): ${windowStartChicago} to ${windowEndChicago}`);
     console.log('');
     console.log(`Dashboard moved: ${dashboardHoursDiff.toFixed(2)}h (avg $${impliedDollarPerHour.toFixed(2)}/h)`);
     console.log(`Ledger billed:   ${(totalProvenSeconds / 3600).toFixed(2)}h PROVEN`);
@@ -178,6 +274,11 @@ async function main(): Promise<void> {
   } else {
     console.log('No founder dashboard readings found in docs/CREDITS.md\n');
   }
+
+  console.log(
+    'PROVEN rows appear once deploys after 2026-09-14 record the session.ended event; every row before that is wall clock.'
+  );
+  console.log('');
 }
 
 main().catch((err) => {

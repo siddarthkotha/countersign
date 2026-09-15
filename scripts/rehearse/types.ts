@@ -281,6 +281,7 @@ export interface RehearseDiagnosticBundle {
   deployed_commit: string | null;
   server_events: RehearseDiagnosticEvent[];
   client_events: RehearseDiagnosticEvent[];
+  billed_seconds?: number;
 }
 
 export interface DiagnosticsSummary {

@@ -26,6 +26,7 @@ import {
   addClientEvents,
   checkClientPostRate,
   summarizeBundle,
+  populateBilledSeconds,
   MAX_CLIENT_EVENTS_PER_REQUEST,
   MAX_CLIENT_BODY_BYTES,
   MAX_CLIENT_EVENTS_PER_SESSION,
@@ -1007,6 +1008,93 @@ describe('CallSession — onDiagnostic', () => {
 
     expect(events.some((e) => e.kind === 'input.speech.started')).toBe(true);
     expect(events.some((e) => e.kind === 'input.speech.stopped')).toBe(true);
+  });
+
+  // Billing path tests: session.ended event carrying billed_seconds
+  describe('billing — session.ended with billed_seconds', () => {
+    it('records aai_session_terminated event with session_duration_seconds from session.ended', () => {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const events: { kind: string; detail: unknown }[] = [];
+      const session = newSession(clock, aai, events);
+
+      session.start();
+      clock.now = 123400; // 123.4 seconds elapsed
+      aai.emit({ type: 'session.ended', session_duration_seconds: 123.4, audio_duration_seconds: 100 });
+
+      const termEvents = events.filter((e) => e.kind === 'aai_session_terminated');
+      expect(termEvents).toHaveLength(1);
+      const detail = termEvents[0]!.detail as { session_duration_seconds: number; audio_duration_seconds?: number };
+      expect(detail.session_duration_seconds).toBe(123.4);
+      expect(detail.audio_duration_seconds).toBe(100);
+    });
+
+    it('session.ended with no billed fields records no aai_session_terminated event', () => {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const events: { kind: string; detail: unknown }[] = [];
+      const session = newSession(clock, aai, events);
+
+      session.start();
+      clock.now = 5000;
+      aai.emit({ type: 'session.ended' }); // no session_duration_seconds
+
+      const termEvents = events.filter((e) => e.kind === 'aai_session_terminated');
+      expect(termEvents).toHaveLength(0);
+    });
+
+    it('session.ended with non-numeric session_duration_seconds is ignored', () => {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const events: { kind: string; detail: unknown }[] = [];
+      const session = newSession(clock, aai, events);
+
+      session.start();
+      clock.now = 5000;
+      // @ts-expect-error: testing invalid input
+      aai.emit({ type: 'session.ended', session_duration_seconds: '12' });
+
+      const termEvents = events.filter((e) => e.kind === 'aai_session_terminated');
+      expect(termEvents).toHaveLength(0);
+    });
+
+    it('populateBilledSeconds extracts billed_seconds from aai_session_terminated event', () => {
+      const state = newDiagnosticsState();
+      const bundle = createBundle(state, 'sess-1', 1000);
+
+      recordServerEvent(state, 'sess-1', 1100, 'aai_session_terminated', {
+        session_duration_seconds: 456.7,
+        audio_duration_seconds: 400,
+      });
+
+      expect(bundle.billed_seconds).toBeUndefined();
+      populateBilledSeconds(bundle);
+      expect(bundle.billed_seconds).toBe(456.7);
+    });
+
+    it('populateBilledSeconds skips if billed_seconds is already set', () => {
+      const state = newDiagnosticsState();
+      const bundle = createBundle(state, 'sess-1', 1000);
+      bundle.billed_seconds = 100;
+
+      recordServerEvent(state, 'sess-1', 1100, 'aai_session_terminated', {
+        session_duration_seconds: 456.7,
+      });
+
+      populateBilledSeconds(bundle);
+      expect(bundle.billed_seconds).toBe(100); // unchanged
+    });
+
+    it('populateBilledSeconds does nothing if no aai_session_terminated event', () => {
+      const state = newDiagnosticsState();
+      const bundle = createBundle(state, 'sess-1', 1000);
+
+      recordServerEvent(state, 'sess-1', 1100, 'evaluate', { verdict: 'PENDING', state: 'INTAKE' });
+
+      expect(bundle.billed_seconds).toBeUndefined();
+      populateBilledSeconds(bundle);
+      expect(bundle.billed_seconds).toBeUndefined();
+    });
   });
 });
 

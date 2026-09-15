@@ -312,7 +312,8 @@ export function summarizeBundle(bundle: DiagnosticBundle): {
 
 /** Extract billed_seconds from the aai_session_terminated diagnostic event (if present)
  *  and set it on the bundle. Called after endBundle to populate the billing duration
- *  from AssemblyAI's session.ended Termination event. */
+ *  from AssemblyAI's session.ended Termination event. Relies on the aai_session_terminated
+ *  event being recorded in server_events before this function is called. */
 export function populateBilledSeconds(bundle: DiagnosticBundle): void {
   if (bundle.billed_seconds !== undefined) return; // already set
   for (const e of bundle.server_events) {
