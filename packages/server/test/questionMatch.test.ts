@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   transcriptAsksQuestion,
+  verbatimQuestionSentence,
   QUESTION_IMPERATIVE_STARTS,
   QUESTION_LEAD_INS,
 } from '../src/call/questionMatch.js';
@@ -91,6 +92,35 @@ describe('transcriptAsksQuestion', () => {
 
     it('does not match whitespace only', () => {
       expect(transcriptAsksQuestion('   ', null)).toBe(false);
+    });
+  });
+
+  describe('ELICIT_REQUEST engine-composed sentences (review fix 2026-09-15)', () => {
+    // The engine's elicitRequestSentence (fsm.ts ~line 199) now composes exact, speakable
+    // sentences for ELICIT_REQUEST goals instead of paraphrase instructions. These tests
+    // verify that the question-reask logic in session.ts (maybeReaskQuestion) correctly
+    // recognizes these engine-composed sentences as questions that were asked, so the
+    // server does not re-ask when the model already spoke them.
+    it('recognizes "What do you need today?" as a question (intent not stated, no beneficiary)', () => {
+      const elicitSentence = 'What do you need today?';
+      expect(transcriptAsksQuestion(elicitSentence, elicitSentence)).toBe(true);
+    });
+
+    it('recognizes "What is the exact amount for this payment to <beneficiary>?" as a question (amount elicit with beneficiary)', () => {
+      const beneficiary = 'Meridian Supply';
+      const elicitSentence = `What is the exact amount for this payment to ${beneficiary}?`;
+      expect(transcriptAsksQuestion(elicitSentence, elicitSentence)).toBe(true);
+    });
+
+    it('recognizes "What is the exact amount you need to send, and to which vendor?" as a question (amount elicit without beneficiary)', () => {
+      const elicitSentence = 'What is the exact amount you need to send, and to which vendor?';
+      expect(transcriptAsksQuestion(elicitSentence, elicitSentence)).toBe(true);
+    });
+
+    it('negative case: a holding line like "Checking your account balance." is not an ELICIT_REQUEST question', () => {
+      // This is a negative test to ensure holding lines are not confused with questions
+      const holdingLine = 'Checking your account balance.';
+      expect(transcriptAsksQuestion(holdingLine, null)).toBe(false);
     });
   });
 });
