@@ -3379,4 +3379,71 @@ describe('CallSession — a CLOSE reply that never completes (no transcript, no 
     vi.advanceTimersByTime(1500); // CLOSE_GRACE_MS
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
   });
+
+  it('a CLOSE reply with transcript chunks arriving before 12 seconds does NOT trigger the stuck watchdog', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-close-healthy-stream', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+    driveScenarioBThroughA4(session, aai, clock);
+    const closeSentence = session.last!.goal.hint;
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    const countReplyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+    const replyCreatesAtStart = countReplyCreates();
+
+    // A reply starts for the close sentence.
+    clock.now = 53000;
+    aai.emit({ type: 'reply.started', reply_id: 'close-healthy' });
+
+    // At 8 seconds, a transcript chunk arrives that matches the close sentence.
+    // This should clear the stuck watchdog, so no retry should be queued.
+    clock.now = 53000 + 8000;
+    aai.emit({ type: 'transcript.agent', item_id: 'close-healthy-t', text: closeSentence, reply_id: 'close-healthy', interrupted: false });
+
+    // Advance time past 12 seconds total (watchdog window). The stuck timer should
+    // already be cleared by the transcript match, so no retry should fire.
+    vi.advanceTimersByTime(6000); // 8 + 6 = 14 seconds from reply.started
+
+    // No new reply.create should have been sent (watchdog did not fire).
+    expect(countReplyCreates()).toBe(replyCreatesAtStart);
+
+    // Complete the reply normally.
+    clock.now = 53000 + 10000;
+    aai.emit({ type: 'reply.done', reply_id: 'close-healthy', status: 'completed' });
+
+    // The call should end normally via grace period, not via watchdog retry.
+    vi.advanceTimersByTime(1500); // CLOSE_GRACE_MS
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+  });
+
+  it('a CLOSE reply that goes silent for 12+ seconds (no transcript, no reply.done) MUST trigger the stuck watchdog', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-close-silent-12s', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent);
+    session.start();
+    driveScenarioBThroughA4(session, aai, clock);
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    const countReplyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+    const replyCreatesAtStart = countReplyCreates();
+
+    // A reply starts but produces nothing: no transcript chunks, no audio, no reply.done.
+    clock.now = 53000;
+    aai.emit({ type: 'reply.started', reply_id: 'stuck-silent' });
+
+    // Advance past the watchdog window: 12 seconds for the watchdog to fire, plus 400ms
+    // for the retry timer (CLOSE_RETRY_MIN_GAP_MS) to send a new reply.create.
+    vi.advanceTimersByTime(12_000 + 400);
+
+    // The stuck watchdog MUST have fired and queued a retry via armCloseRetryTimer.
+    // At least one new reply.create should have been sent.
+    expect(countReplyCreates()).toBeGreaterThan(replyCreatesAtStart);
+  });
 });
