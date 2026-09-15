@@ -3512,12 +3512,12 @@ describe('CallSession — a CLOSE reply that never completes (no transcript, no 
     // Last audio at clock.now = 53000 + 5000 = 58000
 
     // Watchdog timer fires at 53000 + 12000 = 65000 (12s from reply.started).
-    // At that point, lastAudioAge = 65000 - 57900 = 7100ms < 12000ms, so reschedule.
-    // Watchdog fires again at 65000 + (12000-7100) = 65000 + 4900 = 69900.
-    // At that point, lastAudioAge = 69900 - 57900 = 12000ms >= 12000ms, declare stuck.
+    // At that point, lastAudioAge = 65000 - 58000 = 7000ms < 12000ms, so reschedule.
+    // Watchdog fires again at 65000 + (12000-7000) = 65000 + 5000 = 70000.
+    // At that point, lastAudioAge = 70000 - 58000 = 12000ms >= 12000ms, declare stuck.
 
     // Advance to 16,900ms after reply.started (53000 + 16900 = 69900):
-    // At 69900ms, the second check is just about to fire or has just fired.
+    // At 69900ms, the second check (due at 70000) has not fired yet.
     clock.now = 53000 + 16900;
     vi.advanceTimersByTime(16900);
     const stuckAt16900 = diagEvents.find((e) => e.kind === 'close_reply_stuck');
