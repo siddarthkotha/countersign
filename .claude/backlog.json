@@ -1272,10 +1272,10 @@
     },
     {
       "id": "RENDER-ADMIN-TOKEN",
-      "title": "set COUNTERSIGN_ADMIN_TOKEN in Render's secret store so the live-calls reset route works in production - value generated into local .env 9:30 PM; founder pastes it into Render",
+      "title": "set COUNTERSIGN_ADMIN_TOKEN in Render's secret store so the live-calls reset route works in production - value generated into local .env 9:30 PM; founder pastes it into Render - set in Render 9:27 PM, verified 9:43 PM",
       "files": [],
-      "status": "held",
-      "held_because": "deploy secret store is the founder's (or needs his Render access); the route is disabled without it, which is safe",
+      "status": "done",
+      "held_because": "",
       "agent_id": "",
       "started_at": ""
     },
@@ -2288,12 +2288,41 @@
     },
     {
       "id": "SESSION-LOOKUP",
-      "title": "session lookup: diagnostics by 8-char prefix, code under the banner, per-browser recent-calls list, token-gated GET /api/admin/sessions (founder: zero-step retrieval)",
+      "title": "session lookup: diagnostics by 8-char prefix, code under the banner, per-browser recent-calls list, token-gated GET /api/admin/sessions (founder: zero-step retrieval) - landed c767de8 after review fix round; in push 35",
       "files": [],
-      "status": "running",
+      "status": "done",
       "agent_id": "a38cca04c9da865f2",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
+    },
+    {
+      "id": "push-35",
+      "title": "push 35: c1b0f03..911f733 (credits meter + ledger, judge play sheet, session lookup by code, recent-calls list, admin session list, security fixes) - pushed 9:36 PM on founder word; deploy verification polling",
+      "files": [],
+      "status": "done",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
+    },
+    {
+      "id": "ROTATE-ADMIN-TOKEN-PREFLIP",
+      "title": "rotate COUNTERSIGN_ADMIN_TOKEN before the public flip",
+      "files": [],
+      "status": "held",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
+      "held_because": "the current admin token was pasted into the chat transcript 2026-09-14 9:39 PM; rotate in Render + .env before the public flip (founder step, 1 min)"
+    },
+    {
+      "id": "BILLED-SECONDS-ON-SERVER-ENDED-CALL",
+      "title": "verify billed_seconds arrives on a server-ended live call",
+      "files": [],
+      "status": "held",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
+      "held_because": "check on the founder first server-ended call tonight whether session.ended carries session_duration_seconds; harness-ended calls close the socket first"
     }
   ]
 }
