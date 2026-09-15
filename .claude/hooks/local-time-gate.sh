@@ -88,6 +88,14 @@ for ev in events[last_user_idx + 1:]:
             reply_parts.append(b.get("text", ""))
 
 reply = "\n".join(reply_parts).strip()
+
+# The transcript file is written asynchronously and may lag the turn's final text when Stop
+# hooks run (Claude Code hooks docs; observed 2026-09-14: five false blocks on replies whose
+# time stamp sat only in the final block after tool calls). Prefer the message the harness
+# hands us directly, exactly as lane-gate.sh already does.
+direct = hook.get("last_assistant_message")
+if isinstance(direct, str) and direct.strip():
+    reply = direct.strip()
 if not reply:
     sys.exit(0)  # tool-only turn, nothing shown to the founder
 
