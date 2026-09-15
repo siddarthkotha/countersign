@@ -2323,6 +2323,34 @@
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
       "held_because": "check on the founder first server-ended call tonight whether session.ended carries session_duration_seconds; harness-ended calls close the socket first"
+    },
+    {
+      "id": "push-36",
+      "title": "push 36: 911f733..b288838 (transcript text, bare-name fix x3 sites, idle on caller speech, aai close wait, goodbye tail, close retry wait, harness gaps) - pushed 7:54 AM 2026-09-15 on autopilot after triple gate 1810/1810 x3; deploy poll + 11-scenario re-run launched",
+      "files": [],
+      "status": "done",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
+    },
+    {
+      "id": "DEAD-AIR-FIX",
+      "title": "late goodbye transcript after reply.done starts close grace immediately (Sonnet review finding); re-applied on main base in worktree dead-air-2; push 37",
+      "files": [],
+      "status": "running",
+      "agent_id": "a18d0b0a3ce2592ea",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running"
+    },
+    {
+      "id": "INJECTION-TALLY-WEIGHT",
+      "title": "injection marker weight in the freeze tally (founder decision)",
+      "files": [],
+      "status": "held",
+      "agent_id": "",
+      "started_at": "2026-09-12T15:09:10.151Z",
+      "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
+      "held_because": "reopens Ruling B (2026-09-09: injection counts 1 like a failed check); founder case 8 froze via tally>=3 with two knowledge issues plus the injection; bring as one decision with the recommendation to keep the rule and fix knowledge grading on honest calls first"
     }
   ]
 }
