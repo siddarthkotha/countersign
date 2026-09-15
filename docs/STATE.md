@@ -1,60 +1,61 @@
 # Countersign, session snapshot (overwritten at every close; never appended)
 
-Last write: Monday 2026-09-14, 6:43 PM CDT (Day 7; founder present; autopilot toggled on and
-off during the day). Three fix lanes may still be in flight when the next session opens: see
-"Lanes in flight" below and check them FIRST.
+Last close: Monday 2026-09-14, 7:31 PM CDT (Day 7, which ran 8:41 AM to 7:31 PM; autopilot
+on 3:33 PM to 7:05 PM). Autopilot is OFF. No lanes in flight: every lane of the day landed.
 
 ## The one-paragraph version
 
-Day 7 turned the goodbye bug into a way of working. Rounds 4 and 5 of the server close path
-landed (time-budgeted retries, transcript-armed hang-up, idle-timeout goodbye, no speech after
-the goodbye), then the question path got the same treatment (re-ask when the model swapped a
-holding line for the question; imperative questions count; an issued action follows the
-transcript). The harness grew free-play mode (an improvising caller with random pauses), waits
-for the server's own hang-up, grades the goodbye, dedupes repeated questions and can regrade
-stored reports. The founder set the definition of done (a judge in their own words, any pauses,
-any pronunciation, every case), killed the simulator idea with two external panel seats, ruled
-live tests only, and approved about five hours of credit. The AssemblyAI docs were fetched and
-settle the design: no verbatim-speech primitive exists; the server orders the moments and
-verifies the transcript; the next design step (E) is to let the automatic reply be a holding
-beat and send one instructed reply.create for the engine's line. The first free-play batch
-(deploy 30) scored 21 of 30 on verdict after regrade; three product defects and six harness
-defects were classified and handed to lanes. Push 31 is live (7e24cf4).
+Day 7 turned the goodbye bug into a way of working. The server close path got a time budget,
+a transcript-armed hang-up, an idle-timeout goodbye and no speech after the goodbye; the
+question path got a re-ask when the model swaps a holding line for the question, imperative
+asks count, and an "issued" action follows the transcript. The harness grew free-play mode
+(an improvising caller with seeded random pauses), waits for the server's own hang-up,
+grades the goodbye, dedupes repeated questions and regrades stored reports. The founder set
+the definition of done (a judge in their own words, any pauses, any pronunciation, every
+case), killed the simulator idea with two external panel seats, ruled live tests only,
+approved about five hours of credit, and made Haiku the default lane model. The AssemblyAI
+docs were fetched and settle the design: no verbatim-speech event exists, the automatic reply
+cannot be stopped, reply.create is the only "speak now"; the next design step (E) lets the
+automatic reply be a holding beat and sends one instructed reply.create. The first free-play
+batch (deploy 30) scored 21 of 30 on verdict after regrade; three product defects (a sealed
+verdict drifted and spoke the wrong goodbye; a self-correction lost in the readback; a request
+without an amount produced an invented question) were fixed, reviewed and deployed as push 32.
 
-## PROVEN at this write
-- Live: 7e24cf4 served 6:34 PM, /health ok. Pushes 26 to 31 today.
-- Gate on main at 4014872 (last code tip before docs): rehearse 437/437, full 1674/1674 (88
-  files), typecheck clean, corpus 128/128.
+## PROVEN at this close
+- Live: 6ddd9e9 served 7:27 PM, /health ok. Pushes 26 to 32 today, CI green on each.
+- Close gate 7:31 PM: 1692 tests across 88 files, typecheck clean; corpus 128/128 (7:11 PM).
 - Credits (founder dashboard 5:34 PM): 2.9 h used, $86.92 left, about $4.50 per hour. The
-  free-play batch used about 35 min (harness wall clock).
-- The standing plan: docs/TEST-PLAN.md (rulings, docs quotes, design E, milestones, pass
-  criteria, cases incl. case 11, commands, findings, next-session order).
-- Panel record: docs/PANEL-2026-09-14-TEST-PLAN.md.
+  free-play batch used about 35 min; today's harness total about 56 min plus the batch
+  (ESTIMATE, wall clock).
+- Standing plan: docs/TEST-PLAN.md (rulings, docs quotes, design E, milestones, pass criteria,
+  eleven cases, commands, batch findings, next-session order with step 1b follow-ups).
+- Panel record: docs/PANEL-2026-09-14-TEST-PLAN.md. Play sheet: docs/PLAY-SHEET.md (proof
+  lines from the deploy-28 scripted runs; free-play batch results in TEST-PLAN).
 
-## Lanes in flight at this write (check with git branch --list 'worktree-agent-*' and the log)
-- P1 server (Sonnet): sealed verdict must never move; goodbye is the sealed verdict's sentence;
-  idle end must not precede the goodbye. Evidence: reports T18-22-25 structuring, T17-58-23
-  barge-in.
-- P2+P3 engine (Sonnet): corrected value wins in readbacks and knowledge checks (case 11);
-  verbatim elicit for a request missing its amount or vendor. Evidence: T18-05-49, T18-06-55.
-- Harness (Haiku): holding prefix + question is a question; hang-up and silent personas state
-  the request first; injection persona says the injection line.
-If a lane's commit exists on its worktree branch: cherry-pick onto main (merge is rail-denied
-on autopilot), gate (npm test, typecheck, corpus), scoped review for server/engine changes,
-then push and verify /version.
-
-## Open, in the order to take them
-See docs/TEST-PLAN.md "Next session, in this order". Founder items unchanged: re-record (with
-docs/PLAY-SHEET.md), Render env items, pre-flip items, the Sep 18 judge sim.
+## Open, in the order to take them (mirrors docs/TEST-PLAN.md)
+1. Step 1b follow-ups (Haiku): seal truncation by array position; department words not
+   captured as an approver; watchdog boundary test for a long goodbye. Plus
+   questionMatch.ts returning the new ELICIT_REQUEST sentence.
+2. Design E (holding beat, then one instructed reply.create), test-first, one lane, scoped
+   review, push, verify.
+3. 30 min live confirmation on the three known races; then the 45 min free-play batch;
+   regrade; classify every non-pass HARNESS / PRODUCT / UNKNOWN with its report.
+4. Case 11 scenario and persona. Sheet proof lines. Founder play-through in his own words.
+5. Founder items: re-record; Render env items; pre-flip items; the Sep 18 judge sim.
 
 ## Lessons written to memory today
-Done means any judge (feedback-done-means-any-judge). Prove the script before founder time.
-Lanes claim newer bases than they have; only the re-gate on main is proof. Haiku is the default
-lane model (hook enforces SONNET-JUSTIFIED). Live is the only ground truth for speech; the
-AssemblyAI docs settle the primitives (see the panel record).
+Done means any judge. Prove the script before founder time. Only the re-gate on main is
+proof. Haiku by default (hook enforces SONNET-JUSTIFIED). Live is the only ground truth for
+speech. Do not launch lanes after a token warning without the founder's word; the autopilot
+toggle only fires on a message that is the words alone.
+
+## How to test without being the tester
+`npm run rehearse -- --scenario miller-patient --url https://countersign-bf8q.onrender.com`;
+`npm run sim:freeplay -- --url https://countersign-bf8q.onrender.com --model openai/gpt-4o-mini --runs 3 --seed <n>` (needs OPENROUTER_API_KEY exported);
+`npm run rehearse:regrade -- scripts/rehearse/reports/<report>.md` (free).
 
 ## Next session
 "Day 8 resume: read docs/TEST-PLAN.md first, then docs/STATE.md and the tail of
-docs/AUTOPILOT_LOG.md. Land any evening lane still on its branch, gate, review, push, verify.
-Then design E test-first, then the 30 min live confirmation, then the 45 min free-play batch.
-Live tests only; log every minute; a fix that fails twice live is parked."
+docs/AUTOPILOT_LOG.md. Nothing is in flight. Start at step 1b, then design E, then the 30 min
+live confirmation, then the 45 min batch. Live tests only; log every minute; a fix that fails
+twice live is parked; Haiku by default."

@@ -2072,7 +2072,7 @@
    "id": "FREE-PLAY-BATCH",
    "title": "free-play batch: ten judge cases x 3 runs with the improvising caller (own words, random pauses), graded on verdict + goodbye + no dead air + every question answered",
    "files": [],
-   "status": "held",
+   "status": "done",
    "held_because": "founder ruling 2026-09-14 3:29 PM: run as soon as the harness lanes land (credits ~45 min approved by that ruling); waits on HARNESS-WAIT-FOR-SERVER-HANGUP + HARNESS-FREE-PLAY merged and gated",
    "agent_id": "",
    "started_at": ""
@@ -2156,6 +2156,51 @@
    ],
    "status": "held",
    "held_because": "lane b29597d done and green (Haiku); cherry-pick with the free-play wait-hangup fix after the batch, then regrade the whole batch",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "REVIEW-FOLLOW-UPS-1B",
+   "title": "step 1b: seal truncation by position; department words not an approver; watchdog boundary test; questionMatch ELICIT_REQUEST sentence",
+   "files": [],
+   "status": "held",
+   "held_because": "next session step 1b (docs/TEST-PLAN.md)",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "SEQUENCING-E",
+   "title": "design E: automatic reply as holding beat, one instructed reply.create, transcript verify",
+   "files": [],
+   "status": "held",
+   "held_because": "next session step 3 (docs/TEST-PLAN.md)",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "SPIKE-30-MIN",
+   "title": "30 min live confirmation of E on the three known races",
+   "files": [],
+   "status": "held",
+   "held_because": "after SEQUENCING-E deploys; credits approved 2026-09-14",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "FREE-PLAY-BATCH-2",
+   "title": "45 min free-play batch, ten cases x 3, regrade, classify",
+   "files": [],
+   "status": "held",
+   "held_because": "after the spike",
+   "agent_id": "",
+   "started_at": ""
+  },
+  {
+   "id": "CASE-11-CORRECTED-FIELD",
+   "title": "case 11 scenario + persona: corrected critical field / thinking out loud mid-number",
+   "files": [],
+   "status": "held",
+   "held_because": "next session step 6",
    "agent_id": "",
    "started_at": ""
   }
