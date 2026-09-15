@@ -398,13 +398,52 @@ function isNameField(field: ClaimField): field is 'beneficiary' | 'approver' | '
   return (NAME_FIELDS as ClaimField[]).includes(field);
 }
 
-/** Every seed-known single-word name/alias/place/institution token, normalized (lower-case,
- *  punctuation-stripped) -- built from identity names/aliases, every seed.knowledge entry's
- *  own `accept_tokens` (already single lower-case name/place words -- "marcus", "obi",
- *  "zurich", "calder", "finch", "first", "meridian", "trust", ...), and payment vendors/
- *  vendor aliases. Used by `hasNameSignal` (below) to recognize a genuine but cue-less
- *  answer like "it was Marcus" or "the one in Zurich": a single capitalized word that IS a
- *  real seeded name has no cue verb ("approved by", "counsel is") to anchor an
+/** A small stoplist of common English words (titles, articles, connectors) that must never
+ *  count as a name signal on their own, even if a seed person-name word happens to collide
+ *  with one (e.g. an alias like "Mr. Miller" splits to "mr"/"miller" -- "mr" would otherwise
+ *  be a two-letter word already excluded by the length-3 floor below, but the stoplist is
+ *  kept as an explicit, seed-independent second guard per the review finding). */
+const NAME_TOKEN_STOPWORDS = new Set([
+  'mr', 'mrs', 'ms', 'dr', 'co', 'inc', 'llc', 'ltd', 'and', 'the', 'of', 'for', 'to', 'in', 'on', 'at', 'a', 'an',
+]);
+
+/** True when every alphabetic "word" in `truth` is capitalized and `truth` contains no
+ *  digit -- the cheap, seed-independent heuristic that separates a genuine seeded
+ *  organisation/place/person name ("Calder & Finch", "First Meridian Trust", "Lena Voss",
+ *  "Zurich", "Ridgeline Logistics") from a non-name knowledge fact value that happens to
+ *  live in the same `truth` field ("8830", "August 19", "INV-7734", "CC-2210", "PO-6612",
+ *  "Quarterly parts restock" -- the last is sentence-case, not title-case, so it fails this
+ *  check same as the digit-bearing ones). Ampersands and other non-alphabetic tokens are
+ *  ignored rather than failing the check. */
+function isNameLikeTruth(truth: string): boolean {
+  if (/\d/.test(truth)) return false;
+  const words = truth.split(/\s+/).filter((w) => /[A-Za-z]/.test(w));
+  if (words.length === 0) return false;
+  return words.every((w) => /^[A-Z]/.test(w));
+}
+
+interface SeedNameTokens {
+  /** Single-word tokens from PERSON names only (seed identities' full names and aliases,
+   *  split into individual words) -- length >= 3 and not in `NAME_TOKEN_STOPWORDS`. A bare
+   *  single common word never counts, and an organisation/place word is never split into
+   *  individual tokens here (see `phrases` below) -- that was the bug (finding, Sonnet
+   *  review of 6a81b98): "first"/"trust"/"supply"/"co"/"parts"/"mr"/"ms"/"cc"/"po" and bare
+   *  numbers are no longer produced by this function at all. */
+  words: Set<string>;
+  /** Whole-phrase names, normalized, matched as a bounded phrase (never split into their
+   *  individual common words) -- person full names/aliases, and the named organisations and
+   *  places from `seed.knowledge` truths that pass `isNameLikeTruth`, plus payment
+   *  vendors/vendor aliases. Sorted longest-first (matching order doesn't matter for a
+   *  simple "does this phrase occur" check, but keeps output deterministic for tests). */
+  phrases: string[];
+}
+
+/** Seed-known person/organisation/place names, normalized, split the way the review
+ *  demands: person names contribute both individual words (first/last/alias) AND their
+ *  whole phrase; organisations and places contribute ONLY their whole phrase, never their
+ *  individual common words. Used by `hasNameSignal` (below) to recognize a genuine but
+ *  cue-less answer like "it was Marcus" or "the one in Zurich": a single capitalized word
+ *  that IS a real seeded name has no cue verb ("approved by", "counsel is") to anchor an
  *  `extractCuedNames` hit, and (being one word) never matches the bare-two-capitalized-word
  *  span either, so it was previously missed entirely (finding 1, Sonnet review,
  *  2026-09-15/16). Deliberately never built from TRAP_DECOYS: a decoy is a FALSE value --
@@ -412,37 +451,74 @@ function isNameField(field: ClaimField): field is 'beneficiary' | 'approver' | '
  *  `isAnswerShapedFor`'s TRAP_FACT branch, and treating a decoy as a positive "this looks
  *  like an answer" signal here would blur "answered" with "accepted the wrong value".
  *  Rebuilt per call (the seed is small; not worth caching across calls for a pure function).
- */
-function seedNameTokens(seed: SeedConfig): Set<string> {
-  const tokens = new Set<string>();
-  const addWords = (s: string) => {
-    for (const w of normalizeText(s).split(' ')) {
-      if (w.length >= 2) tokens.add(w);
+ *
+ *  CRITICAL FIX (Sonnet review of 6a81b98, 2026-09-16): the previous version built this set
+ *  from every seed.knowledge entry's `accept_tokens` (already-split single words) and split
+ *  every payment vendor/alias into words too, so common words that happen to appear inside
+ *  a multi-word seeded name/decoy phrase -- "first", "trust", "supply", "co", "parts",
+ *  "mr", "ms", "cc", "po", and bare digit-only tokens -- were individually treated as name
+ *  signals. That made filler like "Trust me, this is legitimate." or "We supply parts to
+ *  them regularly." answer-shaped for a TRAP_FACT challenge, grading an honest caller's
+ *  unrelated small talk AMBIGUOUS (0.5) and closing the awaiting window early. Fixed by
+ *  never reading `accept_tokens` here at all: organisations/places now come from
+ *  `knowledge.truth` (filtered through `isNameLikeTruth`) and payment vendor fields,
+ *  matched only as whole phrases. */
+function seedNameTokens(seed: SeedConfig): SeedNameTokens {
+  const words = new Set<string>();
+  const phraseSet = new Set<string>();
+
+  const addPersonName = (s: string) => {
+    const norm = normalizeText(s);
+    if (norm.length === 0) return;
+    phraseSet.add(norm);
+    for (const w of norm.split(' ')) {
+      if (w.length >= 3 && !NAME_TOKEN_STOPWORDS.has(w)) words.add(w);
     }
   };
+  const addEntityPhrase = (s: string) => {
+    const norm = normalizeText(s);
+    if (norm.length > 0) phraseSet.add(norm);
+  };
+
   for (const identity of seed.identities) {
-    addWords(identity.name);
-    for (const alias of identity.aliases) addWords(alias);
+    addPersonName(identity.name);
+    for (const alias of identity.aliases) addPersonName(alias);
   }
   for (const fact of seed.knowledge) {
-    for (const tok of fact.accept_tokens) addWords(tok);
+    if (isNameLikeTruth(fact.truth)) addEntityPhrase(fact.truth);
   }
   for (const payment of seed.payments) {
-    addWords(payment.vendor);
-    for (const alias of payment.vendor_aliases) addWords(alias);
+    addEntityPhrase(payment.vendor);
+    for (const alias of payment.vendor_aliases) addEntityPhrase(alias);
   }
-  return tokens;
+
+  return { words, phrases: [...phraseSet].sort((a, b) => b.length - a.length) };
+}
+
+/** True when `normText` (already `normalizeText`-normalized) contains any of `phrases` as a
+ *  bounded whole phrase -- same word-boundary shape as `stripLexicon`/`hasLexiconHit`, so a
+ *  multi-word org name only counts when it appears intact, never via one of its individual
+ *  words. */
+function hasNamePhrase(normText: string, phrases: string[]): boolean {
+  for (const phrase of phrases) {
+    const pattern = new RegExp(`\\b${escapeRegExp(phrase).replace(/\s+/g, '\\s+')}\\b`);
+    if (pattern.test(normText)) return true;
+  }
+  return false;
 }
 
 /** True when `rawText` contains a plausible name-answer signal for `field`: a cued name
  *  extraction for this exact field, a bare two-capitalized-word span (a raw-text check,
  *  never normalized -- capitalization is the only cheap signal a name span has once it's
  *  outside a recognized cue pattern like "counsel is X"), or (finding 1, Sonnet review,
- *  2026-09-15/16) a single word matching any seed-known identity/alias/first name/last
- *  name/place/institution token (`seedNameTokens`) -- catches a genuine cue-less, single-
- *  word answer like "it was Marcus" or "the one in Zurich" that neither earlier check
- *  recognizes. This is a SIGNAL check only (does this look like an attempt to answer at
- *  all), never a correctness check -- `gradeLiveCommitment`/`gradeTrapFact` still decide
+ *  2026-09-15/16) a seed-known name signal from `seedNameTokens` -- either a whole seeded
+ *  organisation/place/person phrase occurring intact, or a single word from a seeded
+ *  PERSON name (first/last/alias) -- catching a genuine cue-less answer like "it was
+ *  Marcus" or "the one in Zurich" that neither earlier check recognizes, while never
+ *  treating a bare common word that merely happens to appear inside a longer seeded org
+ *  name (e.g. "trust", "supply") as a signal by itself (CRITICAL fix, Sonnet review of
+ *  6a81b98). This is a SIGNAL check only (does this look like an attempt to answer at all),
+ *  never a correctness check -- `gradeLiveCommitment`/`gradeTrapFact` still decide
  *  PASS/FAIL/AMBIGUOUS from the actual content once grading proceeds; a signal-shaped but
  *  incomplete answer (e.g. a first name where the full name was committed) can still grade
  *  AMBIGUOUS, same as today -- the fix only stops it from being silently left AWAITING
@@ -452,10 +528,12 @@ function hasNameSignal(field: ClaimField, rawText: string, seed: SeedConfig): bo
   if (/\b[A-Z][A-Za-z.']*\s+[A-Z][A-Za-z.']*\b/.test(rawText)) return true;
   if (extractCuedNames(rawText).some((h) => h.field === field)) return true;
   const known = seedNameTokens(seed);
-  return normalizeText(rawText)
+  const normText = normalizeText(rawText);
+  if (hasNamePhrase(normText, known.phrases)) return true;
+  return normText
     .split(' ')
     .filter(Boolean)
-    .some((w) => known.has(w));
+    .some((w) => known.words.has(w));
 }
 
 /** True when `rawText` contains a plausible answer signal for a non-name `field` --
@@ -476,6 +554,19 @@ function hasFieldSignal(field: ClaimField, rawText: string): boolean {
     // resolves to 2+ digits under `normalizeSpokenDigits` even though neither prior check
     // fires on it (a tens word like "eighty" or "thirty" isn't in the single-digit-word
     // list, and "double eight" isn't 2 separate digit words at all).
+    //
+    // Known, accepted gap (2026-09-16, name-tokens lane): `rawText` here can already be a
+    // multi-utterance joined string (this is a SIGNAL check only, called from
+    // `isAnswerShapedFor` on the pre-joined `rawText` `gradeChallenges` builds) -- unlike the
+    // accept_tokens grading branch in `gradeChallenges`, this call site does not have access
+    // to the individual eligible utterances to normalize each one separately, so a digit run
+    // could in principle form across an utterance boundary here. Left as-is: `account_last4`
+    // is never a real `LIVE_COMMITMENT_FIELDS`/`TRAP_FIELD_ORDER` field (see the exhaustiveness
+    // comment above `isAnswerShapedFor`), so this branch is unreachable from any real
+    // `selectChallenge`-produced spec today, and even if it fired wrongly it would only ever
+    // widen "does this look like an answer" -- the actual PASS/FAIL grading for account_last4
+    // goes through `extractAccountLast4`/accept_tokens matching, which this function never
+    // performs.
     return /\d{2,}/.test(normalizeSpokenDigits(rawText));
   }
   if (field === 'amount_usd') {
@@ -798,8 +889,21 @@ export function gradeChallenges(
       // is purely numeric) since it re-tokenizes rawText. Never applied to a non-numeric
       // token (a name/place accept_token like "marcus" must still appear as itself -- this
       // never lets prose "stand in" for a name).
+      //
+      // CRITICAL FIX (2026-09-16, name-tokens lane, Sonnet review of 6a81b98):
+      // `normalizeSpokenDigits` must run PER ELIGIBLE UTTERANCE, never over the already-
+      // joined `rawText` -- two separate caller utterances ("eighty-eight" then, in a later
+      // turn, "thirty") join into the exact same string a single utterance saying "eighty-
+      // eight thirty" would produce, and normalizing that joined string can't tell them
+      // apart, so a digit run must never be allowed to form across an utterance boundary.
+      // Mapping the function over each utterance's own text first (so each call only ever
+      // sees that utterance's own characters) and joining the CONVERTED results is what
+      // makes that structurally impossible, independent of normalizeSpokenDigits' own
+      // punctuation-gap fix.
       const hasDigitToken = expect.accept_tokens.some((tok) => /^\d+$/.test(tok));
-      const digitWords = hasDigitToken ? normalizeText(normalizeSpokenDigits(rawText)).split(' ') : [];
+      const digitWords = hasDigitToken
+        ? normalizeText(eligible.map((u) => normalizeSpokenDigits(u.text)).join(' ')).split(' ')
+        : [];
       const allPresent = expect.accept_tokens.every(
         (tok) => words.includes(normalizeText(tok)) || (/^\d+$/.test(tok) && digitWords.includes(tok)),
       );

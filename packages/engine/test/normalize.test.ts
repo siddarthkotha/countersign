@@ -77,4 +77,44 @@ describe('normalizeSpokenDigits', () => {
     // account_last4 signal still requires >=2 resulting digits, which a bare "30" satisfies.
     expect(normalizeSpokenDigits('thirty')).toBe('30');
   });
+
+  it('a bare compound reading with no punctuation still converts ("eighty-eight thirty" -> 8830)', () => {
+    expect(normalizeSpokenDigits('eighty-eight thirty')).toBe('8830');
+  });
+});
+
+// CRITICAL FIX (2026-09-16, name-tokens lane, Sonnet review of 6a81b98): the previous
+// version let a run continue across ANY gap, including punctuation, an existing digit
+// sequence, or a currency sign -- so "84 471" became "84471", "Forty-four. Seventy-one."
+// became "4471.", "forty-four seventy-one dollars" became "4471 dollars", and "$84,500"
+// became "$84500". Each of those merges is wrong for a different reason (see the function's
+// own doc comment); this describe block pins the corrected behavior for each exact case.
+describe('normalizeSpokenDigits — CRITICAL (Sonnet review of 6a81b98, 2026-09-16): must not merge across an existing digit sequence, punctuation, or an amount suffix', () => {
+  it('never touches a string that already contains digits -- two separate existing digit groups must not merge ("84 471")', () => {
+    expect(normalizeSpokenDigits('84 471')).toBe('84 471');
+  });
+
+  it('never touches a string that already contains a currency sign ("$84,500")', () => {
+    expect(normalizeSpokenDigits('$84,500')).toBe('$84,500');
+  });
+
+  it('a "." sentence boundary breaks the run -- two separate sentences must not merge ("Forty-four. Seventy-one." -> "44. 71.", not "4471.")', () => {
+    expect(normalizeSpokenDigits('Forty-four. Seventy-one.')).toBe('44. 71.');
+  });
+
+  it('a run followed by "dollars" is an amount, not account digits -- left completely unconverted ("forty-four seventy-one dollars")', () => {
+    expect(normalizeSpokenDigits('forty-four seventy-one dollars')).toBe('forty-four seventy-one dollars');
+  });
+
+  it('a run followed by "dollar" (singular) is also left unconverted', () => {
+    expect(normalizeSpokenDigits('twenty dollar bill')).toBe('twenty dollar bill');
+  });
+
+  it('a run followed by "bucks" is also left unconverted', () => {
+    expect(normalizeSpokenDigits('forty five bucks')).toBe('forty five bucks');
+  });
+
+  it('a comma pause within one continuous reading still merges (distinct from a sentence-ending period) -- "forty-four, seventy-one" -> "4471"', () => {
+    expect(normalizeSpokenDigits('forty-four, seventy-one')).toBe('4471');
+  });
 });

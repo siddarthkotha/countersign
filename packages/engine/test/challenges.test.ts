@@ -581,6 +581,59 @@ describe('isAnswerShapedFor — finding 1 (Sonnet review, 2026-09-15/16): seed-k
   });
 });
 
+// CRITICAL FIX (2026-09-16, name-tokens lane, Sonnet review of 6a81b98): `seedNameTokens`
+// used to add every word of every seed.knowledge `accept_tokens` entry and every payment
+// vendor/alias, so `hasNameSignal` treated common words that merely appear INSIDE a longer
+// seeded org/place name ("first", "trust", "supply", "co", "parts") as name signals all by
+// themselves. That made ordinary filler answer-shaped for a pending TRAP_FACT challenge,
+// grading an honest caller's unrelated small talk AMBIGUOUS (0.5) and closing the awaiting
+// window early. Fixed: organisation/place names now count only as WHOLE PHRASES (matched
+// intact, never split into their individual words); only PERSON names (seed identities'
+// full names and aliases) contribute single-word tokens, and only when >= 3 characters and
+// not in the small common-word stoplist.
+describe('isAnswerShapedFor — CRITICAL (Sonnet review of 6a81b98, 2026-09-16): name tokens come only from person names and whole-phrase org/place names', () => {
+  const trueClaim = claim('c-counsel-nt', 'counsel', 'STATED', 'calder and finch', 1000, 'Calder & Finch');
+  const spec: ChallengeSpec = {
+    challenge_id: 'nt-1',
+    kind: 'TRAP_FACT',
+    field: 'counsel',
+    ask: 'x',
+    expect: { trap_value: 'Whitmore & Bass', true_claim_id: 'c-counsel-nt' },
+  };
+
+  it('"Trust me, this is legitimate." is NOT answer-shaped (the word "trust" alone, from "First Meridian Trust", must not count)', () => {
+    expect(isAnswerShapedFor(spec, 'Trust me, this is legitimate.', SEED, [trueClaim])).toBe(false);
+  });
+
+  it('"We supply parts to them regularly." is NOT answer-shaped (the words "supply"/"parts", from "Meridian Supply"/"Quarterly parts restock", must not count)', () => {
+    expect(isAnswerShapedFor(spec, 'We supply parts to them regularly.', SEED, [trueClaim])).toBe(false);
+  });
+
+  it('"the first one" is NOT answer-shaped (the word "first", from "First Meridian Trust", must not count)', () => {
+    expect(isAnswerShapedFor(spec, 'the first one', SEED, [trueClaim])).toBe(false);
+  });
+
+  it('"it was Marcus" IS answer-shaped (a real seeded person first name, cue-less)', () => {
+    expect(isAnswerShapedFor(spec, 'it was Marcus', SEED, [trueClaim])).toBe(true);
+  });
+
+  it('"Marcus" alone IS answer-shaped', () => {
+    expect(isAnswerShapedFor(spec, 'Marcus', SEED, [trueClaim])).toBe(true);
+  });
+
+  it('"Calder and Finch" IS answer-shaped (whole-phrase org match)', () => {
+    expect(isAnswerShapedFor(spec, 'Calder and Finch', SEED, [trueClaim])).toBe(true);
+  });
+
+  it('"the one in Zurich" IS answer-shaped (whole-phrase, single-word place)', () => {
+    expect(isAnswerShapedFor(spec, 'the one in Zurich', SEED, [trueClaim])).toBe(true);
+  });
+
+  it('"First Meridian Trust" IS answer-shaped (whole-phrase org match, and also the bare two-capitalized-word check)', () => {
+    expect(isAnswerShapedFor(spec, 'First Meridian Trust', SEED, [trueClaim])).toBe(true);
+  });
+});
+
 describe('gradeChallenges — accept_tokens digit-word matching (finding 1, Sonnet review, 2026-09-15/16)', () => {
   it('RELATIONAL account challenge PASSes when the digits are read back as compound number words ("forty-four seventy-one" -> 4471)', () => {
     const beneficiaryClaim = claim('c-ben3', 'beneficiary', 'STATED', 'meridian supply', 1000, 'Meridian Supply');
@@ -625,6 +678,44 @@ describe('gradeChallenges — accept_tokens digit-word matching (finding 1, Sonn
     const conversation = [utt('u1', 3000, 'Ninety-nine, twelve.')];
     const result = gradeChallenges(conversation, actions, [spec], SEED, [beneficiaryClaim]);
     expect(result['dg-3']?.result).toBe('FAIL');
+  });
+
+  // CRITICAL FIX (2026-09-16, name-tokens lane, Sonnet review of 6a81b98): normalizeSpokenDigits
+  // must run PER ELIGIBLE UTTERANCE, never over an already-joined multi-utterance string --
+  // joining "eighty-eight" and "thirty" from two SEPARATE caller turns with a single space (the
+  // same join gradeChallenges always does before grading) is byte-for-byte identical to one
+  // utterance saying "eighty-eight thirty", so only normalizing each utterance's own text
+  // separately (never the joined result) can tell them apart.
+  it('a RELATIONAL digit challenge does NOT PASS when the digits arrive as two separate caller utterances ("eighty-eight" then "thirty")', () => {
+    const beneficiaryClaim = claim('c-ben6', 'beneficiary', 'STATED', 'meridian supply', 1000, 'Meridian Supply');
+    const spec: ChallengeSpec = {
+      challenge_id: 'dg-4',
+      kind: 'RELATIONAL',
+      field: 'account_last4',
+      ask: 'Ask for the last four digits of the account attached to the beneficiary they named.',
+      expect: { accept_tokens: ['8830'] },
+    };
+    const actions: AgentAction[] = [issuedAction('a1', 'dg-4', 2000)];
+    const conversation = [utt('u1', 3000, 'eighty-eight'), utt('u2', 3200, 'thirty')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, [beneficiaryClaim]);
+    expect(result['dg-4']?.result).not.toBe('PASS');
+  });
+
+  // Same shape, but the SAME single utterance saying both words together: must still PASS
+  // (the fix must not overcorrect into never merging within one real utterance).
+  it('the same digits DO PASS when spoken in one continuous caller utterance ("eighty-eight thirty")', () => {
+    const beneficiaryClaim = claim('c-ben7', 'beneficiary', 'STATED', 'meridian supply', 1000, 'Meridian Supply');
+    const spec: ChallengeSpec = {
+      challenge_id: 'dg-5',
+      kind: 'RELATIONAL',
+      field: 'account_last4',
+      ask: 'Ask for the last four digits of the account attached to the beneficiary they named.',
+      expect: { accept_tokens: ['8830'] },
+    };
+    const actions: AgentAction[] = [issuedAction('a1', 'dg-5', 2000)];
+    const conversation = [utt('u1', 3000, 'eighty-eight thirty')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, [beneficiaryClaim]);
+    expect(result['dg-5']?.result).toBe('PASS');
   });
 });
 
