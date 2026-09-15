@@ -14,7 +14,7 @@ Live demo: https://countersign-bf8q.onrender.com. Use desktop Chrome with a work
 
 4. Answer the agent's verification questions truthfully or falsely, as your role requires. The checks happen silently on the right board as you speak.
 
-5. Wait for the goodbye. The system hangs up itself. The left board shows the full transcript of both sides as it happens. The right board shows the checks and the verdict banner. The bottom shows the hash-chained evidence export fingerprint.
+5. Wait for the goodbye. The system hangs up itself. The left board shows the full transcript of both sides as it happens. The right board shows the checks and the verdict banner. The bottom shows the hash-chained evidence export fingerprint. After the goodbye, note the eight-character session code shown under the banner; it is how a call's full record is fetched.
 
 ## The world you are calling into
 

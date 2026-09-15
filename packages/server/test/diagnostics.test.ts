@@ -23,6 +23,7 @@ import {
   recordServerEvent,
   endBundle,
   getBundle,
+  lookupBundleResult,
   addClientEvents,
   checkClientPostRate,
   summarizeBundle,
@@ -339,6 +340,107 @@ describe('diagnostics.ts — pure functions', () => {
       verdict: 'STAGE',
       errors: 1,
     });
+  });
+
+  it('getBundle: exact ID lookup still works', () => {
+    const state = newDiagnosticsState();
+    const fullId = '11111111-1111-1111-1111-111111111111';
+    createBundle(state, fullId, 1000);
+
+    const result = getBundle(state, fullId);
+    expect(result).not.toBeNull();
+    expect(result?.session_id).toBe(fullId);
+  });
+
+  it('getBundle: 8-char prefix returns the bundle if unique', () => {
+    const state = newDiagnosticsState();
+    const fullId = '11111111-1111-1111-1111-111111111111';
+    createBundle(state, fullId, 1000);
+
+    const result = getBundle(state, fullId.slice(0, 8));
+    expect(result).not.toBeNull();
+    expect(result?.session_id).toBe(fullId);
+  });
+
+  it('getBundle: 7-char prefix returns null (too short)', () => {
+    const state = newDiagnosticsState();
+    const fullId = '11111111-1111-1111-1111-111111111111';
+    createBundle(state, fullId, 1000);
+
+    const result = getBundle(state, fullId.slice(0, 7));
+    expect(result).toBeNull();
+  });
+
+  it('getBundle: returns null when no sessions match', () => {
+    const state = newDiagnosticsState();
+    createBundle(state, '11111111-1111-1111-1111-111111111111', 1000);
+
+    const result = getBundle(state, '99999999');
+    expect(result).toBeNull();
+  });
+
+  it('getBundle: returns null when ambiguous (multiple prefix matches)', () => {
+    const state = newDiagnosticsState();
+    // Two session IDs that share the same first 8 characters
+    const id1 = '11111111-1111-1111-1111-111111111111';
+    const id2 = '11111111-2222-2222-2222-222222222222';
+    createBundle(state, id1, 1000);
+    createBundle(state, id2, 2000);
+
+    // Prefix that matches both should return null
+    const result = getBundle(state, '11111111');
+    expect(result).toBeNull();
+  });
+
+  it('lookupBundleResult: exact UUID returns bundle with count="exact"', () => {
+    const state = newDiagnosticsState();
+    const fullId = '11111111-1111-1111-1111-111111111111';
+    createBundle(state, fullId, 1000);
+
+    const result = lookupBundleResult(state, fullId);
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty('bundle');
+    if ('bundle' in result!) {
+      expect(result.bundle.session_id).toBe(fullId);
+      expect(result.count).toBe('exact');
+    }
+  });
+
+  it('lookupBundleResult: 8-char prefix returns bundle when unique', () => {
+    const state = newDiagnosticsState();
+    const fullId = '11111111-1111-1111-1111-111111111111';
+    createBundle(state, fullId, 1000);
+
+    const result = lookupBundleResult(state, fullId.slice(0, 8));
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty('bundle');
+    if ('bundle' in result!) {
+      expect(result.bundle.session_id).toBe(fullId);
+    }
+  });
+
+  it('lookupBundleResult: returns null when no match', () => {
+    const state = newDiagnosticsState();
+    createBundle(state, '11111111-1111-1111-1111-111111111111', 1000);
+
+    const result = lookupBundleResult(state, '99999999');
+    expect(result).toBeNull();
+  });
+
+  it('lookupBundleResult: returns ambiguous error when multiple matches', () => {
+    const state = newDiagnosticsState();
+    const id1 = '11111111-1111-1111-1111-111111111111';
+    const id2 = '11111111-2222-2222-2222-222222222222';
+    createBundle(state, id1, 1000);
+    createBundle(state, id2, 2000);
+
+    const result = lookupBundleResult(state, '11111111');
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty('error');
+    if ('error' in result!) {
+      expect(result.error).toBe('ambiguous');
+      expect(result.count).toBe(2);
+    }
   });
 });
 

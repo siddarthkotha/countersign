@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import MicCheck, { type MicCheckReason, type MicCheckResultInfo } from '../components/MicCheck';
 import RoleCards from '../components/RoleCards';
+import RecentCalls from '../components/RecentCalls';
 import Masthead from '../components/Masthead';
 import { startSession, getHealth, type DemoPersona, type StartResult, type LiveCallsReason } from '../api';
 
@@ -189,6 +190,8 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
       <MicCheck onResult={setMicResult} />
 
       <RoleCards selected={role} onSelect={setRole} />
+
+      <RecentCalls />
 
       <p>Desktop Chrome recommended. Every system here is simulated; nothing moves real money.</p>
     </main>

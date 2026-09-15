@@ -191,7 +191,50 @@ export function endBundle(state: DiagnosticsState, session_id: string, now: numb
 }
 
 export function getBundle(state: DiagnosticsState, session_id: string): DiagnosticBundle | null {
-  return state.bundles.get(session_id) ?? null;
+  // Exact match first
+  const exact = state.bundles.get(session_id);
+  if (exact) return exact;
+
+  // If no exact match and id is at least 8 characters, try prefix match
+  if (session_id.length >= 8) {
+    const matches: DiagnosticBundle[] = [];
+    for (const bundle of state.bundles.values()) {
+      if (bundle.session_id.startsWith(session_id)) {
+        matches.push(bundle);
+      }
+    }
+    // Return the bundle only if exactly one match; ambiguous/no matches return null
+    // (http.ts layer checks count and returns appropriate status code)
+    if (matches.length === 1) return matches[0]!;
+  }
+
+  return null;
+}
+
+/** Lookup helper for http.ts that disambiguates between zero, one, and multiple prefix matches.
+ *  Returns the bundle if exactly one match, null if zero or multiple. The caller decides
+ *  whether to return 404 (no matches) or 409 (multiple). */
+export function lookupBundleResult(
+  state: DiagnosticsState,
+  session_id: string,
+): { bundle: DiagnosticBundle; count: 'exact' } | { error: 'ambiguous'; count: number } | null {
+  // Exact match first
+  const exact = state.bundles.get(session_id);
+  if (exact) return { bundle: exact, count: 'exact' };
+
+  // If no exact match and id is at least 8 characters, try prefix match
+  if (session_id.length >= 8) {
+    const matches: DiagnosticBundle[] = [];
+    for (const bundle of state.bundles.values()) {
+      if (bundle.session_id.startsWith(session_id)) {
+        matches.push(bundle);
+      }
+    }
+    if (matches.length === 1) return { bundle: matches[0]!, count: 'exact' };
+    if (matches.length > 1) return { error: 'ambiguous', count: matches.length };
+  }
+
+  return null;
 }
 
 export type ClientPostRateResult = 'ok' | 'not_found' | 'rate_limited';

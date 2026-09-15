@@ -17,6 +17,7 @@ import {
   addClientEvents,
   checkClientPostRate,
   getBundle,
+  lookupBundleResult,
   recordPendingServerEvent,
   MAX_CLIENT_BODY_BYTES,
   type DiagnosticsState,
@@ -355,21 +356,30 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
     // session. The id is a UUID minted the same way `/api/session/start` mints one (unguess-
     // able) -- same 404-for-bad-shape check as `/reset`/`/end` above, no separate auth in v1
     // (documented: the data is synthetic by law, and unguessable-UUID is the only gate).
+    // Amendment: if a full UUID is not provided, allow prefix lookup (8+ chars) to find the
+    // session by its first 8 characters (displayed on the call screen).
     const diagMatch = /^\/api\/session\/([^/]+)\/diagnostics$/.exec(path);
     if (diagMatch && (req.method === 'GET' || req.method === 'POST')) {
       const id = diagMatch[1] as string;
-      if (!UUID_RE.test(id)) {
+      const isExactUuid = UUID_RE.test(id);
+      const isValidIdLength = id.length >= 8;
+
+      if (!isExactUuid && !isValidIdLength) {
         sendJson(res, 404, { error: 'not_found' });
         return;
       }
 
       if (req.method === 'GET') {
-        const bundle = getBundle(deps.diagnostics, id);
-        if (!bundle) {
+        const lookupResult = lookupBundleResult(deps.diagnostics, id);
+        if (!lookupResult) {
           sendJson(res, 404, { error: 'not_found' });
           return;
         }
-        sendJson(res, 200, bundle);
+        if ('error' in lookupResult) {
+          sendJson(res, 409, { error: lookupResult.error, matches: lookupResult.count });
+          return;
+        }
+        sendJson(res, 200, lookupResult.bundle);
         return;
       }
 
@@ -382,7 +392,22 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
       // session-cumulative-budget validation (400 for shape, 413 for a full session budget)
       // is `addClientEvents`'s job (diagnostics.ts) -- same division as everywhere else in
       // this file (transport-level checks here, payload validation in the owning module).
-      const rate = checkClientPostRate(deps.diagnostics, id, now);
+      // For POST, only apply prefix lookup to GET side per the requirement ("do not widen writes").
+      let lookupId = id;
+      if (!isExactUuid && isValidIdLength) {
+        const lookupResult = lookupBundleResult(deps.diagnostics, id);
+        if (!lookupResult) {
+          sendJson(res, 404, { error: 'not_found' });
+          return;
+        }
+        if ('error' in lookupResult) {
+          sendJson(res, 409, { error: lookupResult.error, matches: lookupResult.count });
+          return;
+        }
+        lookupId = lookupResult.bundle.session_id;
+      }
+
+      const rate = checkClientPostRate(deps.diagnostics, lookupId, now);
       if (rate === 'not_found') {
         sendJson(res, 404, { error: 'not_found' });
         return;
@@ -410,7 +435,7 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
         sendJson(res, 413, { error: 'payload_too_large' });
         return;
       }
-      const result = addClientEvents(deps.diagnostics, id, bodyResult.body);
+      const result = addClientEvents(deps.diagnostics, lookupId, bodyResult.body);
       if (!result.ok) {
         const status = result.reason === 'not_found' ? 404 : result.reason === 'session_full' ? 413 : 400;
         sendJson(res, status, { error: result.reason });

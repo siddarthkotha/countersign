@@ -24,6 +24,7 @@ import {
   recordStateEvent,
   recordTranscriptLine,
 } from '../diagnostics/flightRecorder';
+import { addRecentCall } from '../lib/recentCalls';
 
 export type StartedSession = Extract<StartResult, { session_id: string }>;
 
@@ -349,6 +350,7 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
         setEndedReason(reason);
         setLink('ended');
         logTimingsOnce();
+        addRecentCall(session.session_id, screenState?.verdict ?? null);
         flushDiagnosticsFetch();
       });
       clientRef.current = client;
@@ -427,7 +429,12 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
         <p role="status">Voice link lost, security state preserved. Reconnecting…</p>
       )}
 
-      {endedReason && <p role="status">{endedReasonToPlainWords(endedReason, screenState?.verdict)}</p>}
+      {endedReason && (
+        <>
+          <p role="status">{endedReasonToPlainWords(endedReason, screenState?.verdict)}</p>
+          <p>Session code: {session.session_id.slice(0, 8)}</p>
+        </>
+      )}
 
       {screenState ? (
         <CallView screen={screenState} timings={timings} />
