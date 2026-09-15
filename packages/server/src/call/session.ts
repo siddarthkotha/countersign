@@ -257,6 +257,15 @@ export class CallSession {
    *  goodbye). Whichever fires first (`reply.done` or this timeout) wins; the call is never
    *  ended twice. */
   private static readonly CLOSE_DONE_WAIT_MS = 4_000;
+  /** Defect B fix (2026-09-15, PROVEN: CLOSE reply.create sent twice on 6 of 8 live founder
+   *  calls on 2026-09-14, three times on one): how long `scheduleCloseIfNeeded` waits, after
+   *  a reply's own `reply.done` arrives with no matching transcript accumulated YET, before
+   *  concluding the close line was not spoken and arming a retry. PROVEN from the same live
+   *  sample: the agent's final `transcript.agent` chunk for a reply arrives at the END of
+   *  that reply -- within tens of ms of `reply.done`, in either order -- so a decision made
+   *  the instant `reply.done` fires can race a transcript that is already on the wire. See
+   *  `armCloseTranscriptWait`'s own doc comment for the full mechanism. */
+  private static readonly CLOSE_TRANSCRIPT_WAIT_MS = 1_500;
   /** Defect A fix (2026-09-15, PROVEN on all 8 server-ended founder calls 2026-09-14):
    *  output audio is 24 kHz PCM16 mono (docs/ASSEMBLYAI_INTEGRATION.md line 17, matching
    *  `packages/web/src/audio/playback.ts`'s own `SAMPLE_RATE = 24000`) -- 24000 samples/sec *
@@ -291,6 +300,10 @@ export class CallSession {
   private replyCreateLostTimer: ReturnType<typeof setTimeout> | null = null;
   private closeDoneWaitTimer: ReturnType<typeof setTimeout> | null = null;
   private closeStuckTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Defect B fix: the pending "wait for a late transcript" timer, and which reply id it is
+   *  waiting on -- see `armCloseTranscriptWait`'s own doc comment. */
+  private closeTranscriptWaitTimer: ReturnType<typeof setTimeout> | null = null;
+  private closeTranscriptWaitReplyId: string | null = null;
   /** Defect A fix: bytes of `reply.audio` actually RELAYED to the browser (post-suppression),
    *  and the server clock time the first relayed frame went out, keyed by AAI reply id --
    *  never pruned (same convention `replyTranscripts` above already uses: one call's total
@@ -518,6 +531,11 @@ export class CallSession {
       clearTimeout(this.closeStuckTimer);
       this.closeStuckTimer = null;
     }
+    if (this.closeTranscriptWaitTimer) {
+      clearTimeout(this.closeTranscriptWaitTimer);
+      this.closeTranscriptWaitTimer = null;
+      this.closeTranscriptWaitReplyId = null;
+    }
     // Review fix (2026-09-15): the question-reask spacing timer is not CLOSE-specific, but
     // this is the one method every ending path (`end()`) already funnels through to clear
     // every other pending send timer -- same reasoning as `replyCreateLostTimer` above.
@@ -622,13 +640,18 @@ export class CallSession {
       clearTimeout(this.closeRetryTimer);
       this.closeRetryTimer = null;
     }
+    if (this.closeTranscriptWaitTimer) {
+      clearTimeout(this.closeTranscriptWaitTimer);
+      this.closeTranscriptWaitTimer = null;
+      this.closeTranscriptWaitReplyId = null;
+    }
 
     // Defect A fix: size the wait to the goodbye's own estimated playback length instead of a
     // flat CLOSE_GRACE_MS regardless of how much audio there was to play. `replyId` is the
     // CONFIRMED goodbye reply (`goodbyeConfirmedReplyId`, always set before this method is
-    // ever called from `scheduleCloseIfNeeded`/`maybeArmCloseOnTranscript`) -- its own relayed
-    // byte count and first-relayed-frame timestamp are what `dispatchAaiEvent`'s `reply.audio`
-    // case records. No audio recorded
+    // ever called from `scheduleCloseIfNeeded`/`maybeArmCloseOnTranscript`/
+    // `armCloseTranscriptWait`) -- its own relayed byte count and first-relayed-frame
+    // timestamp are what `dispatchAaiEvent`'s `reply.audio` case records. No audio recorded
     // at all (bytes === 0, e.g. every existing transcript-only test fixture, or a genuinely
     // silent reply) falls back to the unchanged flat CLOSE_GRACE_MS -- today's timing exactly.
     const replyId = this.goodbyeConfirmedReplyId;
@@ -696,11 +719,68 @@ export class CallSession {
       clearTimeout(this.closeStuckTimer);
       this.closeStuckTimer = null;
     }
+    // Defect B fix (2026-09-15): a matching chunk landing here means whatever
+    // `armCloseTranscriptWait` may have pending for this reply (waiting to decide whether a
+    // retry is owed) has its answer already -- nothing left to wait for.
+    if (this.closeTranscriptWaitTimer) {
+      clearTimeout(this.closeTranscriptWaitTimer);
+      this.closeTranscriptWaitTimer = null;
+      this.closeTranscriptWaitReplyId = null;
+    }
     this.closeDoneWaitTimer = setTimeout(() => {
       this.closeDoneWaitTimer = null;
       this.beginCloseGrace();
     }, CallSession.CLOSE_DONE_WAIT_MS);
     this.closeDoneWaitTimer.unref?.();
+  }
+
+  /** Defect B fix (2026-09-15, PROVEN: CLOSE reply.create sent twice on 6 of 8 live founder
+   *  calls 2026-09-14, three times on one): `scheduleCloseIfNeeded`'s non-match branch used
+   *  to arm a retry (`armCloseRetryTimer`, spaced only CLOSE_RETRY_MIN_GAP_MS=400ms) the
+   *  instant a reply's own `reply.done` arrived with no matching transcript accumulated YET
+   *  -- but the final `transcript.agent` chunk for a reply routinely arrives at (or just
+   *  after) that SAME reply's `reply.done`, sometimes after the 400ms gap had already sent a
+   *  redundant `reply.create` (underrun bursts inside those retries were PROVEN in the same
+   *  live sample). This method is what `scheduleCloseIfNeeded` arms instead: gives a late
+   *  transcript chunk CLOSE_TRANSCRIPT_WAIT_MS (1500ms -- well over the "tens of ms" lag
+   *  actually measured live) to still land and complete the match before concluding the
+   *  close line was not spoken. `maybeArmCloseOnTranscript` (fired on every transcript.agent
+   *  chunk, including one arriving inside this window) is what actually confirms a match if
+   *  one lands, and clears this timer when it does; this timer's own callback re-checks
+   *  `ended`/`goodbyeConfirmed` at fire time, so it is a pure no-op if a match already landed
+   *  by then -- it can never race or duplicate that confirmation. Only when the window closes
+   *  with STILL no match does it fall through to the unchanged, still-spaced
+   *  `armCloseRetryTimer`. A defensive match check is also run here (rather than trusting
+   *  `maybeArmCloseOnTranscript` alone) in case a chunk lands without re-triggering that path.
+   *  Idempotent per reply id: a repeat call for the SAME id already being waited on is a
+   *  no-op; a call for a DIFFERENT id (should not happen in practice -- only one CLOSE reply
+   *  is ever in flight at a time -- but defensive) replaces the pending wait, the same "latest
+   *  wins" convention `armCloseRetryTimer`/`maybeArmCloseOnTranscript` already use elsewhere
+   *  in this file. */
+  private armCloseTranscriptWait(replyId: string): void {
+    if (this.closeTranscriptWaitTimer && this.closeTranscriptWaitReplyId === replyId) return;
+    if (this.closeTranscriptWaitTimer) {
+      clearTimeout(this.closeTranscriptWaitTimer);
+      this.closeTranscriptWaitTimer = null;
+    }
+    this.closeTranscriptWaitReplyId = replyId;
+    this.closeTranscriptWaitTimer = setTimeout(() => {
+      this.closeTranscriptWaitTimer = null;
+      this.closeTranscriptWaitReplyId = null;
+      if (this.ended || this.goodbyeConfirmed) return;
+      const sentence = this.currentCloseSentence();
+      if (!sentence) return;
+      const transcript = this.replyTranscripts.get(replyId) ?? '';
+      if (transcriptMatchesCloseSentence(transcript, sentence)) {
+        this.goodbyeConfirmed = true;
+        this.goodbyeConfirmedReplyId = replyId;
+        this.beginCloseGrace();
+        return;
+      }
+      this.closeLastReplyWasEmpty = transcript.trim().length === 0;
+      this.armCloseRetryTimer();
+    }, CallSession.CLOSE_TRANSCRIPT_WAIT_MS);
+    this.closeTranscriptWaitTimer.unref?.();
   }
 
   /** Round 4, requirement 1: arms the CLOSE_RETRY_MIN_GAP_MS spacing timer before the next
@@ -814,14 +894,17 @@ export class CallSession {
    *  barge-in still counts -- once SEALED there is nothing left for the model to do, so a
    *  caller who talks over the close line does not buy the call more time).
    *
-   *  Not matched (rule 2/3): the close line was NOT heard in this reply, whether it finished
-   *  cleanly or was interrupted. Round 4 (requirement 8): records whether this reply's own
-   *  accumulated transcript was empty/whitespace-only (read once by the retry this arms, so
-   *  an empty reply does not bump the diagnostics `attempt` counter -- it still counts as a
-   *  reason to retry, just not as an "attempt"), then arms the spaced retry
-   *  (`armCloseRetryTimer`) with a one-shot `instructions` payload carrying the exact wrapper
-   *  prompt.ts's own CLOSE case uses (`Say exactly this and nothing else: "..."`) rather than
-   *  relying on the standing `system_prompt` alone. There is no attempt cap anymore
+   *  Not matched (rule 2/3): the close line was NOT heard in THIS reply's transcript so far,
+   *  whether it finished cleanly or was interrupted. Defect B fix (2026-09-15): no longer
+   *  concludes "not spoken" and arms a retry immediately here -- the reply's own final
+   *  transcript chunk routinely arrives at (or just after) `reply.done` itself (PROVEN live),
+   *  so this instead arms `armCloseTranscriptWait`, which gives that chunk
+   *  CLOSE_TRANSCRIPT_WAIT_MS to still land before falling through to the spaced retry
+   *  (`armCloseRetryTimer`, with a one-shot `instructions` payload carrying the exact wrapper
+   *  prompt.ts's own CLOSE case uses -- `Say exactly this and nothing else: "..."` -- rather
+   *  than relying on the standing `system_prompt` alone; round 4, requirement 8's
+   *  empty-transcript bookkeeping is now read at THAT wait's own fire time, off the latest
+   *  transcript, not the snapshot taken here). There is no attempt cap anymore
    *  (CLOSE_REPLY_ATTEMPTS is gone) -- retries continue, spaced, until either a match is
    *  heard or the CLOSE_TOTAL_MS (45s) hard cap (`armClose`) ends the call `close_timeout`. */
   private scheduleCloseIfNeeded(replyId: string): void {
@@ -847,8 +930,7 @@ export class CallSession {
       return;
     }
 
-    this.closeLastReplyWasEmpty = transcript.trim().length === 0;
-    this.armCloseRetryTimer();
+    this.armCloseTranscriptWait(replyId);
   }
 
   constructor(opts: CallSessionOpts) {

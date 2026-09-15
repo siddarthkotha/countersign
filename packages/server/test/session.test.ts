@@ -1258,7 +1258,12 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
 
   // Round 4 (2026-09-14): the retry no longer goes out synchronously off the reply.done --
   // it waits CLOSE_RETRY_MIN_GAP_MS (400ms) first (a real timer, advanced explicitly below).
-  it('an INTERRUPTED reply.done for CLOSE that was cut off before saying anything close-shaped is treated as NOT spoken and retried (after the spacing gap), not hung up on', () => {
+  // Defect B fix (2026-09-15): that 400ms gap no longer starts immediately off reply.done
+  // either -- `scheduleCloseIfNeeded` first waits CLOSE_TRANSCRIPT_WAIT_MS (1500ms) for a
+  // late transcript.agent chunk that might still confirm the close line before concluding it
+  // was not spoken (see `armCloseTranscriptWait`'s own doc comment). No further chunk ever
+  // arrives here, so the retry now fires at 1500ms + 400ms = 1900ms after reply.done.
+  it('an INTERRUPTED reply.done for CLOSE that was cut off before saying anything close-shaped is treated as NOT spoken and retried (after the transcript wait and spacing gap), not hung up on', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
@@ -1274,9 +1279,11 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     clock.now = 7700;
     aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'interrupted' });
 
-    // Not sent yet -- waits the spacing gap.
+    // Not sent yet -- waits the transcript window, then the spacing gap.
     expect(aai.sent.at(-1)).not.toMatchObject({ instructions: expect.stringContaining('Say exactly this') });
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(1500); // CLOSE_TRANSCRIPT_WAIT_MS
+    expect(aai.sent.at(-1)).not.toMatchObject({ instructions: expect.stringContaining('Say exactly this') });
+    vi.advanceTimersByTime(400); // CLOSE_RETRY_MIN_GAP_MS
     // Not matched -- a retry reply.create goes out instead of arming the hang-up.
     expect(aai.sent.at(-1)).toEqual({ type: 'reply.create', instructions: expect.stringContaining('Say exactly this') });
     vi.advanceTimersByTime(1500);
@@ -1825,8 +1832,12 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
 
   // Round 4 (2026-09-14, time-budget fix): the retry no longer fires synchronously off
   // reply.done -- it waits CLOSE_RETRY_MIN_GAP_MS (400ms) first (a real setTimeout, advanced
-  // explicitly below). Everything else about the reproduction is unchanged.
-  it('(a) reproduces the PROVEN live sequence: a reply carrying AssemblyAI\'s own unrelated text does NOT end the call -- it costs one close_retry (sent after the 400ms spacing gap), and only the reply that actually says the close line ends it', () => {
+  // explicitly below). Defect B fix (2026-09-15): that gap no longer starts immediately off
+  // reply.done either -- `scheduleCloseIfNeeded` first waits CLOSE_TRANSCRIPT_WAIT_MS
+  // (1500ms) for a late transcript.agent chunk before concluding the close line was not
+  // spoken (see `armCloseTranscriptWait`). No further chunk arrives for 'aai-turn-1' here, so
+  // the retry fires at 1500ms + 400ms = 1900ms after its reply.done.
+  it('(a) reproduces the PROVEN live sequence: a reply carrying AssemblyAI\'s own unrelated text does NOT end the call -- it costs one close_retry (sent after the transcript wait and spacing gap), and only the reply that actually says the close line ends it', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
@@ -1863,7 +1874,10 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
 
     // NOT ended: the close line was never heard.
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
-    // The retry does not go out immediately -- it waits the spacing gap.
+    // The retry does not go out immediately -- it waits the transcript window, then the
+    // spacing gap.
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+    vi.advanceTimersByTime(1500); // CLOSE_TRANSCRIPT_WAIT_MS -- no late chunk arrives
     expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
     vi.advanceTimersByTime(399);
     expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
@@ -1919,7 +1933,11 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
   // either a match is heard or the CLOSE_TOTAL_MS (45s) absolute budget ends the call. This
   // test's old premise ("no fourth ever sent") is exactly backwards under the new design: a
   // fourth (and more) DOES go out once each retry is given its 400ms gap to actually fire.
-  it('three non-matching replies do not exhaust anything -- a fourth (and more) reply.create is sent, spaced >=400ms, until the 45s absolute budget ends the call close_timeout', () => {
+  // Defect B fix (2026-09-15): each of those 400ms gaps now starts only after a further
+  // CLOSE_TRANSCRIPT_WAIT_MS (1500ms) transcript wait off reply.done (see
+  // `armCloseTranscriptWait`) -- no further chunk ever arrives for r1/r2/r3 below, so each
+  // retry now costs 1500ms + 400ms = 1900ms instead of 400ms.
+  it('three non-matching replies do not exhaust anything -- a fourth (and more) reply.create is sent, spaced >=(1500+400)ms, until the 45s absolute budget ends the call close_timeout', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
@@ -1935,7 +1953,9 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     aai.emit({ type: 'transcript.agent', item_id: 'x1', text: 'Please provide the', reply_id: 'r1', interrupted: false });
     clock.now = 4200;
     aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
-    // Not sent yet -- waits the spacing gap.
+    // Not sent yet -- waits the transcript window, then the spacing gap.
+    expect(replyCreates()).toHaveLength(1);
+    vi.advanceTimersByTime(1500); // CLOSE_TRANSCRIPT_WAIT_MS -- no late chunk arrives
     expect(replyCreates()).toHaveLength(1);
     vi.advanceTimersByTime(400);
     expect(replyCreates()).toHaveLength(2); // attempt 2 (close_retry)
@@ -1945,6 +1965,7 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     aai.emit({ type: 'transcript.agent', item_id: 'x2', text: 'One moment please', reply_id: 'r2', interrupted: false });
     clock.now = 4400;
     aai.emit({ type: 'reply.done', reply_id: 'r2', status: 'completed' });
+    vi.advanceTimersByTime(1500);
     vi.advanceTimersByTime(400);
     expect(replyCreates()).toHaveLength(3); // attempt 3 (close_retry) -- still no cap
 
@@ -1953,6 +1974,7 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     aai.emit({ type: 'transcript.agent', item_id: 'x3', text: 'Still not the close line', reply_id: 'r3', interrupted: false });
     clock.now = 4600;
     aai.emit({ type: 'reply.done', reply_id: 'r3', status: 'completed' });
+    vi.advanceTimersByTime(1500);
     vi.advanceTimersByTime(400);
     // A FOURTH reply.create goes out -- proof there is no attempt cap anymore.
     expect(replyCreates()).toHaveLength(4);
@@ -1961,9 +1983,9 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     // Nothing ever answers the outstanding (4th) request again -- the "lost" reply.create
     // timeout (1500ms) and the retry gap (400ms) keep re-sending it roughly every 1900ms,
     // but only the 45s absolute budget (armed the instant CLOSE was first reached) ends the
-    // call. 400+400+400 = 1200ms already elapsed above; the remaining 43,800ms closes the gap
-    // to exactly CLOSE_TOTAL_MS.
-    vi.advanceTimersByTime(43_799);
+    // call. Three (1500+400)ms transcript-wait+retry cycles = 5700ms already elapsed above;
+    // the remaining 39,299ms closes the gap to exactly CLOSE_TOTAL_MS.
+    vi.advanceTimersByTime(39_299);
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
     vi.advanceTimersByTime(1);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
@@ -2017,7 +2039,11 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       aai.emit({ type: 'reply.started', reply_id: 'r1' });
       aai.emit({ type: 'transcript.agent', item_id: 'x1', text: 'Please provide the', reply_id: 'r1', interrupted: false });
       aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
-      // Never sends immediately -- must wait the spacing gap.
+      // Never sends immediately -- must wait the transcript window, then the spacing gap
+      // (Defect B fix, 2026-09-15: `armCloseTranscriptWait`'s CLOSE_TRANSCRIPT_WAIT_MS, 1500ms,
+      // then CLOSE_RETRY_MIN_GAP_MS, 400ms -- no further chunk ever arrives for r1).
+      expect(replyCreates()).toHaveLength(1);
+      vi.advanceTimersByTime(1500); // CLOSE_TRANSCRIPT_WAIT_MS
       expect(replyCreates()).toHaveLength(1);
       vi.advanceTimersByTime(399);
       expect(replyCreates()).toHaveLength(1);
@@ -2029,6 +2055,7 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       // itself count as an attempt for diagnostics.
       aai.emit({ type: 'reply.started', reply_id: 'r2' });
       aai.emit({ type: 'reply.done', reply_id: 'r2', status: 'completed' });
+      vi.advanceTimersByTime(1500);
       vi.advanceTimersByTime(400);
       expect(replyCreates()).toHaveLength(3);
       expect(closeRetryDiags().at(-1)!.detail).toMatchObject({ attempt: 2 }); // reused, not bumped
@@ -2040,6 +2067,7 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       aai.emit({ type: 'transcript.agent', item_id: 'x3', text: 'This transfer is frozen', reply_id: 'r3', interrupted: true });
       aai.emit({ type: 'input.speech.started' });
       aai.emit({ type: 'reply.done', reply_id: 'r3', status: 'interrupted' });
+      vi.advanceTimersByTime(1500);
       vi.advanceTimersByTime(400);
       expect(replyCreates()).toHaveLength(4); // a 4th send -- the old design would have refused this
       expect(closeRetryDiags().at(-1)!.detail).toMatchObject({ attempt: 3 });
