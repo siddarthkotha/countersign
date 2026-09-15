@@ -335,10 +335,13 @@ function selectRelational(claims: Claim[], issued: ChallengeSpec[], seed: SeedCo
  *  the CALLER named -- and so ranks above the seeded, non-conversational SEED_FACT
  *  question; otherwise RELATIONAL was dead code against the shipping seed, since SEED_FACT
  *  would always exhaust the challenge budget first.) Null once
- *  `seed.thresholds.max_challenges` have been issued, or nothing applies. `results` is
- *  accepted for interface symmetry with the grading side; nothing here currently changes
- *  selection based on past results (a FAILED/PASSED challenge is still "issued" and thus
- *  excluded from re-selection via `issued`). */
+ *  `seed.thresholds.max_challenges` have been issued, or nothing applies.
+ *
+ *  FIX (2026-09-15, fragment-shaped challenges): `results` is now used to check if any
+ *  issued challenge is still UNANSWERED (awaiting a caller response). If so, return null
+ *  and do not select a new challenge — selectChallenge must not move on while one is
+ *  awaiting, else a fragmented utterance (like "final figure moved this morning" arriving
+ *  as a separate AssemblyAI turn) is silently abandoned and replaced with a new challenge. */
 export function selectChallenge(
   claims: Claim[],
   issued: ChallengeSpec[],
@@ -347,7 +350,12 @@ export function selectChallenge(
   session_id: string,
   conversation?: Utterance[],
 ): ChallengeSpec | null {
-  void results;
+  // Do not advance if any issued challenge is still awaiting a caller response
+  for (const spec of issued) {
+    const result = results[spec.challenge_id];
+    if (result === 'UNANSWERED') return null;
+  }
+
   if (issued.length >= seed.thresholds.max_challenges) return null;
   const challengeId = `${session_id}-${issued.length + 1}`;
 
@@ -377,6 +385,100 @@ const REFUSAL_RE = /(not going to|won't|will not|can't tell|cannot tell|don't kn
 const NAME_FIELDS: ClaimField[] = ['beneficiary', 'approver', 'counsel', 'escrow_institution'];
 function isNameField(field: ClaimField): field is 'beneficiary' | 'approver' | 'counsel' | 'escrow_institution' {
   return (NAME_FIELDS as ClaimField[]).includes(field);
+}
+
+/** FIX (2026-09-15, fragment-shaped challenges): Check if text is answer-shaped for a
+ *  specific challenge field. A fragment with no answer content leaves the challenge
+ *  AWAITING (not graded); selectChallenge must not move on while awaiting.
+ *
+ *  Answer-shaped for each field type:
+ *  - name fields (approver, counsel, escrow_institution, beneficiary): contains a
+ *    capitalized name token or explicit refusal (via REFUSAL_RE)
+ *  - account_last4: contains at least two digits or a spelled digit word
+ *  - deadline: contains a date/deadline pattern (via extractDeadline) or a number
+ *  - amount_usd: contains a dollar amount (via extractAmounts) or a number
+ *  - other fields: any non-empty text after refusal check
+ *
+ *  Bare confirmations ("yes", "that's right", "correct") or text with none of the
+ *  above patterns are not answer-shaped and leave the challenge awaiting. */
+function isAnswerShapedFor(field: ClaimField, rawText: string, seed: SeedConfig): boolean {
+  if (rawText.trim().length === 0) return false;
+  const rawLower = rawText.toLowerCase();
+
+  // Explicit refusal is always answer-shaped (handled separately in gradeChallenges)
+  if (REFUSAL_RE.test(rawLower)) return true;
+
+  const normText = normalizeText(rawText);
+
+  if (isNameField(field)) {
+    // Name field: answer-shaped if it contains a name token, negation, or affirmation
+
+    // Check for capitalized name pattern
+    if (/\b[A-Z][A-Za-z.']*\s+[A-Z][A-Za-z.']*\b/.test(rawText)) return true;
+
+    // Check for cued-name extraction
+    const cued = extractCuedNames(rawText).filter((h) => h.field === field);
+    if (cued.length > 0) return true;
+
+    // Check for negation or affirmation — any of these means the caller is answering the name question
+    // (TRAP_FACT will handle the specific grading logic for rules (a/b/c))
+    if (hasLexiconHit(rawText, seed.negate_lexicon)) return true;
+    if (hasLexiconHit(rawText, seed.affirm_lexicon)) return true;
+
+    // No name-shaped content found
+    return false;
+  }
+
+  if (field === 'account_last4') {
+    // Digits field: must contain at least two digits or a spelled digit word
+    // Match 2+ consecutive digits or spelled-out words like "eight", "eight", "three", "zero"
+    const digitPattern = /\d{2,}|(?:zero|one|two|three|four|five|six|seven|eight|nine|oh)\b/gi;
+    const matches = rawText.match(digitPattern);
+    if (matches && matches.length >= 2) return true;
+
+    // Also check if extractAccountLast4 finds anything
+    const hit = extractAccountLast4(rawText);
+    if (hit) return true;
+
+    return false;
+  }
+
+  if (field === 'amount_usd') {
+    // Amount field: must contain a dollar amount or a number
+    const hits = extractAmounts(rawText);
+    if (hits.length > 0) return true;
+
+    // Also accept bare numbers
+    if (/\b\d+\b/.test(rawText)) return true;
+
+    return false;
+  }
+
+  if (field === 'deadline') {
+    // Deadline field: must contain a date/deadline pattern
+    const hit = extractDeadline(rawText);
+    if (hit) return true;
+
+    // Also accept numbers (day of month, year, etc.)
+    if (/\b\d+\b/.test(rawText)) return true;
+
+    // Accept weekday names or relative time words
+    if (/\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|tonight|eod|end\s+of\s+day)\b/i.test(rawText)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // For SEED_FACT and RELATIONAL (accept_tokens): any non-empty text is answer-shaped
+  // unless it's just bare confirmation
+  if (hasLexiconHit(rawText, seed.affirm_lexicon) && normText.length <= 10) {
+    // "yes", "correct", "that's right" alone → not answer-shaped for most facts
+    return false;
+  }
+
+  // Default: any non-empty, non-bare-confirmation text is answer-shaped
+  return normText.length > 0;
 }
 
 /** Caller utterances strictly after `issuedAction.t_ms` and strictly before the next
@@ -554,13 +656,29 @@ export function gradeChallenges(
     const normText = normalizeText(rawText);
     const quote: Quote = { utterance_id: eligible[0]!.id, text: eligible[0]!.text };
 
+    // FIX (2026-09-15, fragment-shaped challenges): if we have multiple eligible utterances
+    // (likely an AssemblyAI fragment split) and they are not answer-shaped for this specific
+    // challenge field (e.g. "final figure moved this morning" after "And make it $2.1 million,"
+    // for a name challenge), leave the challenge AWAITING (UNANSWERED) rather than grading
+    // the fragments as AMBIGUOUS. This prevents selectChallenge from advancing to the next
+    // field while a probe is still unanswered. For single utterances, apply normal grading.
+    //
+    // Apply this check only to TRAP_FACT (which grades name fields) and LIVE_COMMITMENT
+    // (which grades various field types). SEED_FACT and RELATIONAL use accept_tokens
+    // (keyword matching) and should not have this restriction.
+    const expect = spec.expect;
+    const isTokenBased = 'accept_tokens' in expect;
+    if (!isTokenBased && eligible.length > 1 && !isAnswerShapedFor(spec.field, rawText, seed)) {
+      out[spec.challenge_id] = { result: 'UNANSWERED', eligible_utterance_ids: eligibleIds };
+      continue;
+    }
+
     if (REFUSAL_RE.test(rawLower)) {
       out[spec.challenge_id] = { result: 'REFUSED', quote, eligible_utterance_ids: eligibleIds };
       continue;
     }
 
     let result: ChallengeResult;
-    const expect = spec.expect;
     if ('accept_tokens' in expect) {
       const words = normText.split(' ');
       const allPresent = expect.accept_tokens.every((tok) => words.includes(normalizeText(tok)));
