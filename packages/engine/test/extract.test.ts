@@ -216,4 +216,44 @@ describe('extractCuedNames', () => {
     const vendor = 'the vendor will be Meridian Supply';
     expect(extractCuedNames(vendor)).toEqual([{ field: 'beneficiary', value: 'Meridian Supply', quote: 'Meridian Supply' }]);
   });
+
+  // Fix round 2 (2026-09-14, item ii): the reversed approver cue "(NAME) approved" was
+  // capturing department names like "Treasury", "Compliance", "Finance" because they match
+  // the NAME pattern (capitalized words). Add a department stoplist to distinguish
+  // "Elena Park approved it" (person) from "Corporate Treasury approved this" (department).
+  it('keeps person names in reversed approver cue "(Name) approved"', () => {
+    // Two-word person name should still match.
+    expect(extractCuedNames('wait, Elena Park approved it')).toEqual([
+      { field: 'approver', value: 'Elena Park', quote: 'Elena Park' },
+    ]);
+    // Single-word person name should match.
+    expect(extractCuedNames('Marcus approved the transfer')).toEqual([
+      { field: 'approver', value: 'Marcus', quote: 'Marcus' },
+    ]);
+  });
+
+  it('excludes department names in reversed approver cue "(Name) approved"', () => {
+    // Department names should not match the approver pattern, even though they are capitalized.
+    expect(extractCuedNames('Corporate Treasury approved this')).toEqual([]);
+    expect(extractCuedNames('Finance approved the wire')).toEqual([]);
+    expect(extractCuedNames('Compliance approved it yesterday')).toEqual([]);
+    expect(extractCuedNames('Legal Department approved')).toEqual([]);
+    expect(extractCuedNames('Operations approved the request')).toEqual([]);
+    expect(extractCuedNames('HR approved the transaction')).toEqual([]);
+    expect(extractCuedNames('Payroll approved the check')).toEqual([]);
+    expect(extractCuedNames('Audit approved this')).toEqual([]);
+    expect(extractCuedNames('Risk Management approved')).toEqual([]);
+    expect(extractCuedNames('Security approved the transfer')).toEqual([]);
+    expect(extractCuedNames('Procurement approved')).toEqual([]);
+    expect(extractCuedNames('Accounting approved the expense')).toEqual([]);
+  });
+
+  it('keeps two-word person names like "Elena Park" while excluding multi-word departments', () => {
+    // Elena Park (person, two words) should match.
+    expect(extractCuedNames('wait, Elena Park approved it')).toEqual([
+      { field: 'approver', value: 'Elena Park', quote: 'Elena Park' },
+    ]);
+    // "Corporate Treasury" (department, two words) should NOT match.
+    expect(extractCuedNames('Corporate Treasury approved this')).toEqual([]);
+  });
 });

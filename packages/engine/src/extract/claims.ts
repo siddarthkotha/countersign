@@ -69,6 +69,43 @@ const ESCROW_CUE_HEAD = '\\bescrow\\b\\s+';
 const ESCROW_CUE_KIND = '(?:institution\\s+|bank\\s+)?';
 const ESCROW_CUE_CONNECTOR = '(?:is\\s+at\\s+|is\\s+|at\\s+|with\\s+|account\\s+(?:is\\s+)?at\\s+)';
 
+// Department/functional unit names that should not match as person names in the approver
+// pattern "(NAME) approved". These are excluded to avoid capturing "Treasury approved this"
+// or "Finance approved it" as if a person named "Treasury" or "Finance" approved.
+const DEPARTMENT_STOPLIST = new Set([
+  'accounting',
+  'audit',
+  'compliance',
+  'corporate',
+  'finance',
+  'financial',
+  'hr',
+  'legal',
+  'operations',
+  'payroll',
+  'procurement',
+  'risk',
+  'security',
+  'treasury',
+]);
+
+// Check if a name looks like a department name rather than a person name. A department
+// name is one or more words from the stoplist, optionally with "department" or "management".
+function isDepartmentName(name: string): boolean {
+  const lower = name.toLowerCase();
+  const words = lower.split(/\s+/);
+  // If any word in the name is a department word (and not "the"/"of"/"and"/"&"),
+  // and the name doesn't have typical person-name indicators, treat it as a department.
+  const hasDepartmentWord = words.some((w) => DEPARTMENT_STOPLIST.has(w) || w === 'department' || w === 'management');
+  if (!hasDepartmentWord) return false;
+
+  // A department name typically has no lowercase "the"/"of"/"and" connectors between
+  // capitalized words, or consists mostly of department words. For simplicity, if it
+  // contains any department stoplist word and more than one word total, assume it's a
+  // department. Single-word matches like "Marcus" won't trigger this.
+  return words.length > 1 || words.some((w) => DEPARTMENT_STOPLIST.has(w));
+}
+
 const CUE_PATTERNS: { field: CuedNameField; re: RegExp }[] = [
   { field: 'approver', re: new RegExp(`\\bapproved by\\s+(${NAME})`, 'g') },
   // fix (P2, 2026-09-14, rehearsal report 2026-09-14T18-05-49-single-wrong-answer.md): a
@@ -118,13 +155,18 @@ interface RawCuedNameMatch {
  *  the same span the identity extractor is told to ignore. */
 function collectCuedNameMatches(text: string): RawCuedNameMatch[] {
   const matches: RawCuedNameMatch[] = [];
-  for (const { field, re } of CUE_PATTERNS) {
+  for (let patternIdx = 0; patternIdx < CUE_PATTERNS.length; patternIdx++) {
+    const pattern = CUE_PATTERNS[patternIdx]!;
+    const { field, re } = pattern;
+    const isReversedApproverPattern = field === 'approver' && patternIdx === 1; // The second approver pattern is the reversed one
     re.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {
       const rawName = m[1]!;
       const name = trimName(rawName);
       if (name.length === 0) continue;
+      // For the reversed approver pattern "(NAME) approved", exclude department names.
+      if (isReversedApproverPattern && isDepartmentName(name)) continue;
       const nameStart = m.index + m[0].indexOf(rawName);
       matches.push({ field, index: nameStart, name });
     }
