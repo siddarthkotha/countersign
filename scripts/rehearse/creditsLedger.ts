@@ -164,12 +164,18 @@ async function main(): Promise<void> {
   let totalProvenSeconds = 0;
   let totalEstimateSeconds = 0;
 
+  // Cache all parsed bundles to avoid re-reading from disk
+  const bundlesCache: DiagnosticBundle[] = [];
+
   for (const file of diagnosticsFiles) {
     try {
       const content = await readFile(join(REPORTS_DIR, file), 'utf-8');
       const bundle: DiagnosticBundle = JSON.parse(content);
 
       if (!bundle.started_at || !bundle.ended_at) continue;
+
+      // Store in cache for later window analysis
+      bundlesCache.push(bundle);
 
       // Extract day using Chicago timezone
       const dayKey = getChicagoDayKey(bundle.started_at);
@@ -238,19 +244,12 @@ async function main(): Promise<void> {
     const first = readings[0]!;
     const last = readings[readings.length - 1]!;
 
-    // Collect bundles that started within the reading window
+    // Collect bundles that started within the reading window using cached bundles
     const bundlesInWindow: DiagnosticBundle[] = [];
-    for (const file of diagnosticsFiles) {
-      try {
-        const content = await readFile(join(REPORTS_DIR, file), 'utf-8');
-        const bundle: DiagnosticBundle = JSON.parse(content);
-
-        // Bundle's start time must be between first and last reading (in UTC)
-        if (bundle.started_at >= first.timestampMs && bundle.started_at <= last.timestampMs) {
-          bundlesInWindow.push(bundle);
-        }
-      } catch {
-        // ignore
+    for (const bundle of bundlesCache) {
+      // Bundle's start time must be between first and last reading (in UTC)
+      if (bundle.started_at >= first.timestampMs && bundle.started_at <= last.timestampMs) {
+        bundlesInWindow.push(bundle);
       }
     }
 
