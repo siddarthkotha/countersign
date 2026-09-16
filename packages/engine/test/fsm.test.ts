@@ -476,7 +476,7 @@ describe('phrasingGoal -- SEALED composes an exact, ready-to-speak close sentenc
     expect(hint).not.toContain('—'); // no em-dashes in spoken lines
   }
 
-  it('STAGE: names the staging/second-approval outcome, nothing released, evidence complete', () => {
+  it('STAGE: says "Your request is staged for independent approval. The payment is not released. Goodbye."', () => {
     const out = sealedGoal('STAGE');
     expect(out.code).toBe('CLOSE');
     expect(out.hint).toBe('Your request is staged for independent approval. The payment is not released. Goodbye.');

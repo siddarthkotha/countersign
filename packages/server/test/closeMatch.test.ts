@@ -76,6 +76,20 @@ describe('transcriptMatchesCloseSentence', () => {
       ),
     ).toBe(false);
   });
+
+  it('does NOT match a garbled duplicated transcript where words are doubled and interleaved (known limit: distinguishing clause is not contiguous)', () => {
+    // PROVEN gap (live STT artifact 2026-09-16): words doubled and interleaved, e.g.
+    // "ThisThis transfer transfer is is frozen frozen and an incident is open. The payment is
+    // not released. Goodbye." -- the distinguishing clause "this transfer is frozen and an
+    // incident is open" is no longer contiguous after normalization, so the fallback does not
+    // match. This is a known limit of the current matcher design.
+    expect(
+      transcriptMatchesCloseSentence(
+        'ThisThis transfer transfer is is frozen frozen and an incident is open. The payment is not released. Goodbye.',
+        freeze,
+      ),
+    ).toBe(false);
+  });
 });
 
 describe('DISTINGUISHING_CLAUSE_BY_VERDICT', () => {
