@@ -278,9 +278,9 @@ function readbackSentence(field: ClaimField, claim: Claim): string {
 function closeSentence(verdict: Verdict): string {
   switch (verdict) {
     case 'STAGE':
-      return 'Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.';
+      return 'Your request is staged for independent approval. The payment is not released. Goodbye.';
     case 'FREEZE':
-      return 'This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.';
+      return 'This transfer is frozen and an incident is open. The payment is not released. Goodbye.';
     case 'ESCALATE':
       return 'This cannot be completed by voice. A callback on the registered number will follow. Goodbye.';
     default:

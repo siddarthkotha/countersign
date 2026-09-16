@@ -54,7 +54,7 @@ function baseResult(overrides: Partial<RunResult> = {}): RunResult {
   };
 }
 
-const FREEZE_SENTENCE = 'This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.';
+const FREEZE_SENTENCE = 'This transfer is frozen and an incident is open. The payment is not released. Goodbye.';
 
 describe('parseTranscriptTable (round-tripped through renderReport)', () => {
   it('recovers every transcript line, speaker, t_ms and text exactly', () => {

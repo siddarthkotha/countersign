@@ -80,8 +80,8 @@ out of this lane.) No banner, no call. Budget: 3 short takes.
 5. Expect the staged announcement (PARAPHRASED, content guaranteed): the agent states the
    request is staged for Marcus Obi's second approval and that voice alone never releases a
    transfer.
-6. Expect the close (VERBATIM, exact): *"Your request is staged for a second, independent
-   approval. Nothing has been released. The evidence record is complete. Goodbye."*
+6. Expect the close (VERBATIM, exact): *"Your request is staged for independent
+   approval. The payment is not released. Goodbye."*
 Banner: **STAGED FOR SECOND APPROVAL**, subline "second approval: Marcus Obi" + export hash.
 Duration: ~100 seconds wall, ESTIMATE (today's rehearsal). Record the full call; the ~9s
 excerpt in the final cut is an editing decision, not a recording instruction.
@@ -103,8 +103,7 @@ lines below are the reference wording a past rehearsal used, not a script to rea
    engine's freeze goes straight to the close sentence; the plain-word reasons and the
    incident id appear on the WIRE FROZEN banner, not in speech. If you talk over the close,
    the agent says it again (up to three times) before hanging up.
-7. Expect the close (VERBATIM, exact): *"This transfer is frozen and an incident has been
-   opened for review. Nothing has moved. Goodbye."*
+7. Expect the close (VERBATIM, exact): *"This transfer is frozen and an incident is open. The payment is not released. Goodbye."*
 Banner: **WIRE FROZEN**, the plain-word reasons list, incident id + export hash.
 Duration: ~60 seconds wall, ESTIMATE (today's rehearsal). Record the full call.
 

@@ -672,7 +672,7 @@ describe('evaluate -- sealed verdict never moves (P1 fix, 2026-09-14)', () => {
     expect(sealedOut.verdict).toBe('FREEZE');
     expect(sealedOut.state).toBe('SEALED');
     expect(sealedOut.goal.code).toBe('CLOSE');
-    expect(sealedOut.goal.hint).toBe('This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.');
+    expect(sealedOut.goal.hint).toBe('This transfer is frozen and an incident is open. The payment is not released. Goodbye.');
   });
 
   it('the P1 shape: two more caller lines after sealing (a wire amount repeated, then a fresh non-answer) never move the verdict, state, or close sentence -- output is byte-for-byte identical to the sealed instant', () => {

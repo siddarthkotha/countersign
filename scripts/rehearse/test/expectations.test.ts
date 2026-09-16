@@ -173,8 +173,8 @@ describe('lastAgentLineDisplay', () => {
 });
 
 describe('checkCloseLineExpectation', () => {
-  const FREEZE_SENTENCE = 'This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.';
-  const STAGE_SENTENCE = 'Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.';
+  const FREEZE_SENTENCE = 'This transfer is frozen and an incident is open. The payment is not released. Goodbye.';
+  const STAGE_SENTENCE = 'Your request is staged for independent approval. The payment is not released. Goodbye.';
 
   it('is n/a when the caller/harness ended the call (caller_ended), regardless of verdict', () => {
     const transcript: TranscriptRecord[] = [{ speaker: 'agent', text: 'something unrelated', t_ms: 0 }];
@@ -224,14 +224,14 @@ describe('checkCloseLineExpectation', () => {
 
   it('accepts the close sentence split across two agent transcript lines (concatenated)', () => {
     const transcript: TranscriptRecord[] = [
-      { speaker: 'agent', text: 'This transfer is frozen and an incident has been opened for review.', t_ms: 100 },
-      { speaker: 'agent', text: 'Nothing has moved. Goodbye.', t_ms: 200 },
+      { speaker: 'agent', text: 'This transfer is frozen and an incident is open.', t_ms: 100 },
+      { speaker: 'agent', text: 'The payment is not released. Goodbye.', t_ms: 200 },
     ];
     expect(checkCloseLineExpectation('agent_closed', 'FREEZE', transcript).status).toBe('spoken');
   });
 
   it('fails when the transcript speaks a DIFFERENT verdict\'s closing sentence than the one actually reached', () => {
-    const transcript: TranscriptRecord[] = [{ speaker: 'agent', text: STAGE_SENTENCE, t_ms: 100 }];
+    const transcript: TranscriptRecord[] = [{ speaker: 'agent', text: 'Your request is staged for independent approval. The payment is not released. Goodbye.', t_ms: 100 }];
     const result = checkCloseLineExpectation('agent_closed', 'FREEZE', transcript);
     expect(result.status).toBe('not_spoken');
   });

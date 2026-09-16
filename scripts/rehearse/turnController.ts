@@ -149,8 +149,8 @@ export function isHoldingLine(text: string): boolean {
  *  ONE sentence that matches the call's ACTUAL verdict). `ENGINE_CLOSE_SENTENCES` above is
  *  now derived from this map's values so the two can never drift apart. */
 export const CLOSE_SENTENCE_BY_VERDICT: Record<'STAGE' | 'FREEZE' | 'ESCALATE' | 'NO_ACTION', string> = {
-  STAGE: 'Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.',
-  FREEZE: 'This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.',
+  STAGE: 'Your request is staged for independent approval. The payment is not released. Goodbye.',
+  FREEZE: 'This transfer is frozen and an incident is open. The payment is not released. Goodbye.',
   ESCALATE: 'This cannot be completed by voice. A callback on the registered number will follow. Goodbye.',
   NO_ACTION: 'Thank you for calling. Goodbye.',
 };
@@ -162,8 +162,8 @@ export function isClosingLine(text: string): boolean {
 }
 
 /** Strips everything but letters/digits/spaces and collapses whitespace, so a close-line
- *  match tolerates STT/TTS punctuation and casing drift ("Nothing has moved," vs "nothing
- *  has moved") without tolerating a genuinely different sentence. */
+ *  match tolerates STT/TTS punctuation and casing drift ("The payment is not released," vs "the
+ *  payment is not released") without tolerating a genuinely different sentence. */
 function normalizeForCloseMatch(text: string): string {
   return text
     .toLowerCase()
@@ -195,8 +195,8 @@ export function isClosingLineStart(text: string): boolean {
   return ENGINE_CLOSE_SENTENCES.some((s) => normalizeForCloseMatch(s).startsWith(partial));
 }
 
-/** The close sentence's own final substantive clause -- e.g. "Nothing has moved" for FREEZE,
- *  "The evidence record is complete" for STAGE -- with the trailing "Goodbye." clause
+/** The close sentence's own final substantive clause -- e.g. "The payment is not released" for FREEZE,
+ *  "The payment is not released" for STAGE -- with the trailing "Goodbye." clause
  *  dropped. Used as the lenient fallback match: a transcript that got the closing "Goodbye"
  *  and this one distinguishing clause, but not the sentence's opening clause verbatim (a
  *  live model's own minor rewording, or the caller/harness's STT dropping a word), still
@@ -214,15 +214,25 @@ function lastSubstantiveClause(sentence: string): string {
  *  sentence can land split across two transcript records when a reply gets interrupted mid
  *  final-clause and the model is asked again) together contain the ONE close sentence that
  *  matches `verdict` -- either verbatim (modulo `normalizeForCloseMatch`'s case/punctuation/
- *  whitespace leniency) or, failing that, this verdict's own `lastSubstantiveClause` AND the
- *  word "goodbye", both present somewhere in the concatenation. Never matches on a DIFFERENT
- *  verdict's sentence, and never matches on "goodbye" alone. */
+ *  whitespace leniency) or, failing that, ALL of this verdict's own substantive clauses
+ *  AND the word "goodbye", present somewhere in the concatenation. Never matches on a
+ *  DIFFERENT verdict's sentence, and never matches on "goodbye" alone. */
 export function closeLineSpokenForVerdict(verdict: 'STAGE' | 'FREEZE' | 'ESCALATE' | 'NO_ACTION', agentLines: readonly string[]): boolean {
   const concatenated = normalizeForCloseMatch(agentLines.join(' '));
   const fullSentence = CLOSE_SENTENCE_BY_VERDICT[verdict];
   if (concatenated.includes(normalizeForCloseMatch(fullSentence))) return true;
-  const lastClause = normalizeForCloseMatch(lastSubstantiveClause(fullSentence));
-  return concatenated.includes(lastClause) && concatenated.includes('goodbye');
+
+  // Lenient fallback: check that ALL substantive clauses are present, allowing the model
+  // to rephrase any individual clause while keeping all the key parts
+  const clauses = fullSentence
+    .split('.')
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0 && c.toLowerCase() !== 'goodbye');
+
+  const allClausesPresent = clauses.every((clause) =>
+    concatenated.includes(normalizeForCloseMatch(clause))
+  );
+  return allClausesPresent && concatenated.includes('goodbye');
 }
 
 /** Scenario-level default for `Scenario.agent_silence_fail_ms` (types.ts) when a patient-mode

@@ -147,7 +147,7 @@ describe('computeQuestionAnswerRatio', () => {
       line('agent', 'Which institution holds the Hartwell escrow?', 81447),
       line('agent', 'Hold on. Which institution holds the Hartwell escrow?', 86487),
       // No caller response, then close line follows
-      line('agent', 'This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.', 94467),
+      line('agent', 'This transfer is frozen and an incident is open. The payment is not released. Goodbye.', 94467),
     ];
     // Both agent questions normalize to the same thing and collapse to one unanswered
     // Gap is 86487 - 81447 = 5040ms > 1500ms, so the caller had a chance
@@ -162,7 +162,7 @@ describe('computeQuestionAnswerRatio', () => {
     const transcript = [
       line('agent', 'What is the amount?', 100),
       line('caller', '$84,500.', 200),
-      line('agent', 'Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.', 1000),
+      line('agent', 'Your request is staged for independent approval. The payment is not released. Goodbye.', 1000),
       line('agent', 'Are you still there?', 2000),
       line('agent', 'Hello?', 3000),
     ];

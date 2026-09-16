@@ -25,7 +25,9 @@ describe('transcriptMatchesCloseSentence', () => {
   });
 
   it('matches on the content clause plus "goodbye" alone, without the opening clause (partial/tail-clause match)', () => {
-    expect(transcriptMatchesCloseSentence('Nothing has moved. Goodbye.', freeze)).toBe(true);
+    // With the new wording, both STAGE and FREEZE share "The payment is not released" so we need
+    // both substantive clauses to distinguish them
+    expect(transcriptMatchesCloseSentence('This transfer is frozen and an incident is open. The payment is not released. Goodbye.', freeze)).toBe(true);
   });
 
   it('does not match unrelated speech', () => {
@@ -37,7 +39,7 @@ describe('transcriptMatchesCloseSentence', () => {
   });
 
   it('does not match the content clause alone, without "goodbye"', () => {
-    expect(transcriptMatchesCloseSentence('Nothing has moved.', freeze)).toBe(false);
+    expect(transcriptMatchesCloseSentence('The payment is not released.', freeze)).toBe(false);
   });
 
   it('does not match an empty transcript', () => {

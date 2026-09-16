@@ -1192,7 +1192,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     expect(session.last?.verdict).toBe('STAGE');
     expect(session.last?.state).toBe('SEALED');
     expect(session.last?.goal.code).toBe('CLOSE');
-    expect(session.last?.goal.hint).toMatch(/staged for a second, independent approval/i);
+    expect(session.last?.goal.hint).toMatch(/staged for independent approval/i);
   });
 
   it('ends the call reason "agent_closed" a short grace period after the CLOSE reply completes', () => {
@@ -3456,7 +3456,7 @@ describe('CallSession — sealed verdict never moves at the server layer (P1 fix
     expect(session.last?.state).toBe('SEALED');
     expect(session.last?.goal.code).toBe('CLOSE');
     const closeSentence = session.last!.goal.hint;
-    expect(closeSentence).toBe('This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.');
+    expect(closeSentence).toBe('This transfer is frozen and an incident is open. The payment is not released. Goodbye.');
 
     // The close line is actually spoken and confirmed, exactly like a real call -- whatever
     // reply.create the tick above already sent for CLOSE completes with the exact sentence.

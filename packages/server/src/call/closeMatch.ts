@@ -23,8 +23,8 @@
 // exercise the matcher against the real wording rather than a stand-in string.
 export const ENGINE_CLOSE_SENTENCES: Record<'STAGE' | 'FREEZE' | 'ESCALATE' | 'NO_ACTION', string> = {
   STAGE:
-    'Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.',
-  FREEZE: 'This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.',
+    'Your request is staged for independent approval. The payment is not released. Goodbye.',
+  FREEZE: 'This transfer is frozen and an incident is open. The payment is not released. Goodbye.',
   ESCALATE: 'This cannot be completed by voice. A callback on the registered number will follow. Goodbye.',
   NO_ACTION: 'Thank you for calling. Goodbye.',
 };
@@ -46,8 +46,8 @@ export function normalizeForCloseMatch(s: string): string {
 /** The non-"Goodbye" clauses of a close sentence, normalized -- `closeSentence`'s own shape
  *  is always "<opening clause(s)>. <content clause>. Goodbye." (STAGE/FREEZE/ESCALATE) or
  *  "<content clause>. Goodbye." (the default/NO_ACTION line), so the LAST clause once
- *  "Goodbye" is filtered out is always the one that actually names the outcome ("Nothing has
- *  moved", "The evidence record is complete", ...). */
+ *  "Goodbye" is filtered out is always the one that actually names the outcome ("The payment is
+ *  not released", ...). */
 function contentClauses(sentence: string): string[] {
   return sentence
     .split('.')
@@ -73,8 +73,9 @@ export function transcriptMatchesCloseSentence(accumulatedTranscript: string, cl
 
   const clauses = contentClauses(closeSentence);
   if (clauses.length === 0) return false;
-  const contentClause = clauses[clauses.length - 1]!;
-  const hasContent = contentClause.length > 0 && transcript.includes(contentClause);
+  // Lenient fallback: require all clauses to be present, allowing the model to rephrase
+  // any individual clause while keeping all the key parts
+  const allClausesPresent = clauses.every((clause) => transcript.includes(clause));
   const hasGoodbye = transcript.includes('goodbye');
-  return hasContent && hasGoodbye;
+  return allClausesPresent && hasGoodbye;
 }

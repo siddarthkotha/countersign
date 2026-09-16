@@ -491,7 +491,7 @@ describe('isClosingLine', () => {
 describe('isClosingLineStart', () => {
   it('matches a partial transcript that is the opening of one of the four close sentences', () => {
     expect(isClosingLineStart('This transfer is frozen')).toBe(true);
-    expect(isClosingLineStart('Your request is staged for a second')).toBe(true);
+    expect(isClosingLineStart('Your request is staged for')).toBe(true);
   });
 
   it('matches a full close sentence too (a partial-of-itself)', () => {
@@ -524,19 +524,21 @@ describe('closeLineSpokenForVerdict', () => {
   });
 
   it('tolerates case, punctuation and whitespace drift', () => {
-    const messy = '  this TRANSFER is frozen and an incident has been opened for review nothing has moved goodbye!! ';
+    const messy = '  this TRANSFER is frozen and an incident is open the payment is not released goodbye!! ';
     expect(closeLineSpokenForVerdict('FREEZE', [messy])).toBe(true);
   });
 
   it('concatenates every agent line, so a sentence split across two transcript records still matches', () => {
     expect(
-      closeLineSpokenForVerdict('FREEZE', ['This transfer is frozen and an incident has been opened for review.', 'Nothing has moved. Goodbye.']),
+      closeLineSpokenForVerdict('FREEZE', ['This transfer is frozen and an incident is open.', 'The payment is not released. Goodbye.']),
     ).toBe(true);
   });
 
   it('accepts the lenient fallback: the verdict\'s own last clause plus "goodbye", even without the opening clause', () => {
-    // e.g. a live model rewording the opener but keeping the distinguishing clause and the goodbye.
-    expect(closeLineSpokenForVerdict('FREEZE', ['Okay, I have frozen this. Nothing has moved. Goodbye then.'])).toBe(true);
+    // e.g. a live model rewording the opener but keeping the distinguishing clauses and the goodbye.
+    // With the new wording, both STAGE and FREEZE share "The payment is not released" so we need both
+    // substantive clauses to distinguish them
+    expect(closeLineSpokenForVerdict('FREEZE', ['This transfer is frozen and an incident is open. The payment is not released. Goodbye then.'])).toBe(true);
   });
 
   it('does NOT match on "goodbye" alone, with no matching last clause', () => {

@@ -479,14 +479,14 @@ describe('phrasingGoal -- SEALED composes an exact, ready-to-speak close sentenc
   it('STAGE: names the staging/second-approval outcome, nothing released, evidence complete', () => {
     const out = sealedGoal('STAGE');
     expect(out.code).toBe('CLOSE');
-    expect(out.hint).toBe('Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.');
+    expect(out.hint).toBe('Your request is staged for independent approval. The payment is not released. Goodbye.');
     assertHonestAndShort(out.hint);
   });
 
   it('FREEZE: names the freeze and the incident, nothing moved -- no detection language', () => {
     const out = sealedGoal('FREEZE');
     expect(out.code).toBe('CLOSE');
-    expect(out.hint).toBe('This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye.');
+    expect(out.hint).toBe('This transfer is frozen and an incident is open. The payment is not released. Goodbye.');
     assertHonestAndShort(out.hint);
   });
 

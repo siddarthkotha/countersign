@@ -333,7 +333,7 @@ describe('renderPrompt', () => {
   // ready-to-speak close sentence into `goal.hint`; prompt.ts's job is only to relay it
   // verbatim, the same treatment READBACK already gets.
   it('CLOSE says the engine-composed close sentence verbatim, wrapped in "say exactly", and carries no instruction to ask anything', () => {
-    const say = 'Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.';
+    const say = 'Your request is staged for independent approval. The payment is not released. Goodbye.';
     const prompt = renderPrompt(baseGoal('CLOSE', { hint: say }), makeCtx());
     // The "Now" section (after the standing rules) is exactly the verbatim wrapper -- no
     // extra sentence, question, or instruction to ask anything appended around it.
@@ -349,7 +349,7 @@ describe('renderPrompt', () => {
   // outcome line the new standing rule carves out ("unless the current goal's own words
   // say it").
   it('the new "never announce an outcome" standing rule and CLOSE\'s verbatim wrapper both render on the same CLOSE prompt', () => {
-    const say = 'Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye.';
+    const say = 'Your request is staged for independent approval. The payment is not released. Goodbye.';
     const prompt = renderPrompt(baseGoal('CLOSE', { hint: say }), makeCtx());
     expect(prompt).toContain(
       "Never announce completion, processing, approval, release, or any other outcome unless the current goal's own words say it; the engine composes every outcome line.",

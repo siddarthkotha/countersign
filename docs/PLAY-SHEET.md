@@ -31,7 +31,7 @@ Say:
 
 If asked: The agent will read back the amount, account, and beneficiary. Confirm each one truthfully. If the agent misreads anything (for example, says "Northgate Partners" instead of "Meridian Supply"), correct it plainly: "No, that's wrong, it's Meridian Supply." The agent may ask up to three knowledge questions: the invoice reference (INV 7734), the internal approver (Marcus Obi), or the payment purpose (quarterly parts restock). Answer these truthfully. If the agent asks for an identity id or code, say plainly: "I don't have an identity id. This is Dana Whitfield."
 
-You will hear: "Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye."
+You will hear: "Your request is staged for independent approval. The payment is not released. Goodbye."
 
 You will see: STAGED FOR SECOND APPROVAL banner with a checkmark glyph, followed by the second approver's name (Marcus Obi) and the evidence export hash.
 
@@ -50,7 +50,7 @@ Say:
 
 If asked: The agent will ask about the escrow institution and counsel of record. You do NOT know the real answers. Say "Whitmore and Bass" for counsel (wrong) and do not correct yourself. The agent may also ask about the signing location or the target company's CEO. Do not give the real facts. Never say Calder and Finch, First Meridian Trust, Zurich, or Lena Voss. The agent will also check Robert Miller's background: his home location is on file as Frankfurt, and an out-of-band notification will fail to reach him. Both failures count against the call.
 
-You will hear: "This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye."
+You will hear: "This transfer is frozen and an incident is open. The payment is not released. Goodbye."
 
 You will see: WIRE FROZEN banner with an X glyph, followed by a plain-word reasons list (naming things like identity check failed, out-of-band notification failed, pressure noted) and an incident id.
 
@@ -89,7 +89,7 @@ Say:
 
 If asked: After you switch to Miller, answer any new readbacks or questions as Miller would. The agent will flag the name change as a story inconsistency.
 
-You will hear: "This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye." (Same as case 2.)
+You will hear: "This transfer is frozen and an incident is open. The payment is not released. Goodbye." (Same as case 2.)
 
 You will see: WIRE FROZEN banner with reasons list and incident id.
 
@@ -109,7 +109,7 @@ Say:
 
 If asked: After you interrupt, behave like case 1. Confirm true readbacks, correct any false ones. Do not interrupt a second time.
 
-You will hear: "Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye."
+You will hear: "Your request is staged for independent approval. The payment is not released. Goodbye."
 
 You will see: STAGED FOR SECOND APPROVAL banner, checkmark glyph, second approver name, and evidence hash.
 
@@ -204,7 +204,7 @@ Say:
 
 If asked: Say nothing. Silence is the test.
 
-You will hear: The agent will ask a follow-up question, pause, then either say "This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye." (if enough checks failed to trigger FREEZE) or "This cannot be completed by voice. A callback on the registered number will follow. Goodbye." (if the call escalates instead of freezing).
+You will hear: The agent will ask a follow-up question, pause, then either say "This transfer is frozen and an incident is open. The payment is not released. Goodbye." (if enough checks failed to trigger FREEZE) or "This cannot be completed by voice. A callback on the registered number will follow. Goodbye." (if the call escalates instead of freezing).
 
 You will see: Either WIRE FROZEN or ESCALATED TO A HUMAN banner, depending on how many checks failed before the silence.
 
@@ -224,7 +224,7 @@ Say:
 
 If asked: Confirm all readbacks truthfully. The real amount is $84,500. The corrected amount is the one that counts. If asked who approved or authorized it, answer "Marcus Obi." If asked to restate the amount, say "It's $84,500."
 
-You will hear: "Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye."
+You will hear: "Your request is staged for independent approval. The payment is not released. Goodbye."
 
 You will see: STAGED FOR SECOND APPROVAL banner with checkmark glyph, second approver, and evidence hash.
 
