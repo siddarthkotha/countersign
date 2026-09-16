@@ -8,6 +8,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
   closeLineSpokenForVerdict,
   CLOSE_SENTENCE_BY_VERDICT,
+  DISTINGUISHING_CLAUSE_BY_VERDICT,
   CLOSE_WAIT_MS,
   computeTurnGaps,
   ENGINE_CLOSE_SENTENCES,
@@ -534,18 +535,23 @@ describe('closeLineSpokenForVerdict', () => {
     ).toBe(true);
   });
 
-  it('accepts the lenient fallback: the verdict\'s own last clause plus "goodbye", even without the opening clause', () => {
-    // e.g. a live model rewording the opener but keeping the distinguishing clauses and the goodbye.
-    // With the new wording, both STAGE and FREEZE share "The payment is not released" so we need both
-    // substantive clauses to distinguish them
-    expect(closeLineSpokenForVerdict('FREEZE', ['This transfer is frozen and an incident is open. The payment is not released. Goodbye then.'])).toBe(true);
+  it('accepts the lenient fallback: the verdict\'s own distinguishing (first) clause verbatim, plus a REWORDED second clause, plus "goodbye"', () => {
+    // Founder ruling 2026-09-16: STAGE and FREEZE now share their final clause ("The payment
+    // is not released"), so that shared clause can no longer be what proves which verdict was
+    // spoken -- only FREEZE's own first clause can. A live model rewording the shared clause
+    // must still match as long as the distinguishing clause and "goodbye" are both present.
+    expect(
+      closeLineSpokenForVerdict('FREEZE', [
+        'This transfer is frozen and an incident is open. Nothing further will move on this account. Goodbye.',
+      ]),
+    ).toBe(true);
   });
 
-  it('does NOT match on "goodbye" alone, with no matching last clause', () => {
+  it('does NOT match on "goodbye" alone, with no matching distinguishing clause', () => {
     expect(closeLineSpokenForVerdict('FREEZE', ['Alright, goodbye.'])).toBe(false);
   });
 
-  it('does NOT match on the last clause alone, with no "goodbye" (e.g. cut off before it)', () => {
+  it('does NOT match on the distinguishing clause alone, with no "goodbye" (e.g. cut off before it)', () => {
     expect(closeLineSpokenForVerdict('FREEZE', ['This transfer is frozen and nothing has moved.'])).toBe(false);
   });
 
@@ -554,12 +560,33 @@ describe('closeLineSpokenForVerdict', () => {
     expect(closeLineSpokenForVerdict('STAGE', [CLOSE_SENTENCE_BY_VERDICT.FREEZE])).toBe(false);
   });
 
+  it('does NOT cross-match via the lenient fallback either: the shared "payment is not released" clause plus "goodbye" never satisfies STAGE for a FREEZE transcript', () => {
+    expect(
+      closeLineSpokenForVerdict('STAGE', [
+        'This transfer is frozen and an incident is open. The payment is not released. Goodbye.',
+      ]),
+    ).toBe(false);
+  });
+
   it('does NOT match an interrupted, incomplete reply (the miller-patient regression shape)', () => {
     expect(closeLineSpokenForVerdict('FREEZE', ['Please provide the'])).toBe(false);
   });
 
   it('returns false for no agent lines at all', () => {
     expect(closeLineSpokenForVerdict('FREEZE', [])).toBe(false);
+  });
+});
+
+describe('DISTINGUISHING_CLAUSE_BY_VERDICT', () => {
+  it('gives every verdict a clause that is unique across all four verdicts', () => {
+    const values = Object.values(DISTINGUISHING_CLAUSE_BY_VERDICT);
+    expect(new Set(values).size).toBe(values.length);
+  });
+
+  it('is present, non-empty, for every verdict in CLOSE_SENTENCE_BY_VERDICT', () => {
+    for (const verdict of Object.keys(CLOSE_SENTENCE_BY_VERDICT) as Array<keyof typeof CLOSE_SENTENCE_BY_VERDICT>) {
+      expect(DISTINGUISHING_CLAUSE_BY_VERDICT[verdict].length).toBeGreaterThan(0);
+    }
   });
 });
 

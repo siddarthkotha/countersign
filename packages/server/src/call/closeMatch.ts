@@ -45,9 +45,7 @@ export function normalizeForCloseMatch(s: string): string {
 
 /** The non-"Goodbye" clauses of a close sentence, normalized -- `closeSentence`'s own shape
  *  is always "<opening clause(s)>. <content clause>. Goodbye." (STAGE/FREEZE/ESCALATE) or
- *  "<content clause>. Goodbye." (the default/NO_ACTION line), so the LAST clause once
- *  "Goodbye" is filtered out is always the one that actually names the outcome ("The payment is
- *  not released", ...). */
+ *  "<content clause>. Goodbye." (the default/NO_ACTION line). */
 function contentClauses(sentence: string): string[] {
   return sentence
     .split('.')
@@ -55,15 +53,49 @@ function contentClauses(sentence: string): string[] {
     .filter((c) => c.length > 0 && c !== 'goodbye');
 }
 
+/** For each verdict, the first of its own close sentence's content clauses that does not
+ *  appear as a content clause of any OTHER verdict's sentence -- the shortest piece of
+ *  wording that, on its own, identifies which verdict was actually spoken. Computed
+ *  generically off `ENGINE_CLOSE_SENTENCES` (never a hardcoded index), so a future wording
+ *  edit that makes two verdicts share their first clause throws here instead of silently
+ *  reintroducing cross-matching. Founder ruling 2026-09-16 gave STAGE and FREEZE a shared
+ *  final clause ("The payment is not released"), which is exactly what made the OLD "require
+ *  every clause" fallback here too strict (any small rewording of either sentence's OTHER
+ *  clause then failed the match, which on the server re-sends CLOSE and doubles the
+ *  goodbye) -- see closeMatch.test.ts's own "every verdict's distinguishing clause is
+ *  unique" test. */
+export const DISTINGUISHING_CLAUSE_BY_VERDICT: Record<'STAGE' | 'FREEZE' | 'ESCALATE' | 'NO_ACTION', string> = (() => {
+  const verdicts = Object.keys(ENGINE_CLOSE_SENTENCES) as Array<keyof typeof ENGINE_CLOSE_SENTENCES>;
+  const clausesByVerdict = new Map(verdicts.map((v) => [v, contentClauses(ENGINE_CLOSE_SENTENCES[v])]));
+  const result = {} as Record<keyof typeof ENGINE_CLOSE_SENTENCES, string>;
+  for (const verdict of verdicts) {
+    const ownClauses = clausesByVerdict.get(verdict)!;
+    const distinguishing = ownClauses.find((clause) =>
+      verdicts.every((other) => other === verdict || !clausesByVerdict.get(other)!.includes(clause)),
+    );
+    if (distinguishing === undefined) {
+      throw new Error(
+        `closeMatch: "${verdict}"'s close sentence has no content clause that distinguishes it from the other verdicts -- a wording change made every clause ambiguous`,
+      );
+    }
+    result[verdict] = distinguishing;
+  }
+  return result;
+})();
+
 /** True when `accumulatedTranscript` (every transcript.agent chunk recorded for one AAI
  *  reply, concatenated in arrival order) can be read as the caller having actually heard
- *  `closeSentence` -- leniently: either an exact normalized match, or both "goodbye" and the
- *  sentence's own content clause (e.g. "nothing has moved") appearing somewhere in the
- *  transcript. The lenient branch accepts a reply that paraphrased the connective tissue but
- *  landed the words that actually matter, and a reply cut short by barge-in that still got
- *  the content clause and the word "goodbye" out before being interrupted. Never matches an
- *  empty transcript, and never matches on "goodbye" alone (that word alone proves nothing
- *  about WHICH outcome was spoken). */
+ *  `closeSentence` -- leniently: either an exact normalized match, or both "goodbye" and
+ *  this verdict's own DISTINGUISHING content clause (see `DISTINGUISHING_CLAUSE_BY_VERDICT`)
+ *  appearing somewhere in the transcript. The lenient branch accepts a reply that
+ *  paraphrased any OTHER clause but landed the one clause that actually proves which
+ *  verdict this is, plus a reply cut short by barge-in that still got that clause and the
+ *  word "goodbye" out before being interrupted. Never matches an empty transcript, never
+ *  matches on "goodbye" alone (that word alone proves nothing about WHICH outcome was
+ *  spoken), and never matches a DIFFERENT verdict's sentence (the distinguishing clause is
+ *  unique to its own verdict by construction). `closeSentence` must be one of
+ *  `ENGINE_CLOSE_SENTENCES`'s own values -- an unrecognized sentence has no fallback and
+ *  can only match exactly. */
 export function transcriptMatchesCloseSentence(accumulatedTranscript: string, closeSentence: string): boolean {
   const transcript = normalizeForCloseMatch(accumulatedTranscript);
   if (transcript.length === 0) return false;
@@ -71,11 +103,12 @@ export function transcriptMatchesCloseSentence(accumulatedTranscript: string, cl
   const sentence = normalizeForCloseMatch(closeSentence);
   if (sentence.length > 0 && transcript.includes(sentence)) return true;
 
-  const clauses = contentClauses(closeSentence);
-  if (clauses.length === 0) return false;
-  // Lenient fallback: require all clauses to be present, allowing the model to rephrase
-  // any individual clause while keeping all the key parts
-  const allClausesPresent = clauses.every((clause) => transcript.includes(clause));
+  const verdict = (Object.keys(ENGINE_CLOSE_SENTENCES) as Array<keyof typeof ENGINE_CLOSE_SENTENCES>).find(
+    (v) => normalizeForCloseMatch(ENGINE_CLOSE_SENTENCES[v]) === sentence,
+  );
+  if (verdict === undefined) return false;
+
+  const distinguishingClause = DISTINGUISHING_CLAUSE_BY_VERDICT[verdict];
   const hasGoodbye = transcript.includes('goodbye');
-  return allClausesPresent && hasGoodbye;
+  return transcript.includes(distinguishingClause) && hasGoodbye;
 }

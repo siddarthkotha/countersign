@@ -195,44 +195,70 @@ export function isClosingLineStart(text: string): boolean {
   return ENGINE_CLOSE_SENTENCES.some((s) => normalizeForCloseMatch(s).startsWith(partial));
 }
 
-/** The close sentence's own final substantive clause -- e.g. "The payment is not released" for FREEZE,
- *  "The payment is not released" for STAGE -- with the trailing "Goodbye." clause
- *  dropped. Used as the lenient fallback match: a transcript that got the closing "Goodbye"
- *  and this one distinguishing clause, but not the sentence's opening clause verbatim (a
- *  live model's own minor rewording, or the caller/harness's STT dropping a word), still
- *  counts as "the close line was spoken" -- ANY other combination (e.g. "Goodbye" alone, or
- *  the opening clause without "Goodbye") does not. */
-function lastSubstantiveClause(sentence: string): string {
-  const clauses = sentence
+/** The content ("non-Goodbye") clauses of a close sentence, in order, untouched by
+ *  `normalizeForCloseMatch` (callers normalize before comparing). Shared by
+ *  `DISTINGUISHING_CLAUSE_BY_VERDICT` below. */
+function contentClauses(sentence: string): string[] {
+  return sentence
     .split('.')
     .map((c) => c.trim())
     .filter((c) => c.length > 0 && c.toLowerCase() !== 'goodbye');
-  return clauses[clauses.length - 1] ?? sentence;
 }
+
+/** For each verdict, the first of its own close sentence's content clauses that does not
+ *  appear (case-insensitively) as a content clause of any OTHER verdict's sentence -- the
+ *  shortest piece of wording that, on its own, identifies which verdict was actually
+ *  spoken. Computed generically off `CLOSE_SENTENCE_BY_VERDICT` (never a hardcoded index),
+ *  so a future wording edit that makes two verdicts share their first clause throws here
+ *  instead of silently reintroducing cross-matching. Founder ruling 2026-09-16 gave STAGE
+ *  and FREEZE a shared final clause ("The payment is not released"), which is exactly what
+ *  made the OLD "require every clause" fallback here too strict (any small rewording of
+ *  either sentence's OTHER clause then failed the match) -- see turnController.test.ts's
+ *  own "every verdict's distinguishing clause is unique" test. Mirrors
+ *  `DISTINGUISHING_CLAUSE_BY_VERDICT` in packages/server/src/call/closeMatch.ts; the two
+ *  must never drift apart (see this file's own top-of-module comment on
+ *  `CLOSE_SENTENCE_BY_VERDICT`). */
+export const DISTINGUISHING_CLAUSE_BY_VERDICT: Record<'STAGE' | 'FREEZE' | 'ESCALATE' | 'NO_ACTION', string> = (() => {
+  const verdicts = Object.keys(CLOSE_SENTENCE_BY_VERDICT) as Array<keyof typeof CLOSE_SENTENCE_BY_VERDICT>;
+  const clausesByVerdict = new Map(
+    verdicts.map((v) => [v, contentClauses(CLOSE_SENTENCE_BY_VERDICT[v]).map((c) => c.toLowerCase())]),
+  );
+  const result = {} as Record<keyof typeof CLOSE_SENTENCE_BY_VERDICT, string>;
+  for (const verdict of verdicts) {
+    const own = contentClauses(CLOSE_SENTENCE_BY_VERDICT[verdict]);
+    const ownLower = clausesByVerdict.get(verdict)!;
+    const idx = ownLower.findIndex((clause) =>
+      verdicts.every((other) => other === verdict || !clausesByVerdict.get(other)!.includes(clause)),
+    );
+    if (idx === -1) {
+      throw new Error(
+        `turnController: "${verdict}"'s close sentence has no content clause that distinguishes it from the other verdicts -- a wording change made every clause ambiguous`,
+      );
+    }
+    result[verdict] = own[idx]!;
+  }
+  return result;
+})();
 
 /** True iff `agentLines` (every agent transcript line, in order, concatenated -- the close
  *  sentence can land split across two transcript records when a reply gets interrupted mid
  *  final-clause and the model is asked again) together contain the ONE close sentence that
  *  matches `verdict` -- either verbatim (modulo `normalizeForCloseMatch`'s case/punctuation/
- *  whitespace leniency) or, failing that, ALL of this verdict's own substantive clauses
- *  AND the word "goodbye", present somewhere in the concatenation. Never matches on a
- *  DIFFERENT verdict's sentence, and never matches on "goodbye" alone. */
+ *  whitespace leniency) or, failing that, this verdict's own DISTINGUISHING clause (see
+ *  `DISTINGUISHING_CLAUSE_BY_VERDICT`) AND the word "goodbye", present somewhere in the
+ *  concatenation. Never matches on a DIFFERENT verdict's sentence (the distinguishing
+ *  clause is unique to its own verdict by construction), and never matches on "goodbye"
+ *  alone. */
 export function closeLineSpokenForVerdict(verdict: 'STAGE' | 'FREEZE' | 'ESCALATE' | 'NO_ACTION', agentLines: readonly string[]): boolean {
   const concatenated = normalizeForCloseMatch(agentLines.join(' '));
   const fullSentence = CLOSE_SENTENCE_BY_VERDICT[verdict];
   if (concatenated.includes(normalizeForCloseMatch(fullSentence))) return true;
 
-  // Lenient fallback: check that ALL substantive clauses are present, allowing the model
-  // to rephrase any individual clause while keeping all the key parts
-  const clauses = fullSentence
-    .split('.')
-    .map((c) => c.trim())
-    .filter((c) => c.length > 0 && c.toLowerCase() !== 'goodbye');
-
-  const allClausesPresent = clauses.every((clause) =>
-    concatenated.includes(normalizeForCloseMatch(clause))
-  );
-  return allClausesPresent && concatenated.includes('goodbye');
+  // Lenient fallback: require the ONE clause that distinguishes this verdict's sentence
+  // from the other three, plus "goodbye" -- allows the model to rephrase every OTHER
+  // clause while still proving which verdict was actually spoken.
+  const distinguishingClause = DISTINGUISHING_CLAUSE_BY_VERDICT[verdict];
+  return concatenated.includes(normalizeForCloseMatch(distinguishingClause)) && concatenated.includes('goodbye');
 }
 
 /** Scenario-level default for `Scenario.agent_silence_fail_ms` (types.ts) when a patient-mode
