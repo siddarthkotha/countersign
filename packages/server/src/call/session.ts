@@ -298,25 +298,40 @@ export class CallSession {
    *  scripts/rehearse/reports/2026-09-16T17-50-00-miller-patient.diagnostics.json): the CLOSE
    *  reply.create sent at 96157ms was never acknowledged (no `reply.started` ever arrived) --
    *  `armReplyCreateLostTimer` logged `reply_create_lost` and `armCloseRetryTimer` re-sent,
-   *  spaced CLOSE_RETRY_MIN_GAP_MS apart, 24 times in a row, EVERY one lost the exact same way,
-   *  for the full CLOSE_TOTAL_MS (45s) budget before `armClose`'s own hard cap finally ended
-   *  the call. A `reply.create` that AssemblyAI never even starts 3 times running is not a
-   *  transient underrun (those get a `reply.started` and simply say the wrong thing, or
-   *  nothing) -- it means the far end has stopped acknowledging sends at all, and burning the
-   *  rest of the 45s budget on more of the same is pure latency with no chance of a spoken
-   *  goodbye. `closeLostStreak` counts CONSECUTIVE `reply_create_lost` events for a CLOSE
-   *  goal; reset to 0 the instant ANY CLOSE reply actually gets a `reply.started` (see that
-   *  case's own comment) -- a reply that starts is not lost, regardless of what it goes on to
-   *  say. At `MAX_CLOSE_LOST_STREAK` consecutive losses, `abandonClose` (below) gives up early
-   *  rather than waiting out the rest of CLOSE_TOTAL_MS: LAW 2 is unaffected either way (the
-   *  verdict and containment already ran at the moment CLOSE was first rendered, long before
-   *  any of this) -- this only decides how long the wire stays open with no chance of the
-   *  caller ever hearing the goodbye. Chosen to burn at most roughly
+   *  spaced CLOSE_RETRY_MIN_GAP_MS apart, and EVERY ONE of the next 24 attempts was lost the
+   *  exact same way -- not one single CLOSE reply ever got a `reply.started` for the entire
+   *  45s CLOSE_TOTAL_MS budget, all the way to `armClose`'s own hard cap finally ending the
+   *  call. That total, unbroken non-responsiveness (AssemblyAI never once acknowledges a CLOSE
+   *  reply.create, from the very first attempt to the last) is a different, and much stronger,
+   *  signal than an isolated stretch of a few lost sends in the middle of an otherwise-live
+   *  exchange (round 4's own tests deliberately drive AssemblyAI through 14+ seconds of
+   *  silence between real, started-but-mismatched replies, and rely on the unbounded,
+   *  time-budgeted retry to ride that out to a real answer -- see
+   *  `CLOSE retry is time-budgeted, not attempt-capped` in session.test.ts). Bailing out on
+   *  the FIRST short losing streak, regardless of whether AssemblyAI has ever actually
+   *  responded at all this call, would break that tolerance for a channel that is merely slow.
+   *
+   *  So the bound is two-part: `closeEverStarted` (set the instant ANY CLOSE reply gets a
+   *  `reply.started` -- see that case's own comment) records whether AssemblyAI has EVER once
+   *  acknowledged a CLOSE reply.create, for the life of the call; `closeLostStreak` counts
+   *  CONSECUTIVE `reply_create_lost` events since the last time that happened (reset to 0 on
+   *  every real start, not just the first). `abandonClose` (below) only ever fires when NEITHER
+   *  a start has EVER happened NOR the streak is still under `MAX_CLOSE_LOST_STREAK` -- i.e.
+   *  only for a channel that has been totally unresponsive to CLOSE from the very first attempt
+   *  onward, exactly the live incident's own shape. Once even one CLOSE reply has started,
+   *  round 4's original unbounded-but-time-budgeted design (the 45s absolute cap is the only
+   *  backstop) is preserved unchanged -- this fix adds a circuit breaker for total
+   *  non-responsiveness, not a general attempt cap. LAW 2 is unaffected either way (the verdict
+   *  and containment already ran at the moment CLOSE was first rendered, long before any of
+   *  this) -- this only decides how long the wire stays open with zero chance of the caller
+   *  ever hearing the goodbye. Chosen to burn at most roughly
    *  MAX_CLOSE_LOST_STREAK * (REPLY_CREATE_LOST_MS + CLOSE_RETRY_MIN_GAP_MS) =~ 5.7s of retrying
-   *  (matching the live cadence, ~1.9s/attempt) before giving up -- well short of the 45s the
-   *  live failure actually burned, and still three genuine attempts, not zero. */
+   *  (matching the live cadence, ~1.9s/attempt) before giving up in that total-failure case --
+   *  well short of the 45s the live failure actually burned, and still three genuine attempts,
+   *  not zero. */
   private static readonly MAX_CLOSE_LOST_STREAK = 3;
   private closeLostStreak = 0;
+  private closeEverStarted = false;
   private closeGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private closeHardCapTimer: ReturnType<typeof setTimeout> | null = null;
   private closeRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1607,11 +1622,16 @@ export class CallSession {
         // risk of being "lost" -- something started.
         this.clearReplyCreateLostTimer();
         // Fix (2026-09-16): a CLOSE reply that actually starts is definitionally not "lost",
-        // regardless of what it goes on to say -- reset the consecutive-loss streak
-        // `abandonClose` counts against (see `MAX_CLOSE_LOST_STREAK`'s own doc comment). Never
-        // touches `closeReplySendCount` (observability only) or any mismatch/empty-transcript
+        // regardless of what it goes on to say -- reset the consecutive-loss streak AND record
+        // that AssemblyAI has responded to CLOSE at least once this call (see
+        // `MAX_CLOSE_LOST_STREAK`'s own doc comment for why both matter: `abandonClose` only
+        // ever fires for total, unbroken non-responsiveness). Never touches
+        // `closeReplySendCount` (observability only) or any mismatch/empty-transcript
         // bookkeeping -- those still run their own unchanged course once this reply completes.
-        if (requestedGoal === 'CLOSE') this.closeLostStreak = 0;
+        if (requestedGoal === 'CLOSE') {
+          this.closeLostStreak = 0;
+          this.closeEverStarted = true;
+        }
         // Round 5: `reply.audio` events carry no reply id of their own (aai/types.ts) -- this
         // is the only record of which reply subsequent frames belong to. A reply that starts
         // AFTER the goodbye is already transcript-confirmed, and is not the confirmed reply
@@ -2498,7 +2518,13 @@ export class CallSession {
       if (this.last?.goal.code === 'CLOSE') {
         this.closeLastReplyWasEmpty = false;
         this.closeLostStreak += 1;
-        if (this.closeLostStreak >= CallSession.MAX_CLOSE_LOST_STREAK) {
+        // Fix (2026-09-16): only a channel that has NEVER once acknowledged a CLOSE reply
+        // (see `closeEverStarted`'s own doc comment) is a candidate for early abandonment --
+        // once at least one CLOSE reply has actually started, round 4's original design
+        // (unbounded, time-budgeted retries, backstopped only by the 45s absolute cap) is
+        // preserved unchanged, so an isolated stretch of a few lost sends in an otherwise-live
+        // exchange is ridden out exactly as it always was.
+        if (!this.closeEverStarted && this.closeLostStreak >= CallSession.MAX_CLOSE_LOST_STREAK) {
           this.abandonClose('reply_create_lost_streak');
           return;
         }

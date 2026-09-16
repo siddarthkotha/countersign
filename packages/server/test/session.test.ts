@@ -1297,25 +1297,47 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
 
   // Round 4 (2026-09-14, time-budget fix): the hard cap moved from CLOSE_TIMEOUT_MS (15s,
   // paired with a 3-attempt cap) to CLOSE_TOTAL_MS (45s, no attempt cap at all -- retries are
-  // spaced by CLOSE_RETRY_MIN_GAP_MS instead of counted). Nothing ever responds here, so the
-  // server's own reply.create keeps getting superseded by the 1500ms "lost" timeout and
-  // re-sent every ~1900ms (1500 lost + 400 gap) until the 45s absolute budget ends the call --
-  // same observable shape as before (close_timeout, no reply.done ever arrives), just at 45s.
-  it('the hard cap ends the call with reason "close_timeout" if no reply.done for CLOSE ever arrives', () => {
+  // spaced by CLOSE_RETRY_MIN_GAP_MS instead of counted).
+  //
+  // Fix (2026-09-16, PROVEN live failure -- deploy 41, scripts/rehearse/reports/
+  // 2026-09-16T17-50-00-miller-patient.diagnostics.json): "nothing ever responds" is exactly
+  // this test's own shape -- no CLOSE reply.create EVER gets a reply.started, not once, for
+  // the whole call -- and burning the full 45s on that (as this test used to assert) is
+  // precisely the live bug: 24 consecutive lost sends, no chance of a spoken goodbye, before
+  // the old hard cap finally ended the call. `abandonClose`'s lost-streak circuit breaker now
+  // ends the call after MAX_CLOSE_LOST_STREAK (3) consecutive losses with NO CLOSE reply ever
+  // having started at all -- see `MAX_CLOSE_LOST_STREAK`'s own doc comment in session.ts for
+  // why this is scoped to total non-responsiveness only (a channel that has started at least
+  // one CLOSE reply still gets the full, unbounded 45s budget -- see the sibling
+  // `three non-matching replies...` and `(a) keeps retrying past the OLD 15s/3-attempt cap...`
+  // tests just above/below, unaffected by this fix).
+  it('gives up early (close_abandoned) after a bounded streak of lost sends if no CLOSE reply.done -- or even reply.started -- ever arrives', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
     const call: CallContext = { session_id: 'sess-close-hardcap', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
-    const session = newSession(clock, call, aai, sent);
+    const session = new CallSession({
+      session_id: call.session_id,
+      seed: MERIDIAN,
+      call,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+    });
     session.start();
     driveToSealedStage(session, aai, clock);
     expect(session.last?.goal.code).toBe('CLOSE');
 
-    vi.advanceTimersByTime(44_999);
-    expect(sent.some((e) => e.type === 'ended')).toBe(false);
-    vi.advanceTimersByTime(1);
-    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
+    // Three full lost+retry cycles (1500ms lost timeout + 400ms retry gap each) -- the third
+    // loss crosses MAX_CLOSE_LOST_STREAK and ends the call immediately, at ~5.3s, nowhere near
+    // the 45s CLOSE_TOTAL_MS budget this used to burn in full.
+    vi.advanceTimersByTime(1500 + 400 + 1500 + 400 + 1500);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_abandoned' });
+    expect(diagEvents.find((e) => e.kind === 'close_abandoned')?.detail).toEqual({ reason: 'reply_create_lost_streak', streak: 3 });
   });
 
   // ---------------------------------------------------------------------------------------
@@ -1435,13 +1457,29 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
   // -- the a4 reply.done here sends the first real CLOSE reply.create (reply_done_goal_diverged),
   // and since nothing ever answers it, the new 1500ms "lost" timeout plus the 400ms retry gap
   // keep re-sending it every ~1900ms (no attempt cap) until the 45s absolute budget fires.
-  it('if no genuinely new reply ever starts after the stale reply.done, the 45s hard cap still fires close_timeout', () => {
+  // Fix (2026-09-16, PROVEN live failure -- deploy 41): "no new reply ever starts" is total
+  // non-responsiveness for CLOSE, from the very first (and only) attempt onward -- exactly the
+  // live incident's own shape (see `MAX_CLOSE_LOST_STREAK`'s own doc comment in session.ts).
+  // `abandonClose`'s lost-streak circuit breaker now ends the call well before the 45s hard
+  // cap in this case; the 45s absolute cap remains the backstop only once at least one CLOSE
+  // reply has actually started (see the sibling round-4 tests, unaffected by this fix).
+  it('gives up early (close_abandoned) if no genuinely new reply -- or even a reply.started -- ever arrives for CLOSE after the stale reply.done', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
     const call: CallContext = { session_id: 'sess-close-race-hardcap', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
-    const session = newSession(clock, call, aai, sent);
+    const session = new CallSession({
+      session_id: call.session_id,
+      seed: MERIDIAN,
+      call,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+    });
     session.start();
     driveThroughC4AndStartA4(session, aai, clock);
 
@@ -1453,12 +1491,12 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     clock.now = 6500;
     aai.emit({ type: 'reply.done', reply_id: 'a4', status: 'completed' });
 
-    // ...but no new reply ever starts. The 45s hard cap (armed the instant CLOSE was first
-    // rendered, at the tool.call tick above) is the backstop that still ends the call.
-    vi.advanceTimersByTime(44_999);
-    expect(sent.some((e) => e.type === 'ended')).toBe(false);
-    vi.advanceTimersByTime(1);
-    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
+    // ...and the first real CLOSE reply.create this sends (reply_done_goal_diverged) never
+    // gets a reply.started either -- three full lost+retry cycles later, the streak crosses
+    // MAX_CLOSE_LOST_STREAK and the call ends immediately, ~5.3s later, not 45s.
+    vi.advanceTimersByTime(1500 + 400 + 1500 + 400 + 1500);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_abandoned' });
+    expect(diagEvents.find((e) => e.kind === 'close_abandoned')?.detail).toEqual({ reason: 'reply_create_lost_streak', streak: 3 });
   });
 
   // Row 15 (rules.ts) only ever converts a PENDING verdict on call_ended -- an
@@ -2150,27 +2188,47 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
     });
 
-    it('(b) no matching reply ever arrives -- the call ends close_timeout at the 45s absolute budget, and the number of reply.create sent is bounded by the retry spacing', () => {
+    // Fix (2026-09-16, PROVEN live failure -- deploy 41): "no matching reply ever arrives" --
+    // meaning no CLOSE reply.create EVER even gets a reply.started -- is exactly the live
+    // incident's own shape (24 consecutive losses, zero starts, the full 45s burned with no
+    // chance of a spoken goodbye). `abandonClose`'s lost-streak circuit breaker now ends the
+    // call after MAX_CLOSE_LOST_STREAK (3) consecutive losses in this total-non-responsiveness
+    // case; see `MAX_CLOSE_LOST_STREAK`'s own doc comment in session.ts. Test (a) directly
+    // above proves the 45s budget is still the backstop once at least one CLOSE reply has
+    // actually started -- unaffected by this fix.
+    it('(b) no matching reply -- or even a reply.started -- ever arrives: the call ends early (close_abandoned), not at the 45s absolute budget', () => {
       vi.useFakeTimers();
       const clock = { now: 0 };
       const aai = new FakeAaiSocket();
       const sent: ServerEvent[] = [];
-      const session = newSession(clock, CALL_B, aai, sent);
+      const diagEvents: { kind: string; detail: unknown }[] = [];
+      const session = new CallSession({
+        session_id: CALL_B.session_id,
+        seed: MERIDIAN,
+        call: CALL_B,
+        aai,
+        now: () => clock.now,
+        onServerEvent: (e) => sent.push(e),
+        mock: mockToolResult,
+        onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+      });
       session.start();
-      driveToFreezeCloseWithFirstSend(session, aai, clock);
+      driveToFreezeCloseWithFirstSend(session, aai, clock); // attempt 1 (tick_end) already sent
       expect(session.last?.goal.code).toBe('CLOSE');
+      const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+      const baseline = replyCreates().length;
 
-      vi.advanceTimersByTime(44_999);
-      expect(sent.some((e) => e.type === 'ended')).toBe(false);
-      vi.advanceTimersByTime(1);
-      expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
+      // Three full lost+retry cycles -- the third loss crosses MAX_CLOSE_LOST_STREAK and ends
+      // the call immediately, at ~5.3s, nowhere near the 45s CLOSE_TOTAL_MS budget this used
+      // to burn in full.
+      vi.advanceTimersByTime(1500 + 400 + 1500 + 400 + 1500);
+      expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_abandoned' });
+      expect(diagEvents.find((e) => e.kind === 'close_abandoned')?.detail).toEqual({ reason: 'reply_create_lost_streak', streak: 3 });
 
-      // Bounded sanity check: even with nothing ever answering, the retry spacing (>=400ms
-      // between sends, via the reply-lost timeout + retry gap) means far fewer than one send
-      // per 400ms could ever have gone out across the 45s budget.
-      const replyCreateCount = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
-      expect(replyCreateCount).toBeGreaterThan(0);
-      expect(replyCreateCount).toBeLessThan(45_000 / 400);
+      // Bounded sanity check: exactly two more CLOSE reply.create sends (attempts 2 and 3, the
+      // spaced retries) went out on top of the baseline (attempt 1) before the circuit breaker
+      // fired -- never anywhere close to one send per 400ms for the rest of a 45s budget.
+      expect(replyCreates().length).toBe(baseline + 2);
     });
 
     it('(c) a lost reply.create (no reply.started within 1500ms) is superseded by a fresh one', () => {
