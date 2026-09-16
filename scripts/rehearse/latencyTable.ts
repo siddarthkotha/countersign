@@ -69,6 +69,13 @@ export async function loadRuns(reportsDir: string): Promise<LoadedRun[]> {
       continue; // skip a corrupt/truncated bundle rather than fail the whole table
     }
 
+    // Skip null bundles (valid JSON but not a real diagnostics object) and bundles missing
+    // server_events -- this prevents "Cannot read properties of null (reading 'server_events')"
+    // crashes when a .diagnostics.json file contains just "null" (seen on some interrupted runs).
+    if (!bundle || typeof bundle !== 'object' || !('server_events' in bundle)) {
+      continue;
+    }
+
     const mdFileName = fileName.replace(/\.diagnostics\.json$/, '.md');
     let mdText: string | null = null;
     try {

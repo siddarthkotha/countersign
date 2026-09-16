@@ -75,6 +75,16 @@ describe('loadRuns', () => {
     expect(await loadRuns(dir)).toEqual([]);
   });
 
+  it('skips a null diagnostics bundle (valid JSON null) rather than crashing with Cannot read properties of null', async () => {
+    const base = '2026-09-11T12-00-00-scenario-a-dana-legitimate';
+    await writeFile(join(dir, `${base}.diagnostics.json`), 'null', 'utf-8');
+    await writeFile(join(dir, `${base}.md`), 'Scenario: `scenario-a-dana-legitimate`\nTarget: https://countersign-bf8q.onrender.com\n', 'utf-8');
+
+    // Should not throw, should skip the null bundle
+    const runs = await loadRuns(dir);
+    expect(runs).toEqual([]);
+  });
+
   it('parses the perceived per-turn gaps from the paired .md report', async () => {
     const base = '2026-09-11T12-00-00-scenario-a-dana-legitimate';
     await writeFile(join(dir, `${base}.diagnostics.json`), JSON.stringify(bundle([])), 'utf-8');

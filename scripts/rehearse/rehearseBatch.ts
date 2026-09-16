@@ -6,8 +6,10 @@
 // (scripts/rehearse/run.ts, one real live call per invocation -- this file never re-implements
 // minting a session, opening the WebSocket, or running turns) sequentially, stopping at the
 // run count, the summed estimated-minutes cap, or a server-side daily_cap refusal, whichever
-// comes first. Writes one rollup markdown, then regenerates docs/LATENCY.md from whatever
-// diagnostics bundles exist on disk afterward (scripts/rehearse/latencyTable.ts).
+// comes first. --runs specifies the TOTAL number of calls to make, round-robined across
+// --scenarios (e.g. --runs 4 --scenarios a,b,c executes: a, b, c, a). Writes one rollup
+// markdown, then regenerates docs/LATENCY.md from whatever diagnostics bundles exist on disk
+// afterward (scripts/rehearse/latencyTable.ts).
 //
 // Everything that touches the network or spawns a process lives in `main()`/`spawnRun()` at
 // the bottom. Everything above that -- scheduling, the stop-condition check, output parsing,
