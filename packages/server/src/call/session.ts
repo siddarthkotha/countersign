@@ -294,6 +294,29 @@ export class CallSession {
    *  `maybeArmCloseOnTranscript` still clear it outright (both indicate the reply is healthy).
    *  Left well inside CLOSE_TOTAL_MS (45s) so a stuck reply still gets several retries. */
   private static readonly CLOSE_REPLY_STUCK_MS = 12_000;
+  /** Fix (2026-09-16, PROVEN live failure -- deploy 41,
+   *  scripts/rehearse/reports/2026-09-16T17-50-00-miller-patient.diagnostics.json): the CLOSE
+   *  reply.create sent at 96157ms was never acknowledged (no `reply.started` ever arrived) --
+   *  `armReplyCreateLostTimer` logged `reply_create_lost` and `armCloseRetryTimer` re-sent,
+   *  spaced CLOSE_RETRY_MIN_GAP_MS apart, 24 times in a row, EVERY one lost the exact same way,
+   *  for the full CLOSE_TOTAL_MS (45s) budget before `armClose`'s own hard cap finally ended
+   *  the call. A `reply.create` that AssemblyAI never even starts 3 times running is not a
+   *  transient underrun (those get a `reply.started` and simply say the wrong thing, or
+   *  nothing) -- it means the far end has stopped acknowledging sends at all, and burning the
+   *  rest of the 45s budget on more of the same is pure latency with no chance of a spoken
+   *  goodbye. `closeLostStreak` counts CONSECUTIVE `reply_create_lost` events for a CLOSE
+   *  goal; reset to 0 the instant ANY CLOSE reply actually gets a `reply.started` (see that
+   *  case's own comment) -- a reply that starts is not lost, regardless of what it goes on to
+   *  say. At `MAX_CLOSE_LOST_STREAK` consecutive losses, `abandonClose` (below) gives up early
+   *  rather than waiting out the rest of CLOSE_TOTAL_MS: LAW 2 is unaffected either way (the
+   *  verdict and containment already ran at the moment CLOSE was first rendered, long before
+   *  any of this) -- this only decides how long the wire stays open with no chance of the
+   *  caller ever hearing the goodbye. Chosen to burn at most roughly
+   *  MAX_CLOSE_LOST_STREAK * (REPLY_CREATE_LOST_MS + CLOSE_RETRY_MIN_GAP_MS) =~ 5.7s of retrying
+   *  (matching the live cadence, ~1.9s/attempt) before giving up -- well short of the 45s the
+   *  live failure actually burned, and still three genuine attempts, not zero. */
+  private static readonly MAX_CLOSE_LOST_STREAK = 3;
+  private closeLostStreak = 0;
   private closeGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private closeHardCapTimer: ReturnType<typeof setTimeout> | null = null;
   private closeRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -482,6 +505,26 @@ export class CallSession {
   private questionReaskGoalKey: string | null = null;
   private questionReaskCount = 0;
   private static readonly QUESTION_REASK_MAX = 2;
+  /** Fix (2026-09-16, PROVEN live failure -- deploy 41, scripts/rehearse/reports/
+   *  2026-09-16T17-50-00-miller-patient.diagnostics.json): four consecutive
+   *  `question_reask_sent` events for the SAME ASK_CHALLENGE rendering (44037, 51207, 58489,
+   *  63657) every one logged `"attempt": 0` -- `questionReaskCount` never advanced because
+   *  every one of those four replies had a completely EMPTY `replyTranscripts` entry (no
+   *  `transcript.agent` event ever arrived for them at all, despite each one producing
+   *  `reply.started`/`reply.audio`/`reply.done` -- see this file's own incident notes on
+   *  `recordGoalCompletionAction`). The empty-reply forgiveness below (`countAttempt`'s CLOSE
+   *  analogue) was designed for a reply that genuinely said nothing; it cannot tell that case
+   *  apart from "AssemblyAI never delivered a transcript event for whatever it said", and a
+   *  question stuck in the latter state is forgiven FOREVER -- the agent re-asks the same
+   *  question indefinitely (29s / 4 replies live before the idle timer, not this mechanism,
+   *  finally ended the call), holding the floor and never letting the caller's own turn
+   *  resolve. `questionReaskEmptyCount` bounds the FORGIVEN attempts separately from the
+   *  counted ones (`questionReaskCount`) so a rendering that never produces a transcript still
+   *  gives up after a bounded number of tries, same shape as `MAX_CLOSE_LOST_STREAK` bounds
+   *  the CLOSE retry loop for the analogous reason. Reset alongside `questionReaskCount`
+   *  whenever the goal rendering itself changes (`maybeReaskQuestion`'s own goalKey check). */
+  private questionReaskEmptyCount = 0;
+  private static readonly QUESTION_REASK_MAX_EMPTY = 2;
   /** Review fix (2026-09-15, Important -- FAIL on the first cut): the reask used to call
    *  `sendReplyCreate` SYNCHRONOUSLY at `reply.done`, with none of the spacing round 4 gave
    *  the CLOSE retry (`CLOSE_RETRY_MIN_GAP_MS`/`armCloseRetryTimer` above) for exactly the
@@ -1563,6 +1606,12 @@ export class CallSession {
         // Round 4, requirement 5: this reply.create (if any was outstanding) is no longer at
         // risk of being "lost" -- something started.
         this.clearReplyCreateLostTimer();
+        // Fix (2026-09-16): a CLOSE reply that actually starts is definitionally not "lost",
+        // regardless of what it goes on to say -- reset the consecutive-loss streak
+        // `abandonClose` counts against (see `MAX_CLOSE_LOST_STREAK`'s own doc comment). Never
+        // touches `closeReplySendCount` (observability only) or any mismatch/empty-transcript
+        // bookkeeping -- those still run their own unchanged course once this reply completes.
+        if (requestedGoal === 'CLOSE') this.closeLostStreak = 0;
         // Round 5: `reply.audio` events carry no reply id of their own (aai/types.ts) -- this
         // is the only record of which reply subsequent frames belong to. A reply that starts
         // AFTER the goodbye is already transcript-confirmed, and is not the confirmed reply
@@ -1890,8 +1939,14 @@ export class CallSession {
     if (goalKey !== this.questionReaskGoalKey) {
       this.questionReaskGoalKey = goalKey;
       this.questionReaskCount = 0;
+      this.questionReaskEmptyCount = 0;
     }
     if (this.questionReaskCount >= CallSession.QUESTION_REASK_MAX) return;
+    // Fix (2026-09-16): a rendering whose replies never produce a transcript at all (see
+    // `QUESTION_REASK_MAX_EMPTY`'s own doc comment) is bounded separately from the counted
+    // cap above -- without this, `questionReaskCount` never advances (every one of those
+    // replies is "forgiven" as empty) and this method reasks forever.
+    if (this.questionReaskEmptyCount >= CallSession.QUESTION_REASK_MAX_EMPTY) return;
 
     const transcript = this.replyTranscripts.get(replyId) ?? '';
     const sentence = verbatimQuestionSentence(goal);
@@ -1943,11 +1998,19 @@ export class CallSession {
       if (JSON.stringify(this.last.goal) !== this.questionReaskArmedGoalKey) return; // goal moved on -- cancel
       if (this.speaking || this.replyCreateAwaitingStart) return;
       if (this.questionReaskCount >= CallSession.QUESTION_REASK_MAX) return;
+      // Fix (2026-09-16): the empty/no-transcript budget is checked again at fire time, same
+      // "re-check everything, not just at arm time" philosophy as every other guard here --
+      // see `QUESTION_REASK_MAX_EMPTY`'s own doc comment for why this is a NECESSARY second
+      // cap, not a duplicate of the one just above.
+      if (this.questionReaskLastReplyWasEmpty && this.questionReaskEmptyCount >= CallSession.QUESTION_REASK_MAX_EMPTY) return;
 
       const goalCode = this.questionReaskArmedGoalCode!;
       const instructions = this.questionReaskArmedInstructions!;
-      if (!this.questionReaskLastReplyWasEmpty) this.questionReaskCount += 1;
+      if (this.questionReaskLastReplyWasEmpty) this.questionReaskEmptyCount += 1;
+      else this.questionReaskCount += 1;
       this.sendReplyCreate(goalCode, 'question_not_asked', instructions);
+      // Diag shape unchanged (existing tests assert an exact `{goal_code, attempt}` shape) --
+      // `questionReaskEmptyCount` is internal bookkeeping only, not surfaced here.
       this.diag('question_reask_sent', { goal_code: goalCode, attempt: this.questionReaskCount });
     }, CallSession.CLOSE_RETRY_MIN_GAP_MS);
     this.questionReaskTimer.unref?.();
@@ -2434,10 +2497,34 @@ export class CallSession {
       this.pendingRequestedGoal = null;
       if (this.last?.goal.code === 'CLOSE') {
         this.closeLastReplyWasEmpty = false;
+        this.closeLostStreak += 1;
+        if (this.closeLostStreak >= CallSession.MAX_CLOSE_LOST_STREAK) {
+          this.abandonClose('reply_create_lost_streak');
+          return;
+        }
         this.armCloseRetryTimer();
       }
     }, CallSession.REPLY_CREATE_LOST_MS);
     this.replyCreateLostTimer.unref?.();
+  }
+
+  /** Fix (2026-09-16): gives up on ever hearing the goodbye spoken, instead of burning the
+   *  rest of CLOSE_TOTAL_MS on retries that have already failed `MAX_CLOSE_LOST_STREAK` times
+   *  in a row the exact same way (see that constant's own doc comment for the live incident).
+   *  LAW 2 holds regardless: the verdict was already sealed and containment already ran the
+   *  moment CLOSE was first rendered (`applyEvaluate`'s goal-changed branch) -- this only ends
+   *  the call sooner once it's clear no more reply.create is going to land. `close_abandoned`
+   *  is a distinct diagnostics/end-reason value from `close_timeout` (the unchanged 45s
+   *  backstop for the OTHER failure shape: replies that DO start but never match) so the two
+   *  causes stay tellable apart in the flight recorder -- never a verdict, never evidence (LAW
+   *  4), just a fact about how the call ended. Round 4's idle-deferred-goodbye override
+   *  (`idleEndReason`) still wins here exactly as it does for `armClose`'s own hard cap, so an
+   *  idle-triggered close that then gets abandoned still reports `idle_timeout`, not
+   *  `close_abandoned`. */
+  private abandonClose(reason: string): void {
+    if (this.ended) return;
+    this.diag('close_abandoned', { reason, streak: this.closeLostStreak });
+    this.end(this.idleEndReason ?? 'close_abandoned');
   }
 
   private clearReplyCreateLostTimer(): void {
