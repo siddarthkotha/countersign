@@ -540,6 +540,13 @@ export class CallSession {
    *  whenever the goal rendering itself changes (`maybeReaskQuestion`'s own goalKey check). */
   private questionReaskEmptyCount = 0;
   private static readonly QUESTION_REASK_MAX_EMPTY = 2;
+  /** Late-transcript race fix (2026-09-16b): sibling of `CLOSE_TRANSCRIPT_WAIT_MS` (same
+   *  1500ms value -- PROVEN live lag is "tens of ms" for CLOSE and a single 856ms sample for
+   *  the question-reask path, both comfortably inside this window) for the analogous race on
+   *  `maybeReaskQuestion` -- see `questionTranscriptWaitTimer`'s own doc comment for the full
+   *  mechanism. A separate named constant, not a shared one, so either wait's duration can be
+   *  tuned independently later without coupling the two mechanisms. */
+  private static readonly QUESTION_TRANSCRIPT_WAIT_MS = 1_500;
   /** Review fix (2026-09-15, Important -- FAIL on the first cut): the reask used to call
    *  `sendReplyCreate` SYNCHRONOUSLY at `reply.done`, with none of the spacing round 4 gave
    *  the CLOSE retry (`CLOSE_RETRY_MIN_GAP_MS`/`armCloseRetryTimer` above) for exactly the
@@ -576,6 +583,27 @@ export class CallSession {
   private questionReaskArmedGoalCode: GoalCode | null = null;
   private questionReaskArmedInstructions: string | null = null;
   private questionReaskLastReplyWasEmpty = false;
+  /** Late-transcript race fix (2026-09-16b, Sonnet review of bde7814 -- Important): CLOSE's
+   *  own `armCloseTranscriptWait`/`CLOSE_TRANSCRIPT_WAIT_MS` exist because a reply's final
+   *  `transcript.agent` chunk routinely lands AT OR AFTER that reply's own `reply.done`
+   *  (`CLOSE_TRANSCRIPT_WAIT_MS`'s own doc comment, PROVEN live). `maybeReaskQuestion` reads
+   *  `replyTranscripts.get(replyId)` synchronously at `reply.done` too, and was making the
+   *  exact same unguarded assumption -- a transcript that has not landed YET but is still on
+   *  the wire is indistinguishable, at that instant, from one that will never arrive at all.
+   *  PROVEN from 90 bundles (2026-09-14 to 16, 721 replies): 684 transcripts landed inside
+   *  the reply window, 1 arrived 856ms after `reply.done`, 36 never arrived -- rare, but the
+   *  one late arrival is exactly the shape that gets silently misclassified as empty, and
+   *  with `QUESTION_REASK_MAX_EMPTY` now bounding the forgiven count, two such
+   *  misclassifications on the SAME rendering exhaust the budget and the challenge is never
+   *  actually re-asked, with nothing else left to re-issue it. Fix: `maybeReaskQuestion`
+   *  arms `armQuestionTranscriptWait` (below) instead of deciding immediately, but ONLY when
+   *  the transcript is EMPTY at `reply.done` time -- a reply whose transcript already has
+   *  real (non-matching) content, or already matches the question, decides synchronously as
+   *  before (this pair of fields stays unused for that path), so the normal/fast case is not
+   *  slowed down at all. `questionTranscriptWaitReplyId` follows the same "latest reply wins"
+   *  convention `closeTranscriptWaitReplyId` already uses. */
+  private questionTranscriptWaitTimer: ReturnType<typeof setTimeout> | null = null;
+  private questionTranscriptWaitReplyId: string | null = null;
 
   /** Design E (2026-09-15, turn-order design change -- docs/TEST-PLAN.md "The turn order
    *  design change (E)"): the JSON key (`JSON.stringify(goal)`, same convention
@@ -779,6 +807,14 @@ export class CallSession {
     if (this.questionReaskTimer) {
       clearTimeout(this.questionReaskTimer);
       this.questionReaskTimer = null;
+    }
+    // Late-transcript race fix (2026-09-16b): same reasoning as `questionReaskTimer` just
+    // above -- this is not CLOSE-specific either, but `end()` already funnels every pending
+    // send/wait timer through here.
+    if (this.questionTranscriptWaitTimer) {
+      clearTimeout(this.questionTranscriptWaitTimer);
+      this.questionTranscriptWaitTimer = null;
+      this.questionTranscriptWaitReplyId = null;
     }
   }
 
@@ -1978,15 +2014,86 @@ export class CallSession {
     // never drift apart in wording. Non-null here: `goal.code` is already confirmed a
     // QUESTION_GOALS member above.
     const instructions = this.instructedSentenceFor(goal)!;
+
+    // Late-transcript race fix (2026-09-16b, Sonnet review of bde7814): a transcript that is
+    // EMPTY right here, at `reply.done` time, is exactly the shape PROVEN to race a
+    // `transcript.agent` chunk still on the wire (see `questionTranscriptWaitTimer`'s own
+    // class-field doc comment) -- give it `QUESTION_TRANSCRIPT_WAIT_MS` to still land before
+    // concluding this reply said nothing at all. A reply whose transcript already has real
+    // (non-matching) content is not this race -- it decides synchronously below, exactly as
+    // before this fix, so the normal path is not slowed down at all.
+    if (transcript.trim().length === 0) {
+      this.armQuestionTranscriptWait(replyId, goalKey, goal.code, sentence, instructions);
+      return;
+    }
+
     // Unconditionally refreshed even when `armQuestionReaskTimer` below turns out to be a
     // no-op (a timer from an earlier reply of this SAME rendering is already pending) -- the
     // latest reply's own emptiness/instructions are what should fire, same convention
     // `scheduleCloseIfNeeded` already uses for `closeLastReplyWasEmpty`.
-    this.questionReaskLastReplyWasEmpty = transcript.trim().length === 0;
+    this.questionReaskLastReplyWasEmpty = false;
     this.questionReaskArmedGoalKey = goalKey;
     this.questionReaskArmedGoalCode = goal.code;
     this.questionReaskArmedInstructions = instructions;
     this.armQuestionReaskTimer();
+  }
+
+  /** Late-transcript race fix (2026-09-16b, Sonnet review of bde7814 -- Important): the
+   *  question-reask counterpart to `armCloseTranscriptWait` above. Called from
+   *  `maybeReaskQuestion` only when THIS reply's accumulated transcript is still empty at
+   *  `reply.done` time -- see `questionTranscriptWaitTimer`'s own class-field doc comment for
+   *  the full incident this guards against (a `transcript.agent` chunk landing AFTER
+   *  `reply.done`, misclassified as "said nothing" and silently exhausting
+   *  `QUESTION_REASK_MAX_EMPTY`). Idempotent per reply id, same "latest reply wins"
+   *  convention `armCloseTranscriptWait` already uses: a repeat call for the SAME id is a
+   *  no-op; a call for a DIFFERENT id (a newer reply finished before this one's wait fired)
+   *  replaces the pending wait.
+   *
+   *  At fire time, re-reads `replyTranscripts.get(replyId)` (never a snapshot taken at arm
+   *  time) and re-checks `transcriptAsksQuestion` against it: if a chunk landed during the
+   *  wait and now completes the match, the question WAS actually asked -- nothing is
+   *  reasked, and neither `questionReaskCount` nor `questionReaskEmptyCount` is touched, the
+   *  same outcome `maybeReaskQuestion`'s own synchronous match-and-return branch already
+   *  gives an immediate match. Only when the window closes with the transcript STILL empty
+   *  does this fall through to `armQuestionReaskTimer`, exactly as `maybeReaskQuestion`
+   *  itself would have decided immediately before this fix -- `questionReaskLastReplyWasEmpty`
+   *  is set true there so the empty-forgiveness accounting downstream is unaffected by this
+   *  extra wait. Re-checks `ended`/`goodbyeConfirmed`/the goal key at fire time too, same
+   *  "the world can change while this was pending" philosophy every other timer in this file
+   *  already follows. */
+  private armQuestionTranscriptWait(
+    replyId: string,
+    goalKey: string,
+    goalCode: GoalCode,
+    sentence: string | null,
+    instructions: string
+  ): void {
+    if (this.questionTranscriptWaitTimer && this.questionTranscriptWaitReplyId === replyId) return;
+    if (this.questionTranscriptWaitTimer) {
+      clearTimeout(this.questionTranscriptWaitTimer);
+      this.questionTranscriptWaitTimer = null;
+    }
+    this.questionTranscriptWaitReplyId = replyId;
+    this.questionTranscriptWaitTimer = setTimeout(() => {
+      this.questionTranscriptWaitTimer = null;
+      this.questionTranscriptWaitReplyId = null;
+      if (this.ended || this.goodbyeConfirmed) return;
+      if (!this.last || JSON.stringify(this.last.goal) !== goalKey) return; // goal moved on -- cancel
+
+      const transcript = this.replyTranscripts.get(replyId) ?? '';
+      if (transcriptAsksQuestion(transcript, sentence)) {
+        // The late chunk proves the question WAS asked -- nothing to reask, nothing consumed.
+        this.diag('question_transcript_wait_resolved', { goal_code: goalCode, asked: true });
+        return;
+      }
+
+      this.questionReaskLastReplyWasEmpty = transcript.trim().length === 0;
+      this.questionReaskArmedGoalKey = goalKey;
+      this.questionReaskArmedGoalCode = goalCode;
+      this.questionReaskArmedInstructions = instructions;
+      this.armQuestionReaskTimer();
+    }, CallSession.QUESTION_TRANSCRIPT_WAIT_MS);
+    this.questionTranscriptWaitTimer.unref?.();
   }
 
   /** Review fix (2026-09-15): the spaced-send counterpart to `armCloseRetryTimer` above, same

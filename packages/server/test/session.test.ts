@@ -2758,6 +2758,13 @@ describe('CallSession — question-reask: a completed reply that never asked the
   }
 
   const REASK_GAP_MS = 400; // CallSession.CLOSE_RETRY_MIN_GAP_MS, reused for the reask timer
+  // Late-transcript race fix (2026-09-16b, Sonnet review of bde7814): a reply whose transcript
+  // is EMPTY at reply.done/maybeReaskQuestion time now waits QUESTION_TRANSCRIPT_WAIT_MS for a
+  // late transcript.agent chunk before arming the spaced reask timer at all -- see
+  // question-reask-late-transcript.test.ts for the race this closes. Only the empty-transcript
+  // step below needs this extra wait; a reply with real (non-empty) content still decides
+  // synchronously, unaffected.
+  const QUESTION_TRANSCRIPT_WAIT_MS = 1500; // CallSession.QUESTION_TRANSCRIPT_WAIT_MS
 
   const CHALLENGE_SPEAK = 'Just to confirm, this transfer goes to Northgate Partners. Is that correct?';
 
@@ -2915,8 +2922,10 @@ describe('CallSession — question-reask: a completed reply that never asked the
     internals.replyCreateAwaitingStart = false;
     internals.replyGoalAtStart.set('a2', 'ASK_CHALLENGE');
     // No `replyTranscripts.set('a2', ...)` at all -- `replyTranscripts.get('a2') ?? ''` is ''.
+    // Empty at this instant -- the late-transcript wait arms first (nothing ever lands during
+    // it here), THEN the spaced reask timer.
     internals.maybeReaskQuestion('a2', 'completed');
-    vi.advanceTimersByTime(REASK_GAP_MS);
+    vi.advanceTimersByTime(QUESTION_TRANSCRIPT_WAIT_MS + REASK_GAP_MS);
     expect(replyCreates()).toHaveLength(2); // still retried
     expect(reaskDiags().map((e) => (e.detail as { attempt: number }).attempt)).toEqual([1, 1]); // NOT bumped
     expect(internals.questionReaskCount).toBe(1); // the counter itself is untouched

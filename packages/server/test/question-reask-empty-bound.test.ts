@@ -18,6 +18,15 @@
 // times with no transcript ever landing, `maybeReaskQuestion` gives up on it silently (same
 // "no new escalation path" shape `QUESTION_REASK_MAX` already has), rather than reasking
 // indefinitely.
+//
+// Timing update (2026-09-16b, Sonnet review of bde7814 -- Important): a transcript-less reply
+// (empty `replyTranscripts` at `reply.done`) no longer decides "forgiven, empty" immediately --
+// `maybeReaskQuestion` now arms `armQuestionTranscriptWait` (`QUESTION_TRANSCRIPT_WAIT_MS` =
+// 1500ms) first, to give a `transcript.agent` chunk still on the wire a chance to land (see
+// question-reask-late-transcript.test.ts for the race this closes). This test's own replies
+// never produce a transcript at all, so the outcome here is unchanged -- only the elapsed time
+// needed to observe each attempt grows from `REASK_GAP_MS` alone to the full wait-then-reask
+// cycle (`FULL_CYCLE_MS`).
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { MERIDIAN, mockToolResult } from '@countersign/engine';
 import type { CallContext, ServerEvent } from '@countersign/engine';
@@ -27,7 +36,12 @@ import scenarioB from '../../engine/corpus/scenario-b-miller-fraud.json' with { 
 
 const CALL_B = scenarioB.call as CallContext;
 const REASK_GAP_MS = 400; // CallSession.CLOSE_RETRY_MIN_GAP_MS, reused for the reask timer
+const QUESTION_TRANSCRIPT_WAIT_MS = 1500; // CallSession.QUESTION_TRANSCRIPT_WAIT_MS
 const QUESTION_REASK_MAX_EMPTY = 2; // CallSession.QUESTION_REASK_MAX_EMPTY
+// A transcript-less reply now waits QUESTION_TRANSCRIPT_WAIT_MS before `armQuestionReaskTimer`
+// even gets armed, then that timer's own REASK_GAP_MS spacing on top -- see the timing-update
+// note above.
+const FULL_CYCLE_MS = QUESTION_TRANSCRIPT_WAIT_MS + REASK_GAP_MS + 100;
 
 function newLiveSession(
   clock: { now: number },
@@ -85,16 +99,16 @@ describe('CallSession -- question reask gives up after a bounded number of empty
       aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
       clock.now = t + 300;
       aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });
-      t += 500;
+      t += FULL_CYCLE_MS;
     }
 
     // First reply (answers c1's own proactive send) -- no transcript at all.
     emitTranscriptlessReply();
     expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(false);
 
-    // The spaced reask fires +400ms: this is empty-forgiven attempt #1.
-    vi.advanceTimersByTime(REASK_GAP_MS);
-    t += REASK_GAP_MS;
+    // The transcript-wait fires at +1500ms (still empty -- nothing ever landed), which arms
+    // the spaced reask timer; that fires +400ms later: this is empty-forgiven attempt #1.
+    vi.advanceTimersByTime(FULL_CYCLE_MS);
     expect(replyCreates().length).toBe(baseline + 1);
     expect(diagEvents.filter((e) => e.kind === 'question_reask_sent')).toHaveLength(1);
     // The engine's own goal never advanced -- the question was never actually put to the
@@ -103,8 +117,7 @@ describe('CallSession -- question reask gives up after a bounded number of empty
 
     // Second reply (answers reask #1) -- still no transcript.
     emitTranscriptlessReply();
-    vi.advanceTimersByTime(REASK_GAP_MS);
-    t += REASK_GAP_MS;
+    vi.advanceTimersByTime(FULL_CYCLE_MS);
     expect(replyCreates().length).toBe(baseline + 2); // empty-forgiven attempt #2 (QUESTION_REASK_MAX_EMPTY)
     expect(diagEvents.filter((e) => e.kind === 'question_reask_sent')).toHaveLength(2);
 
@@ -115,8 +128,7 @@ describe('CallSession -- question reask gives up after a bounded number of empty
     // short only by the unrelated idle timer 33s later, not by this mechanism).
     for (let i = 0; i < 3; i++) {
       emitTranscriptlessReply();
-      vi.advanceTimersByTime(REASK_GAP_MS);
-      t += REASK_GAP_MS;
+      vi.advanceTimersByTime(FULL_CYCLE_MS);
     }
     expect(replyCreates().length).toBe(baseline + QUESTION_REASK_MAX_EMPTY); // still capped at 2
     expect(diagEvents.filter((e) => e.kind === 'question_reask_sent')).toHaveLength(QUESTION_REASK_MAX_EMPTY);

@@ -78,10 +78,14 @@ describe('EMPTY HOLDING REPLY (2026-09-15): an automatic reply with no transcrip
     expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
     expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-1');
 
-    // The spaced reask (+400ms, CLOSE_RETRY_MIN_GAP_MS reused for the reask timer) fires
-    // exactly once, carrying the same instructed sentence -- the empty reply is treated the
-    // same as any other "did not ask" reply, never specially penalized or ignored.
-    vi.advanceTimersByTime(400);
+    // Late-transcript race fix (2026-09-16b, Sonnet review of bde7814): a transcript that is
+    // still empty at reply.done now waits QUESTION_TRANSCRIPT_WAIT_MS (1500ms) for a late
+    // transcript.agent chunk (none arrives here) before arming the spaced reask (+400ms,
+    // CLOSE_RETRY_MIN_GAP_MS reused for the reask timer) -- see
+    // question-reask-late-transcript.test.ts for the race this closes. It still fires exactly
+    // once, carrying the same instructed sentence -- the empty reply is treated the same as
+    // any other "did not ask" reply, never specially penalized or ignored.
+    vi.advanceTimersByTime(1_500 + 400);
     const replyCreates = replyCreatesOf(aai);
     expect(replyCreates).toHaveLength(2);
     expect(replyCreates.at(-1)!.instructions).toBe(`Say exactly this and nothing else: "${sentence}"`);
