@@ -16,7 +16,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPORTS_DIR = join(HERE, 'reports');
+// Allow overriding reports directory via COUNTERSIGN_REPORTS_DIR environment variable
+// (used in testing to avoid polluting the real reports directory)
+const REPORTS_DIR = process.env.COUNTERSIGN_REPORTS_DIR || join(HERE, 'reports');
 const CREDITS_PATH = join(HERE, '..', '..', 'docs', 'CREDITS.md');
 
 const RATE_PER_HOUR = 4.50;

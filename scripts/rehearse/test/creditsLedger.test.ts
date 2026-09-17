@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { readFile, writeFile, mkdir, rm, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm, stat, mkdtemp } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..', '..', '..');
@@ -115,11 +116,12 @@ describe('creditsLedger', () => {
   it('counts open bundles (started_at but no ended_at) as ESTIMATE using last server event', async () => {
     // Bundles with started_at but no ended_at should be counted as ESTIMATE (open bundle),
     // using the last server event's t_ms as the end time, or wall clock if no events.
-    // Write test bundles to the worktree's reports directory for this test.
-    const reportsDir = join(HERE, '..', 'reports');
-    const tempTestBundles: string[] = [];
+    // Create bundles in a temporary directory to avoid polluting the real reports directory.
+    let tempDir: string | null = null;
 
     try {
+      tempDir = await mkdtemp(join(tmpdir(), 'countersign-ledger-test-'));
+      const reportsDir = join(tempDir, 'reports');
       await mkdir(reportsDir, { recursive: true });
 
       // Use recent timestamps so wall clock estimates are reasonable (within last minute)
@@ -156,21 +158,27 @@ describe('creditsLedger', () => {
       ];
 
       for (let i = 0; i < bundles.length; i++) {
-        const bundleFile = join(reportsDir, `test-open-bundle-${i}.diagnostics.json`);
-        await writeFile(bundleFile, JSON.stringify(bundles[i]!));
-        tempTestBundles.push(bundleFile);
+        await writeFile(
+          join(reportsDir, `test-open-bundle-${i}.diagnostics.json`),
+          JSON.stringify(bundles[i]!)
+        );
       }
 
-      const output = execSync(`npm run credits:ledger`, { cwd: REPO_ROOT, encoding: 'utf-8' });
+      // Run credits:ledger with the temporary reports directory
+      const output = execSync(`npm run credits:ledger`, {
+        cwd: REPO_ROOT,
+        encoding: 'utf-8',
+        env: { ...process.env, COUNTERSIGN_REPORTS_DIR: reportsDir },
+      });
 
       // Verify that the output includes both proven and open bundle methods
       expect(output).toContain('PROVEN (termination event)'); // Day 1 with closed-proven bundle
       expect(output).toContain('ESTIMATE (open bundle)'); // Day 2 with open bundle
     } finally {
-      // Clean up test bundles
-      for (const bundleFile of tempTestBundles) {
+      // Clean up temporary directory
+      if (tempDir) {
         try {
-          await rm(bundleFile, { force: true });
+          await rm(tempDir, { recursive: true, force: true });
         } catch {
           // Ignore cleanup errors
         }
