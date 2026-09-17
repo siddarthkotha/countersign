@@ -862,6 +862,114 @@ function negateNearTrapValue(normText: string, trapValueNorm: string, seed: Seed
   return false;
 }
 
+/** FIX (2026-09-17, seed-final-value lane): a caller's spoken self-correction within one
+ *  breath ("Marcus Obi... no, wait, it was actually Elena Park who approved it") must be
+ *  graded on the caller's FINAL stated value, never on whether every accept token merely
+ *  appears somewhere in the reply. `gradeTrapFact` (below) already has this "final value
+ *  wins" behavior for TRAP_FACT (`negateNearTrapValue`/`isPureNegation`); SEED_FACT and
+ *  RELATIONAL, both graded purely by `accept_tokens` membership in `gradeChallenges`, did
+ *  not -- PROVEN, Sonnet investigation 2026-09-17: replaying today's live record
+ *  (scripts/rehearse/reports/2026-09-17T09-15-29-single-wrong-answer.md) shows the caller's
+ *  reply would PASS the `dana_internal_approver` challenge (accept_tokens ['marcus','obi'])
+ *  purely because both words occur somewhere in the reply, even though the caller's own
+ *  final answer names Elena Park (wrong) -- the live call was saved from this only by an
+ *  unrelated STT spelling accident ("Obie" vs "Obi"), not by correct grading. See
+ *  packages/engine/corpus/seed-fact-corrected-wrong-answer-fails.json.
+ *
+ *  Scope, deliberately narrow (matches TEST-PLAN.md ruling 8's own "same-breath" framing):
+ *  only runs when the challenge's ENTIRE eligible reply is a single caller utterance --
+ *  `eligibleUtterances` already caps this window, but a same-breath correction is
+ *  specifically a within-one-utterance phenomenon. A correction spread across separate
+ *  turns (`eligible.length > 1`) is left to the unchanged whole-reply-joined path below:
+ *  splitting an already-joined multi-utterance string on a cue phrase would reintroduce
+ *  exactly the cross-utterance digit-merging bug `normalizeSpokenDigits` was hardened
+ *  against (2026-09-16, name-tokens lane, `eligibleUtterances`'s own doc comment) -- every
+ *  candidate segment here is always carved out of ONE utterance's own raw text, so that
+ *  digit-run safety is untouched.
+ *
+ *  Splits the single utterance's raw text at every phrase in `seed.correction_lexicon`
+ *  (already covers every cue this fix names -- "actually", "no wait", "sorry", "i mean",
+ *  "correction", plus "scratch that"/"let me correct") and reads only the LAST resulting
+ *  piece:
+ *   - no correction cue found (one piece) -> returns null; the caller falls through to the
+ *     pre-existing whole-reply match, completely unchanged (zero regression risk for every
+ *     reply that never self-corrects, including a plain hedge like "Marcus Obi, I think" --
+ *     that still PASSes exactly as before).
+ *   - the last piece reads as pure uncertainty ("I'm not sure", "I don't know", ...) -- the
+ *     caller's own final words retracted the answer without replacing it -- AMBIGUOUS, the
+ *     same vocabulary `gradeLiveCommitment`/`gradeTrapFact` already use for "no clear
+ *     answer yet", never FAIL: an honestly unsure caller is not graded as a liar.
+ *   - otherwise -> grade ONLY that last piece against `accept_tokens`, with the same
+ *     digit-word tolerance (`normalizeSpokenDigits`) the whole-reply path already applies,
+ *     scoped to this one piece's own raw text so a numeric accept_token (RELATIONAL/an
+ *     account-style SEED_FACT) gets the identical treatment as a name token. */
+const UNCERTAINTY_LEXICON = [
+  'not sure',
+  "i'm not sure",
+  "don't know",
+  'do not know',
+  "don't remember",
+  'do not remember',
+  'no idea',
+  "can't recall",
+  'cannot recall',
+  'not certain',
+  'unsure',
+];
+
+/** True when `rawPiece`, once any uncertainty-lexicon phrase is stripped out, leaves
+ *  nothing but at most one leftover filler token (or is empty to begin with) -- the same
+ *  "strip the phrase, see what's left" shape `isPureNegation` uses for negation. */
+function isUncertainPiece(rawPiece: string): boolean {
+  const norm = normalizeText(rawPiece);
+  if (norm.length === 0) return true;
+  const { remainder, hit } = stripLexicon(norm, UNCERTAINTY_LEXICON);
+  if (!hit) return false;
+  return remainder.split(' ').filter(Boolean).length <= 1;
+}
+
+/** Splits `rawText` (case/punctuation preserved) at every occurrence of every phrase in
+ *  `correctionLexicon`, longest phrase first so a multi-word cue is consumed whole rather
+ *  than leaving its words to also match a shorter cue. Each cue word is joined by a
+ *  punctuation-tolerant gap (`[\s,.;:!?-]*`) so "no, wait," in raw caller speech still
+ *  matches the normalized cue "no wait". Empty/whitespace-only pieces (e.g. two cues back
+ *  to back) are dropped. A `rawText` with no cue at all comes back as the single original
+ *  string, unsplit -- callers use `pieces.length <= 1` to detect "no correction found". */
+function splitOnCorrectionCues(rawText: string, correctionLexicon: string[]): string[] {
+  const cues = [...new Set(correctionLexicon.map((c) => normalizeText(c)).filter((c) => c.length > 0))].sort(
+    (a, b) => b.split(' ').length - a.split(' ').length || b.length - a.length,
+  );
+  let pieces = [rawText];
+  for (const cue of cues) {
+    const words = cue.split(' ').map(escapeRegExp);
+    const re = new RegExp(`\\b${words.join('[\\s,.;:!?-]*')}\\b`, 'gi');
+    pieces = pieces.flatMap((p) => p.split(re));
+  }
+  return pieces.map((p) => p.trim()).filter((p) => p.length > 0);
+}
+
+/** Same accept_tokens membership check `gradeChallenges`'s whole-reply path already does
+ *  (a purely-numeric token may also match via `normalizeSpokenDigits`), scoped to a single
+ *  raw piece rather than the full joined reply. */
+function acceptTokensPresentIn(rawPiece: string, acceptTokens: string[]): boolean {
+  const words = normalizeText(rawPiece).split(' ');
+  const hasDigitToken = acceptTokens.some((tok) => /^\d+$/.test(tok));
+  const digitWords = hasDigitToken ? normalizeText(normalizeSpokenDigits(rawPiece)).split(' ') : [];
+  return acceptTokens.every((tok) => words.includes(normalizeText(tok)) || (/^\d+$/.test(tok) && digitWords.includes(tok)));
+}
+
+/** Returns the final-value-wins override for an accept_tokens (SEED_FACT/RELATIONAL)
+ *  challenge, or null when this function has nothing to say (no same-breath correction
+ *  detected) -- see the doc comment above for the full rule and its scope. */
+function finalValueOverride(eligible: Utterance[], acceptTokens: string[], seed: SeedConfig): ChallengeResult | null {
+  if (eligible.length !== 1) return null;
+  const pieces = splitOnCorrectionCues(eligible[0]!.text, seed.correction_lexicon);
+  if (pieces.length <= 1) return null;
+  const last = pieces[pieces.length - 1]!;
+  if (isUncertainPiece(last)) return 'AMBIGUOUS';
+  return acceptTokensPresentIn(last, acceptTokens) ? 'PASS' : 'FAIL';
+}
+
 function gradeTrapFact(trueClaim: Claim | undefined, rawText: string, seed: SeedConfig, trapValue: string): ChallengeResult {
   const normText = normalizeText(rawText);
   const trueVal = trueClaim ? normalizeText(String(trueClaim.value)) : null;
@@ -963,6 +1071,15 @@ export function gradeChallenges(
 
     let result: ChallengeResult;
     if ('accept_tokens' in expect) {
+      // FIX (2026-09-17, seed-final-value lane): grade a same-breath self-correction on the
+      // caller's FINAL stated value -- see `finalValueOverride`'s own doc comment for the
+      // full rule. Returns null (falls through to the pre-existing whole-reply check right
+      // below, byte-for-byte unchanged) whenever no correction was actually found.
+      const override = finalValueOverride(eligible, expect.accept_tokens, seed);
+      if (override !== null) {
+        out[spec.challenge_id] = { result: override, quote, eligible_utterance_ids: eligibleIds };
+        continue;
+      }
       const words = normText.split(' ');
       // FIX (finding 1, Sonnet review, 2026-09-15/16): a purely-numeric accept_token (an
       // account/cost-centre/invoice digit string, e.g. "4471") also matches when it appears

@@ -384,6 +384,96 @@ describe('gradeChallenges — SEED_FACT', () => {
   });
 });
 
+// PROVEN finding (Sonnet investigation, 2026-09-17, seed-final-value lane): SEED_FACT and
+// RELATIONAL grading checked whether every accept token appears ANYWHERE in the caller's
+// reply, with no notion of the caller's FINAL stated value -- unlike the trap-fact grader
+// (`negateNearTrapValue`/`isPureNegation` above), which already has "final value wins"
+// logic. Consequence, PROVEN against today's live record
+// (scripts/rehearse/reports/2026-09-17T09-15-29-single-wrong-answer.md, session
+// 5a6149e5-6ef2-4f5c-ba54-ba5439595b3a): "That would be Marcus Obi... no, wait, it was
+// actually Elena Park who approved it" would PASS a `dana_internal_approver` SEED_FACT
+// challenge (accept_tokens ['marcus','obi']) because both tokens appear somewhere in the
+// reply, even though the caller's own final answer names the wrong person -- the live call
+// was saved from this only because AssemblyAI's STT wrote "Obie" instead of "Obi" (an
+// exact-token mismatch that FAILs the challenge for an unrelated reason, see
+// packages/engine/corpus/seed-fact-corrected-wrong-answer-fails.json). Symmetrically, "Elena
+// Park... no wait, Marcus Obi" should PASS (the caller's final answer is right), which the
+// old whole-reply check already got right by accident but for the wrong reason (both tokens
+// happen to appear "somewhere"), not because it understood the correction.
+describe('gradeChallenges — SEED_FACT/RELATIONAL final value wins on a same-breath correction (2026-09-17, seed-final-value lane)', () => {
+  const approverFact = SEED.knowledge.find((k) => k.id === 'dana_internal_approver')!;
+  const spec: ChallengeSpec = {
+    challenge_id: 'g2-1',
+    kind: 'SEED_FACT',
+    field: 'approver',
+    ask: approverFact.ask,
+    expect: { accept_tokens: approverFact.accept_tokens },
+    fact_id: approverFact.id,
+  };
+  const actions: AgentAction[] = [issuedAction('a1', 'g2-1', 6000)];
+
+  it('PASSes on a plain right answer (baseline, no correction involved)', () => {
+    const conversation = [utt('u1', 7000, 'Marcus Obi approved it.')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, []);
+    expect(result['g2-1']?.result).toBe('PASS');
+  });
+
+  it('FAILs on a plain wrong answer (baseline, no correction involved)', () => {
+    const conversation = [utt('u1', 7000, 'Elena Park approved it.')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, []);
+    expect(result['g2-1']?.result).toBe('FAIL');
+  });
+
+  it('PASSes on an uncorrected hedge ("Marcus Obi, I think") -- a hedge alone is not a correction', () => {
+    const conversation = [utt('u1', 7000, 'Marcus Obi, I think.')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, []);
+    expect(result['g2-1']?.result).toBe('PASS');
+  });
+
+  it('FAILs when a right first answer is corrected to a wrong final one -- finding (a), the live-miss shape', () => {
+    const conversation = [
+      utt('u1', 7000, 'That would be Marcus Obi, if I recall correctly, no wait, it was actually Elena Park who approved it.'),
+    ];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, []);
+    expect(result['g2-1']?.result).toBe('FAIL');
+  });
+
+  it('PASSes when a wrong first answer is corrected to the right final one -- finding (b)', () => {
+    const conversation = [utt('u1', 7000, 'Elena Park, no wait, Marcus Obi.')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, []);
+    expect(result['g2-1']?.result).toBe('PASS');
+  });
+
+  it('is AMBIGUOUS, never FAIL, when a correction backs out into a hedge with no replacement value', () => {
+    const conversation = [utt('u1', 7000, "Elena Park, actually I'm not sure.")];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, []);
+    expect(result['g2-1']?.result).toBe('AMBIGUOUS');
+  });
+
+  // Same rule, RELATIONAL shape (digit accept_tokens rather than name tokens) -- proves the
+  // fix is not name-field-specific.
+  const relSpec: ChallengeSpec = {
+    challenge_id: 'g3-1',
+    kind: 'RELATIONAL',
+    field: 'account_last4',
+    ask: 'Ask for the last four digits of the account attached to the beneficiary they named.',
+    expect: { accept_tokens: ['4471'] },
+  };
+  const relActions: AgentAction[] = [issuedAction('a1', 'g3-1', 6000)];
+
+  it('RELATIONAL: FAILs when the right first digits are corrected to wrong final digits', () => {
+    const conversation = [utt('u1', 7000, "It's 4471, no wait, actually it's 8830.")];
+    const result = gradeChallenges(conversation, relActions, [relSpec], SEED, []);
+    expect(result['g3-1']?.result).toBe('FAIL');
+  });
+
+  it('RELATIONAL: PASSes when wrong first digits are corrected to the right final digits', () => {
+    const conversation = [utt('u1', 7000, "It's 8830, no wait, actually it's 4471.")];
+    const result = gradeChallenges(conversation, relActions, [relSpec], SEED, []);
+    expect(result['g3-1']?.result).toBe('PASS');
+  });
+});
+
 describe('gradeChallenges — LIVE_COMMITMENT', () => {
   const amountClaim = claim('c-amt', 'amount_usd', 'STATED', 1_800_000, 1000, '1.8 million');
   const spec: ChallengeSpec = {
