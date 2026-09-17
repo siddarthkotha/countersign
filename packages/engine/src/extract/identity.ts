@@ -93,10 +93,23 @@ function hasFollowingCue(text: string, lowerText: string, nameEnd: number): bool
 // "Marcus Obi has approved it", "Marcus Obi was our counsel", "Dana Whitfield will approve"
 // must disqualify exactly like the bare-verb forms already did.
 const AUX_RUN = '(?:\\s+(?:has|have|had|was|were|is|are|will|already|just|also|then|previously)){0,3}';
-const DISQUALIFYING_VERB_PHRASE = 'approved|approves|approve|handled|signed|authorized|is our|was our|are our|counsel|represents';
+// RULE (fix round 2, free-play case 11 run 2, 2026-09-17 -- docs/analysis/case11-freeplay-
+// 2026-09-17.md): a relative-clause introducer may sit between the AUX_RUN and the
+// disqualifying verb -- "Marcus IS THE ONE WHO approved this transfer" is a third-person
+// role statement about a registered name, not a self-identification, exactly like the
+// bare-verb and aux-run forms this file already disqualifies. An identity claim needs a
+// first-person self-identification cue (BEFORE_CUES/AFTER_CUES); "name + is/was + the one
+// who / the person who / who + verb" or "name + verb-of-approval" is a role statement about
+// that name, never a switch. Scoped narrowly (name-opens-utterance path only) so a real
+// self-id with a trailing relative clause, e.g. "this is Marcus, who called earlier", is
+// unaffected -- that case matches via BEFORE_CUES before this continuation check ever runs.
+const RELATIVE_CLAUSE_RUN =
+  '(?:\\s+(?:the\\s+one|the\\s+person|the\\s+guy)\\s+(?:who|that)|\\s+(?:who|that))?';
+const DISQUALIFYING_VERB_PHRASE =
+  'approved|approves|approve|handled|signed|authorized|authorised|is our|was our|are our|counsel|represents';
 const DISQUALIFYING_CONTINUATIONS = [
   /^\s*'s\b/i,
-  new RegExp(`^${AUX_RUN}\\s*\\b(?:${DISQUALIFYING_VERB_PHRASE})\\b`, 'i'),
+  new RegExp(`^${AUX_RUN}${RELATIVE_CLAUSE_RUN}\\s*\\b(?:${DISQUALIFYING_VERB_PHRASE})\\b`, 'i'),
 ];
 
 function startsUtteranceValidly(text: string, nameStart: number, nameEnd: number): boolean {

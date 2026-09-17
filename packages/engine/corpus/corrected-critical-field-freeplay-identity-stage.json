@@ -1,0 +1,249 @@
+{
+  "title": "Free-play case 11 run 2 (21-35-48), identity fix applied: no false switch on 'Marcus is the one who approved this transfer'",
+  "description": "VERBATIM from the live free-play record scripts/rehearse/reports/2026-09-16T21-35-48-corrected-critical-field.md + .diagnostics.json (deploy bdf907d, session 088577ad-269b-49ea-a82b-8b63c495ed9b): Dana Whitfield self-corrects the amount in her opening line, is asked for the invoice reference (a fact this free-play scenario's truth block never gives her -- any answer necessarily FAILs), volunteers the account and approver instead, then says 'Marcus is the one who approved this transfer.' Before the identity.ts fix (docs/analysis/case11-freeplay-2026-09-17.md, run 2), that sentence's relative-clause phrasing slipped past DISQUALIFYING_CONTINUATIONS, was read as Marcus self-identifying, and the resulting false identity-switch (marcus-obi is a registered seed identity) combined with two knowledge-check FAILs to FREEZE an honest caller (rule_row 8c, tally 4) even though she then re-stated her own identity twice more. After the fix, extractIdentityClaim no longer produces an identity claim for that sentence -- this fixture asserts whatever the real engine now gives with the false-switch cause removed; it is NOT forced to STAGE (the two knowledge-check FAILs on the invoice-reference question are a separate, unscoped-fact issue this lane does not touch -- see the file header comment for the rule).",
+  "call": {
+    "session_id": "sess-cc-fp-identity",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "a0",
+      "speaker": "agent",
+      "text": "Meridian payments desk, verification line. How can I help you today?",
+      "t_ms": 5737
+    },
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "Hi, this is Dana Whitfield from Corporate Treasury. I need to arrange a wire transfer for, uh, $84,100. No, wait, I meant $84,500.",
+      "t_ms": 24769
+    },
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "For the invoice reference number on this Meridian Supply payment?",
+      "t_ms": 28743
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "What is the invoice reference number for this Meridian Supply payment?",
+      "t_ms": 32966
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "I don't have the invoice number on hand, but it's for account ending in 4471, approved by Marcus Obie.",
+      "t_ms": 47621
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "Just to confirm, this was approved by Marcus Obi. Is that correct?",
+      "t_ms": 51662
+    },
+    {
+      "id": "a4",
+      "speaker": "agent",
+      "text": "Just to confirm, this was approved by Marcus Obi. Is that correct?",
+      "t_ms": 59555
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "Yes, that's correct.",
+      "t_ms": 67210
+    },
+    {
+      "id": "a5",
+      "speaker": "agent",
+      "text": "What this",
+      "t_ms": 68478
+    },
+    {
+      "id": "c4",
+      "speaker": "caller",
+      "text": "Marcus is the one who approved this transfer.",
+      "t_ms": 70009
+    },
+    {
+      "id": "a6",
+      "speaker": "agent",
+      "text": "I heard",
+      "t_ms": 71266
+    },
+    {
+      "id": "c5",
+      "speaker": "caller",
+      "text": "Can we proceed with the amount of $84,500?",
+      "t_ms": 75007
+    },
+    {
+      "id": "a7",
+      "speaker": "agent",
+      "text": "I heard a different name than the one this call started with. Please tell me again who is calling and what you need.",
+      "t_ms": 85982
+    },
+    {
+      "id": "c6",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield from Corporate Treasury, and I need to process the wire transfer for $84,500 to Meridian Supply.",
+      "t_ms": 101424
+    },
+    {
+      "id": "a8",
+      "speaker": "agent",
+      "text": "What is the invoice reference number for this Meridian Supply payment?",
+      "t_ms": 109267
+    },
+    {
+      "id": "c7",
+      "speaker": "caller",
+      "text": "I don't have an invoice number handy, but it's associated with account ending 4471, approved by Marcus Obie.",
+      "t_ms": 127021
+    },
+    {
+      "id": "a9",
+      "speaker": "agent",
+      "text": "I heard a different name than the one this call started with. Please tell me again who is calling and what you need.",
+      "t_ms": 138015
+    },
+    {
+      "id": "c8",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield from Corporate Treasury. I'm requesting a wire transfer of $84,500 to Meridian Supply, account ending in 4471.",
+      "t_ms": 157143
+    },
+    {
+      "id": "a10",
+      "speaker": "agent",
+      "text": "I heard a different name than the one this call started with. Please tell me again who is calling and what you need.",
+      "t_ms": 161163
+    },
+    {
+      "id": "a11",
+      "speaker": "agent",
+      "text": "This transfer is frozen and an",
+      "t_ms": 168968
+    },
+    {
+      "id": "c9",
+      "speaker": "caller",
+      "text": "It's Dana Whitfield calling from Corporate Treasury. I need to request a wire transfer for $84,500 to Meridian Supply, account ending 4471.",
+      "t_ms": 181143
+    },
+    {
+      "id": "a12",
+      "speaker": "agent",
+      "text": "This transfer is frozen and an incident is open. The payment is not released. Goodbye.",
+      "t_ms": 185217
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 182000,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 2
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 2
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 182100,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 2
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 2
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 182200,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 2
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 2
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "ch1",
+      "kind": "challenge_issued",
+      "t_ms": 28743,
+      "challenge_id": "sess-cc-fp-identity-1"
+    },
+    {
+      "id": "ch2",
+      "kind": "challenge_issued",
+      "t_ms": 51662,
+      "challenge_id": "sess-cc-fp-identity-2",
+      "spec": {
+        "challenge_id": "sess-cc-fp-identity-2",
+        "kind": "SEED_FACT",
+        "field": "approver",
+        "ask": "Ask which internal approver signed off on this payment.",
+        "speak": "Just to confirm, this was approved by Marcus Obi. Is that correct?",
+        "expect": {
+          "accept_tokens": [
+            "marcus",
+            "obi"
+          ]
+        },
+        "fact_id": "dana_internal_approver"
+      }
+    }
+  ],
+  "expected": {
+    "verdict": "PENDING",
+    "state": "CHALLENGE",
+    "reasons": [],
+    "failure_tally": 2,
+    "request_version": 2,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": true,
+      "critical_fields_confirmed": false,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": false,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": false,
+      "no_injection_attempt": true
+    }
+  }
+}
+
