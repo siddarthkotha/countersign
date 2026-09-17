@@ -1123,3 +1123,48 @@ describe('selectChallenge — speak: a deterministic, ready-to-speak sentence pe
     expect(spec1?.speak).toBe(spec2?.speak);
   });
 });
+
+// BUG (PROVEN 2026-09-16, engine-tie lane, instrumented investigation, no code changed at the
+// time this was written): packages/server/test/browser-ws.test.ts's "BUG FIX: persona flows end
+// to end" attacker leg is flaky (6 of 10 runs fail alone) because `eligibleUtterances` (and
+// `challengeReplyWindowStatus`) compare caller-utterance/action timestamps to `issuedAction.t_ms`
+// with strict `>`. The server logs `challenge_issued` at `reply.done` -- AFTER the question audio
+// finishes -- so a caller reply that lands in the same recorded millisecond as issuance (a real,
+// observed live shape: PASS run had issued t=7/reply t=8, FAIL run had issued t=9/reply t=9) is
+// excluded from the eligible window. With no later event, `challengeReplyWindowStatus` then finds
+// nothing past `issuedAction.t_ms` either, so the window never closes and the challenge sits
+// AWAITING forever instead of being graded. Rule: an utterance/action logged at the SAME
+// millisecond as challenge_issued counts as AFTER it, because issuance is logged at reply.done,
+// strictly after the question audio -- nothing legitimately shares that instant except a reply.
+describe('gradeChallenges — a caller reply logged at the SAME millisecond as challenge_issued is graded, not left awaiting (tie fix, 2026-09-16)', () => {
+  const counselFact = SEED.knowledge.find((k) => k.id === 'counsel_of_record')!;
+  const spec: ChallengeSpec = {
+    challenge_id: 'tie-1',
+    kind: 'SEED_FACT',
+    field: 'counsel',
+    ask: counselFact.ask,
+    expect: { accept_tokens: counselFact.accept_tokens },
+  };
+  const actions: AgentAction[] = [issuedAction('a1', 'tie-1', 9)];
+
+  it('PASSes an answer whose utterance t_ms equals the challenge_issued action t_ms exactly', () => {
+    const conversation = [utt('u1', 9, 'Calder and Finch')];
+    const result = gradeChallenges(conversation, actions, [spec], SEED, []);
+    expect(result['tie-1']).toEqual({
+      result: 'PASS',
+      quote: { utterance_id: 'u1', text: 'Calder and Finch' },
+      eligible_utterance_ids: ['u1'],
+    });
+  });
+
+  it('a tied caller reply is not left dangling behind a later, different challenge_issued at the same tied instant either', () => {
+    const spec2: ChallengeSpec = { ...spec, challenge_id: 'tie-2' };
+    // A different challenge issued at the SAME t_ms as `spec`'s answer should still bound the
+    // window (this is the "nextAgentActionT" sibling comparison, not the tie under test), but a
+    // reply tied with `spec`'s OWN issuance must still be collected for `spec`.
+    const twoActions: AgentAction[] = [issuedAction('a1', 'tie-1', 9), issuedAction('a2', 'tie-2', 20)];
+    const conversation = [utt('u1', 9, 'Calder and Finch')];
+    const result = gradeChallenges(conversation, twoActions, [spec, spec2], SEED, []);
+    expect(result['tie-1']?.result).toBe('PASS');
+  });
+});
