@@ -2694,6 +2694,61 @@
       "held_because": "known limitation, fails toward ESCALATE; revisit only if a live record shows it",
       "priority": "P3",
       "note": "2026-09-17 8:35 AM CDT"
+    },
+    {
+      "id": "DEGRADED-MAX-AUDIO-ONLY",
+      "title": "a reply with 68 s of continuous audio and no transcript never struck (inactivity watchdog only); add a maximum audio-only duration strike (free-play 2026-09-17T08-35-38)",
+      "status": "done",
+      "held_because": "after free-play batch 2 reports the rate; Sonnet, session.ts",
+      "priority": "P1",
+      "note": "2026-09-17 9:12 AM CDT: landed fb51bf3; push 46 after batch 2"
+    },
+    {
+      "id": "HOLD-WITHOUT-FOLLOWUP",
+      "title": "\"One moment.\" then 31 s of silence when no goal changes (free-play 2026-09-17T08-46-58): re-issue the current goal line within ~3 s after a bare holding reply",
+      "status": "done",
+      "held_because": "after free-play batch 2 reports the rate; Sonnet, session.ts",
+      "priority": "P1",
+      "note": "2026-09-17 9:12 AM CDT: landed fb51bf3; push 46 after batch 2"
+    },
+    {
+      "id": "STAGE-WITH-FAILED-CHALLENGES",
+      "title": "STAGE at row 11 with two FAIL knowledge cards sharing one challenge id (free-play 2026-09-17T09-15-29); duplicate challenge_issued from a merged double question; rule-table path to be explained",
+      "status": "done",
+      "priority": "P0",
+      "note": "2026-09-17 9:46 AM CDT: rule-table defect fixed 900a2f1 (no_failed_challenge); ruling 9 proposed"
+    },
+    {
+      "id": "HOLD-FOLLOWUP-RESCHEDULE",
+      "title": "hold follow-up drops silently if its timer fires while the agent is still speaking; consider one reschedule",
+      "status": "held",
+      "held_because": "minor; needs a live record showing it before adding a retry",
+      "priority": "P3",
+      "note": "2026-09-17 9:34 AM CDT"
+    },
+    {
+      "id": "SEED-FACT-FINAL-VALUE",
+      "title": "seed-fact grading matches accept tokens anywhere in the reply; a same-breath correction to a WRONG name still passes if the right tokens appear earlier; needs final-value-wins like trap and live-commitment grading",
+      "status": "running",
+      "held_because": "engine, after push 46; Sonnet test-first; founder sees it as ruling 9b",
+      "priority": "P1",
+      "note": "2026-09-17 10:02 AM CDT: lane launched from c61abfd; lands for push 47"
+    },
+    {
+      "id": "DIAG-ISSUED-CHALLENGES",
+      "title": "diagnostics bundle lacks the issued-challenge actions (challenge_id, fact_id, kind, t_ms); the live double issuance on 09-15-29 cannot be diagnosed from the record",
+      "status": "running",
+      "held_because": "observability, server; after push 46; Haiku",
+      "priority": "P1",
+      "note": "2026-09-17 10:02 AM CDT: lane launched from c61abfd; lands for push 47"
+    },
+    {
+      "id": "BENEFICIARY-NO-VERB",
+      "title": "\"The amount is $84,600 to Meridian Supply\" yields no beneficiary claim (no verb before \"to NAME\")",
+      "status": "running",
+      "held_because": "engine extraction; after push 46; Sonnet test-first",
+      "priority": "P2",
+      "note": "2026-09-17 10:02 AM CDT: lane launched from c61abfd; lands for push 47"
     }
   ]
 }
