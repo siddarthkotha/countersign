@@ -139,6 +139,44 @@ describe('extractAccountLast4', () => {
     expect(hit).toEqual({ value: '4471', quote: 'ending 4471' });
     expect(text.includes(hit!.quote)).toBe(true);
   });
+
+  // PROVEN gap (docs/analysis/case11-freeplay-2026-09-17.md run 21-32-40): the caller's own
+  // exact words at t=91187 -- "The account ends in 4471." -- never matched the old
+  // "ending|ending in|last four|last 4|suffix" list (no "ends" branch at all), so the
+  // account_last4 claim never registered and the readback gate never cleared. This test is
+  // the verbatim caller line from that record.
+  it('matches the verbatim free-play caller line "The account ends in 4471."', () => {
+    const text = 'The account ends in 4471.';
+    const hit = extractAccountLast4(text);
+    expect(hit).toEqual({ value: '4471', quote: 'ends in 4471' });
+    expect(text.includes(hit!.quote)).toBe(true);
+  });
+
+  // The other phrasings the founder and judges will say, per the same analysis's fix note.
+  it.each([
+    ['the account ending with 4471', '4471', 'ending with 4471'],
+    ['the account ending in 4471', '4471', 'ending in 4471'],
+    ['last four 4471', '4471', 'last four 4471'],
+    ['last 4 4471', '4471', 'last 4 4471'],
+    ['the last four digits are 4471', '4471', 'last four digits are 4471'],
+    ['suffix 4471', '4471', 'suffix 4471'],
+    ['suffix is 4471', '4471', 'suffix is 4471'],
+    ['account 4471', '4471', 'account 4471'],
+  ])('%s → %s / %s', (text, value, quote) => {
+    const hit = extractAccountLast4(text);
+    expect(hit).toEqual({ value, quote });
+    expect(text.includes(hit!.quote)).toBe(true);
+  });
+
+  // Negative: a cue-less number, or a cue word with no adjacent number, must never produce
+  // an account claim -- widening the cue list must not make an unrelated number in the
+  // sentence look like an account digit.
+  it.each([
+    'I need this in 4 minutes',
+    'the invoice ends in December',
+  ])('does not match %s', (text) => {
+    expect(extractAccountLast4(text)).toBeNull();
+  });
 });
 
 describe('extractDeadline', () => {
@@ -278,5 +316,36 @@ describe('extractCuedNames', () => {
     ]);
     // "Corporate Treasury" (department, two words) should NOT match.
     expect(extractCuedNames('Corporate Treasury approved this')).toEqual([]);
+  });
+
+  // PROVEN gap (docs/analysis/case11-freeplay-2026-09-17.md run 21-32-40): the caller's own
+  // exact words at t=24071 -- "...a wire transfer of $84,100— ah, sorry, wait, I meant
+  // $84,500 to Meridian Supply." -- never matched, because the old beneficiary pattern
+  // required the verb to be followed immediately (give or take "it"/"the money"/"the
+  // funds") by "to NAME"; the amount and self-correction between "wire" and "to" broke it,
+  // so the beneficiary claim never registered.
+  it('matches the verbatim free-play caller line with an amount and a self-correction between the verb and "to"', () => {
+    const text =
+      'Hi, this is Dana Whitfield from Corporate Treasury. I need to request a wire transfer of $84,100— ah, sorry, wait, I meant $84,500 to Meridian Supply.';
+    const hits = extractCuedNames(text);
+    expect(hits).toEqual([{ field: 'beneficiary', value: 'Meridian Supply', quote: 'Meridian Supply' }]);
+    expect(text.includes(hits[0]!.quote)).toBe(true);
+  });
+
+  // A plain amount (no correction) between the verb and "to" must also match.
+  it.each([
+    ['wire $84,500 to Meridian Supply', 'Meridian Supply'],
+    ['wire transfer of $84,500 to Meridian Supply', 'Meridian Supply'],
+    ['send eighty four thousand five hundred dollars to Elena Park', 'Elena Park'],
+  ])('%s → %s', (text, value) => {
+    const hits = extractCuedNames(text);
+    expect(hits).toEqual([{ field: 'beneficiary', value, quote: value }]);
+  });
+
+  // Negative: the widened beneficiary filler must not swallow an entire unrelated later
+  // sentence in the same utterance (bounded, and can't cross a full stop).
+  it('does not let the beneficiary filler cross into a later, unrelated sentence', () => {
+    const text = 'Wire the check today. Also, send flowers to Elena for the funeral.';
+    expect(extractCuedNames(text)).toEqual([{ field: 'beneficiary', value: 'Elena', quote: 'Elena' }]);
   });
 });

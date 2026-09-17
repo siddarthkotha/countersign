@@ -8,7 +8,22 @@ export interface AccountLast4Hit {
   quote: string;
 }
 
-const ACCOUNT_LAST4_RE = /\b(?:ending|ending in|last four|last 4|suffix)\s*(?:in\s*)?(\d{4})\b/i;
+// Cue phrases before the last-4 digits of an account number, in the forms callers and
+// judges actually say them (PROVEN gap, docs/analysis/case11-freeplay-2026-09-17.md run
+// 21-32-40: the caller's exact words "The account ends in 4471." never matched the old
+// "ending|ending in|last four|last 4|suffix" list -- there was no "ends" branch at all).
+// Each cue is followed by a MANDATORY single space then exactly 4 digits, so a bare cue
+// word with no adjacent number (e.g. "the invoice ends in December") never matches, and a
+// short number nearby but not immediately after the cue (e.g. "I need this in 4 minutes",
+// which has no cue word at all) never matches either -- see the negative tests below.
+// Branches:
+//   - "ending" / "ending in" / "ending with" 4471
+//   - "ends in" / "ends with" 4471
+//   - "last four" / "last 4" [digits are/is] 4471 (covers "the last four digits are 4471")
+//   - "suffix" [is] 4471
+//   - bare "account" 4471 (no connector word -- callers often just read the digits off)
+const ACCOUNT_LAST4_RE =
+  /\b(?:ending(?:\s+(?:in|with))?|ends\s+(?:in|with)|last\s+(?:four|4)(?:\s+digits\s+(?:are|is))?|suffix(?:\s+is)?|account)\s+(\d{4})\b/i;
 
 export function extractAccountLast4(text: string): AccountLast4Hit | null {
   const m = ACCOUNT_LAST4_RE.exec(text);
@@ -129,9 +144,20 @@ const CUE_PATTERNS: { field: CuedNameField; re: RegExp }[] = [
     re: new RegExp(`${ESCROW_CUE_HEAD}${ESCROW_CUE_KIND}${ESCROW_CUE_CONNECTOR}(${NAME})`, 'g'),
   },
   { field: 'escrow_institution', re: new RegExp(`\\bescrowed\\b\\s+(?:at\\s+|with\\s+)(${NAME})`, 'g') },
+  // PROVEN gap (docs/analysis/case11-freeplay-2026-09-17.md run 21-32-40): the caller's
+  // exact words "wire transfer of $84,500 to Meridian Supply" (and, worse, the same line
+  // with a self-correction still in it -- "...a wire transfer of $84,100— ah, sorry, wait,
+  // I meant $84,500 to Meridian Supply.") never matched, because the old pattern required
+  // the verb to be followed immediately (give or take "it"/"the money"/"the funds") by
+  // "to NAME" -- any amount or short aside between the verb and "to" broke it. The filler
+  // between the verb and "to" is now a short, BOUNDED, non-greedy run of up to 10 words
+  // (an amount, a correction aside, "it"/"the money"/"the funds", any mix of these) so it
+  // still finds the nearest "to NAME" rather than swallowing an entire unrelated sentence;
+  // each filler word is also barred from itself starting with "." so the run can't cross a
+  // full stop into a later, unrelated sentence in the same utterance.
   {
     field: 'beneficiary',
-    re: new RegExp(`\\b(?:pay|wire|send|transfer)\\b\\s+(?:it\\s+|the money\\s+|the funds\\s+)?to\\s+(${NAME})`, 'g'),
+    re: new RegExp(`\\b(?:pay|wire|send|transfer)\\b(?:\\s+(?!\\.)\\S+){0,10}?\\s+to\\s+(${NAME})`, 'g'),
   },
   { field: 'beneficiary', re: new RegExp(`\\bbeneficiary\\b (?:is|will be)\\s+(${NAME})`, 'g') },
   { field: 'beneficiary', re: new RegExp(`\\bvendor\\b (?:is|will be)\\s+(${NAME})`, 'g') },

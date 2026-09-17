@@ -1,0 +1,87 @@
+{
+  "title": "Free-play run 21-32-40 (case 11, corrected-critical-field), replayed through the fixed claims extractor -- still ESCALATE, not STAGE",
+  "description": "Conversation, tools, and the account_last4 elicit are transcribed VERBATIM from scripts/rehearse/reports/2026-09-16T21-32-40-corrected-critical-field.md's flight-recorder transcript (deploy bdf907d, session 64b7dead-4135-4206-bfb6-bcb9f5f57e19). docs/analysis/case11-freeplay-2026-09-17.md's PROVEN root cause: ACCOUNT_LAST4_RE (claims.ts) never matched the caller's 'ends in 4471', and the beneficiary CUE_PATTERN (claims.ts) never matched 'wire transfer of $84,500 to Meridian Supply' (amount + self-correction between the verb and 'to') -- so neither claim ever registered live, and critical_fields_confirmed stayed false until the idle_timeout at t=197946ms (rule_row 15, ESCALATE). This fixture reproduces the SAME conversation/tools/call_ended shape through the FIXED extractor, and the fix IS visible in the real engine output below: the account_last4 and beneficiary readback_result cards now cite the caller's own quotes ('ends in 4471', 'Meridian Supply') instead of staying claimless. But the verdict is STILL ESCALATE, not STAGE -- do not read this file's name as a claim otherwise (kept per the founder-ratified naming for this lane). Reason (traced, not guessed): the real call's ONLY readback confirmation ever logged server-side was for amount_usd (t=71216, caller confirmed at t=79009); account_last4 was only ELICITED (t=80138, caller answered at t=91187) and never read back, because the agent's next three replies (t=93455/96318/99211) were dead-transcript turns (a zero-width space, no real text) -- an already-tracked SEPARATE server/platform defect (git log 3a107ee), out of scope for this lane, and not touched here. Without a readback_issued+affirmation cycle, the ledger (packages/engine/src/ledger.ts) never promotes a STATED claim to CONFIRMED, so critical_fields_confirmed (and, downstream, challenge_requirement_met / at_least_one_challenge_passed) stays false no matter how well the extractor reads the claim, and the call_ended(idle_timeout) at t=197946 lands it on rule_row 15, ESCALATE -- same terminal rule row as the real (pre-fix) run, for a different, now-narrower reason. This fixture's `actions` array asserts only what the record proves actually happened (one challenge_issued per of Dana's 3 seed knowledge facts, one readback_issued for amount_usd, one elicit_issued for account_last4, one call_ended) -- it does not assert a readback/elicit for beneficiary, because the record shows none was ever asked before the call idled out.",
+  "call": {
+    "session_id": "64b7dead-4135-4206-bfb6-bcb9f5f57e19",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    { "id": "a1", "speaker": "agent", "text": "Meridian payments desk, verification line. How can I help you today?", "t_ms": 5256 },
+    { "id": "c1", "speaker": "caller", "text": "Hi, this is Dana Whitfield from Corporate Treasury. I need to request a wire transfer of $84,100— ah, sorry, wait, I meant $84,500 to Meridian Supply.", "t_ms": 24071 },
+    { "id": "a2", "speaker": "agent", "text": "Understood. What is the authorization code for this transfer?", "t_ms": 27584 },
+    { "id": "a3", "speaker": "agent", "text": "Who is the internal approver for this transaction?", "t_ms": 31470 },
+    { "id": "c2", "speaker": "caller", "text": "The approver for this transaction is Marcus Obie. Can you confirm the details for me?", "t_ms": 42907 },
+    { "id": "a4", "speaker": "agent", "text": "For the invoice reference number on this Meridian Supply payment?", "t_ms": 44024 },
+    { "id": "a5", "speaker": "agent", "text": "What is the invoice reference number for this Meridian Supply payment?", "t_ms": 48426 },
+    { "id": "c3", "speaker": "caller", "text": "I actually don't have the invoice reference number on hand right now, but I can get that to you shortly if needed.", "t_ms": 60808 },
+    { "id": "a6", "speaker": "agent", "text": "What is this payment to Meridian Supply for?", "t_ms": 64021 },
+    { "id": "a7", "speaker": "agent", "text": "Just to confirm, the amount is $84,500. Is that correct?", "t_ms": 71216 },
+    { "id": "c4", "speaker": "caller", "text": "Yes, that's correct.", "t_ms": 79009 },
+    { "id": "a8", "speaker": "agent", "text": "Which account ending should this go to? Please give me the last four digits.", "t_ms": 80138 },
+    { "id": "a9", "speaker": "agent", "text": "Which account ending", "t_ms": 81878 },
+    { "id": "c5", "speaker": "caller", "text": "The account ends in 4471.", "t_ms": 91187 },
+    { "id": "c6", "speaker": "caller", "text": "Thanks for your help.", "t_ms": 105507 },
+    { "id": "c7", "speaker": "caller", "text": "Can you proceed with the wire transfer now?", "t_ms": 108108 },
+    { "id": "c8", "speaker": "caller", "text": "I appreciate your prompt assistance. Let me know if you need anything else to complete this.", "t_ms": 129209 },
+    { "id": "c9", "speaker": "caller", "text": "I look forward to your confirmation once the transfer is done.", "t_ms": 144608 },
+    { "id": "c10", "speaker": "caller", "text": "Thanks again.", "t_ms": 145907 },
+    { "id": "c11", "speaker": "caller", "text": "If you have any questions, feel free to reach out. I'm here to help.", "t_ms": 161907 }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 64338,
+      "args": { "identity_id": "dana-whitfield", "request_version": 2 },
+      "result": { "session_active": true, "geo": "Austin, TX", "device": "Dell Latitude (managed)", "request_version": 2 }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 64338,
+      "args": { "identity_id": "dana-whitfield", "request_version": 2 },
+      "result": {
+        "known_vendors": ["Meridian Supply"],
+        "matches": [{ "vendor": "Meridian Supply", "amount_usd": 84500, "account_last4": "4471", "due": "2026-09-04" }],
+        "request_version": 2
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 64338,
+      "args": { "identity_id": "dana-whitfield", "request_version": 2 },
+      "result": { "sent": true, "devices": 1, "response": "confirmed", "latency_ms": 2500, "request_version": 2 }
+    }
+  ],
+  "actions": [
+    { "id": "act1", "kind": "challenge_issued", "t_ms": 31470, "challenge_id": "64b7dead-4135-4206-bfb6-bcb9f5f57e19-1" },
+    { "id": "act2", "kind": "challenge_issued", "t_ms": 48426, "challenge_id": "64b7dead-4135-4206-bfb6-bcb9f5f57e19-2" },
+    { "id": "act3", "kind": "challenge_issued", "t_ms": 64021, "challenge_id": "64b7dead-4135-4206-bfb6-bcb9f5f57e19-3" },
+    { "id": "act4", "kind": "readback_issued", "t_ms": 71216, "field": "amount_usd", "value": "84500" },
+    { "id": "act5", "kind": "elicit_issued", "t_ms": 80138, "field": "account_last4" },
+    { "id": "act6", "kind": "call_ended", "t_ms": 197946, "detail": "idle_timeout" }
+  ],
+  "expected": {
+    "verdict": "ESCALATE",
+    "state": "ACTION",
+    "reasons": [],
+    "failure_tally": 2,
+    "request_version": 2,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": true,
+      "critical_fields_confirmed": false,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": false,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": false,
+      "no_injection_attempt": true
+    }
+  }
+}
