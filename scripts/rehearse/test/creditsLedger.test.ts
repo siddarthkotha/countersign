@@ -111,4 +111,70 @@ describe('creditsLedger', () => {
     expect(output).toBeDefined();
     expect(output.length).toBeGreaterThan(0);
   });
+
+  it('counts open bundles (started_at but no ended_at) as ESTIMATE using last server event', async () => {
+    // Bundles with started_at but no ended_at should be counted as ESTIMATE (open bundle),
+    // using the last server event's t_ms as the end time, or wall clock if no events.
+    // Write test bundles to the worktree's reports directory for this test.
+    const reportsDir = join(HERE, '..', 'reports');
+    const tempTestBundles: string[] = [];
+
+    try {
+      await mkdir(reportsDir, { recursive: true });
+
+      // Use recent timestamps so wall clock estimates are reasonable (within last minute)
+      const nowMs = Date.now();
+      const day1Start = nowMs - 2 * 60 * 1000; // 2 minutes ago (for proven bundle)
+      const day2Start = new Date('2026-09-15T08:00:00Z').getTime(); // Different day for open bundle
+      const lastEventTime = day2Start + 45 * 1000; // 45 seconds after start
+
+      // Create two bundles on different days: proven on day 1, open on day 2
+      const bundles: DiagnosticBundle[] = [
+        {
+          session_id: 'closed-proven',
+          started_at: day1Start,
+          ended_at: day1Start + 30 * 1000,
+          end_reason: 'caller_ended',
+          deployed_commit: null,
+          server_events: [],
+          client_events: [],
+          billed_seconds: 30,
+        },
+        {
+          session_id: 'open-with-events',
+          started_at: day2Start,
+          ended_at: null,
+          end_reason: null,
+          deployed_commit: null,
+          server_events: [
+            { t_ms: day2Start + 10 * 1000, kind: 'session.started', detail: {} },
+            { t_ms: day2Start + 25 * 1000, kind: 'user_spoke', detail: {} },
+            { t_ms: lastEventTime, kind: 'agent_spoke', detail: {} },
+          ],
+          client_events: [],
+        },
+      ];
+
+      for (let i = 0; i < bundles.length; i++) {
+        const bundleFile = join(reportsDir, `test-open-bundle-${i}.diagnostics.json`);
+        await writeFile(bundleFile, JSON.stringify(bundles[i]!));
+        tempTestBundles.push(bundleFile);
+      }
+
+      const output = execSync(`npm run credits:ledger`, { cwd: REPO_ROOT, encoding: 'utf-8' });
+
+      // Verify that the output includes both proven and open bundle methods
+      expect(output).toContain('PROVEN (termination event)'); // Day 1 with closed-proven bundle
+      expect(output).toContain('ESTIMATE (open bundle)'); // Day 2 with open bundle
+    } finally {
+      // Clean up test bundles
+      for (const bundleFile of tempTestBundles) {
+        try {
+          await rm(bundleFile, { force: true });
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+    }
+  });
 });

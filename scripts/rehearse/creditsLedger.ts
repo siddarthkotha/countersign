@@ -26,6 +26,8 @@ interface DiagnosticBundle {
   started_at: number;
   ended_at: number | null;
   billed_seconds?: number;
+  server_events?: { t_ms: number; kind: string; detail: unknown }[];
+  session_id?: string;
 }
 
 interface DailyRecord {
@@ -34,6 +36,7 @@ interface DailyRecord {
   billedSeconds: number;
   provenSeconds: number;
   estimateSeconds: number;
+  openBundleSeconds: number;
 }
 
 interface FounderReading {
@@ -172,7 +175,7 @@ async function main(): Promise<void> {
       const content = await readFile(join(REPORTS_DIR, file), 'utf-8');
       const bundle: DiagnosticBundle = JSON.parse(content);
 
-      if (!bundle.started_at || !bundle.ended_at) continue;
+      if (!bundle.started_at) continue;
 
       // Store in cache for later window analysis
       bundlesCache.push(bundle);
@@ -183,21 +186,39 @@ async function main(): Promise<void> {
       // Get or create daily record
       let record = dailyMap.get(dayKey);
       if (!record) {
-        record = { day: dayKey, calls: 0, billedSeconds: 0, provenSeconds: 0, estimateSeconds: 0 };
+        record = { day: dayKey, calls: 0, billedSeconds: 0, provenSeconds: 0, estimateSeconds: 0, openBundleSeconds: 0 };
         dailyMap.set(dayKey, record);
       }
 
       record.calls += 1;
 
-      // Use billed_seconds if available, otherwise estimate from wall clock
+      // Use billed_seconds if available, otherwise estimate from wall clock or last server event
       if (bundle.billed_seconds !== undefined && typeof bundle.billed_seconds === 'number') {
         record.billedSeconds += bundle.billed_seconds;
         record.provenSeconds += bundle.billed_seconds;
         totalProvenSeconds += bundle.billed_seconds;
       } else {
-        const estimatedSeconds = (bundle.ended_at - bundle.started_at) / 1000;
+        // Compute estimated seconds from either ended_at or last server event
+        let endTime = bundle.ended_at;
+        let isOpenBundle = false;
+
+        if (endTime === null || endTime === undefined) {
+          // Bundle has no ended_at, try to use last server event
+          isOpenBundle = true;
+          if (bundle.server_events && bundle.server_events.length > 0) {
+            endTime = bundle.server_events[bundle.server_events.length - 1]!.t_ms;
+          } else {
+            // No server events, use wall clock (current time)
+            endTime = Date.now();
+          }
+        }
+
+        const estimatedSeconds = (endTime - bundle.started_at) / 1000;
         record.billedSeconds += estimatedSeconds;
         record.estimateSeconds += estimatedSeconds;
+        if (isOpenBundle) {
+          record.openBundleSeconds += estimatedSeconds;
+        }
         totalEstimateSeconds += estimatedSeconds;
       }
     } catch {
@@ -219,12 +240,19 @@ async function main(): Promise<void> {
   for (const record of sortedDays) {
     const minutes = record.billedSeconds / 60;
     const cost = (record.billedSeconds / 3600) * RATE_PER_HOUR;
-    const method =
-      record.estimateSeconds > 0
-        ? record.provenSeconds > 0
-          ? `MIXED (${record.provenSeconds}s proven + ${record.estimateSeconds}s estimated)`
-          : 'ESTIMATE (wall clock)'
-        : 'PROVEN (termination event)';
+    let method: string;
+
+    if (record.estimateSeconds > 0) {
+      if (record.provenSeconds > 0) {
+        method = `MIXED (${record.provenSeconds}s proven + ${record.estimateSeconds}s estimated)`;
+      } else if (record.openBundleSeconds > 0) {
+        method = 'ESTIMATE (open bundle)';
+      } else {
+        method = 'ESTIMATE (wall clock)';
+      }
+    } else {
+      method = 'PROVEN (termination event)';
+    }
 
     console.log(`| ${record.day} | ${record.calls} | ${minutes.toFixed(1)} | $${cost.toFixed(2)} | ${method} |`);
 
@@ -260,7 +288,16 @@ async function main(): Promise<void> {
       if (bundle.billed_seconds !== undefined && typeof bundle.billed_seconds === 'number') {
         windowProvenSeconds += bundle.billed_seconds;
       } else {
-        const estimatedSeconds = (bundle.ended_at! - bundle.started_at) / 1000;
+        // Compute end time from ended_at, last server event, or wall clock
+        let endTime = bundle.ended_at;
+        if (endTime === null || endTime === undefined) {
+          if (bundle.server_events && bundle.server_events.length > 0) {
+            endTime = bundle.server_events[bundle.server_events.length - 1]!.t_ms;
+          } else {
+            endTime = Date.now();
+          }
+        }
+        const estimatedSeconds = (endTime - bundle.started_at) / 1000;
         windowEstimateSeconds += estimatedSeconds;
       }
     }
@@ -268,7 +305,21 @@ async function main(): Promise<void> {
     if (verbose) {
       console.log('\nIn-window bundles:');
       for (const bundle of bundlesInWindow) {
-        const duration = bundle.billed_seconds ?? (bundle.ended_at! - bundle.started_at) / 1000;
+        let duration: number;
+        if (bundle.billed_seconds !== undefined) {
+          duration = bundle.billed_seconds;
+        } else {
+          // Compute end time from ended_at, last server event, or wall clock
+          let endTime = bundle.ended_at;
+          if (endTime === null || endTime === undefined) {
+            if (bundle.server_events && bundle.server_events.length > 0) {
+              endTime = bundle.server_events[bundle.server_events.length - 1]!.t_ms;
+            } else {
+              endTime = Date.now();
+            }
+          }
+          duration = (endTime - bundle.started_at) / 1000;
+        }
         const minutes = (duration / 60).toFixed(1);
         const method = bundle.billed_seconds !== undefined ? 'PROVEN' : 'ESTIMATE';
         console.log(`  ${bundle.session_id}: ${minutes}m (${method})`);
