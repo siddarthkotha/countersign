@@ -2209,10 +2209,11 @@
       "id": "FREE-PLAY-BATCH-2",
       "title": "45 min free-play batch, ten cases x 3, regrade, classify",
       "files": [],
-      "status": "held",
+      "status": "running",
       "held_because": "waits for push 42 (miller dead-stream/close-storm fix) so the 45 min of credit is spent once on the build the founder will play",
       "agent_id": "",
-      "started_at": ""
+      "started_at": "",
+      "note": "2026-09-16 8:13 PM CDT: chained behind the deploy-43 watcher (background)"
     },
     {
       "id": "CASE-11-CORRECTED-FIELD",
@@ -2613,9 +2614,9 @@
     {
       "id": "DEAD-AGENT-TRANSCRIPTS",
       "title": "live: after an untranscribed automatic reply, AssemblyAI delivers no agent transcripts for the rest of the call (miller-2 on 41, dana on 42); server then re-asks blind and the call idles out",
-      "status": "held",
+      "status": "running",
       "priority": "P0",
-      "note": "2026-09-16 7:53 PM CDT: e8a9b5a landed; aai-observability lane running",
+      "note": "2026-09-16 8:55 PM CDT: third occurrence with logging on (20-51-12); no unmodelled types, no deltas; empty-automatic-reply hypothesis now prime; lanes holding-phrase + degraded-close",
       "held_because": "mechanism UNKNOWN until the observability push (43) records the next occurrence live; then fix (delta assembly, degraded-session handling, or session.update guard) from evidence"
     },
     {
@@ -2632,6 +2633,37 @@
       "held_because": "wait for the observability evidence before changing what is sent to AssemblyAI",
       "priority": "P1",
       "note": "2026-09-16 7:53 PM CDT"
+    },
+    {
+      "id": "AAI-OBSERVABILITY-NOISE",
+      "title": "drop the per-change aai_unknown_events event now that per-type detail exists; treat session.updated and transcript.user.delta as known-ignored (routine, 50+ per call) so the ring stays readable",
+      "status": "held",
+      "held_because": "after the free-play batch finishes; Haiku; must ship before the founder session so bundles stay readable",
+      "priority": "P1",
+      "note": "2026-09-16 8:20 PM CDT: PROVEN from 20-13-55 and 20-16-27 bundles"
+    },
+    {
+      "id": "OUT-OF-SCOPE-ROLE-PICK",
+      "title": "judge picks a role (\"I will go with CEO\") but gives no name: flow does not restart and the model improvises location questions until idle (two free-play records, 259 and 284 s)",
+      "status": "held",
+      "held_because": "product behaviour: recommendation after the batch (OUT_OF_SCOPE goal hint tells the caller exactly how to start as Dana or the CEO, and the standing instruction forbids questions the engine did not ask); founder decides",
+      "priority": "P1",
+      "note": "2026-09-16 8:34 PM CDT: records 2026-09-16T20-28-29 and 20-32-50"
+    },
+    {
+      "id": "AGENT-SPEAKS-JSON",
+      "title": "voice model read out an invented tool call as speech (```json {\"name\": \"verify_transaction\"...}) at 80 s of 2026-09-16T20-40-21-identity-switch; first occurrence in about 150 recorded calls",
+      "status": "held",
+      "held_because": "after the batch: check the standing prompt for anything that invites tool-shaped output, add an explicit never-speak-code rule, and consider a server guard that flags a code-shaped agent transcript in diagnostics; founder sees the recommendation",
+      "priority": "P1",
+      "note": "2026-09-16 8:43 PM CDT"
+    },
+    {
+      "id": "APPROVER-CONTRADICTION-MISS",
+      "title": "two different approver names volunteered in one call (\"approved by Marcus Obie, I believe\" then \"I meant to say Elena Park, not Marcus Obie\") did not register as a contradiction; STAGE at row 11 (free-play 2026-09-16T20-57-05)",
+      "status": "running",
+      "priority": "P0",
+      "note": "2026-09-16 9:03 PM CDT: Sonnet lane approver-contradiction (engine)"
     }
   ]
 }
