@@ -410,7 +410,25 @@ describe('extractCuedNames', () => {
     "can't wire anything to Northgate",
     'cannot wire anything to Northgate',
     'there is no need to wire anything to Northgate',
+    "don't send it to Northgate",
+    'never transfer to Northgate',
+    "we won't wire to Northgate",
+    'no need to send anything to Northgate',
   ])('does not read a negated verb as a beneficiary claim: %s', (text) => {
     expect(extractCuedNames(text)).toEqual([]);
+  });
+
+  // PROVEN false negative (negation-scope lane, 2026-09-17): the first negation fix scanned
+  // any "not" within three words of the verb, which is wider than the negation actually
+  // reaches -- none of these three sentences negates the wire (the "not" belongs to a
+  // different clause each time), and the old, pre-negation-fix code correctly extracted
+  // Meridian from all three. The fix scopes negation to the auxiliary/adverb chain directly
+  // attached to the verb (see verbIsNegated in src/extract/claims.ts).
+  it.each([
+    'not sure, but wire it to Meridian',
+    'why not wire it to Meridian',
+    'if not today then wire it to Meridian',
+  ])('a "not" that does not attach to the verb still yields a beneficiary claim: %s', (text) => {
+    expect(extractCuedNames(text)).toEqual([{ field: 'beneficiary', value: 'Meridian', quote: 'Meridian' }]);
   });
 });

@@ -148,18 +148,40 @@ function beneficiaryFillerIsClean(filler: string): boolean {
 // to Meridian" matched Northgate -- the pattern never looked at what preceded the verb, so
 // a negated clause ("do not wire...") was read the same as an instruction. The OLD
 // (pre-widening) pattern didn't match this sentence at all (it has no filler support), so
-// this is a genuinely new gap opened by the filler widening, not a prior regression. A
-// negation word or phrase in the (up to) three words immediately before the verb suppresses
-// the beneficiary claim for THAT clause only -- a later, un-negated clause in the same
-// utterance ("send it to Meridian") still extracts normally, since only the words directly
-// before EACH verb occurrence are checked.
-const BENEFICIARY_NEGATION_RE = /\b(?:not|never|don'?t|do not|won'?t|shouldn'?t|can'?t|cannot|no need to)\b/i;
+// this is a genuinely new gap opened by the filler widening, not a prior regression.
+//
+// PROVEN false negative (review, 2026-09-17, negation-scope lane): the first fix scanned
+// ANY "not" (or other negation word) within the three words before the verb, which is wider
+// than the negation actually reaches. "not sure, but wire it to Meridian", "why not wire it
+// to Meridian", and "if not today then wire it to Meridian" all contain a "not" within three
+// words of "wire" but none of them negates the wire -- the "not" belongs to a different
+// clause ("not sure", a rhetorical "why not", a dangling "if not today") and the old code
+// dropped Meridian from all three, while the pre-fix code correctly extracted it.
+//
+// RULE: negation only suppresses the verb when the negation cue is the auxiliary/adverb
+// chain DIRECTLY ATTACHED to that verb -- i.e. the text immediately before the verb, after
+// stripping at most a short run of adverbs ("ever"/"actually"/"really"), IS one of the cue
+// phrases ("do not"/"don't"/"never"/"won't"/"shouldn't"/"can't"/"cannot"/"no need to"). Any
+// other word, punctuation, or clause break ("but", "then", a comma) sitting between the cue
+// and the verb means the cue is NOT attached to this verb, so it does not negate it -- that
+// is why "not sure, but" (tail word "but"), "why not" (bare "not" is not a cue phrase on its
+// own; only "do not" is), and "not today then" (tail word "then") all fail to match and the
+// verb is read as un-negated. A later, un-negated clause in the same utterance ("send it to
+// Meridian" after "do not wire anything to Northgate") still extracts normally, since only
+// the text directly before EACH verb occurrence is checked.
+const BENEFICIARY_NEGATION_ADVERB = '(?:ever|actually|really)';
+const BENEFICIARY_NEGATION_ADJACENT_RE = new RegExp(
+  `(?:\\bdo not|\\bdon'?t|\\bnever|\\bwon'?t|\\bshouldn'?t|\\bcan'?t|\\bcannot|\\bno need to)` +
+    `(?:\\s+${BENEFICIARY_NEGATION_ADVERB})*\\s*$`,
+  'i',
+);
 
+/** Pure: true iff the text immediately before `verbIndex` ends in a negation cue phrase
+ *  (optionally followed by a short adverb chain) with nothing else between the cue and the
+ *  verb. See the RULE comment above for why adjacency, not proximity, is what matters. */
 function verbIsNegated(text: string, verbIndex: number): boolean {
-  const before = text.slice(0, verbIndex).trim();
-  if (before.length === 0) return false;
-  const lastThreeWords = before.split(/\s+/).slice(-3).join(' ');
-  return BENEFICIARY_NEGATION_RE.test(lastThreeWords);
+  const before = text.slice(0, verbIndex);
+  return BENEFICIARY_NEGATION_ADJACENT_RE.test(before);
 }
 
 /** Validates a "verb ... to NAME" beneficiary match against the two false-positive guards
