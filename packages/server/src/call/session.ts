@@ -722,6 +722,96 @@ export class CallSession {
    *  provably inert against a future call path that stops clearing eagerly. */
   private questionReaskLatestReplyId: string | null = null;
 
+  /** DEGRADED-TRANSCRIPTS mode (2026-09-16, PROVEN four times live -- scripts/rehearse/
+   *  reports/2026-09-16T17-50-00-miller-patient, ...19-31-28-dana-patient,
+   *  ...20-51-12-barge-in-interrupt, ...21-02-41-single-wrong-answer, all in the main
+   *  checkout, gitignored): after one automatic reply with real audio but no agent
+   *  transcript, AssemblyAI can stop delivering agent transcripts for the REST OF THE CALL,
+   *  while replies keep starting with audio and caller transcripts keep arriving fine. Pure
+   *  bookkeeping about the health of the AGENT-side transcript channel -- never touches the
+   *  engine, the verdict (LAW 3), or anything that releases money (LAW 2). This only changes
+   *  how THIS class behaves around two existing, already non-verdict-bearing mechanisms (the
+   *  question re-ask, and the CLOSE hang-up's own transcript confirmation) -- it never
+   *  changes what counts as caller-side evidence and never lets a verified request move past
+   *  STAGED on its own.
+   *
+   *  A "strike" is one reply that had real audio relayed (`replyAudioBytes` > 0 -- AssemblyAI
+   *  generated something audible) and never produced a non-empty agent transcript, detected
+   *  either (a) at that reply's own `reply.done`, after giving a late transcript chunk the
+   *  SAME grace window `armCloseTranscriptWait`/`armQuestionTranscriptWait` already give one
+   *  (`DEGRADED_STRIKE_WAIT_MS`, the same 1500ms value -- see `armDegradedStrikeCheck`), or
+   *  (b) WHILE STILL IN FLIGHT, if it has been audible for `DEGRADED_INFLIGHT_STRIKE_MS`
+   *  (12s) with no transcript at all (see `armDegradedInflightStrikeCheck`) -- occurrence 4
+   *  above was a single automatic reply that ran 34 SECONDS with audio and no transcript
+   *  while the verdict sealed and CLOSE was about to render; detection that only ever fires
+   *  at `reply.done` is far too late for a reply that long. Both paths funnel into
+   *  `recordDegradedStrike`, which dedupes by reply id (`repliesCountedAsDegradedStrike`) so
+   *  one very long dead reply that eventually also fails its own `reply.done` check is never
+   *  double-counted as two strikes.
+   *
+   *  `DEGRADED_MODE_STRIKE_THRESHOLD` (2) CONSECUTIVE strikes turn the mode on, logging ONE
+   *  `transcripts_degraded` diag ({reply_ids, since_t_ms}); the FIRST real (non-empty) agent
+   *  transcript received for ANY reply while the mode is on turns it off immediately and logs
+   *  `transcripts_recovered` (`noteAgentTranscriptSeen`, called from `transcript.agent`) --
+   *  also the same signal that resets an in-progress (sub-threshold) streak back to zero, so
+   *  a single bad reply surrounded by healthy ones never accumulates toward the threshold.
+   *  Interrupted replies are excluded entirely (a caller barge-in cutting a reply short is an
+   *  unrelated, legitimate reason for a missing transcript).
+   *
+   *  Every counted strike also logs its own `degraded_strike` diag (reply id, whether it was
+   *  caught in-flight, and `follows_instructed_reply_done_ms` -- occurrence 4's own follow-on
+   *  finding: all four PROVEN occurrences began within 10ms of one of OUR instructed replies'
+   *  own `reply.done`, tracked via `lastAnyReplyDoneAtMs`/`lastAnyReplyDoneWasInstructed` and
+   *  snapshotted per reply id at its own `reply.started`) -- diagnostics only (LAW 4: never
+   *  evidence, never a verdict), so a future analysis of this pattern doesn't require
+   *  re-deriving it from raw AAI event timestamps by hand again. */
+  private static readonly DEGRADED_MODE_STRIKE_THRESHOLD = 2;
+  private static readonly DEGRADED_STRIKE_WAIT_MS = 1_500;
+  /** See the class-field doc comment above: 12s, same value and evidence basis as
+   *  `CLOSE_REPLY_STUCK_MS` (79 live CLOSE-reply samples, p50 3952ms/p95 9070ms/max 12668ms)
+   *  -- ESTIMATE for replies generally (no equivalent non-CLOSE sample exists), chosen as the
+   *  best documented ceiling in this codebase for "how long a real, healthy reply runs",
+   *  comfortably above it so a long-but-healthy reply is never mistaken for a dead one. */
+  private static readonly DEGRADED_INFLIGHT_STRIKE_MS = 12_000;
+  private degradedTranscriptsMode = false;
+  private degradedStrikeCount = 0;
+  private degradedStrikeReplyIds: string[] = [];
+  private degradedStreakStartTMs: number | null = null;
+  /** One strike per reply id, however it was detected (in-flight or at reply.done) -- see the
+   *  class-field doc comment above for why this dedup is necessary (a single very-long dead
+   *  reply must never count as two strikes just because both detection paths eventually look
+   *  at it). Never pruned -- bounded by the session's own reply count. */
+  private readonly repliesCountedAsDegradedStrike = new Set<string>();
+  /** Pending strike-check timers (both `armDegradedStrikeCheck` and
+   *  `armDegradedInflightStrikeCheck`) -- cleared in bulk by `clearDegradedStrikeTimers`,
+   *  called from `end()`. Each callback also re-checks `this.ended` at fire time, so this is
+   *  belt-and-braces (no dangling timer can act on an ended call either way), matching the
+   *  convention `clearCloseTimers` already sets for every other pending send/wait timer. */
+  private readonly degradedStrikeTimers = new Set<ReturnType<typeof setTimeout>>();
+  /** Reply ids whose `reply.started` fired while `this.replyCreateAwaitingStart` was true --
+   *  i.e. a reply THIS CLASS explicitly asked for via `sendReplyCreate`, not one AssemblyAI
+   *  generated on its own turn-driven cadence (see `replyGoalAtStart`'s own doc comment: that
+   *  map records the goal a reply was labelled under regardless of who prompted it; this set
+   *  narrows to the ones we ourselves instructed). Read by `recordGoalCompletionAction`'s
+   *  degraded-mode fallback and the CLOSE audio-confirm path (`armCloseTranscriptWait`) --
+   *  both require the reply to be OUR OWN instructed one, never an ambient automatic reply,
+   *  before assuming its silence means "spoken but unheard" rather than "never asked at
+   *  all". Never pruned -- bounded by the session's own reply count. */
+  private readonly instructedReplyIds = new Set<string>();
+  /** Occurrence-4 follow-on (see the class-field doc comment above): the server clock time of
+   *  the most recently observed `reply.done` (any status), and whether that reply was one of
+   *  OUR OWN instructed replies -- read once, synchronously, by the very next `reply.started`
+   *  to compute that new reply's own gap into `replyFollowsInstructedDoneMs`. */
+  private lastAnyReplyDoneAtMs: number | null = null;
+  private lastAnyReplyDoneWasInstructed = false;
+  /** Per reply id: milliseconds since the previous reply's own `reply.done`, but ONLY when
+   *  that previous reply was one of ours (`lastAnyReplyDoneWasInstructed`) -- null otherwise
+   *  (no prior reply.done yet, or the previous one was AssemblyAI's own). Snapshotted once,
+   *  at this reply's own `reply.started`, and read later (if this reply goes on to strike) by
+   *  `recordDegradedStrike` for the `degraded_strike` diag's `follows_instructed_reply_done_ms`
+   *  field. Never pruned -- bounded by the session's own reply count. */
+  private readonly replyFollowsInstructedDoneMs = new Map<string, number | null>();
+
   /** Design E (2026-09-15, turn-order design change -- docs/TEST-PLAN.md "The turn order
    *  design change (E)"): the JSON key (`JSON.stringify(goal)`, same convention
    *  `questionReaskGoalKey`/`previousGoalKey` already use) of the last QUESTION_GOALS
@@ -886,6 +976,99 @@ export class CallSession {
   private isFreshQuestionGoal(goal: PhrasingGoal): boolean {
     if (!QUESTION_GOALS.has(goal.code)) return false;
     return JSON.stringify(goal) !== this.lastAskedQuestionKey;
+  }
+
+  /** DEGRADED-TRANSCRIPTS mode: called once, from `transcript.agent`, whenever the chunk just
+   *  recorded is non-empty -- proof the agent-transcript channel is (still, or again) alive.
+   *  Resets an in-progress (sub-threshold) strike streak back to zero regardless of whether
+   *  the mode was ever actually on, and turns the mode off (logging `transcripts_recovered`
+   *  exactly once) if it was. */
+  private noteAgentTranscriptSeen(replyId: string): void {
+    this.degradedStrikeCount = 0;
+    this.degradedStrikeReplyIds = [];
+    this.degradedStreakStartTMs = null;
+    if (this.degradedTranscriptsMode) {
+      this.degradedTranscriptsMode = false;
+      this.diag('transcripts_recovered', { reply_id: replyId });
+    }
+  }
+
+  /** DEGRADED-TRANSCRIPTS mode: the single place a strike is actually counted, from either
+   *  `armDegradedStrikeCheck` (at reply.done, after the late-transcript wait) or
+   *  `armDegradedInflightStrikeCheck` (while still in flight, past
+   *  DEGRADED_INFLIGHT_STRIKE_MS) -- see the class-field doc comment above
+   *  `DEGRADED_MODE_STRIKE_THRESHOLD` for the dedup guarantee and the diag shapes. */
+  private recordDegradedStrike(replyId: string, detail: { in_flight: boolean }): void {
+    if (this.repliesCountedAsDegradedStrike.has(replyId)) return; // one strike per reply, however it was caught
+    this.repliesCountedAsDegradedStrike.add(replyId);
+    if (this.degradedStrikeCount === 0) this.degradedStreakStartTMs = this.nowT();
+    this.degradedStrikeCount += 1;
+    this.degradedStrikeReplyIds.push(replyId);
+    this.diag('degraded_strike', {
+      reply_id: replyId,
+      in_flight: detail.in_flight,
+      follows_instructed_reply_done_ms: this.replyFollowsInstructedDoneMs.get(replyId) ?? null,
+      strike_count: this.degradedStrikeCount,
+    });
+    if (this.degradedTranscriptsMode) return; // already on -- nothing more to log
+    if (this.degradedStrikeCount < CallSession.DEGRADED_MODE_STRIKE_THRESHOLD) return;
+    this.degradedTranscriptsMode = true;
+    this.diag('transcripts_degraded', {
+      reply_ids: [...this.degradedStrikeReplyIds],
+      since_t_ms: this.degradedStreakStartTMs,
+    });
+  }
+
+  /** DEGRADED-TRANSCRIPTS mode, path (a): armed from `reply.done` for every COMPLETED reply
+   *  that had real audio relayed -- gives a late transcript chunk the SAME grace window
+   *  `armCloseTranscriptWait`/`armQuestionTranscriptWait` already give one
+   *  (`DEGRADED_STRIKE_WAIT_MS`, 1500ms) before concluding this reply really produced none.
+   *  Deliberately reads live state at fire time (never a snapshot): if this same reply's
+   *  transcript arrived (via `noteAgentTranscriptSeen`) or `repliesWithDone`/`ended` says
+   *  there's nothing left to check, this is a no-op. Runs independently of, and never blocks
+   *  or delays, the CLOSE/QUESTION_GOALS-specific wait mechanisms already checking the exact
+   *  same transcript for their own, unrelated reasons. */
+  private armDegradedStrikeCheck(replyId: string): void {
+    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+      this.degradedStrikeTimers.delete(timer);
+      if (this.ended) return;
+      const transcript = this.replyTranscripts.get(replyId) ?? '';
+      if (transcript.trim().length > 0) return; // arrived within the wait -- healthy, no strike
+      this.recordDegradedStrike(replyId, { in_flight: false });
+    }, CallSession.DEGRADED_STRIKE_WAIT_MS);
+    timer.unref?.();
+    this.degradedStrikeTimers.add(timer);
+  }
+
+  /** DEGRADED-TRANSCRIPTS mode, path (b) (occurrence 4, 2026-09-16T21-02-41-single-wrong-
+   *  answer, PROVEN: a single automatic reply ran 34 SECONDS with audio and no transcript
+   *  while the verdict sealed and CLOSE rendered): armed from the FIRST relayed audio frame
+   *  of every reply (`reply.audio`'s own `reply.audio.first` bookkeeping) -- catches a reply
+   *  that is still running, well before its own (possibly very distant) `reply.done` would
+   *  ever let `armDegradedStrikeCheck` see it. Re-checks at fire time that this is still the
+   *  CURRENT reply (`currentReplyId`, not superseded by a newer one) and that it has not
+   *  already finished (`repliesWithDone` -- once it has, `armDegradedStrikeCheck` alone owns
+   *  it; `recordDegradedStrike`'s own dedup makes this belt-and-braces, not load-bearing). */
+  private armDegradedInflightStrikeCheck(replyId: string): void {
+    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+      this.degradedStrikeTimers.delete(timer);
+      if (this.ended) return;
+      if (this.repliesWithDone.has(replyId)) return; // finished already -- the reply.done path owns it
+      if (this.currentReplyId !== replyId) return; // superseded by a newer reply -- stale check
+      const transcript = this.replyTranscripts.get(replyId) ?? '';
+      if (transcript.trim().length > 0) return; // healthy
+      this.recordDegradedStrike(replyId, { in_flight: true });
+    }, CallSession.DEGRADED_INFLIGHT_STRIKE_MS);
+    timer.unref?.();
+    this.degradedStrikeTimers.add(timer);
+  }
+
+  /** Cancels every pending strike-check timer (both paths) -- called once, from `end()`.
+   *  Belt-and-braces only: each callback already re-checks `this.ended` at fire time, so a
+   *  timer left uncleared could never act on a call that has already ended either way. */
+  private clearDegradedStrikeTimers(): void {
+    for (const timer of this.degradedStrikeTimers) clearTimeout(timer);
+    this.degradedStrikeTimers.clear();
   }
 
   private clearCloseTimers(): void {
@@ -1156,7 +1339,13 @@ export class CallSession {
    *  is ever in flight at a time -- but defensive) replaces the pending wait, the same "latest
    *  wins" convention `armCloseRetryTimer`/`maybeArmCloseOnTranscript` already use elsewhere
    *  in this file. */
-  private armCloseTranscriptWait(replyId: string): void {
+  /** `degradedAtReplyDone`: a SNAPSHOT of `degradedTranscriptsMode`, taken by
+   *  `scheduleCloseIfNeeded` synchronously at this reply's own `reply.done` (never the LIVE
+   *  value re-read when this timer's callback fires, CLOSE_TRANSCRIPT_WAIT_MS later) -- see
+   *  the DEGRADED-TRANSCRIPTS class-field doc comment: this avoids a self-referential edge
+   *  case where THIS very reply's own strike (which can only resolve after this same wait)
+   *  would otherwise be able to flip the mode on just in time to change its own outcome. */
+  private armCloseTranscriptWait(replyId: string, degradedAtReplyDone: boolean): void {
     if (this.closeTranscriptWaitTimer && this.closeTranscriptWaitReplyId === replyId) return;
     if (this.closeTranscriptWaitTimer) {
       clearTimeout(this.closeTranscriptWaitTimer);
@@ -1173,6 +1362,32 @@ export class CallSession {
       if (transcriptMatchesCloseSentence(transcript, sentence)) {
         this.goodbyeConfirmed = true;
         this.goodbyeConfirmedReplyId = replyId;
+        this.beginCloseGrace();
+        return;
+      }
+      // DEGRADED-TRANSCRIPTS mode (2026-09-16, PROVEN live: a CLOSE reply started with
+      // audio, reached reply.done with no transcript, so `transcriptMatchesCloseSentence`
+      // never confirmed it, CLOSE was re-sent, and the caller heard duplicate goodbyes): once
+      // the channel is already known degraded, a CLOSE reply we ourselves instructed, that
+      // started and produced real audio but still has no transcript even after this full
+      // wait, is a channel outage -- not evidence the goodbye was never spoken. Confirms from
+      // audio alone (`close_confirmed_by_audio`) instead of re-sending an already-spoken
+      // goodbye. LAW 2 is unaffected: the verdict and containment already ran the instant
+      // CLOSE first rendered, long before this -- this only decides how long the wire stays
+      // open trying to confirm a goodbye that was, in all likelihood, already heard.
+      if (
+        degradedAtReplyDone &&
+        (this.replyAudioBytes.get(replyId) ?? 0) > 0 &&
+        this.instructedReplyIds.has(replyId) &&
+        this.replyGoalAtStart.get(replyId) === 'CLOSE'
+      ) {
+        this.diag('close_confirmed_by_audio', { reply_id: replyId });
+        this.goodbyeConfirmed = true;
+        this.goodbyeConfirmedReplyId = replyId;
+        if (this.closeRetryTimer) {
+          clearTimeout(this.closeRetryTimer);
+          this.closeRetryTimer = null;
+        }
         this.beginCloseGrace();
         return;
       }
@@ -1329,7 +1544,10 @@ export class CallSession {
       return;
     }
 
-    this.armCloseTranscriptWait(replyId);
+    // DEGRADED-TRANSCRIPTS mode: snapshotted here, synchronously, at THIS reply's own
+    // reply.done -- see `armCloseTranscriptWait`'s own doc comment on `degradedAtReplyDone`
+    // for why this must be a snapshot, never re-read live inside that later callback.
+    this.armCloseTranscriptWait(replyId, this.degradedTranscriptsMode);
   }
 
   constructor(opts: CallSessionOpts) {
@@ -1430,6 +1648,7 @@ export class CallSession {
     }
     this.ended = true;
     this.clearCloseTimers();
+    this.clearDegradedStrikeTimers();
     // Red team item 4 (founder ruling, 2026-09-09): before anything else about ending the
     // call, record the structured fact that it ended -- LAW 3 forbids the SERVER from
     // deciding what that means (a rejected first attempt at this fix, branch
@@ -1761,6 +1980,10 @@ export class CallSession {
           // Round 4, requirement 7: check the instant this chunk arrives, not only at
           // reply.done -- see `maybeArmCloseOnTranscript`'s own doc comment.
           this.maybeArmCloseOnTranscript(evt.reply_id);
+          // DEGRADED-TRANSCRIPTS mode: a non-empty chunk is proof the agent-transcript
+          // channel is (still, or again) alive -- see `noteAgentTranscriptSeen`'s own doc
+          // comment.
+          if (evt.text.trim().length > 0) this.noteAgentTranscriptSeen(evt.reply_id);
         }
         // Flight recorder: role, length, and text all recorded. This is diagnostics (not
         // evidence per LAW 4) -- the text is recorded so live calls can be analyzed post-hoc
@@ -1789,8 +2012,25 @@ export class CallSession {
         // (this reply arose from ordinary caller-turn-driven flow, not our own ask) does
         // `this.last.goal.code` -- the goal in force at this exact instant, before this
         // event's own `tick()` runs -- correctly describe what it was phrased under.
-        const requestedGoal = this.replyCreateAwaitingStart ? this.pendingRequestedGoal : (this.last?.goal?.code ?? null);
+        // DEGRADED-TRANSCRIPTS mode: captured before `replyCreateAwaitingStart` is cleared
+        // below -- true exactly when THIS reply is the one we ourselves asked AssemblyAI to
+        // speak (see `instructedReplyIds`'s own doc comment), never an ambient automatic
+        // reply that merely happens to render under the current goal.
+        const wasInstructedReply = this.replyCreateAwaitingStart;
+        const requestedGoal = wasInstructedReply ? this.pendingRequestedGoal : (this.last?.goal?.code ?? null);
         if (requestedGoal) this.replyGoalAtStart.set(evt.reply_id, requestedGoal);
+        if (wasInstructedReply) this.instructedReplyIds.add(evt.reply_id);
+        // Occurrence-4 follow-on (see the DEGRADED-TRANSCRIPTS class-field doc comment):
+        // records, for THIS reply, how long it started after the previous reply's own
+        // reply.done -- but only when that previous reply was one of ours (an ambient
+        // automatic reply following AssemblyAI's own turn-taking is not the signal this
+        // tracks). Read later, only if this reply goes on to strike, by `recordDegradedStrike`.
+        this.replyFollowsInstructedDoneMs.set(
+          evt.reply_id,
+          this.lastAnyReplyDoneWasInstructed && this.lastAnyReplyDoneAtMs !== null
+            ? this.nowT() - this.lastAnyReplyDoneAtMs
+            : null
+        );
         this.replyCreateAwaitingStart = false;
         this.pendingRequestedGoal = null;
         // Round 4, requirement 5: this reply.create (if any was outstanding) is no longer at
@@ -1861,6 +2101,11 @@ export class CallSession {
         if (!this.replyFirstAudioRecorded) {
           this.replyFirstAudioRecorded = true;
           this.diag('reply.audio.first', {});
+          // DEGRADED-TRANSCRIPTS mode, path (b): a reply that is still running well past
+          // DEGRADED_INFLIGHT_STRIKE_MS with no transcript at all is caught here, rather than
+          // waiting for its own (possibly very distant) reply.done -- see
+          // `armDegradedInflightStrikeCheck`'s own doc comment.
+          if (this.currentReplyId) this.armDegradedInflightStrikeCheck(this.currentReplyId);
         }
         return;
 
@@ -1871,6 +2116,21 @@ export class CallSession {
         // `maybeArmCloseOnTranscript` (indirectly, via a later `transcript.agent` event) for
         // it -- see `repliesWithDone`'s own doc comment.
         this.repliesWithDone.add(evt.reply_id);
+        // DEGRADED-TRANSCRIPTS mode, path (a): a completed reply that had real audio relayed
+        // and (after the existing late-transcript wait) still has no transcript counts one
+        // strike -- see `armDegradedStrikeCheck`'s own doc comment. Interrupted replies are
+        // excluded: a caller barge-in cutting a reply short is an unrelated, legitimate
+        // reason for a missing transcript, not a channel-health signal.
+        if (evt.status === 'completed' && (this.replyAudioBytes.get(evt.reply_id) ?? 0) > 0) {
+          this.armDegradedStrikeCheck(evt.reply_id);
+        }
+        // Occurrence-4 follow-on: records this reply's own completion for the NEXT reply's
+        // `reply.started` to compute its gap from -- see `replyFollowsInstructedDoneMs`'s own
+        // doc comment. Read `instructedReplyIds` (never `wasInstructedReply`, a `reply.started`-
+        // scoped local from a different case) so this is correct regardless of which case set
+        // it.
+        this.lastAnyReplyDoneAtMs = this.nowT();
+        this.lastAnyReplyDoneWasInstructed = this.instructedReplyIds.has(evt.reply_id);
         // Idle-timing fix (timing-analysis.md §C): the agent finishing a reply is
         // conversational activity too -- this is what lets the 30s idle window start
         // counting from the moment the agent stops talking (asking a question, saying the
@@ -2054,7 +2314,45 @@ export class CallSession {
     if (status !== 'completed' || !this.last) return;
     const goal: PhrasingGoal = this.last.goal;
     const transcript = this.replyTranscripts.get(replyId) ?? '';
-    const asked = transcriptAsksQuestion(transcript, verbatimQuestionSentence(goal));
+    let asked = transcriptAsksQuestion(transcript, verbatimQuestionSentence(goal));
+    // DEGRADED-TRANSCRIPTS mode: reads the mode value as of THIS reply's own reply.done
+    // (synchronous, before this same reply could ever contribute a strike of its own -- a
+    // strike only resolves DEGRADED_STRIKE_WAIT_MS/DEGRADED_INFLIGHT_STRIKE_MS later, so this
+    // reply's own outcome can never retroactively flip the value read right here). A reply
+    // with real audio and an EMPTY transcript, while the channel is already known degraded,
+    // is very likely a question that WAS spoken but that AssemblyAI simply never transcribed
+    // -- but ONLY if it was OUR OWN instructed reply for THIS exact goal (`instructedReplyIds`
+    // + `replyGoalAtStart` match): an ambient automatic reply we never asked for proves
+    // nothing about whether the question was ever put to the caller at all. Safe under LAW 3:
+    // grading (challenge PASS/FAIL/AMBIGUOUS) still comes exclusively from the CALLER's own
+    // transcript, never from this action -- all `assumed_asked` does is let the engine treat
+    // the question as issued so its own readback/challenge-selection logic advances normally;
+    // an assumed ask that was never actually spoken can only ever lead to an unanswered
+    // challenge later (never a false PASS, never STAGE on its own).
+    //
+    // ONE-TIME benefit of the doubt per rendering: `alreadyReaskedThisRendering` refuses the
+    // assumption once this exact goal rendering has ALREADY needed at least one counted-or-
+    // forgiven re-ask (`questionReaskGoalKey`/`questionReaskCount`/`questionReaskEmptyCount`,
+    // `maybeReaskQuestion`'s own bookkeeping). Two or more CONSECUTIVE silent instructed
+    // replies for the very same still-unresolved rendering is exactly the shape
+    // `QUESTION_REASK_MAX_EMPTY` already exists to bound and give up on -- repeated silence is
+    // a materially weaker signal than a single occurrence, and assuming every one of them was
+    // "spoken but untranscribed" would let a rendering nobody ever actually asked advance
+    // regardless. Only the FIRST completed reply for a rendering (nothing re-asked yet) gets
+    // this assumption; every later one, once degraded, falls through to `maybeReaskQuestion`'s
+    // own (also degraded-suppressed) re-ask bookkeeping instead, which stays PENDING rather
+    // than silently claiming an ask that a repeating pattern of silence makes hard to credit.
+    const alreadyReaskedThisRendering =
+      this.questionReaskGoalKey === JSON.stringify(goal) && (this.questionReaskCount > 0 || this.questionReaskEmptyCount > 0);
+    if (!asked && this.degradedTranscriptsMode && !alreadyReaskedThisRendering && transcript.trim().length === 0) {
+      const hadAudio = (this.replyAudioBytes.get(replyId) ?? 0) > 0;
+      const wasOurInstructedReplyForThisGoal =
+        this.instructedReplyIds.has(replyId) && this.replyGoalAtStart.get(replyId) === goal.code;
+      if (hadAudio && wasOurInstructedReplyForThisGoal) {
+        asked = true;
+        this.diag('assumed_asked', { reply_id: replyId, goal_code: goal.code });
+      }
+    }
     if (goal.code === 'ASK_CHALLENGE' && goal.challenge) {
       if (!asked) return;
       this.logs.actions.push({
@@ -2128,6 +2426,20 @@ export class CallSession {
     if (this.ended || this.goodbyeConfirmed) return;
     if (this.replyCreateAwaitingStart) return; // something else already sent one this turn
     if (!this.last) return;
+    // DEGRADED-TRANSCRIPTS mode: while the agent-transcript channel is known degraded, a
+    // completed reply with no transcript is very likely a spoken-but-untranscribed question,
+    // not evidence the model said nothing -- re-asking on that signal would very plausibly
+    // talk over a caller who already heard (and may already be answering) the real question.
+    // This is checked ONCE, here, at the top -- the entry point EVERY reask decision for this
+    // reply funnels through -- and deliberately reads the CURRENT mode value at this exact,
+    // synchronous instant (before this same reply's own outcome could ever contribute a
+    // strike: a strike only resolves DEGRADED_STRIKE_WAIT_MS/DEGRADED_INFLIGHT_STRIKE_MS
+    // later). Deliberately NOT re-checked again inside `armQuestionReaskTimer`'s own later
+    // callback: a reask already armed here, before the mode flipped, must still be allowed to
+    // fire on schedule -- the mode turning on is itself informed by this exact reply
+    // (whichever one is the CURRENT/2nd consecutive strike), and re-checking live inside the
+    // spaced timer would retroactively cancel a send this same reply had already earned.
+    if (this.degradedTranscriptsMode) return;
 
     const goal = this.last.goal;
     if (!QUESTION_GOALS.has(goal.code)) return;
