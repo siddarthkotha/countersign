@@ -150,48 +150,6 @@ export class CallSession {
    *  stops producing one diag event per tick. Never affects what tick() computes -- only
    *  whether a duplicate gets written to the bundle. */
   private lastEvaluateSignature: string | null = null;
-  /** Finding 1 (2026-09-16 dead-transcript investigation, `scripts/rehearse/reports/
-   *  2026-09-16T17-50-00-miller-patient.diagnostics.json` and `...19-31-28-dana-patient...`):
-   *  `mapServerEvent`'s `default` branch (`aai/session.ts`) silently drops any AssemblyAI
-   *  server message this adapter does not model -- only `RealAaiSocket.stats().unknown_events`
-   *  (a bare running total, no type name, no detail) ever recorded it, and before this fix the
-   *  ONLY place that read it was `end()`, once, after the call was already over. Both PROVEN
-   *  live failures had zero `error`/`session.error` diagnostics and zero JS exceptions caught
-   *  by `recoverFromDispatchError`, yet the agent-transcript channel went dead for 9.3-9.5s
-   *  replies with real audio and never recovered -- exactly the shape an unmodeled/dropped
-   *  server message (or AssemblyAI's own transcript pipeline going silent with no wire signal
-   *  at all) would produce, and exactly what this counter exists to catch. `checkAaiUnknown
-   *  Events` (below) is now called from `handleAaiEvent` on every dispatched event, not just at
-   *  `end()`, so a still-running call's diagnostics bundle shows the drop as it happens. This
-   *  field is the running total as of the last check, so only the DELTA is ever logged (never
-   *  re-reporting the same drops twice).
-   *
-   *  KNOWN GAP, NOT fixed by this change (out of this task's LANE-FILES fence -- only
-   *  `packages/server/src/call/session.ts`, `.../call/prompt.ts`, `packages/server/test/**`):
-   *  every real call's `opts.aai` is `index.ts`'s `PendingAaiSocket`, which implements only
-   *  `send`/`on`/`close` -- it has NO `stats()` method, so `stats?.()` below is `undefined`
-   *  (not a zero count) for every live call today, and this check is a no-op in production
-   *  until `PendingAaiSocket.stats()` is added there, delegating to `this.real?.stats()`.
-   *  PROVEN empirically: both dead-transcript bundles have zero `aai_unknown_events` diag
-   *  entries despite `end()` running its stats-read on every call (`idle_timeout` in both).
-   *  A fuller fix -- a per-message `onUnknownEvent(type, detail)` hook threaded through
-   *  `AaiConnectDeps` (aai/types.ts) and called from `wire()`'s message handler (aai/
-   *  session.ts) with the actual type name and a trimmed detail, instead of only incrementing
-   *  a silent counter -- also needs those two out-of-lane files. This change makes call/
-   *  session.ts ready to surface either fix the moment it lands. */
-  private lastKnownAaiUnknownEvents = 0;
-  /** See `lastKnownAaiUnknownEvents`'s doc comment for the full finding this closes. */
-  private checkAaiUnknownEvents(): void {
-    const stats = this.opts.aai.stats?.();
-    if (!stats) return;
-    if (stats.unknown_events > this.lastKnownAaiUnknownEvents) {
-      this.diag('aai_unknown_events', {
-        unknown_events: stats.unknown_events,
-        new_since_last_check: stats.unknown_events - this.lastKnownAaiUnknownEvents,
-      });
-      this.lastKnownAaiUnknownEvents = stats.unknown_events;
-    }
-  }
   /** aai-observability lane (2026-09-16, item 1): every server message
    *  `opts.aai.onUnhandledMessage` reports (everything `aai/session.ts`'s `mapServerEvent`
    *  does not model, except `transcript.agent.delta` -- see `recordAgentDelta` below for
@@ -218,10 +176,21 @@ export class CallSession {
     }
   }
 
-  /** Called once, from `end()`. See `unhandledMessageCounts`'s own doc comment. */
+  /** Called once, from `end()`. See `unhandledMessageCounts`'s own doc comment. Also
+   *  records known-ignored types (session.updated, transcript.user.delta) with
+   *  ignored: true flag. */
   private recordUnhandledMessageSummary(): void {
     for (const [type, total] of this.unhandledMessageCounts) {
       this.diag('aai_unhandled_message_summary', { type, total });
+    }
+    // aai-observability lane (2026-09-16, finding 2): record known-ignored types with
+    // ignored: true so the bundle shows they were seen and recognized, not dropped without
+    // signal.
+    const ignoredStats = this.opts.aai.ignoredEventStats?.();
+    if (ignoredStats) {
+      for (const [type, total] of ignoredStats) {
+        this.diag('aai_unhandled_message_summary', { type, total, ignored: true });
+      }
     }
   }
 
@@ -1491,15 +1460,10 @@ export class CallSession {
     // the hash resolves.
     this.logCallEnded(reason);
     this.tick();
-    // Finding 1 fix (2026-09-16): `checkAaiUnknownEvents` now runs on every dispatched event
-    // (`handleAaiEvent`) -- this call just catches anything dropped between the last
-    // dispatched event and here, at call end. `stats()` is optional (FakeAaiSocket has none,
-    // since tests only ever emit shapes it knows), so this is a no-op for every fake-AAI call
-    // and every test that doesn't supply one.
-    this.checkAaiUnknownEvents();
     // aai-observability lane (2026-09-16, item 1): the ONE point every unhandled-message
     // type's TRUE total is guaranteed to be recorded, even a type that never crossed
-    // `UNHANDLED_MESSAGE_LOG_CAP` and so never got its own `_capped` notice.
+    // `UNHANDLED_MESSAGE_LOG_CAP` and so never got its own `_capped` notice. Also records
+    // known-ignored types (session.updated, transcript.user.delta) with ignored: true flag.
     this.recordUnhandledMessageSummary();
     this.diag('session_ended', { reason });
     try {
@@ -1618,9 +1582,6 @@ export class CallSession {
    *  way to see it, same as before this fix. */
   private handleAaiEvent(evt: AaiEvent): void {
     if (this.ended) return;
-    // Finding 1 fix (2026-09-16): checked on every dispatched event now, not only once at
-    // `end()` -- see `lastKnownAaiUnknownEvents`'s own doc comment for the full finding.
-    this.checkAaiUnknownEvents();
     try {
       this.dispatchAaiEvent(evt);
     } catch (err) {

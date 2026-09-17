@@ -547,26 +547,58 @@ describe('connectAai', () => {
     });
   });
 
-  it('stats() reports server messages this adapter does not model', async () => {
+  it('stats() reports server messages this adapter does not model, excluding known-ignored types', async () => {
     const { deps, sockets } = makeDeps();
     const aai = await connectAndReady(deps, sockets, 'sess-1');
 
     expect(aai.stats?.()).toEqual({ unknown_events: 0 });
 
+    // transcript.agent.delta gets its own dedicated channel, never increments unknown_events
     sockets[0]!.triggerMessage({ type: 'transcript.agent.delta', reply_id: 'r1', delta: 'hi' });
-    sockets[0]!.triggerMessage({ type: 'session.updated' });
+    expect(aai.stats?.()).toEqual({ unknown_events: 0 });
 
-    expect(aai.stats?.()).toEqual({ unknown_events: 2 });
+    // session.updated is known-ignored, never increments unknown_events
+    sockets[0]!.triggerMessage({ type: 'session.updated' });
+    expect(aai.stats?.()).toEqual({ unknown_events: 0 });
+
+    // An actual unknown type increments the counter
+    sockets[0]!.triggerMessage({ type: 'some.other.type' });
+    expect(aai.stats?.()).toEqual({ unknown_events: 1 });
+
+    // ignoredEventStats() reports the known-ignored types separately
+    expect(aai.ignoredEventStats?.()).toEqual(new Map([['session.updated', 1]]));
   });
 
   // aai-observability lane (2026-09-16, dead-transcript investigation finding 1 continued):
   // `deps.onUnhandledMessage` and `AaiSocket.onUnhandledMessage` are the two channels a
   // message this adapter does not model can reach a caller through -- see both fields' own
   // doc comments (aai/session.ts's AaiConnectDeps, aai/types.ts's AaiSocket) for why both
-  // exist. `transcript.agent.delta` is deliberately excluded from BOTH (it has its own
-  // dedicated channel, tested separately below).
+  // exist. `transcript.agent.delta` and known-ignored types (session.updated,
+  // transcript.user.delta) are deliberately excluded from BOTH (deltas have their own
+  // dedicated channel, ignored types are tracked separately).
   describe('unhandled messages (aai-observability lane, 2026-09-16)', () => {
-    it('calls deps.onUnhandledMessage with the type and a <=200-char JSON slice, for a message mapServerEvent does not model', async () => {
+    it('calls deps.onUnhandledMessage with the type and a <=200-char JSON slice, for a message mapServerEvent does not model (excluding known-ignored types)', async () => {
+      const { deps, sockets } = makeDeps();
+      const calls: [string, string][] = [];
+      deps.onUnhandledMessage = (type, detail) => calls.push([type, detail]);
+      const aai = await connectAndReady(deps, sockets, 'sess-1');
+
+      sockets[0]!.triggerMessage({ type: 'some.unknown.type', config: { voice: 'alba' } });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]![0]).toBe('some.unknown.type');
+      const detail = calls[0]![1];
+      expect(detail.length).toBeLessThanOrEqual(200);
+      expect(JSON.parse(detail)).toEqual({ type: 'some.unknown.type', config: { voice: 'alba' } });
+      // stats() and the deps hook both fire off the very same drop -- proving the delta
+      // count from the earlier test and this one are counting the same event, not two
+      // different mechanisms.
+      expect(aai.stats?.()).toEqual({ unknown_events: 1 });
+      // Known-ignored types do not appear in either stats or calls
+      expect(aai.ignoredEventStats?.()).toEqual(new Map());
+    });
+
+    it('does NOT call deps.onUnhandledMessage for known-ignored types (session.updated, transcript.user.delta)', async () => {
       const { deps, sockets } = makeDeps();
       const calls: [string, string][] = [];
       deps.onUnhandledMessage = (type, detail) => calls.push([type, detail]);
@@ -574,15 +606,9 @@ describe('connectAai', () => {
 
       sockets[0]!.triggerMessage({ type: 'session.updated', config: { voice: 'alba' } });
 
-      expect(calls).toHaveLength(1);
-      expect(calls[0]![0]).toBe('session.updated');
-      const detail = calls[0]![1];
-      expect(detail.length).toBeLessThanOrEqual(200);
-      expect(JSON.parse(detail)).toEqual({ type: 'session.updated', config: { voice: 'alba' } });
-      // stats() and the deps hook both fire off the very same drop -- proving the delta
-      // count from the earlier test and this one are counting the same event, not two
-      // different mechanisms.
-      expect(aai.stats?.()).toEqual({ unknown_events: 1 });
+      expect(calls).toHaveLength(0);
+      expect(aai.stats?.()).toEqual({ unknown_events: 0 });
+      expect(aai.ignoredEventStats?.()).toEqual(new Map([['session.updated', 1]]));
     });
 
     it('truncates detail to 200 chars for a large unmodelled message, without throwing', async () => {
@@ -591,7 +617,7 @@ describe('connectAai', () => {
       deps.onUnhandledMessage = (type, detail) => calls.push([type, detail]);
       await connectAndReady(deps, sockets, 'sess-1');
 
-      sockets[0]!.triggerMessage({ type: 'session.updated', huge: 'x'.repeat(500) });
+      sockets[0]!.triggerMessage({ type: 'some.unknown.type', huge: 'x'.repeat(500) });
 
       expect(calls).toHaveLength(1);
       expect(calls[0]![1].length).toBe(200);
@@ -608,15 +634,19 @@ describe('connectAai', () => {
       expect(calls).toHaveLength(0);
     });
 
-    it('AaiSocket.onUnhandledMessage receives the same (type, detail) a caller registered before the message arrived', async () => {
+    it('AaiSocket.onUnhandledMessage receives the same (type, detail) a caller registered before the message arrived, excluding known-ignored types', async () => {
       const { deps, sockets } = makeDeps();
       const aai = await connectAndReady(deps, sockets, 'sess-1');
       const calls: [string, string][] = [];
       aai.onUnhandledMessage?.((type, detail) => calls.push([type, detail]));
 
-      sockets[0]!.triggerMessage({ type: 'session.updated' });
+      sockets[0]!.triggerMessage({ type: 'some.unknown.type' });
 
-      expect(calls).toEqual([['session.updated', JSON.stringify({ type: 'session.updated' })]]);
+      expect(calls).toEqual([['some.unknown.type', JSON.stringify({ type: 'some.unknown.type' })]]);
+
+      // Known-ignored types are never passed to this handler
+      sockets[0]!.triggerMessage({ type: 'session.updated' });
+      expect(calls).toHaveLength(1); // Still just the one from above
     });
 
     it("falls back to type 'unknown' for a message with no string type field at all", async () => {
@@ -649,7 +679,8 @@ describe('connectAai', () => {
         ['a1', 'Hel'],
         ['a1', 'lo'],
       ]);
-      expect(aai.stats?.()).toEqual({ unknown_events: 2 });
+      // transcript.agent.delta uses its own dedicated channel, never increments unknown_events
+      expect(aai.stats?.()).toEqual({ unknown_events: 0 });
     });
   });
 });

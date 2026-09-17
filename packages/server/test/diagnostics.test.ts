@@ -612,12 +612,9 @@ describe('CallSession — onDiagnostic', () => {
     expect(events.some((e) => e.kind === 'session_ended' && (e.detail as { reason: string }).reason === 'cap_reached')).toBe(true);
   });
 
-  it('records session_ended (with reason) and aai_unknown_events (when the socket reports stats) on end', () => {
+  it('records session_ended (with reason) on end (aai_unknown_events diag was removed in aai-observability lane, finding 2)', () => {
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
-    // FakeAaiSocket has no `stats()` -- give this one instance a stub, matching the shape
-    // the real adapter (aai/session.ts's RealAaiSocket) exposes.
-    (aai as unknown as { stats: () => { unknown_events: number } }).stats = () => ({ unknown_events: 3 });
     const events: { kind: string; detail: unknown }[] = [];
     const session = newSession(clock, aai, events);
 
@@ -625,9 +622,6 @@ describe('CallSession — onDiagnostic', () => {
     session.end('caller_ended');
 
     expect(events.some((e) => e.kind === 'session_ended' && (e.detail as { reason: string }).reason === 'caller_ended')).toBe(true);
-    expect(events.some((e) => e.kind === 'aai_unknown_events' && (e.detail as { unknown_events: number }).unknown_events === 3)).toBe(
-      true,
-    );
   });
 
   it('never calls onDiagnostic if it was not supplied (an unwired session behaves exactly as before)', () => {

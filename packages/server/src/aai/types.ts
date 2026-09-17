@@ -16,6 +16,10 @@ export interface AaiSocket {
    *  (which never has unmodeled events, since tests only ever emit shapes it knows) need
    *  not implement it. */
   stats?(): { unknown_events: number };
+  /** aai-observability lane (2026-09-16, finding 2): returns a map of known-ignored message
+   *  types (session.updated, transcript.user.delta) and their occurrence counts per type.
+   *  Optional, same reasoning as `stats()`. */
+  ignoredEventStats?(): Map<string, number>;
   /** Rehearsal-harness debug hook (item: judge-sim finding 2026-09-11, "zero AssemblyAI
    *  socket drops occurred" -- session.resume was never exercised live). Forces the SAME
    *  unexpected-close path a real network drop takes (`RealAaiSocket.handleUnexpectedClose`

@@ -21,6 +21,9 @@ export class FakeAaiSocket implements AaiSocket {
    *  call uses, without a real AssemblyAI connection (LAW: tests never call the live API). */
   private unhandledHandlers: ((type: string, detail: string) => void)[] = [];
   private agentDeltaHandlers: ((reply_id: string, delta: string) => void)[] = [];
+  /** aai-observability lane (2026-09-16, finding 2): track known-ignored types separately
+   *  from unhandled messages, matching RealAaiSocket's behavior. */
+  private ignoredCounts = new Map<string, number>();
 
   send(msg: object): void {
     if (this.closed) return;
@@ -85,5 +88,19 @@ export class FakeAaiSocket implements AaiSocket {
   emitAgentDelta(reply_id: string, delta: string): void {
     if (this.closed) return;
     for (const h of this.agentDeltaHandlers) h(reply_id, delta);
+  }
+
+  /** aai-observability lane (2026-09-16, finding 2): test entry point for emitting
+   *  known-ignored types (session.updated, transcript.user.delta) that should be tracked
+   *  but never call the unhandled-message handlers or fire individual diagnostics. */
+  emitIgnoredMessage(type: string): void {
+    if (this.closed) return;
+    const count = (this.ignoredCounts.get(type) ?? 0) + 1;
+    this.ignoredCounts.set(type, count);
+  }
+
+  /** Returns the count of known-ignored types emitted for this socket. */
+  ignoredEventStats(): Map<string, number> {
+    return this.ignoredCounts;
   }
 }

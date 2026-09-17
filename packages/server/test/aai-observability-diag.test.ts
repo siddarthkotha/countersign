@@ -42,18 +42,18 @@ function newSession(aai: FakeAaiSocket, sent: ServerEvent[], diagEvents: { kind:
 }
 
 describe('aai_unhandled_message (aai-observability lane, 2026-09-16, item 1)', () => {
-  it('logs aai_unhandled_message with {type, detail} for a message FakeAaiSocket reports as unhandled', () => {
+  it('logs aai_unhandled_message with {type, detail} for a message FakeAaiSocket reports as unhandled (excluding known-ignored types)', () => {
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
     const diagEvents: { kind: string; detail: unknown }[] = [];
     const session = newSession(aai, sent, diagEvents);
     session.start();
 
-    aai.emitUnhandledMessage('session.updated', '{"type":"session.updated"}');
+    aai.emitUnhandledMessage('some.unknown.type', '{"type":"some.unknown.type"}');
 
     const entries = diagEvents.filter((e) => e.kind === 'aai_unhandled_message');
     expect(entries).toHaveLength(1);
-    expect(entries[0]!.detail).toEqual({ type: 'session.updated', detail: '{"type":"session.updated"}' });
+    expect(entries[0]!.detail).toEqual({ type: 'some.unknown.type', detail: '{"type":"some.unknown.type"}' });
   });
 
   it('rate-limits per type: the first 20 occurrences of a type each log individually, the 21st logs one _capped notice, and nothing further logs live', () => {
@@ -64,14 +64,14 @@ describe('aai_unhandled_message (aai-observability lane, 2026-09-16, item 1)', (
     session.start();
 
     for (let i = 0; i < 25; i++) {
-      aai.emitUnhandledMessage('session.updated', `{"n":${i}}`);
+      aai.emitUnhandledMessage('some.unknown.type', `{"n":${i}}`);
     }
 
     const logged = diagEvents.filter((e) => e.kind === 'aai_unhandled_message');
     expect(logged).toHaveLength(20);
     const capped = diagEvents.filter((e) => e.kind === 'aai_unhandled_message_capped');
     expect(capped).toHaveLength(1);
-    expect(capped[0]!.detail).toEqual({ type: 'session.updated' });
+    expect(capped[0]!.detail).toEqual({ type: 'some.unknown.type' });
   });
 
   it('rate-limits independently per type -- a second, rare type is never capped by the first type crossing its own cap', () => {
@@ -81,11 +81,11 @@ describe('aai_unhandled_message (aai-observability lane, 2026-09-16, item 1)', (
     const session = newSession(aai, sent, diagEvents);
     session.start();
 
-    for (let i = 0; i < 25; i++) aai.emitUnhandledMessage('session.updated', `{"n":${i}}`);
-    aai.emitUnhandledMessage('some.other.type', '{"rare":true}');
+    for (let i = 0; i < 25; i++) aai.emitUnhandledMessage('some.unknown.type.a', `{"n":${i}}`);
+    aai.emitUnhandledMessage('some.unknown.type.b', '{"rare":true}');
 
     expect(diagEvents.filter((e) => e.kind === 'aai_unhandled_message_capped')).toHaveLength(1);
-    const other = diagEvents.filter((e) => e.kind === 'aai_unhandled_message' && (e.detail as { type: string }).type === 'some.other.type');
+    const other = diagEvents.filter((e) => e.kind === 'aai_unhandled_message' && (e.detail as { type: string }).type === 'some.unknown.type.b');
     expect(other).toHaveLength(1);
   });
 
@@ -96,17 +96,17 @@ describe('aai_unhandled_message (aai-observability lane, 2026-09-16, item 1)', (
     const session = newSession(aai, sent, diagEvents);
     session.start();
 
-    for (let i = 0; i < 25; i++) aai.emitUnhandledMessage('session.updated', `{"n":${i}}`);
-    aai.emitUnhandledMessage('rare.type', '{}');
-    aai.emitUnhandledMessage('rare.type', '{}');
+    for (let i = 0; i < 25; i++) aai.emitUnhandledMessage('some.unknown.type.a', `{"n":${i}}`);
+    aai.emitUnhandledMessage('some.unknown.type.b', '{}');
+    aai.emitUnhandledMessage('some.unknown.type.b', '{}');
 
     expect(diagEvents.some((e) => e.kind === 'aai_unhandled_message_summary')).toBe(false);
 
     session.end('caller_ended');
 
     const summaries = diagEvents.filter((e) => e.kind === 'aai_unhandled_message_summary');
-    expect(summaries).toContainEqual({ kind: 'aai_unhandled_message_summary', detail: { type: 'session.updated', total: 25 } });
-    expect(summaries).toContainEqual({ kind: 'aai_unhandled_message_summary', detail: { type: 'rare.type', total: 2 } });
+    expect(summaries).toContainEqual({ kind: 'aai_unhandled_message_summary', detail: { type: 'some.unknown.type.a', total: 25 } });
+    expect(summaries).toContainEqual({ kind: 'aai_unhandled_message_summary', detail: { type: 'some.unknown.type.b', total: 2 } });
   });
 
   it('never logs aai_unhandled_message for a transcript.agent.delta emitted through the dedicated delta channel', () => {
@@ -231,5 +231,68 @@ describe('aai_transcript_deltas (aai-observability lane, 2026-09-16, item 3)', (
     const entries = diagEvents.filter((e) => e.kind === 'aai_transcript_deltas');
     expect(entries).toHaveLength(1);
     expect((entries[0]!.detail as { reply_id: string }).reply_id).toBe('a1');
+  });
+});
+
+describe('aai_unhandled_message_summary with known-ignored types (aai-observability lane, 2026-09-16, finding 2)', () => {
+  it('never logs aai_unhandled_message for known-ignored types (session.updated, transcript.user.delta)', () => {
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(aai, sent, diagEvents);
+    session.start();
+
+    aai.emitIgnoredMessage('session.updated');
+    aai.emitIgnoredMessage('transcript.user.delta');
+
+    expect(diagEvents.filter((e) => e.kind === 'aai_unhandled_message')).toHaveLength(0);
+  });
+
+  it('records known-ignored types in summary at end() with ignored: true flag', () => {
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(aai, sent, diagEvents);
+    session.start();
+
+    aai.emitIgnoredMessage('session.updated');
+    aai.emitIgnoredMessage('session.updated');
+    aai.emitIgnoredMessage('transcript.user.delta');
+
+    session.end('caller_ended');
+
+    const summaries = diagEvents.filter((e) => e.kind === 'aai_unhandled_message_summary');
+    expect(summaries).toContainEqual({
+      kind: 'aai_unhandled_message_summary',
+      detail: { type: 'session.updated', total: 2, ignored: true },
+    });
+    expect(summaries).toContainEqual({
+      kind: 'aai_unhandled_message_summary',
+      detail: { type: 'transcript.user.delta', total: 1, ignored: true },
+    });
+  });
+
+  it('mixes unknown types and ignored types in the same summary', () => {
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(aai, sent, diagEvents);
+    session.start();
+
+    aai.emitUnhandledMessage('some.unknown.type', '{}');
+    aai.emitIgnoredMessage('session.updated');
+
+    session.end('caller_ended');
+
+    const summaries = diagEvents.filter((e) => e.kind === 'aai_unhandled_message_summary');
+    expect(summaries).toHaveLength(2);
+    expect(summaries).toContainEqual({
+      kind: 'aai_unhandled_message_summary',
+      detail: { type: 'some.unknown.type', total: 1 },
+    });
+    expect(summaries).toContainEqual({
+      kind: 'aai_unhandled_message_summary',
+      detail: { type: 'session.updated', total: 1, ignored: true },
+    });
   });
 });

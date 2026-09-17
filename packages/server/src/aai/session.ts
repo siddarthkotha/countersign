@@ -160,6 +160,15 @@ function parseMessage(data: unknown): Record<string, unknown> | null {
   }
 }
 
+/** Set of message types that are known but not modeled (aai-observability lane, 2026-09-16,
+ *  dead-transcript investigation finding 2: session.updated and transcript.user.delta are
+ *  routine and do not indicate unmodeled server messages this adapter should surface).
+ *  `session.updated` is the acknowledgement of our session.update (6-12 per call).
+ *  `transcript.user.delta` is the user-side streaming text delta (~20-40 per call). Both
+ *  must not increment the unknown_events counter or fire the unhandled-message hook, but
+ *  each must appear once per type in the end-of-session summary with `ignored: true` flag. */
+const KNOWN_IGNORED_TYPES = new Set<string>(['session.updated', 'transcript.user.delta']);
+
 /** Maps one already-parsed server message to an AaiEvent, or null for anything this adapter
  *  does not model (session.updated, the transcript.*.delta streaming events, and any future
  *  event type AssemblyAI adds) -- unknown types are ignored, never thrown on. */
@@ -230,6 +239,11 @@ class RealAaiSocket implements AaiSocket {
   /** Server messages whose type this adapter does not model -- never used for control
    *  flow, kept only so a caller (e.g. the live smoke script) can report it if useful. */
   unknownEventCount = 0;
+  /** aai-observability lane (2026-09-16, finding 2): count of known-but-ignored message
+   *  types per type name (session.updated, transcript.user.delta). These do NOT increment
+   *  `unknownEventCount` or fire the unhandled-message hook, but must appear in the
+   *  end-of-session summary with `ignored: true` flag. */
+  private readonly ignoredEventCounts = new Map<string, number>();
   /** aai-observability lane (2026-09-16): subscribers for `AaiSocket.onUnhandledMessage`
    *  (every unmodelled message except `transcript.agent.delta`) and
    *  `AaiSocket.onAgentTranscriptDelta` (that one type, separately) -- see both methods'
@@ -265,28 +279,36 @@ class RealAaiSocket implements AaiSocket {
       }
       const evt = mapServerEvent(msg);
       if (!evt) {
-        this.unknownEventCount += 1;
+        const rawType = typeof msg.type === 'string' ? msg.type : 'unknown';
         // aai-observability lane (2026-09-16): surface WHAT was dropped, not just that
         // something was -- `transcript.agent.delta` (PROVEN fields, docs/aai-docs-check-
         // 2026-09-01.md line 85: reply_id, item_id, delta, start_ms, end_ms) gets its own
         // dedicated, aggregated channel (see `onAgentTranscriptDelta`'s own doc comment for
-        // why); every other unmodelled type goes through the generic, rate-limited channel
-        // instead.
-        const rawType = typeof msg.type === 'string' ? msg.type : 'unknown';
+        // why) and does not increment the unknown counter.
         if (rawType === 'transcript.agent.delta') {
           const replyId = typeof msg.reply_id === 'string' ? msg.reply_id : 'unknown';
           const delta = typeof msg.delta === 'string' ? msg.delta : '';
           for (const h of this.agentDeltaHandlers) h(replyId, delta);
-        } else {
-          let detail: string;
-          try {
-            detail = JSON.stringify(msg).slice(0, 200);
-          } catch {
-            detail = '<unserializable>';
-          }
-          this.deps.onUnhandledMessage?.(rawType, detail);
-          for (const h of this.unhandledHandlers) h(rawType, detail);
+          return;
         }
+        // aai-observability lane (2026-09-16, finding 2): session.updated and
+        // transcript.user.delta are known-ignored types that must not increment the
+        // unknown counter or fire the unhandled-message hook, but must appear in the
+        // end-of-session summary with ignored: true.
+        if (KNOWN_IGNORED_TYPES.has(rawType)) {
+          const count = (this.ignoredEventCounts.get(rawType) ?? 0) + 1;
+          this.ignoredEventCounts.set(rawType, count);
+          return;
+        }
+        this.unknownEventCount += 1;
+        let detail: string;
+        try {
+          detail = JSON.stringify(msg).slice(0, 200);
+        } catch {
+          detail = '<unserializable>';
+        }
+        this.deps.onUnhandledMessage?.(rawType, detail);
+        for (const h of this.unhandledHandlers) h(rawType, detail);
         return;
       }
       this.emit(evt);
@@ -403,6 +425,13 @@ class RealAaiSocket implements AaiSocket {
    *  nothing and lets the live smoke script (or any future ops surface) report it. */
   stats(): { unknown_events: number } {
     return { unknown_events: this.unknownEventCount };
+  }
+
+  /** aai-observability lane (2026-09-16, finding 2): visibility into known-ignored message
+   *  types (session.updated, transcript.user.delta) so CallSession can include them in the
+   *  end-of-session summary with ignored: true flag. */
+  ignoredEventStats(): Map<string, number> {
+    return this.ignoredEventCounts;
   }
 
   /** aai-observability lane (2026-09-16): see `AaiSocket.onUnhandledMessage`'s doc comment
