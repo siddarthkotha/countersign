@@ -2609,6 +2609,29 @@
       "held_because": "pre-existing; needs a live sample of a garbled goodbye before designing a looser match (token-bag) without reopening cross-match",
       "priority": "P2",
       "note": "2026-09-16 6:52 PM CDT"
+    },
+    {
+      "id": "DEAD-AGENT-TRANSCRIPTS",
+      "title": "live: after an untranscribed automatic reply, AssemblyAI delivers no agent transcripts for the rest of the call (miller-2 on 41, dana on 42); server then re-asks blind and the call idles out",
+      "status": "held",
+      "priority": "P0",
+      "note": "2026-09-16 7:53 PM CDT: e8a9b5a landed; aai-observability lane running",
+      "held_because": "mechanism UNKNOWN until the observability push (43) records the next occurrence live; then fix (delta assembly, degraded-session handling, or session.update guard) from evidence"
+    },
+    {
+      "id": "AAI-OBSERVABILITY",
+      "title": "log unhandled AssemblyAI message types with detail, stats() on PendingAaiSocket, per-reply delta accounting when a reply ends without a final transcript",
+      "status": "done",
+      "priority": "P0",
+      "note": "2026-09-16 8:05 PM CDT: landed 42ea143; push 43 pending"
+    },
+    {
+      "id": "SESSION-UPDATE-MID-REPLY",
+      "title": "applyEvaluate sends session.update with no reply-in-flight guard (one PROVEN mid-reply send in miller-2); causal link to transcript loss UNKNOWN",
+      "status": "held",
+      "held_because": "wait for the observability evidence before changing what is sent to AssemblyAI",
+      "priority": "P1",
+      "note": "2026-09-16 7:53 PM CDT"
     }
   ]
 }
