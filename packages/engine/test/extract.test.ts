@@ -348,4 +348,69 @@ describe('extractCuedNames', () => {
     const text = 'Wire the check today. Also, send flowers to Elena for the funeral.';
     expect(extractCuedNames(text)).toEqual([{ field: 'beneficiary', value: 'Elena', quote: 'Elena' }]);
   });
+
+  // PROVEN false positives opened by the round-2 widening (review, 2026-09-17): the bounded
+  // filler happily swallowed an idiom ("send my regards to Marcus" -- nobody is naming
+  // Marcus a payment beneficiary) and a bare pronoun object ("transfer me to Elena" -- a
+  // request to be transferred to a person, not a beneficiary claim). The old (pre-widening)
+  // pattern rejected both since it required the verb to be followed immediately by "to
+  // NAME" with no filler at all. Fix: the filler's FIRST word must not be a bare pronoun or
+  // possessive (me/us/him/her/them/my/our/your/his/their), and the filler must not contain
+  // an idiom word (regards/love/thanks/best/greetings) anywhere.
+  it.each(['send my regards to Marcus', 'give my love to Elena', 'send thanks to Marcus', 'best regards to Elena', 'send greetings to Marcus'])(
+    'does not read an idiom as a beneficiary claim: %s',
+    (text) => {
+      expect(extractCuedNames(text)).toEqual([]);
+    },
+  );
+
+  it('does not read a bare pronoun object as a beneficiary claim: "transfer me to Elena"', () => {
+    expect(extractCuedNames('transfer me to Elena')).toEqual([]);
+  });
+
+  it.each(['send us to Marcus', 'wire him to Elena', 'transfer them to Marcus'])(
+    'does not read other bare pronoun objects as a beneficiary claim: %s',
+    (text) => {
+      expect(extractCuedNames(text)).toEqual([]);
+    },
+  );
+
+  // Still green: an ordinary short object word that is NOT a pronoun/possessive still works.
+  it.each([
+    ['wire $84,500 to Meridian Supply', 'Meridian Supply'],
+    ['send it to Meridian Supply', 'Meridian Supply'],
+  ])('keeps matching an ordinary filler: %s → %s', (text, value) => {
+    expect(extractCuedNames(text)).toEqual([{ field: 'beneficiary', value, quote: value }]);
+  });
+  it('keeps matching the verbatim free-play self-correction line', () => {
+    const text =
+      'Hi, this is Dana Whitfield from Corporate Treasury. I need to request a wire transfer of $84,100— ah, sorry, wait, I meant $84,500 to Meridian Supply.';
+    expect(extractCuedNames(text)).toEqual([{ field: 'beneficiary', value: 'Meridian Supply', quote: 'Meridian Supply' }]);
+  });
+
+  // PROVEN false positive opened by the round-2 widening: a negated verb ("do not wire...")
+  // right before "to NAME" still matched, because the pattern never looked at what preceded
+  // the verb -- the old (pre-widening) pattern didn't match this sentence at all (no filler
+  // support), so this is a genuinely new gap, not a regression of prior behavior. Fix: a
+  // negation word/phrase (not/never/don't/do not/won't/shouldn't/can't/cannot/no need to)
+  // immediately before the verb, or within the three words before it, suppresses a
+  // beneficiary claim for THAT clause -- but a later, non-negated clause in the same
+  // utterance still extracts normally.
+  it('does not read a negated verb as a beneficiary claim, but a later un-negated clause still matches', () => {
+    const text = 'do not wire anything to Northgate, send it to Meridian';
+    expect(extractCuedNames(text)).toEqual([{ field: 'beneficiary', value: 'Meridian', quote: 'Meridian' }]);
+  });
+
+  it.each([
+    'never wire anything to Northgate',
+    "don't wire anything to Northgate",
+    "do not wire anything to Northgate",
+    "won't wire anything to Northgate",
+    "shouldn't wire anything to Northgate",
+    "can't wire anything to Northgate",
+    'cannot wire anything to Northgate',
+    'there is no need to wire anything to Northgate',
+  ])('does not read a negated verb as a beneficiary claim: %s', (text) => {
+    expect(extractCuedNames(text)).toEqual([]);
+  });
 });

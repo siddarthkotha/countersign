@@ -121,7 +121,57 @@ function isDepartmentName(name: string): boolean {
   return words.length > 1 || words.some((w) => DEPARTMENT_STOPLIST.has(w));
 }
 
-const CUE_PATTERNS: { field: CuedNameField; re: RegExp }[] = [
+// PROVEN false-positive vectors (review, 2026-09-17, run by executing the regex) opened by
+// the "verb ... to NAME" filler widening above: "send my regards to Marcus" and "transfer
+// me to Elena" both matched even though the OLD (pre-widening) pattern rejected them (it
+// required the verb to be followed immediately by "to NAME", no filler at all) -- so a
+// generic filler needs its own guardrails, not just a length cap. A filler is rejected
+// (the whole beneficiary match is dropped for that verb) if:
+//   (a) its FIRST word is a bare pronoun or possessive object ("me"/"us"/"him"/"her"/
+//       "them"/"my"/"our"/"your"/"his"/"their") -- "transfer me to Elena" is a request to be
+//       transferred to a person, not a beneficiary claim; an ordinary object word like "it"
+//       is NOT on this list, so "send it to Meridian Supply" is unaffected.
+//   (b) it contains an idiom word ("regards"/"love"/"thanks"/"best"/"greetings") anywhere --
+//       "send my regards to Marcus" and "give my love to Elena" are pleasantries, not wires.
+const BENEFICIARY_FILLER_PRONOUN_STOPLIST = new Set(['me', 'us', 'him', 'her', 'them', 'my', 'our', 'your', 'his', 'their']);
+const BENEFICIARY_FILLER_IDIOM_RE = /\b(?:regards|love|thanks|best|greetings)\b/i;
+
+function beneficiaryFillerIsClean(filler: string): boolean {
+  const trimmed = filler.trim();
+  if (trimmed.length === 0) return true;
+  const firstWord = trimmed.split(/\s+/)[0]!.toLowerCase().replace(/[^a-z']/g, '');
+  if (BENEFICIARY_FILLER_PRONOUN_STOPLIST.has(firstWord)) return false;
+  return !BENEFICIARY_FILLER_IDIOM_RE.test(trimmed);
+}
+
+// PROVEN false positive (review, 2026-09-17): "do not wire anything to Northgate, send it
+// to Meridian" matched Northgate -- the pattern never looked at what preceded the verb, so
+// a negated clause ("do not wire...") was read the same as an instruction. The OLD
+// (pre-widening) pattern didn't match this sentence at all (it has no filler support), so
+// this is a genuinely new gap opened by the filler widening, not a prior regression. A
+// negation word or phrase in the (up to) three words immediately before the verb suppresses
+// the beneficiary claim for THAT clause only -- a later, un-negated clause in the same
+// utterance ("send it to Meridian") still extracts normally, since only the words directly
+// before EACH verb occurrence are checked.
+const BENEFICIARY_NEGATION_RE = /\b(?:not|never|don'?t|do not|won'?t|shouldn'?t|can'?t|cannot|no need to)\b/i;
+
+function verbIsNegated(text: string, verbIndex: number): boolean {
+  const before = text.slice(0, verbIndex).trim();
+  if (before.length === 0) return false;
+  const lastThreeWords = before.split(/\s+/).slice(-3).join(' ');
+  return BENEFICIARY_NEGATION_RE.test(lastThreeWords);
+}
+
+/** Validates a "verb ... to NAME" beneficiary match against the two false-positive guards
+ *  above. `m.groups.filler` is the captured run of words between the verb and "to" (see the
+ *  regex below); `m.index` is where the verb itself starts. */
+function validateBeneficiaryVerbToName(m: RegExpExecArray, text: string): boolean {
+  const filler = m.groups?.filler ?? '';
+  if (!beneficiaryFillerIsClean(filler)) return false;
+  return !verbIsNegated(text, m.index);
+}
+
+const CUE_PATTERNS: { field: CuedNameField; re: RegExp; validate?: (m: RegExpExecArray, text: string) => boolean }[] = [
   { field: 'approver', re: new RegExp(`\\bapproved by\\s+(${NAME})`, 'g') },
   // fix (P2, 2026-09-14, rehearsal report 2026-09-14T18-05-49-single-wrong-answer.md): a
   // caller correcting themselves said "...wait, I mean Elena Park approved it." -- the name
@@ -157,7 +207,8 @@ const CUE_PATTERNS: { field: CuedNameField; re: RegExp }[] = [
   // full stop into a later, unrelated sentence in the same utterance.
   {
     field: 'beneficiary',
-    re: new RegExp(`\\b(?:pay|wire|send|transfer)\\b(?:\\s+(?!\\.)\\S+){0,10}?\\s+to\\s+(${NAME})`, 'g'),
+    re: new RegExp(`\\b(?:pay|wire|send|transfer)\\b(?<filler>(?:\\s+(?!\\.)\\S+){0,10}?)\\s+to\\s+(?<name>${NAME})`, 'g'),
+    validate: validateBeneficiaryVerbToName,
   },
   { field: 'beneficiary', re: new RegExp(`\\bbeneficiary\\b (?:is|will be)\\s+(${NAME})`, 'g') },
   { field: 'beneficiary', re: new RegExp(`\\bvendor\\b (?:is|will be)\\s+(${NAME})`, 'g') },
@@ -183,12 +234,19 @@ function collectCuedNameMatches(text: string): RawCuedNameMatch[] {
   const matches: RawCuedNameMatch[] = [];
   for (let patternIdx = 0; patternIdx < CUE_PATTERNS.length; patternIdx++) {
     const pattern = CUE_PATTERNS[patternIdx]!;
-    const { field, re } = pattern;
+    const { field, re, validate } = pattern;
     const isReversedApproverPattern = field === 'approver' && patternIdx === 1; // The second approver pattern is the reversed one
     re.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {
-      const rawName = m[1]!;
+      // `validate` is only set on the "verb ... to NAME" beneficiary pattern (its own named
+      // capture groups let it inspect the filler and what preceded the verb) -- every other
+      // pattern has no `validate` and behaves exactly as before.
+      if (validate && !validate(m, text)) continue;
+      // A pattern with a named `name` group (currently only the one above, which also has a
+      // `filler` group ahead of it, shifting the positional index) is read from there;
+      // every other pattern still reads the name from its one-and-only capturing group, m[1].
+      const rawName = (m.groups?.name ?? m[1])!;
       const name = trimName(rawName);
       if (name.length === 0) continue;
       // For the reversed approver pattern "(NAME) approved", exclude department names.
