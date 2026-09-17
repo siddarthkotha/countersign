@@ -1831,10 +1831,11 @@
       "id": "STASH-CLEANUP",
       "title": "three verification stash entries left by the ledger lane (*-temp-verify-*, *-verify2-*), already applied, safe to drop; git stash drop is rail-blocked on autopilot",
       "files": [],
-      "status": "held",
+      "status": "done",
       "held_because": "a delete; drop at close with the founder's word",
       "agent_id": "",
-      "started_at": ""
+      "started_at": "",
+      "note": "2026-09-16 5:40 PM CDT: git stash list empty at open, nothing to clean"
     },
     {
       "id": "LEDGER-rereview",
@@ -2209,7 +2210,7 @@
       "title": "45 min free-play batch, ten cases x 3, regrade, classify",
       "files": [],
       "status": "held",
-      "held_because": "after the spike",
+      "held_because": "waits for push 42 (miller dead-stream/close-storm fix) so the 45 min of credit is spent once on the build the founder will play",
       "agent_id": "",
       "started_at": ""
     },
@@ -2401,11 +2402,12 @@
       "id": "REWRITE-INJECTION-FIXTURE",
       "title": "rewrite injection-plus-two-slips-escalates.json as a real ruling-6 proof",
       "files": [],
-      "status": "held",
+      "status": "done",
       "agent_id": "",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
-      "held_because": "new fixture (append-only) with explicit specs on its challenge_issued actions so two wrong answers grade FAIL and the old-tally counter-proof holds; after push 40"
+      "held_because": "new fixture (append-only) with explicit specs on its challenge_issued actions so two wrong answers grade FAIL and the old-tally counter-proof holds; after push 40",
+      "note": "2026-09-16 6:03 PM CDT: landed a031c49 via cherry-pick; old fixture rename/removal remains a founder call"
     },
     {
       "id": "COMMIT-APPROVED-RECORDING",
@@ -2430,11 +2432,12 @@
       "id": "SPIKE-2",
       "title": "second six-call confirmation on deploy 40 vs deploy 36 (goodbye delay, agent lines, wall time)",
       "files": [],
-      "status": "held",
+      "status": "done",
       "agent_id": "",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
-      "held_because": "needs deploy 40 verified; first item next session"
+      "held_because": "needs deploy 40 verified; first item next session",
+      "note": "2026-09-16 6:01 PM CDT: 4/6 pass on deploy 41; docs/SPIKE2-2026-09-16.md"
     },
     {
       "id": "FOUNDER-PLAY-THROUGH-2",
@@ -2444,7 +2447,7 @@
       "agent_id": "",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
-      "held_because": "after SPIKE-2 beats deploy 36; founder ready"
+      "held_because": "needs a build that passes miller twice in a row plus the founder voice; not before push 42"
     },
     {
       "id": "CHEAT-SHEET-ON-LANDING",
@@ -2480,11 +2483,12 @@
       "id": "FLAKE-CREDITS-LEDGER-TEST",
       "title": "creditsLedger.test.ts \"handles missing reports directory gracefully\" times out under load",
       "files": [],
-      "status": "held",
+      "status": "running",
       "agent_id": "",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
-      "held_because": "flaked once in three runs 2026-09-15 3:25 PM and once in a lane run 7:10 AM (5 s timeout scanning 100+ bundles under load); raise the timeout or scan a fixture dir in the test"
+      "held_because": "flaked once in three runs 2026-09-15 3:25 PM and once in a lane run 7:10 AM (5 s timeout scanning 100+ bundles under load); raise the timeout or scan a fixture dir in the test",
+      "note": "2026-09-16 5:46 PM CDT: Haiku worktree lane (autopilot queue item 4)"
     },
     {
       "id": "push-41",
@@ -2495,6 +2499,116 @@
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
       "held_because": ""
+    },
+    {
+      "id": "MILLER-DEAD-STREAM-CLOSE-STORM",
+      "title": "deploy 41 miller call 2: untranscribed re-ask storm talks over the caller 29 s, no caller transcript after 33 s, CLOSE retried 25x unbounded, 45 s dead air after verdict (report 2026-09-16T17-50-00)",
+      "status": "done",
+      "priority": "P0",
+      "note": "2026-09-16 6:18 PM CDT: landed 6df151d+bde7814; review + triple gate running; push 42 next"
+    },
+    {
+      "id": "BATCH-RUNNER-ROLLUP-CRASH",
+      "title": "rehearse:batch crashes after roll-up (TypeError null server_events) and --runs is total calls not rounds; fix + usage comment",
+      "status": "done",
+      "priority": "P2",
+      "note": "2026-09-16 6:06 PM CDT: landed via cherry-pick"
+    },
+    {
+      "id": "MILLER-SILENT-EXPECTATION",
+      "title": "miller-silent-after-amount: harness expects ESCALATE, live gives FREEZE when lookups beat the idle timer (deploys 39 and 41); widen to ESCALATE-or-FREEZE or change the rule",
+      "status": "held",
+      "held_because": "founder decision on the expected verdict (oracle-like); recommendation: widen, play sheet already says either",
+      "note": "2026-09-16 5:59 PM CDT: records 2026-09-15T08-56-33 and 2026-09-16T17-53-17"
+    },
+    {
+      "id": "AAI-AUTO-REPLY-DOCS-CHECK",
+      "title": "VERIFY-AT-BUILD: can AssemblyAI automatic replies be disabled (server-driven replies only) and is there a reply cancel primitive",
+      "status": "done",
+      "priority": "P1",
+      "note": "2026-09-16 6:13 PM CDT: none documented for all three (disable auto reply, cancel reply, silent reply); URLs in the log"
+    },
+    {
+      "id": "CLOSE-LINE-WORDING",
+      "title": "shorten the STAGE and FREEZE close sentences (ESTIMATE 1 to 3 s off the tail); wording options for the founder",
+      "status": "done",
+      "held_because": "spoken product copy is a founder decision; options prepared after the docs check so it is one decision",
+      "note": "2026-09-16 6:27 PM CDT: landed 163e49a; matcher follow-up split out",
+      "options": {
+        "current": {
+          "STAGE": "Your request is staged for a second, independent approval. Nothing has been released. The evidence record is complete. Goodbye. (22 words, 3.6 to 4.0 s audio PROVEN)",
+          "FREEZE": "This transfer is frozen and an incident has been opened for review. Nothing has moved. Goodbye. (17 words, 7.2 to 8.1 s audio PROVEN)"
+        },
+        "option A (short, same facts)": {
+          "STAGE": "Staged for a second approval. Nothing released. Goodbye.",
+          "FREEZE": "Transfer frozen, incident opened. Nothing moved. Goodbye."
+        },
+        "option B (medium)": {
+          "STAGE": "Your request is staged for independent approval. Nothing has been released. Goodbye.",
+          "FREEZE": "This transfer is frozen and an incident is open. Nothing has moved. Goodbye."
+        },
+        "recommendation": "B: keeps the sentence a human would say on a phone, drops the evidence-record clause (it is on screen anyway), ESTIMATE 1 to 2 s saved; A risks sounding clipped to a judge. Saving is ESTIMATE until measured by close_tail_wait audio_seconds on three calls each."
+      }
+    },
+    {
+      "id": "DESIGN-E-KEEP-OR-REVERT",
+      "title": "design E holding beat: empty automatic reply not obeyed live (1 of 5); keep, revert, or replace with disabled auto replies if the docs allow",
+      "status": "done",
+      "held_because": "founder decision sent by push notification 6:13 PM; recommendation keep E + close lines option B",
+      "note": "2026-09-16 6:16 PM CDT: founder chose wording only; E stays (no objection raised)"
+    },
+    {
+      "id": "REASK-LATE-TRANSCRIPT-WAIT",
+      "title": "re-ask path: wait 1.5 s for a late agent transcript before classifying a reply empty (review finding on the miller fix)",
+      "status": "done",
+      "priority": "P0",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/test/question-reask-late-transcript.test.ts"
+      ],
+      "note": "2026-09-16 6:39 PM CDT: landed 4c65ead"
+    },
+    {
+      "id": "LEDGER-OPEN-BUNDLES",
+      "title": "credits ledger: bundles with a start and no end time are invisible to daily totals and the reading window (crashed or in-progress calls)",
+      "status": "held",
+      "held_because": "pre-existing gap, billing accuracy only; fix after the demo work, Haiku",
+      "note": "2026-09-16 6:24 PM CDT: from the push-42 review"
+    },
+    {
+      "id": "CLOSE-MATCH-FIRST-CLAUSE",
+      "title": "close-line lenient matcher: distinguish verdicts by the first clause (shared tail after ruling 7), not all clauses",
+      "status": "done",
+      "priority": "P0",
+      "files": [
+        "packages/server/src/call/closeMatch.ts",
+        "scripts/rehearse/turnController.ts"
+      ],
+      "note": "2026-09-16 6:35 PM CDT: landed via cherry-pick"
+    },
+    {
+      "id": "FLAKE-BROWSER-WS-PERSONA",
+      "title": "engine: strict > on same-millisecond timestamps in eligibleUtterances leaves a challenge ungraded forever (persona test 6/10 fail alone); fix >= with tie test",
+      "status": "done",
+      "held_because": "not a product defect; root-cause lane after push 42 (Haiku)",
+      "note": "2026-09-16 7:12 PM CDT: tie fix landed e74164d; a load-only residue on the 3 s poll may remain (watch the triple gate)",
+      "priority": "P0"
+    },
+    {
+      "id": "REASK-WAIT-IDEMPOTENT",
+      "title": "question transcript wait must be idempotent per rendering: non-empty reply clears a pending wait from an earlier reply (review Important on 4c65ead)",
+      "status": "done",
+      "held_because": "same session.ts area as the persona-test mechanism; one lane after the bisect reports",
+      "priority": "P0",
+      "note": "2026-09-16 7:22 PM CDT: landed f0dd58e"
+    },
+    {
+      "id": "CLOSE-MATCH-GARBLED-LIMIT",
+      "title": "close matchers need the distinguishing clause contiguous; a doubled/interleaved STT transcript of the goodbye would not match and the server would re-send CLOSE (known limit, tested)",
+      "status": "held",
+      "held_because": "pre-existing; needs a live sample of a garbled goodbye before designing a looser match (token-bag) without reopening cross-match",
+      "priority": "P2",
+      "note": "2026-09-16 6:52 PM CDT"
     }
   ]
 }
