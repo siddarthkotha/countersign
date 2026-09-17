@@ -449,6 +449,41 @@ describe('buildLedger', () => {
     expect(currentClaim(claims, 'approver')?.value).toBe('elena park');
   });
 
+  // 11c. (2026-09-16, approver-contradiction lane, PROVEN live miss: free-play harness run,
+  // report scripts/rehearse/reports/2026-09-16T20-57-05-single-wrong-answer.md +
+  // .diagnostics.json) A hedge word ("Sorry, I mean...") no longer launders a differing
+  // `approver` value into CORRECTED once an agent turn has intervened since the original
+  // claim -- unlike 11/11b (a same-breath self-correction with NO agent turn in between,
+  // still correctly graded CORRECTED), this is a revision of an already-settled claim after
+  // the conversation moved on to something else (mirrors 10b's "the correction has gone
+  // stale" ruling for amount_usd, applied here to the field itself never being honestly
+  // "mis-transcribed" the way a digit can be).
+  it('11c. self-correction with a hedge word, but an agent turn intervenes since the ORIGINAL approver claim -> CONTRADICTED, not CORRECTED', () => {
+    const conversation: Utterance[] = [
+      u('u1', "Yes, that's correct. $84,600 approved by Marcus Obie, I believe.", 85_941),
+      { id: 'a1', speaker: 'agent', text: 'Just to confirm, the account ends in 4 4 7 1. Is that correct?', t_ms: 89_886 },
+      u('u2', 'Yes, that\'s right.', 104_033),
+      u(
+        'u3',
+        'The account ends in 4471. Sorry, I meant to say it was approved by Elena Park, not Marcus Obie.',
+        113_546,
+      ),
+    ];
+    const { claims } = buildLedger(conversation, [], MERIDIAN);
+    const approverClaims = claims.filter((c) => c.field === 'approver');
+    expect(approverClaims).toHaveLength(2);
+    expect(approverClaims[0]).toMatchObject({ kind: 'STATED', value: 'marcus obie', quote: { text: 'Marcus Obie' } });
+    expect(approverClaims[1]).toMatchObject({
+      kind: 'CONTRADICTED',
+      value: 'elena park',
+      quote: { text: 'Elena Park' },
+      supersedes: approverClaims[0]!.id,
+    });
+    expect(currentClaim(claims, 'approver')?.value).toBe('elena park');
+    // Both quotes are still on the record -- LAW 4, facts kept, never erased.
+    expect(claims.find((c) => c.id === approverClaims[0]!.id)).toBeDefined();
+  });
+
   // Bare-name-challenge-answer fix (2026-09-14): a bare name opening an utterance is NOT a
   // self-identification when that utterance answers a pending readback for a person-shaped
   // field. Dana identifies as Dana Whitfield, then when asked "which internal approver signed

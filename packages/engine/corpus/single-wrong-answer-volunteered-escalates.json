@@ -1,0 +1,259 @@
+{
+  "title": "Volunteered approver contradiction escalates",
+  "description": "PROVEN live miss (free-play harness run, report scripts/rehearse/reports/2026-09-16T20-57-05-single-wrong-answer.md + its .diagnostics.json), replayed VERBATIM: conversation, tool results, and agent readback/challenge actions are copied from that record. A free-play caller playing Dana volunteers 'approved by Marcus Obie' unprompted, then two turns later self-corrects with a hedge word -- 'Sorry, I meant to say it was approved by Elena Park, not Marcus Obie' -- without ever being challenged on the approver field at all (the call's one TRAP_FACT challenge was already spent on the beneficiary field, which the caller answered correctly). Before the 2026-09-16 fix, the correction-lexicon hit on 'sorry' classified the second approver value CORRECTED instead of CONTRADICTED, so no_contradictions stayed true and the deployed engine staged the call. After the fix, a differing approver value is always CONTRADICTED (mirrors the always-CONTRADICTED handling identity switches already get) regardless of hedge wording, so no_contradictions reads false for the rest of the call and row 11's STAGE is permanently out of reach; the call ended (the agent, under the pre-fix verdict, said its goodbye and hung up) while still short of the freeze line, so it escalates for a human callback (row 15) rather than repairing itself.",
+  "call": {
+    "session_id": "sess-6",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "Meridian payments desk, verification line. How can I help you today?",
+      "t_ms": 5366
+    },
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "Hi, this is Dana Whitfield from Corporate Treasury. I need to request a wire correction for Meridian Supply, please.",
+      "t_ms": 16136
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "Who is calling and what is the transaction amount for the Meridian Supply wire?What is the exact amount you need to send, and to which vendor?",
+      "t_ms": 16645
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "What is the exact amount you need to send, and to which vendor?",
+      "t_ms": 21204
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "The amount is $84,600, and the vendor is Meridian Supply, account ending in 4471.",
+      "t_ms": 35647
+    },
+    {
+      "id": "a4",
+      "speaker": "agent",
+      "text": "Just to confirm, this transfer goes to Northgate Partners. Is that correct?",
+      "t_ms": 36255
+    },
+    {
+      "id": "a5",
+      "speaker": "agent",
+      "text": "You are requesting a wire correction for eighty four thousand six hundred dollars to Northgate Partners?",
+      "t_ms": 42076
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "No, it's Meridian Supply, not Northgate Partners. Please correct that.",
+      "t_ms": 54535
+    },
+    {
+      "id": "a6",
+      "speaker": "agent",
+      "text": "Authority or urgency are",
+      "t_ms": 56513,
+      "interrupted": true
+    },
+    {
+      "id": "c4",
+      "speaker": "caller",
+      "text": "The account ends in 4471, as I mentioned.",
+      "t_ms": 59335
+    },
+    {
+      "id": "a7",
+      "speaker": "agent",
+      "text": "Just to confirm, the amount is $84,600. Is that correct?",
+      "t_ms": 69092
+    },
+    {
+      "id": "c5",
+      "speaker": "caller",
+      "text": "Yes, that's correct. $84,600 approved by Marcus Obie, I believe.",
+      "t_ms": 85941
+    },
+    {
+      "id": "a8",
+      "speaker": "agent",
+      "text": "Just to confirm, the account ends in 4 4 7 1. Is that correct?",
+      "t_ms": 89886
+    },
+    {
+      "id": "a9",
+      "speaker": "agent",
+      "text": "Just to confirm, the account ends in 4 4 7 1. Is that correct?",
+      "t_ms": 95409
+    },
+    {
+      "id": "c6",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 104033
+    },
+    {
+      "id": "a10",
+      "speaker": "agent",
+      "text": "Just",
+      "t_ms": 105158,
+      "interrupted": true
+    },
+    {
+      "id": "c7",
+      "speaker": "caller",
+      "text": "The account ends in 4471. Sorry, I meant to say it was approved by Elena Park, not Marcus Obie.",
+      "t_ms": 113546
+    },
+    {
+      "id": "a11",
+      "speaker": "agent",
+      "text": "Just to confirm, the beneficiary is Meridian Supply. Is that correct?",
+      "t_ms": 117578
+    },
+    {
+      "id": "a12",
+      "speaker": "agent",
+      "text": "Just to confirm, the beneficiary is Meridian Supply. Is that correct?",
+      "t_ms": 123018
+    },
+    {
+      "id": "c8",
+      "speaker": "caller",
+      "text": "Yes, the beneficiary is indeed Meridian Supply. Thank you for confirming that.",
+      "t_ms": 136233
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 54536,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 54536,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 54536,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "act1",
+      "kind": "challenge_issued",
+      "t_ms": 36255,
+      "challenge_id": "sess-6-1"
+    },
+    {
+      "id": "act2",
+      "kind": "readback_issued",
+      "t_ms": 69092,
+      "field": "amount_usd",
+      "value": "84600"
+    },
+    {
+      "id": "act3",
+      "kind": "readback_issued",
+      "t_ms": 89886,
+      "field": "account_last4",
+      "value": "4471"
+    },
+    {
+      "id": "act4",
+      "kind": "readback_issued",
+      "t_ms": 95409,
+      "field": "account_last4",
+      "value": "4471"
+    },
+    {
+      "id": "act5",
+      "kind": "readback_issued",
+      "t_ms": 117578,
+      "field": "beneficiary",
+      "value": "meridian supply"
+    },
+    {
+      "id": "act6",
+      "kind": "readback_issued",
+      "t_ms": 123018,
+      "field": "beneficiary",
+      "value": "meridian supply"
+    },
+    {
+      "id": "act7",
+      "kind": "call_ended",
+      "t_ms": 148746,
+      "detail": "agent_closed"
+    }
+  ],
+  "expected": {
+    "verdict": "ESCALATE",
+    "state": "ACTION",
+    "reasons": [],
+    "failure_tally": 1,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": false,
+      "critical_fields_confirmed": true,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": true,
+      "no_injection_attempt": true
+    }
+  }
+}
