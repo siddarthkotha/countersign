@@ -1,15 +1,15 @@
 // packages/server/test/empty-automatic-reply.test.ts
-// Design E follow-up, EMPTY HOLDING REPLY (2026-09-15, measured live on deploy 39 -- see
-// prompt.ts's own doc comment on STANDING_RULES): the standing rule now asks the automatic
-// reply to produce literally nothing (an empty reply) rather than a "One moment." holding
-// line, once it has nothing new to say -- PROVEN the old holding-beat wording made the agent
-// say "One moment." four to five times per call (agent lines 14 vs 7 on the same Dana script,
-// verdict-to-goodbye 13.8s vs 4.0s), and PROVEN an EMPTY automatic reply is possible at all
-// (bundle 2026-09-15T08-06-07-corrected-critical-field: reply.done 0.5s after reply.started
-// with no transcript in between). This file proves session.ts handles that empty-transcript
-// reply cleanly end to end: not counted as a question asked, the instructed reply.create
-// still follows it exactly once, and the CLOSE hang-up path is unaffected by an empty reply
-// arriving before the real goodbye.
+// Design E follow-up, HOLDING-REPLY EXPERIMENT (2026-09-15/16 -- see prompt.ts's own doc
+// comment on STANDING_RULES): the standing rule was changed to ask the automatic reply to
+// produce literally nothing (an empty reply) rather than a "One moment." holding line, once
+// it has nothing new to say (2026-09-15 measured on deploy 39, PROVEN the holding-beat
+// wording made the agent say "One moment." four to five times per call), but three live calls
+// on 2026-09-16 died with dead transcript (records 17-50-00 miller, 19-31-28 dana, 20-51-12
+// barge-in). The rule reverted to "always say exactly 'One moment.'" as a reversible
+// experiment to isolate the culprit. This file proves session.ts still handles both cases
+// cleanly end to end: an empty-transcript reply is not counted as a question asked, the
+// instructed reply.create still follows it exactly once, and the CLOSE hang-up path is
+// unaffected by an empty reply arriving before the real goodbye.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { MERIDIAN, mockToolResult } from '@countersign/engine';
 import type { CallContext, ServerEvent } from '@countersign/engine';

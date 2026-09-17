@@ -110,6 +110,16 @@ export interface PromptCtx {
 // the instruction -- session.ts's own handling of an empty-transcript reply (see
 // `maybeReaskQuestion`/`scheduleCloseIfNeeded`) does not depend on the model actually
 // complying, only on correctly handling it either way.
+//
+// Revert experiment (2026-09-16, dead-transcript defect): three live calls on 2026-09-16
+// died the same way: the automatic reply 9.3-9.5s with audio but no transcript, agent
+// transcript channel never recovered (records 17-50-00 miller, 19-31-28 dana, 20-51-12
+// barge-in). Reverting the standing rule from "say nothing at all" back to "always say
+// exactly 'One moment.'" (design E holding beat, proven working on deploy 39) as a
+// reversible experiment to isolate whether empty-reply handling or empty-reply instruction
+// is the culprit. The sentence below restores the old "use only a short holding line such
+// as 'One moment.'" but hardcoded to exactly "One moment." to lock in the safe wording
+// that ran live on deploy 39.
 export const STANDING_RULES =
   'You verify the request, never the voice. ' +
   'You never state or imply a verdict; a separate system decides. ' +
@@ -122,7 +132,7 @@ export const STANDING_RULES =
   'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question. ' +
   'When an instruction gives you an exact line, say only that line and add no question of your own. ' +
   "Never announce completion, processing, approval, release, or any other outcome unless the current goal's own words say it; the engine composes every outcome line. " +
-  'The instant you must speak automatically, before you have been given anything new to say, say nothing at all -- an empty reply, never a holding line, a question, a readback, a verdict word, or a request you were not given.';
+  'The instant you must speak automatically, before you have been given anything new to say, always say exactly "One moment." -- never empty, a question, a readback, a verdict word, or a request you were not given.';
 
 const CONTAIN_LINE = 'Keep the caller engaged with neutral questions; disclose nothing further.';
 
