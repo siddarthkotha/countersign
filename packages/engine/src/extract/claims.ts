@@ -234,6 +234,37 @@ const CUE_PATTERNS: { field: CuedNameField; re: RegExp; validate?: (m: RegExpExe
   },
   { field: 'beneficiary', re: new RegExp(`\\bbeneficiary\\b (?:is|will be)\\s+(${NAME})`, 'g') },
   { field: 'beneficiary', re: new RegExp(`\\bvendor\\b (?:is|will be)\\s+(${NAME})`, 'g') },
+  // PROVEN gap (found 2026-09-17: docs/analysis/... free-play Dana line "The amount is
+  // $84,600 to Meridian Supply, account ending 4471" never matched any beneficiary cue,
+  // because every cue above requires a verb (pay/wire/send/transfer) before "to NAME" --
+  // amount-led and noun-led phrasings have no such verb at all. These five cues add the
+  // no-verb shapes judges/callers actually use, without touching the verb cue above or its
+  // guards (pronoun stoplist, idiom stoplist, negation adjacency): a caller who leads with
+  // the dollar figure, or narrates in the present-progressive/noun-phrase register, still
+  // gets a beneficiary claim.
+  //   - "<amount> to NAME": a literal dollar amount immediately followed by "to NAME"
+  //     ("$84,600 to Meridian Supply", "the amount is $84,600 to Meridian Supply"). NAME
+  //     itself requires a leading capital letter, so a lowercase object ("$1.8 million wired
+  //     to the escrow account") can never match this cue by construction.
+  //   - "going to NAME": present-progressive narration ("it's going to Meridian Supply").
+  //   - "for NAME", gated: "for" alone is far too common to cue on bare, so this only fires
+  //     when "for" is directly preceded by "payment is" / "transfer is" / "wire is" / "it is"
+  //     / "it's" -- "the payment is for Meridian Supply", "it's for Meridian Supply". This
+  //     also keeps "This payment is for system upgrades" (lowercase object) from matching.
+  //   - "payable to NAME": "payable to Meridian Supply".
+  //   - "recipient is NAME": "the recipient is Meridian Supply" (mirrors the existing
+  //     "beneficiary is NAME" / "vendor is NAME" cues just above).
+  // De-duping in collectCuedNameMatches (below) drops any of these that lands on the exact
+  // same name span as the verb cue already matched (e.g. "wire $84,500 to Meridian Supply"
+  // is also a valid "<amount> to NAME" match) so no beneficiary hit is ever double-counted.
+  { field: 'beneficiary', re: new RegExp(`\\$[\\d,]+(?:\\.\\d{1,2})?\\s+to\\s+(${NAME})`, 'g') },
+  { field: 'beneficiary', re: new RegExp(`\\bgoing\\s+to\\s+(${NAME})`, 'g') },
+  {
+    field: 'beneficiary',
+    re: new RegExp(`(?:\\b(?:payment|transfer|wire)\\s+is|\\bit(?:'s|\\s+is))\\s+for\\s+(${NAME})`, 'g'),
+  },
+  { field: 'beneficiary', re: new RegExp(`\\bpayable\\s+to\\s+(${NAME})`, 'g') },
+  { field: 'beneficiary', re: new RegExp(`\\brecipient\\b (?:is|will be)\\s+(${NAME})`, 'g') },
 ];
 
 /** Trims a matched name run at the first comma/period, since the NAME pattern's own
@@ -254,6 +285,11 @@ interface RawCuedNameMatch {
  *  the same span the identity extractor is told to ignore. */
 function collectCuedNameMatches(text: string): RawCuedNameMatch[] {
   const matches: RawCuedNameMatch[] = [];
+  // De-dupe by (field, name start index): the no-verb beneficiary cues added above can land
+  // on the exact same name span the verb cue already matched (e.g. "wire $84,500 to Meridian
+  // Supply" is both the verb cue and the new "<amount> to NAME" cue) -- keep only the first
+  // pattern's hit for that span so a single spoken name is never counted twice.
+  const seenSpans = new Set<string>();
   for (let patternIdx = 0; patternIdx < CUE_PATTERNS.length; patternIdx++) {
     const pattern = CUE_PATTERNS[patternIdx]!;
     const { field, re, validate } = pattern;
@@ -274,6 +310,9 @@ function collectCuedNameMatches(text: string): RawCuedNameMatch[] {
       // For the reversed approver pattern "(NAME) approved", exclude department names.
       if (isReversedApproverPattern && isDepartmentName(name)) continue;
       const nameStart = m.index + m[0].indexOf(rawName);
+      const spanKey = `${field}:${nameStart}`;
+      if (seenSpans.has(spanKey)) continue;
+      seenSpans.add(spanKey);
       matches.push({ field, index: nameStart, name });
     }
   }

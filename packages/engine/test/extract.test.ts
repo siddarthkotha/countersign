@@ -431,4 +431,36 @@ describe('extractCuedNames', () => {
   ])('a "not" that does not attach to the verb still yields a beneficiary claim: %s', (text) => {
     expect(extractCuedNames(text)).toEqual([{ field: 'beneficiary', value: 'Meridian', quote: 'Meridian' }]);
   });
+
+  // PROVEN gap (2026-09-17): every beneficiary cue above requires a verb (pay/wire/send/
+  // transfer) before "to NAME". A free-play Dana line -- "The amount is $84,600 to Meridian
+  // Supply, account ending 4471" -- has no such verb, so no beneficiary claim ever registered
+  // and the readback gate could never clear. These are the no-verb, amount-led and noun-led
+  // shapes judges/callers actually say: "<amount> to NAME", "going to NAME", "for NAME"
+  // (gated on payment/transfer/wire/it is/it's directly before "for"), "payable to NAME",
+  // "beneficiary is NAME" (already matched by the pre-existing cue), and "recipient is NAME".
+  it.each([
+    ['The amount is $84,600 to Meridian Supply', 'Meridian Supply'],
+    ['$84,500 to Meridian Supply, account ending 4471', 'Meridian Supply'],
+    ["it's going to Meridian Supply", 'Meridian Supply'],
+    ['the payment is for Meridian Supply', 'Meridian Supply'],
+    ['payable to Meridian Supply', 'Meridian Supply'],
+    ['the beneficiary is Meridian Supply', 'Meridian Supply'],
+    ['recipient is Meridian Supply', 'Meridian Supply'],
+  ])('matches a no-verb beneficiary cue: %s → %s', (text, value) => {
+    expect(extractCuedNames(text)).toEqual([{ field: 'beneficiary', value, quote: value }]);
+  });
+
+  // Negatives: none of these are a beneficiary claim, and none should start matching just
+  // because the no-verb cues above were added.
+  it.each([
+    'send my regards to Marcus',
+    'transfer me to Elena',
+    'I spoke to Marcus',
+    'according to Marcus',
+    'next to Elena',
+    'thanks to Marcus',
+  ])('still does not read a non-beneficiary "to NAME" as a beneficiary claim: %s', (text) => {
+    expect(extractCuedNames(text)).toEqual([]);
+  });
 });
