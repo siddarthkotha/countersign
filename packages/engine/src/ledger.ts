@@ -24,7 +24,7 @@ import { extractIdentityClaim } from './extract/identity.js';
 import { answersToPersonQuestion } from './extract/personQuestion.js';
 import { hasLexiconHit, normalizeText, normalizeValue } from './normalize.js';
 import { escapeRegExp } from './util.js';
-import type { AgentAction, Claim, ClaimField, ClaimKind, SeedConfig, Utterance } from './types.js';
+import type { AgentAction, AgentActionKind, Claim, ClaimField, ClaimKind, SeedConfig, Utterance } from './types.js';
 
 // request_version bumps only when the current value of one of these fields changes.
 const VERSIONED_FIELDS = new Set<ClaimField>(['amount_usd', 'beneficiary', 'account_last4']);
@@ -162,6 +162,29 @@ export function buildLedger(
     return agentTurnTimes.some((t) => t > fromExclusive && t < toExclusive);
   }
 
+  // fix (2026-09-17, approver-gate lane; review finding on 3897cde): the
+  // NEVER_CORRECTABLE_ACROSS_AGENT_TURNS_FIELDS gate below used to reuse `hasAgentTurnBetween`
+  // above, which fires on ANY agent utterance -- including a holding phrase the agent says
+  // automatically after every caller turn ("One moment.") and an interrupted stub the caller
+  // barged in over ("Just", "Authority or"). Neither of those is the agent asking anything or
+  // the conversation moving on to a new topic; grading a same-breath correction CONTRADICTED
+  // because a holding beat happened to land in between raises a false FAIL card against an
+  // honest caller. The gate instead asks whether an agent ACTION was logged in between --
+  // readback_issued, challenge_issued, or elicit_issued, the only three AgentActionKinds that
+  // represent the agent asking the caller something (session_config_updated/link_changed/
+  // call_ended are bookkeeping, never a question). This is computed purely from the actions
+  // log's timestamps, never from utterance text or length, so it can't be fooled by phrasing
+  // and can't miss a real question that happens to be worded briefly. A holding beat or a
+  // cut-off word is not the conversation moving on; an issued question is.
+  const AGENT_QUESTION_ACTION_KINDS: ReadonlySet<AgentActionKind> = new Set<AgentActionKind>([
+    'readback_issued',
+    'challenge_issued',
+    'elicit_issued',
+  ]);
+  function hasAgentActionBetween(fromExclusive: number, toExclusive: number): boolean {
+    return actions.some((a) => AGENT_QUESTION_ACTION_KINDS.has(a.kind) && a.t_ms > fromExclusive && a.t_ms < toExclusive);
+  }
+
   // Only readback_issued/challenge_issued actions matter to the ledger: the former drives
   // CONFIRMED/UNKNOWN and the repair window; both bound how long a readback stays "open for
   // an answer" (§C: the agent has moved on once it asks the next thing).
@@ -284,7 +307,7 @@ export function buildLedger(
 
   // RULING (2026-09-16, approver-contradiction lane; PROVEN by
   // scripts/rehearse/reports/2026-09-16T20-57-05-single-wrong-answer.md's free-play miss): a
-  // differing `approver` value that arrives AFTER an intervening agent turn is ALWAYS a
+  // differing `approver` value that arrives AFTER an intervening agent ACTION is ALWAYS a
   // contradiction, never a "correction" -- no correction-lexicon hedge word can launder it.
   // This is narrower than treating every differing `approver` value as CONTRADICTED: the
   // 2026-09-14 P2 ruling (see `classifyDifferentValue`'s rule (a)/(a2) and
@@ -292,12 +315,13 @@ export function buildLedger(
   // self-correcting a value nothing has acted on yet ("approved by Marcus Obie -- wait, I
   // mean Elena Park approved it", or the same split across two adjacent caller turns with no
   // agent turn between) -- that is a live, in-progress statement, not yet a settled fact the
-  // rest of the call has moved past, and this gate leaves it untouched (`hasAgentTurnBetween`
-  // is false for both). The miss's shape is different: the caller stated "approved by Marcus
-  // Obie" as part of confirming the amount readback, the conversation then moved through TWO
-  // MORE agent turns (an account-digits readback, re-asked) and a caller confirmation of
-  // THAT unrelated field, before "Sorry, I meant to say it was approved by Elena Park, not
-  // Marcus Obie" ever arrived -- a revision of an already-settled claim, not a same-breath
+  // rest of the call has moved past, and this gate leaves it untouched (`hasAgentActionBetween`
+  // is false for both, since no readback/challenge/elicit was ever logged in between). The
+  // miss's shape is different: the caller stated "approved by Marcus Obie" as part of
+  // confirming the amount readback, the conversation then moved through TWO MORE agent
+  // ACTIONS (an account-digits readback, re-asked) and a caller confirmation of THAT
+  // unrelated field, before "Sorry, I meant to say it was approved by Elena Park, not Marcus
+  // Obie" ever arrived -- a revision of an already-settled claim, not a same-breath
   // correction, and WHO approved the payment is not something a caller mishears about their
   // own claim the way a transposed digit is. `classifyDifferentValue`'s rule (a) (a bare
   // correction-lexicon hit anywhere in the utterance, with no adjacency check at all) graded
@@ -310,14 +334,25 @@ export function buildLedger(
   // CONTRADICTED claim, the second value does NOT silently replace the first for anything
   // that reads `entered_as`/kind (see compose.ts's `buildExposureEvidence` for the parallel
   // CORRECTED-vs-CONTRADICTED distinction on amount_usd, which this leaves untouched).
+  //
+  // REVIEW FIX (2026-09-17, approver-gate lane): this gate originally reused
+  // `hasAgentTurnBetween` (any agent UTTERANCE), which also fires on a holding phrase the
+  // agent says automatically after every caller turn ("One moment.") and on an interrupted
+  // stub utterance a barge-in cut off ("Just", "Authority or") -- neither is the agent asking
+  // anything, so an honest same-breath correction that merely happened to have one of those
+  // in between was wrongly graded CONTRADICTED (see the corpus-replay-shaped test 11d/11e in
+  // test/ledger.test.ts). Fixed to gate on `hasAgentActionBetween` -- an agent ACTION
+  // (readback_issued/challenge_issued/elicit_issued) logged in between -- computed purely
+  // from the actions log's timestamps, never from utterance text or length. A holding beat or
+  // a cut-off word is not the conversation moving on; an issued question is.
   const NEVER_CORRECTABLE_ACROSS_AGENT_TURNS_FIELDS = new Set<ClaimField>(['approver']);
 
   // Non-identity fields: first sighting is STATED (or APPROXIMATE); a later different value
   // is classified by `classifyDifferentValue`, except a `NEVER_CORRECTABLE_ACROSS_AGENT_
-  // TURNS_FIELDS` field whose current claim already has an agent turn after it -- always
-  // CONTRADICTED, bypassing the correction-lexicon paths entirely (see the ruling above); a
-  // repeated same value is a no-op here (the readback resolution below is the only route to
-  // CONFIRMED/UNKNOWN).
+  // TURNS_FIELDS` field whose current claim already has an agent ACTION logged after it --
+  // always CONTRADICTED, bypassing the correction-lexicon paths entirely (see the ruling
+  // above); a repeated same value is a no-op here (the readback resolution below is the only
+  // route to CONFIRMED/UNKNOWN).
   function processHit(
     field: ClaimField,
     rawValue: string | number,
@@ -333,7 +368,7 @@ export function buildLedger(
       return;
     }
     if (current.value === value) return;
-    if (NEVER_CORRECTABLE_ACROSS_AGENT_TURNS_FIELDS.has(field) && hasAgentTurnBetween(current.t_ms, u.t_ms)) {
+    if (NEVER_CORRECTABLE_ACROSS_AGENT_TURNS_FIELDS.has(field) && hasAgentActionBetween(current.t_ms, u.t_ms)) {
       addClaim(field, 'CONTRADICTED', value, u.id, quote, u.t_ms, current.id);
       return;
     }

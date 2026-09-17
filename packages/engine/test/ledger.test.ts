@@ -458,7 +458,7 @@ describe('buildLedger', () => {
   // the conversation moved on to something else (mirrors 10b's "the correction has gone
   // stale" ruling for amount_usd, applied here to the field itself never being honestly
   // "mis-transcribed" the way a digit can be).
-  it('11c. self-correction with a hedge word, but an agent turn intervenes since the ORIGINAL approver claim -> CONTRADICTED, not CORRECTED', () => {
+  it('11c. self-correction with a hedge word, but an agent ACTION (readback_issued) intervenes since the ORIGINAL approver claim -> CONTRADICTED, not CORRECTED', () => {
     const conversation: Utterance[] = [
       u('u1', "Yes, that's correct. $84,600 approved by Marcus Obie, I believe.", 85_941),
       { id: 'a1', speaker: 'agent', text: 'Just to confirm, the account ends in 4 4 7 1. Is that correct?', t_ms: 89_886 },
@@ -469,7 +469,16 @@ describe('buildLedger', () => {
         113_546,
       ),
     ];
-    const { claims } = buildLedger(conversation, [], MERIDIAN);
+    // fix (2026-09-17, approver-gate lane): the gate is now "an agent ACTION was logged
+    // between the two claims" (see hasAgentActionBetween in ledger.ts), not "an agent
+    // utterance happened between them" -- so this fixture must carry the actions-log entry
+    // for the account-digits readback the agent utterance (a1) represents, or the new gate
+    // has nothing to see and would (wrongly) grade this CORRECTED. This is the real shape:
+    // live, every readback the agent speaks is also logged as a readback_issued action.
+    const actions: AgentAction[] = [
+      { id: 'r1', kind: 'readback_issued', t_ms: 89_886, field: 'account_last4', value: '4471' },
+    ];
+    const { claims } = buildLedger(conversation, actions, MERIDIAN);
     const approverClaims = claims.filter((c) => c.field === 'approver');
     expect(approverClaims).toHaveLength(2);
     expect(approverClaims[0]).toMatchObject({ kind: 'STATED', value: 'marcus obie', quote: { text: 'Marcus Obie' } });
@@ -482,6 +491,70 @@ describe('buildLedger', () => {
     expect(currentClaim(claims, 'approver')?.value).toBe('elena park');
     // Both quotes are still on the record -- LAW 4, facts kept, never erased.
     expect(claims.find((c) => c.id === approverClaims[0]!.id)).toBeDefined();
+  });
+
+  // 11d. (2026-09-17, approver-gate lane; review finding on 3897cde) A holding phrase the
+  // agent now says automatically after every caller turn ("One moment.") is still an AGENT
+  // UTTERANCE, but it asks nothing and is logged as no action at all -- it must not count as
+  // "the conversation moving on" for the never-correctable-across-agent-turns gate. Same
+  // shape as 11/11b (a same-breath correction with a lexicon word, no settled fact acted on
+  // in between) and must grade the same way: CORRECTED.
+  it('11d. holding phrase "One moment." between claim and correction is not an agent ACTION -> still CORRECTED', () => {
+    const conversation: Utterance[] = [
+      u('u1', 'This is Dana Whitfield, corporate treasury. This has been approved by Marcus Obie.', 0),
+      { id: 'a1', speaker: 'agent', text: 'One moment.', t_ms: 3_000 },
+      u('u2', 'Sorry, I mean Elena Park approved it.', 6_000),
+    ];
+    const { claims } = buildLedger(conversation, [], MERIDIAN);
+    const approverClaims = claims.filter((c) => c.field === 'approver');
+    expect(approverClaims).toHaveLength(2);
+    expect(approverClaims[0]).toMatchObject({ kind: 'STATED', value: 'marcus obie' });
+    expect(approverClaims[1]).toMatchObject({ kind: 'CORRECTED', value: 'elena park', supersedes: approverClaims[0]!.id });
+    expect(currentClaim(claims, 'approver')?.value).toBe('elena park');
+  });
+
+  // 11e. Same as 11d but the agent utterance is an interrupted stub ("Just") -- a caller
+  // barge-in cut the agent off before it could ask anything, so again no action was logged.
+  // A cut-off word is not the conversation moving on either -> CORRECTED.
+  it('11e. interrupted stub agent utterance ("Just") between claim and correction is not an agent ACTION -> still CORRECTED', () => {
+    const conversation: Utterance[] = [
+      u('u1', 'This is Dana Whitfield, corporate treasury. This has been approved by Marcus Obie.', 0),
+      { id: 'a1', speaker: 'agent', text: 'Just', t_ms: 3_000 },
+      u('u2', 'Sorry, I mean Elena Park approved it.', 6_000),
+    ];
+    const { claims } = buildLedger(conversation, [], MERIDIAN);
+    const approverClaims = claims.filter((c) => c.field === 'approver');
+    expect(approverClaims).toHaveLength(2);
+    expect(approverClaims[0]).toMatchObject({ kind: 'STATED', value: 'marcus obie' });
+    expect(approverClaims[1]).toMatchObject({ kind: 'CORRECTED', value: 'elena park', supersedes: approverClaims[0]!.id });
+    expect(currentClaim(claims, 'approver')?.value).toBe('elena park');
+  });
+
+  // 11f. The live-miss shape, minimal form: an agent ACTION (readback_issued or
+  // challenge_issued) -- not merely an utterance -- was logged between the two approver
+  // claims. An issued question means the agent asked something and the conversation moved
+  // on; a later hedge-word "correction" of the earlier, already-acted-on claim is a revision
+  // of settled fact, not a same-breath repair -> CONTRADICTED.
+  it('11f. an agent readback_issued ACTION (with its utterance) between claims -> CONTRADICTED', () => {
+    const conversation: Utterance[] = [
+      u('u1', 'This is Dana Whitfield, corporate treasury. This has been approved by Marcus Obie.', 0),
+      { id: 'a1', speaker: 'agent', text: 'Just to confirm, the account ends in 4471. Is that correct?', t_ms: 3_000 },
+      u('u2', "Yes, that's right.", 6_000),
+      u('u3', 'Sorry, I meant to say it was approved by Elena Park, not Marcus Obie.', 9_000),
+    ];
+    const actions: AgentAction[] = [
+      { id: 'r1', kind: 'readback_issued', t_ms: 3_000, field: 'account_last4', value: '4471' },
+    ];
+    const { claims } = buildLedger(conversation, actions, MERIDIAN);
+    const approverClaims = claims.filter((c) => c.field === 'approver');
+    expect(approverClaims).toHaveLength(2);
+    expect(approverClaims[0]).toMatchObject({ kind: 'STATED', value: 'marcus obie' });
+    expect(approverClaims[1]).toMatchObject({
+      kind: 'CONTRADICTED',
+      value: 'elena park',
+      supersedes: approverClaims[0]!.id,
+    });
+    expect(currentClaim(claims, 'approver')?.value).toBe('elena park');
   });
 
   // Bare-name-challenge-answer fix (2026-09-14): a bare name opening an utterance is NOT a
