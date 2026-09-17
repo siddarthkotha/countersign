@@ -2684,29 +2684,57 @@ export class CallSession {
     }
     if (goal.code === 'ASK_CHALLENGE' && goal.challenge) {
       if (!asked) return;
+      const t_ms = this.nowT();
       this.logs.actions.push({
         id: this.nextActionId(),
         kind: 'challenge_issued',
-        t_ms: this.nowT(),
+        t_ms,
         challenge_id: goal.challenge.challenge_id,
         spec: goal.challenge,
       });
+      // LAW 4: record a diagnostic event with verbatim ids, never paraphrase
+      this.diag('action_logged', {
+        kind: 'challenge_issued',
+        t_ms,
+        challenge_id: goal.challenge.challenge_id,
+        fact_id: goal.challenge.fact_id ?? null,
+        spec_kind: goal.challenge.kind,
+        reply_id: replyId,
+      });
     } else if (goal.code === 'READBACK' && goal.readback) {
       if (!asked) return;
+      const t_ms = this.nowT();
       this.logs.actions.push({
         id: this.nextActionId(),
         kind: 'readback_issued',
-        t_ms: this.nowT(),
+        t_ms,
         field: goal.readback.field,
         value: goal.readback.value,
       });
+      // LAW 4: record a diagnostic event with verbatim ids, never paraphrase
+      this.diag('action_logged', {
+        kind: 'readback_issued',
+        t_ms,
+        field: goal.readback.field,
+        spec_kind: 'READBACK',
+        reply_id: replyId,
+      });
     } else if (goal.code === 'ELICIT_MISSING_CRITICAL' && goal.elicit) {
       if (!asked) return;
+      const t_ms = this.nowT();
       this.logs.actions.push({
         id: this.nextActionId(),
         kind: 'elicit_issued',
-        t_ms: this.nowT(),
+        t_ms,
         field: goal.elicit.field,
+      });
+      // LAW 4: record a diagnostic event with verbatim ids, never paraphrase
+      this.diag('action_logged', {
+        kind: 'elicit_issued',
+        t_ms,
+        field: goal.elicit.field,
+        spec_kind: 'ELICIT',
+        reply_id: replyId,
       });
     }
   }

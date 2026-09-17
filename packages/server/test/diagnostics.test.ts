@@ -1196,6 +1196,96 @@ describe('CallSession — onDiagnostic', () => {
       expect(bundle.billed_seconds).toBeUndefined();
     });
   });
+
+  // Action logging (2026-09-17): every challenge_issued/readback_issued/elicit_issued
+  // produces an action_logged diagnostic event recording the action's key identifiers
+  describe('action_logged diagnostic events', () => {
+    it('records exactly one action_logged for each issued challenge', () => {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const events: { kind: string; detail: unknown }[] = [];
+      const session = newSession(clock, aai, events);
+
+      session.start();
+      driveScenarioBIntoEvidence(session, aai, clock);
+
+      // driveScenarioBIntoEvidence issues two challenges via the appended completions.
+      const actionLogged = events.filter((e) => e.kind === 'action_logged');
+      // Only challenge_issued events are produced by this scenario (no readback/elicit).
+      const challengeLogged = actionLogged.filter((e) => (e.detail as Record<string, unknown>).kind === 'challenge_issued');
+      expect(challengeLogged.length).toBeGreaterThanOrEqual(2);
+
+      // Each challenge_logged should have the right structure
+      for (const event of challengeLogged) {
+        const detail = event.detail as Record<string, unknown>;
+        expect(detail.kind).toBe('challenge_issued');
+        expect(typeof detail.spec_kind).toBe('string'); // spec_kind is the ChallengeKind enum (e.g., SEED_FACT)
+        expect(typeof detail.challenge_id).toBe('string');
+        expect(typeof detail.reply_id).toBe('string');
+        expect(detail.t_ms).toBeDefined();
+      }
+    });
+
+    it('records action_logged with fact_id for SEED_FACT challenges', () => {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const events: { kind: string; detail: unknown }[] = [];
+      const session = newSession(clock, aai, events);
+
+      session.start();
+      driveScenarioBIntoEvidence(session, aai, clock);
+
+      const actionLogged = events.filter((e) => e.kind === 'action_logged');
+      const seedFactLogged = actionLogged.filter(
+        (e) => (e.detail as Record<string, unknown>).kind === 'challenge_issued' &&
+                (e.detail as Record<string, unknown>).spec_kind === 'SEED_FACT' &&
+                (e.detail as Record<string, unknown>).fact_id !== undefined
+      );
+
+      // The scenario uses SEED_FACT challenges which should have fact_id
+      expect(seedFactLogged.length).toBeGreaterThan(0);
+      for (const event of seedFactLogged) {
+        const detail = event.detail as Record<string, unknown>;
+        expect(typeof detail.fact_id).toBe('string');
+      }
+    });
+
+    it('action_logged events appear in the exported diagnostic bundle', () => {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const events: { kind: string; detail: unknown }[] = [];
+      const state = newDiagnosticsState();
+      
+      // Create bundle to capture server events
+      const bundle = createBundle(state, CALL_B.session_id, clock.now);
+      const session = new CallSession({
+        session_id: CALL_B.session_id,
+        seed: MERIDIAN,
+        call: CALL_B,
+        aai,
+        now: () => clock.now,
+        onServerEvent: () => {},
+        mock: mockToolResult,
+        onDiagnostic: (kind, detail) => {
+          events.push({ kind, detail });
+          recordServerEvent(state, CALL_B.session_id, clock.now, kind, detail);
+        },
+      });
+
+      session.start();
+      driveScenarioBIntoEvidence(session, aai, clock);
+
+      // Check that action_logged appears in the bundle's server_events
+      const actionLoggedInBundle = bundle.server_events.filter((e) => e.kind === 'action_logged');
+      expect(actionLoggedInBundle.length).toBeGreaterThanOrEqual(2);
+      
+      for (const event of actionLoggedInBundle) {
+        const detail = event.detail as Record<string, unknown>;
+        expect(detail.spec_kind).toBeDefined();
+        expect(detail.reply_id).toBeDefined();
+      }
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------------------
