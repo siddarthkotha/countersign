@@ -2209,11 +2209,11 @@
       "id": "FREE-PLAY-BATCH-2",
       "title": "45 min free-play batch, ten cases x 3, regrade, classify",
       "files": [],
-      "status": "running",
+      "status": "done",
       "held_because": "waits for push 42 (miller dead-stream/close-storm fix) so the 45 min of credit is spent once on the build the founder will play",
       "agent_id": "",
       "started_at": "",
-      "note": "2026-09-16 8:13 PM CDT: chained behind the deploy-43 watcher (background)"
+      "note": "2026-09-17 11:58 AM CDT: two batches run (deploy 43: 12/33, deploy 45: 17/33); regrades unchanged; findings fixed through push 47"
     },
     {
       "id": "CASE-11-CORRECTED-FIELD",
@@ -2448,7 +2448,7 @@
       "agent_id": "",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
-      "held_because": "2026-09-17 8:04 AM CDT: GO recommended on deploy 44 (10/10, 0 dead replies); waits for the founder to play cases 5, 7, 8, 11"
+      "held_because": "2026-09-17 11:58 AM CDT: GO on deploy 47 (16/16 scripted proofs on 44 to 47); needs the founder voice"
     },
     {
       "id": "CHEAT-SHEET-ON-LANDING",
@@ -2484,12 +2484,12 @@
       "id": "FLAKE-CREDITS-LEDGER-TEST",
       "title": "creditsLedger.test.ts \"handles missing reports directory gracefully\" times out under load",
       "files": [],
-      "status": "running",
+      "status": "done",
       "agent_id": "",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
       "held_because": "flaked once in three runs 2026-09-15 3:25 PM and once in a lane run 7:10 AM (5 s timeout scanning 100+ bundles under load); raise the timeout or scan a fixture dir in the test",
-      "note": "2026-09-16 5:46 PM CDT: Haiku worktree lane (autopilot queue item 4)"
+      "note": "2026-09-17 11:58 AM CDT: fixed 9b6edd9 (double read cached); no recurrence in 10 triple gates"
     },
     {
       "id": "push-41",
