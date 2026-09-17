@@ -370,6 +370,20 @@ export class CallSession {
    *  finished playing"). Chosen to match the task's own stated formula; not independently
    *  measured (ESTIMATE, not PROVEN) since no round-trip playback-finished signal exists yet. */
   private static readonly CLOSE_AUDIO_TAIL_BUFFER_MS = 1_000;
+  /** CRITICAL 2 fix (2026-09-17 review of e7ba96f): the minimum relayed CLOSE-reply audio
+   *  (converted from bytes via `OUTPUT_AUDIO_BYTES_PER_SECOND`, same as `beginCloseGrace`'s own
+   *  `audioSeconds`) required before `armCloseTranscriptWait`'s degraded audio-confirm branch
+   *  will treat a transcript-less CLOSE reply as spoken. A documented ABSOLUTE FLOOR (the
+   *  review's own simpler alternative to computing each close sentence's own expected TTS
+   *  length -- this codebase has no measured chars/sec speech rate to derive that from):
+   *  every CLOSE sentence (fsm.ts's `closeSentence()`) is at minimum the 32-character default
+   *  "Thank you for calling. Goodbye." and every real, non-fragment completion of one takes
+   *  several real seconds to speak -- comfortably above this floor. A caller barge-in cutting
+   *  a CLOSE reply to a fragment ("This...") produces at most a couple hundred milliseconds of
+   *  audio -- comfortably below it. 2,000ms is also well under the smallest FULL live
+   *  CLOSE-reply duration this codebase has measured (`CLOSE_REPLY_STUCK_MS`'s own 79-sample
+   *  p50 of 3952ms), so a genuine completed goodbye is never mistaken for a fragment. */
+  private static readonly DEGRADED_CLOSE_CONFIRM_MIN_AUDIO_MS = 2_000;
   /** PROVEN defect (2026-09-14, scripts/rehearse/reports/2026-09-14T17-58-23-barge-in-
    *  interrupt.md + .diagnostics.json): a CLOSE `reply.create` was sent, `reply.started` and
    *  `reply.audio.first` both arrived, then NOTHING else for the rest of the call (no further
@@ -740,11 +754,14 @@ export class CallSession {
    *  either (a) at that reply's own `reply.done`, after giving a late transcript chunk the
    *  SAME grace window `armCloseTranscriptWait`/`armQuestionTranscriptWait` already give one
    *  (`DEGRADED_STRIKE_WAIT_MS`, the same 1500ms value -- see `armDegradedStrikeCheck`), or
-   *  (b) WHILE STILL IN FLIGHT, if it has been audible for `DEGRADED_INFLIGHT_STRIKE_MS`
-   *  (12s) with no transcript at all (see `armDegradedInflightStrikeCheck`) -- occurrence 4
-   *  above was a single automatic reply that ran 34 SECONDS with audio and no transcript
-   *  while the verdict sealed and CLOSE was about to render; detection that only ever fires
-   *  at `reply.done` is far too late for a reply that long. Both paths funnel into
+   *  (b) WHILE STILL IN FLIGHT, if AUDIO HAS STOPPED ARRIVING for `DEGRADED_INFLIGHT_STRIKE_MS`
+   *  (12s of INACTIVITY, not 12s of total runtime -- CRITICAL 1 fix, 2026-09-17 review: see
+   *  `checkDegradedInflightStrike`'s own doc comment; a reply that keeps streaming real audio
+   *  past 12s is never struck just for running long) with no transcript at all (see
+   *  `armDegradedInflightStrikeCheck`) -- occurrence 4 above was a single automatic reply that
+   *  ran 34 SECONDS with audio and no transcript while the verdict sealed and CLOSE was about
+   *  to render; detection that only ever fires at `reply.done` is far too late for a reply
+   *  that long. Both paths funnel into
    *  `recordDegradedStrike`, which dedupes by reply id (`repliesCountedAsDegradedStrike`) so
    *  one very long dead reply that eventually also fails its own `reply.done` check is never
    *  double-counted as two strikes.
@@ -1045,22 +1062,60 @@ export class CallSession {
    *  while the verdict sealed and CLOSE rendered): armed from the FIRST relayed audio frame
    *  of every reply (`reply.audio`'s own `reply.audio.first` bookkeeping) -- catches a reply
    *  that is still running, well before its own (possibly very distant) `reply.done` would
-   *  ever let `armDegradedStrikeCheck` see it. Re-checks at fire time that this is still the
-   *  CURRENT reply (`currentReplyId`, not superseded by a newer one) and that it has not
-   *  already finished (`repliesWithDone` -- once it has, `armDegradedStrikeCheck` alone owns
-   *  it; `recordDegradedStrike`'s own dedup makes this belt-and-braces, not load-bearing). */
+   *  ever let `armDegradedStrikeCheck` see it.
+   *
+   *  CRITICAL 1 fix (2026-09-17 review of e7ba96f): this used to fire ONCE, unconditionally,
+   *  DEGRADED_INFLIGHT_STRIKE_MS after the reply's own FIRST audio frame -- so a real, healthy
+   *  reply that keeps streaming audio well past that point (the observed live max CLOSE-reply
+   *  duration is 12,668ms, per `CLOSE_REPLY_STUCK_MS`'s own 79-sample doc comment; nothing
+   *  stops an ordinary non-CLOSE reply from running that long too) would strike on continued,
+   *  healthy audio alone -- exactly backwards from this mode's whole purpose (catching DEAD
+   *  air, not long replies). Fixed to measure audio INACTIVITY instead, mirroring
+   *  `checkCloseReplyStuck`/`CLOSE_REPLY_STUCK_MS` (below) exactly: `armDegradedInflightStrikeCheck`
+   *  now only ever arms the FIRST check, at `DEGRADED_INFLIGHT_STRIKE_MS` from the first frame;
+   *  `checkDegradedInflightStrike` is the idempotent check itself, re-arming for the REMAINING
+   *  time whenever `lastReplyAudioAt` (updated on every `reply.audio` frame, for ANY reply --
+   *  see that field's own doc comment) shows audio arrived more recently than the full window,
+   *  and only striking once the full window has passed with no new frame at all. */
   private armDegradedInflightStrikeCheck(replyId: string): void {
     const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
       this.degradedStrikeTimers.delete(timer);
-      if (this.ended) return;
-      if (this.repliesWithDone.has(replyId)) return; // finished already -- the reply.done path owns it
-      if (this.currentReplyId !== replyId) return; // superseded by a newer reply -- stale check
-      const transcript = this.replyTranscripts.get(replyId) ?? '';
-      if (transcript.trim().length > 0) return; // healthy
-      this.recordDegradedStrike(replyId, { in_flight: true });
+      this.checkDegradedInflightStrike(replyId);
     }, CallSession.DEGRADED_INFLIGHT_STRIKE_MS);
     timer.unref?.();
     this.degradedStrikeTimers.add(timer);
+  }
+
+  /** CRITICAL 1 fix: the idempotent in-flight check itself -- see
+   *  `armDegradedInflightStrikeCheck`'s own doc comment for the full incident and design.
+   *  Guards, in order: call ended; this reply already reached its own `reply.done`
+   *  (`armDegradedStrikeCheck` alone owns it from there -- `recordDegradedStrike`'s own dedup
+   *  makes this belt-and-braces, not load-bearing); superseded by a newer reply
+   *  (`currentReplyId`); already has a real transcript (healthy, nothing to check further).
+   *  Only then does it look at audio inactivity: `lastAudioAge` under the full window
+   *  re-arms for the remaining time (exactly `checkCloseReplyStuck`'s own shape); the full
+   *  window elapsed with no new frame is what actually strikes. */
+  private checkDegradedInflightStrike(replyId: string): void {
+    if (this.ended) return;
+    if (this.repliesWithDone.has(replyId)) return; // finished already -- the reply.done path owns it
+    if (this.currentReplyId !== replyId) return; // superseded by a newer reply -- stale check
+    const transcript = this.replyTranscripts.get(replyId) ?? '';
+    if (transcript.trim().length > 0) return; // healthy
+
+    const now = this.opts.now();
+    const lastAudioAge = this.lastReplyAudioAt !== null ? now - this.lastReplyAudioAt : Infinity;
+    if (lastAudioAge < CallSession.DEGRADED_INFLIGHT_STRIKE_MS) {
+      const remainingMs = CallSession.DEGRADED_INFLIGHT_STRIKE_MS - lastAudioAge;
+      const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+        this.degradedStrikeTimers.delete(timer);
+        this.checkDegradedInflightStrike(replyId);
+      }, remainingMs);
+      timer.unref?.();
+      this.degradedStrikeTimers.add(timer);
+      return;
+    }
+
+    this.recordDegradedStrike(replyId, { in_flight: true });
   }
 
   /** Cancels every pending strike-check timer (both paths) -- called once, from `end()`.
@@ -1344,8 +1399,12 @@ export class CallSession {
    *  value re-read when this timer's callback fires, CLOSE_TRANSCRIPT_WAIT_MS later) -- see
    *  the DEGRADED-TRANSCRIPTS class-field doc comment: this avoids a self-referential edge
    *  case where THIS very reply's own strike (which can only resolve after this same wait)
-   *  would otherwise be able to flip the mode on just in time to change its own outcome. */
-  private armCloseTranscriptWait(replyId: string, degradedAtReplyDone: boolean): void {
+   *  would otherwise be able to flip the mode on just in time to change its own outcome.
+   *  `replyStatus`: this reply's own `reply.done.status`, also threaded through by
+   *  `scheduleCloseIfNeeded` (CRITICAL 2 fix, 2026-09-17 review of e7ba96f) -- see the
+   *  audio-confirm branch below for why an `interrupted` reply can never be confirmed from
+   *  audio alone. */
+  private armCloseTranscriptWait(replyId: string, degradedAtReplyDone: boolean, replyStatus: string): void {
     if (this.closeTranscriptWaitTimer && this.closeTranscriptWaitReplyId === replyId) return;
     if (this.closeTranscriptWaitTimer) {
       clearTimeout(this.closeTranscriptWaitTimer);
@@ -1375,9 +1434,22 @@ export class CallSession {
       // goodbye. LAW 2 is unaffected: the verdict and containment already ran the instant
       // CLOSE first rendered, long before this -- this only decides how long the wire stays
       // open trying to confirm a goodbye that was, in all likelihood, already heard.
+      //
+      // CRITICAL 2 fix (2026-09-17 review of e7ba96f): this used to accept ANY nonzero audio,
+      // so a CLOSE reply cut to a fragment by a caller barge-in (e.g. "This...",
+      // `reply.done.status === 'interrupted'`) would falsely confirm the goodbye and hang up
+      // on the caller mid-sentence. Fixed with two added guards: (a) `replyStatus ===
+      // 'completed'` -- an interrupted reply was, by definition, cut short; that is never
+      // evidence the full line was heard, however much audio it relayed before being cut off.
+      // (b) a minimum-audio floor (`DEGRADED_CLOSE_CONFIRM_MIN_AUDIO_MS`) -- see that
+      // constant's own doc comment for the reasoning (a documented absolute floor, the
+      // simpler of the two options the review offered, since this codebase has no measured
+      // chars/sec TTS rate to compute each close sentence's own expected length from).
+      const audioMs = ((this.replyAudioBytes.get(replyId) ?? 0) / CallSession.OUTPUT_AUDIO_BYTES_PER_SECOND) * 1000;
       if (
         degradedAtReplyDone &&
-        (this.replyAudioBytes.get(replyId) ?? 0) > 0 &&
+        replyStatus === 'completed' &&
+        audioMs >= CallSession.DEGRADED_CLOSE_CONFIRM_MIN_AUDIO_MS &&
         this.instructedReplyIds.has(replyId) &&
         this.replyGoalAtStart.get(replyId) === 'CLOSE'
       ) {
@@ -1521,7 +1593,7 @@ export class CallSession {
    *  transcript, not the snapshot taken here). There is no attempt cap anymore
    *  (CLOSE_REPLY_ATTEMPTS is gone) -- retries continue, spaced, until either a match is
    *  heard or the CLOSE_TOTAL_MS (45s) hard cap (`armClose`) ends the call `close_timeout`. */
-  private scheduleCloseIfNeeded(replyId: string): void {
+  private scheduleCloseIfNeeded(replyId: string, status: string): void {
     // Round 5: once confirmed, nothing is owed for any OTHER reply -- but the confirmed
     // reply's own `reply.done` must still fall through below (test (e)'s own PROVEN
     // "reply.done wins the race" behaviour: `beginCloseGrace` is idempotent, so letting this
@@ -1546,8 +1618,11 @@ export class CallSession {
 
     // DEGRADED-TRANSCRIPTS mode: snapshotted here, synchronously, at THIS reply's own
     // reply.done -- see `armCloseTranscriptWait`'s own doc comment on `degradedAtReplyDone`
-    // for why this must be a snapshot, never re-read live inside that later callback.
-    this.armCloseTranscriptWait(replyId, this.degradedTranscriptsMode);
+    // for why this must be a snapshot, never re-read live inside that later callback. `status`
+    // is threaded through too (CRITICAL 2 fix, 2026-09-17 review): an INTERRUPTED reply --
+    // cut short by a caller barge-in -- must never be confirmed from audio alone, however
+    // much audio it relayed before being cut off. See that method's own doc comment.
+    this.armCloseTranscriptWait(replyId, this.degradedTranscriptsMode, status);
   }
 
   constructor(opts: CallSessionOpts) {
@@ -2187,7 +2262,7 @@ export class CallSession {
         // redundant one from `scheduleCloseIfNeeded`'s own retry path. Checked regardless of
         // `evt.status`: an interrupted close still means nothing more is owed if the close
         // line was already heard (see `scheduleCloseIfNeeded`'s own doc comment).
-        if (!this.replyCreateAwaitingStart) this.scheduleCloseIfNeeded(evt.reply_id);
+        if (!this.replyCreateAwaitingStart) this.scheduleCloseIfNeeded(evt.reply_id, evt.status);
         break;
 
       case 'input.speech.started':
@@ -2348,9 +2423,25 @@ export class CallSession {
       const hadAudio = (this.replyAudioBytes.get(replyId) ?? 0) > 0;
       const wasOurInstructedReplyForThisGoal =
         this.instructedReplyIds.has(replyId) && this.replyGoalAtStart.get(replyId) === goal.code;
-      if (hadAudio && wasOurInstructedReplyForThisGoal) {
+      // LAW 3 fix (2026-09-17 review of e7ba96f, Important): this assumption used to apply to
+      // EVERY goal code here, including READBACK -- but `readback_issued` is not just internal
+      // bookkeeping the way `challenge_issued`/`elicit_issued` are (those only ever let the
+      // engine pick its OWN next challenge/field, still graded exclusively from the caller's
+      // own words). `readback_issued` is what the LEDGER (engine/ledger.ts) reads to treat the
+      // caller's VERY NEXT turn as CONFIRMING a critical field -- so assuming one was spoken
+      // when it may never have reached the caller's ears (this reply's real failure mode: audio
+      // relayed, transcript lost) would let a "yes" the caller never actually meant confirm a
+      // field they never heard read back. Restricted to CHALLENGE/ELICIT only; a READBACK this
+      // reply may or may not have actually spoken is left UNCONFIRMED instead -- no re-ask is
+      // ever armed for it either (the degraded mode suppresses `maybeReaskQuestion` for every
+      // QUESTION_GOALS code, READBACK included), so the call simply has no forward path for
+      // this rendering and falls to the idle timer, ending ESCALATE-side -- the safe side per
+      // LAW 3 (never STAGE on evidence this uncertain).
+      if (hadAudio && wasOurInstructedReplyForThisGoal && goal.code !== 'READBACK') {
         asked = true;
         this.diag('assumed_asked', { reply_id: replyId, goal_code: goal.code });
+      } else if (hadAudio && wasOurInstructedReplyForThisGoal && goal.code === 'READBACK' && goal.readback) {
+        this.diag('readback_not_assumed', { reply_id: replyId, field: goal.readback.field });
       }
     }
     if (goal.code === 'ASK_CHALLENGE' && goal.challenge) {

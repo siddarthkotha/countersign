@@ -165,15 +165,23 @@ describe('CallSession -- DEGRADED-TRANSCRIPTS mode: detection and recovery (i)',
     newSession(clock, CALL_B, aai, sent, diagEvents);
 
     // Reply 'long1' starts speaking and never stops (no reply.done in this test at all).
+    // CRITICAL 1 fix (2026-09-17): the in-flight check now measures audio INACTIVITY off
+    // `opts.now()` (mirroring `checkCloseReplyStuck`), so `clock.now` must advance in lockstep
+    // with the fake timer for its computation to mean anything -- same convention
+    // session.test.ts's own CLOSE audio-inactivity tests already use (e.g. "(NEW TEST 1)").
     clock.now = 1000;
     aai.emit({ type: 'reply.started', reply_id: 'long1' });
     aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
 
     // Still well short of the in-flight threshold: no strike yet.
+    clock.now += DEGRADED_INFLIGHT_STRIKE_MS - 1;
     vi.advanceTimersByTime(DEGRADED_INFLIGHT_STRIKE_MS - 1);
     expect(diagEvents.filter((e) => e.kind === 'degraded_strike')).toHaveLength(0);
 
-    // Crosses it: 'long1' strikes IN FLIGHT, with no reply.done ever having fired for it.
+    // Crosses it: 'long1' strikes IN FLIGHT, with no reply.done ever having fired for it -- no
+    // further audio arrived after the single frame above, so the inactivity re-arm exhausts
+    // and strikes exactly as the old flat timer did for this single-frame shape.
+    clock.now += 1;
     vi.advanceTimersByTime(1);
     const strikes = diagEvents.filter((e) => e.kind === 'degraded_strike');
     expect(strikes).toHaveLength(1);
@@ -186,11 +194,79 @@ describe('CallSession -- DEGRADED-TRANSCRIPTS mode: detection and recovery (i)',
     clock.now = 1000 + DEGRADED_INFLIGHT_STRIKE_MS;
     aai.emit({ type: 'reply.started', reply_id: 'long2' });
     aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
+    clock.now += DEGRADED_INFLIGHT_STRIKE_MS;
     vi.advanceTimersByTime(DEGRADED_INFLIGHT_STRIKE_MS);
 
     const degraded = diagEvents.filter((e) => e.kind === 'transcripts_degraded');
     expect(degraded).toHaveLength(1);
     expect(degraded[0]!.detail).toMatchObject({ reply_ids: ['long1', 'long2'] });
+  });
+
+  it('a reply streaming audio frames every 500ms for 14s whose transcript arrives at 14.5s does NOT strike (mirrors session.test.ts\'s own CLOSE "14s does NOT trigger the stuck watchdog" audio-inactivity case, but for the in-flight strike check -- CRITICAL 1 fix)', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    newSession(clock, CALL_B, aai, sent, diagEvents);
+
+    clock.now = 1000;
+    aai.emit({ type: 'reply.started', reply_id: 'long-healthy' });
+
+    // A frame every 500ms for 14 seconds -- comfortably past DEGRADED_INFLIGHT_STRIKE_MS (12s)
+    // of TOTAL runtime, but never silent for anywhere near that long at any single point.
+    // clock.now advances in lockstep with the fake timer so the audio-inactivity re-arm
+    // actually gets exercised (unlike a bare `clock.now` jump, which never lets a pending
+    // setTimeout fire at all).
+    for (let i = 0; i < 28; i++) {
+      aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
+      clock.now += 500;
+      vi.advanceTimersByTime(500);
+    }
+    expect(diagEvents.filter((e) => e.kind === 'degraded_strike')).toHaveLength(0);
+
+    // Transcript and reply.done arrive 500ms after the last frame (14.5s total) -- a real,
+    // healthy long reply, never struck for running long.
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'long-healthy-t',
+      text: 'Thank you for your patience -- still checking that.',
+      reply_id: 'long-healthy',
+      interrupted: false,
+    });
+    aai.emit({ type: 'reply.done', reply_id: 'long-healthy', status: 'completed' });
+    vi.advanceTimersByTime(DEGRADED_STRIKE_WAIT_MS);
+
+    expect(diagEvents.filter((e) => e.kind === 'degraded_strike')).toHaveLength(0);
+    expect(diagEvents.filter((e) => e.kind === 'transcripts_degraded')).toHaveLength(0);
+  });
+
+  it('a reply whose audio frames STOP entirely (occurrence-4\'s literal dead-reply shape) still strikes once no audio has arrived for DEGRADED_INFLIGHT_STRIKE_MS, without waiting for the full 34s the live incident ran', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    newSession(clock, CALL_B, aai, sent, diagEvents);
+
+    clock.now = 1000;
+    aai.emit({ type: 'reply.started', reply_id: 'dead1' });
+    // A few frames arrive, THEN STOP completely -- no reply.done, no transcript, ever.
+    for (let i = 0; i < 4; i++) {
+      aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
+      clock.now += 500;
+      vi.advanceTimersByTime(500);
+    }
+    // No strike yet -- audio only stopped 2000ms ago, well under the 12s inactivity window.
+    expect(diagEvents.filter((e) => e.kind === 'degraded_strike')).toHaveLength(0);
+
+    // Audio never resumes. The strike fires DEGRADED_INFLIGHT_STRIKE_MS after the LAST frame
+    // (not 34s, and not a flat 12s from the FIRST frame either).
+    clock.now += DEGRADED_INFLIGHT_STRIKE_MS;
+    vi.advanceTimersByTime(DEGRADED_INFLIGHT_STRIKE_MS);
+    const strikes = diagEvents.filter((e) => e.kind === 'degraded_strike' && (e.detail as { reply_id: string }).reply_id === 'dead1');
+    expect(strikes).toHaveLength(1);
+    expect(strikes[0]!.detail).toMatchObject({ reply_id: 'dead1', in_flight: true });
   });
 
   it('an in-flight strike and a later reply.done-triggered strike for the SAME reply are never double-counted', () => {
@@ -201,10 +277,13 @@ describe('CallSession -- DEGRADED-TRANSCRIPTS mode: detection and recovery (i)',
     const diagEvents: { kind: string; detail: unknown }[] = [];
     newSession(clock, CALL_B, aai, sent, diagEvents);
 
-    // 'long1' strikes in flight at t=12000ms (no transcript, no reply.done yet)...
+    // 'long1' strikes in flight at t=12000ms (no transcript, no reply.done yet)... clock.now
+    // advances in lockstep with the fake timer -- see the sibling in-flight test above for why
+    // this now matters (CRITICAL 1 fix: the check measures audio inactivity off `opts.now()`).
     clock.now = 1000;
     aai.emit({ type: 'reply.started', reply_id: 'long1' });
     aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
+    clock.now += DEGRADED_INFLIGHT_STRIKE_MS;
     vi.advanceTimersByTime(DEGRADED_INFLIGHT_STRIKE_MS);
     expect(diagEvents.filter((e) => e.kind === 'degraded_strike')).toHaveLength(1);
 
@@ -392,12 +471,18 @@ describe('CallSession -- DEGRADED-TRANSCRIPTS mode: CLOSE confirmed from audio (
     const afterAttempt3 = closeReplyCreates().length;
     expect(afterAttempt3).toBeGreaterThan(afterAttempt2); // attempt 3 -- degraded mode was already on
 
-    // Attempt 3's own reply, now WHILE already degraded: audio, no transcript. This is the one
-    // that gets confirmed from audio instead of triggering yet another retry.
+    // Attempt 3's own reply, now WHILE already degraded: FULL-LENGTH audio (120,000 bytes ->
+    // 2500ms of decoded PCM, comfortably past DEGRADED_CLOSE_CONFIRM_MIN_AUDIO_MS -- CRITICAL 2
+    // fix, 2026-09-17: a real, completed goodbye, not a fragment), no transcript. reply.done's
+    // own clock.now is 2500ms after reply.started (matching the audio's own real length,
+    // unlike the other attempts' instant done) so `beginCloseGrace`'s audio-based tail wait
+    // stays within the flat CLOSE_GRACE_MS this test's final wait already expects -- see
+    // `beginCloseGrace`'s own doc comment for the formula. This is the one that gets confirmed
+    // from audio instead of triggering yet another retry.
     clock.now = 11500;
     aai.emit({ type: 'reply.started', reply_id: 'close-c' });
-    aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
-    clock.now = 11700;
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(120_000).toString('base64') });
+    clock.now = 14000;
     aai.emit({ type: 'reply.done', reply_id: 'close-c', status: 'completed' });
 
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
@@ -446,5 +531,139 @@ describe('CallSession -- DEGRADED-TRANSCRIPTS mode: CLOSE confirmed from audio (
     const retryMsg = aai.sent.at(-1) as { type: string; instructions?: string };
     expect(retryMsg.type).toBe('reply.create');
     expect(retryMsg.instructions).toContain('Say exactly this');
+  });
+
+  it('while degraded, a CLOSE reply cut to a fragment by a caller barge-in (a little audio, INTERRUPTED status) is NOT confirmed from audio, and still falls through to the ordinary retry (CRITICAL 2 fix)', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, { ...CALL_CLOSE, session_id: 'sess-degraded-close-interrupted' }, aai, sent, diagEvents);
+    driveToSealedStage(session, aai, clock);
+    expect(session.last?.goal.code).toBe('CLOSE');
+
+    const closeReplyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+
+    // Attempts 1 and 2: the same audio-only, no-transcript COMPLETED shape as the sibling test
+    // above -- crosses the degraded-mode threshold once attempt 2's own strike resolves.
+    clock.now = 7500;
+    aai.emit({ type: 'reply.started', reply_id: 'close-a' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(120_000).toString('base64') });
+    clock.now = 7700;
+    aai.emit({ type: 'reply.done', reply_id: 'close-a', status: 'completed' });
+    vi.advanceTimersByTime(CLOSE_TRANSCRIPT_WAIT_MS);
+    vi.advanceTimersByTime(CLOSE_RETRY_MIN_GAP_MS);
+
+    clock.now = 9500;
+    aai.emit({ type: 'reply.started', reply_id: 'close-b' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(120_000).toString('base64') });
+    clock.now = 9700;
+    aai.emit({ type: 'reply.done', reply_id: 'close-b', status: 'completed' });
+    vi.advanceTimersByTime(CLOSE_TRANSCRIPT_WAIT_MS);
+    expect(diagEvents.filter((e) => e.kind === 'transcripts_degraded')).toHaveLength(1);
+    vi.advanceTimersByTime(CLOSE_RETRY_MIN_GAP_MS);
+    const afterAttempt3Sent = closeReplyCreates().length;
+
+    // Attempt 3, now degraded: the CALLER BARGES IN partway through the close line -- a small
+    // fragment of audio ("This...") and an INTERRUPTED reply.done, never completed. Must NOT
+    // be confirmed from audio, however much the mode is already degraded.
+    clock.now = 11500;
+    aai.emit({ type: 'reply.started', reply_id: 'close-c' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') }); // ~2ms of audio
+    clock.now = 11600;
+    aai.emit({ type: 'reply.done', reply_id: 'close-c', status: 'interrupted' });
+
+    vi.advanceTimersByTime(CLOSE_TRANSCRIPT_WAIT_MS);
+    expect(diagEvents.filter((e) => e.kind === 'close_confirmed_by_audio')).toHaveLength(0);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+
+    // Falls through to the ordinary spaced retry, exactly as an undegraded interrupted CLOSE
+    // would -- the caller is asked the goodbye again, never hung up on mid-sentence.
+    vi.advanceTimersByTime(CLOSE_RETRY_MIN_GAP_MS);
+    expect(closeReplyCreates().length).toBeGreaterThan(afterAttempt3Sent);
+  });
+});
+
+describe('CallSession -- DEGRADED-TRANSCRIPTS mode: READBACK completion is never assumed (LAW 3 fix, iv)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('while degraded, an instructed READBACK reply with audio and no transcript does NOT log readback_issued, and the caller\'s following "Yes" does not confirm the field', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_B, aai, sent, diagEvents);
+
+    // Degrade the mode on two ambient replies BEFORE the caller ever speaks (goal is still
+    // GREET, not a QUESTION_GOALS code) -- same convention the (ii) suite above uses, and
+    // deliberately so: an ambient empty completion sharing a QUESTION_GOALS goal's own label
+    // would otherwise trigger the pre-existing (unrelated, out-of-scope) question-reask
+    // machinery, which this test is not about.
+    emitAudioNoTranscriptReply(aai, clock, 's0a', 100, 300);
+    vi.advanceTimersByTime(DEGRADED_STRIKE_WAIT_MS);
+    emitAudioNoTranscriptReply(aai, clock, 's0b', 400, 600);
+    vi.advanceTimersByTime(DEGRADED_STRIKE_WAIT_MS);
+    expect(diagEvents.filter((e) => e.kind === 'transcripts_degraded')).toHaveLength(1);
+
+    // The caller states the wire request -- the engine issues a TRAP_FACT ASK_CHALLENGE and
+    // proactively sends an instructed reply.create for it.
+    clock.now = 1000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c1',
+      text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
+    });
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+
+    // 'a1' answers it: audio, no transcript -- degraded mode is ALREADY on (from s0a/s0b), so
+    // `assumed_asked` applies to this CHALLENGE goal (unaffected by this fix, which only
+    // restricts READBACK) and `challenge_issued` is logged, letting the engine actually grade
+    // the caller's upcoming trap-fact correction and advance past CHALLENGE.
+    clock.now = 1500;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
+    clock.now = 1800;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+    vi.advanceTimersByTime(DEGRADED_STRIKE_WAIT_MS);
+    expect(diagEvents.some((e) => e.kind === 'assumed_asked' && (e.detail as { reply_id: string }).reply_id === 'a1')).toBe(true);
+    expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(true);
+
+    // The caller corrects the trap fact -- the engine advances to a genuine READBACK for the
+    // amount, and proactively sends an instructed reply.create for it. Mode is STILL degraded
+    // throughout (nothing here ever produced a real transcript).
+    clock.now = 3500;
+    aai.emit({ type: 'transcript.user', item_id: 'c2', text: "No, that's wrong. It's Meridian Supply." });
+    expect(session.last?.goal.code).toBe('READBACK');
+    const field = session.last!.goal.readback!.field;
+    expect(field).toBe('amount_usd');
+
+    // 'r1' is that instructed READBACK reply: real audio, but AssemblyAI never transcribes it
+    // -- the exact PROVEN degraded shape this fix protects.
+    clock.now = 4000;
+    aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
+    clock.now = 4300;
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+
+    // No readback_issued action -- an un-heard readback must never let the caller's next "yes"
+    // confirm a critical field they may never have heard.
+    expect(session.logs.actions.some((a) => a.kind === 'readback_issued')).toBe(false);
+    expect(diagEvents.some((e) => e.kind === 'assumed_asked' && (e.detail as { reply_id: string }).reply_id === 'r1')).toBe(false);
+    const notAssumed = diagEvents.filter((e) => e.kind === 'readback_not_assumed');
+    expect(notAssumed).toHaveLength(1);
+    expect(notAssumed[0]!.detail).toEqual({ reply_id: 'r1', field: 'amount_usd' });
+
+    // The caller's next turn says "Yes" -- with no readback_issued ever logged, the ledger
+    // (engine/ledger.ts) has no pending readback to close out, so this cannot confirm
+    // amount_usd: it stays exactly as first STATED, never CONFIRMED.
+    clock.now = 4800;
+    aai.emit({ type: 'transcript.user', item_id: 'c3', text: "Yes, that's right." });
+    expect(session.logs.actions.some((a) => a.kind === 'readback_issued')).toBe(false);
+    const amountClaim = session.last?.ledger.find((c) => c.field === 'amount_usd');
+    expect(amountClaim?.kind).not.toBe('CONFIRMED');
   });
 });
