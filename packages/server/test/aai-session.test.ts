@@ -558,4 +558,98 @@ describe('connectAai', () => {
 
     expect(aai.stats?.()).toEqual({ unknown_events: 2 });
   });
+
+  // aai-observability lane (2026-09-16, dead-transcript investigation finding 1 continued):
+  // `deps.onUnhandledMessage` and `AaiSocket.onUnhandledMessage` are the two channels a
+  // message this adapter does not model can reach a caller through -- see both fields' own
+  // doc comments (aai/session.ts's AaiConnectDeps, aai/types.ts's AaiSocket) for why both
+  // exist. `transcript.agent.delta` is deliberately excluded from BOTH (it has its own
+  // dedicated channel, tested separately below).
+  describe('unhandled messages (aai-observability lane, 2026-09-16)', () => {
+    it('calls deps.onUnhandledMessage with the type and a <=200-char JSON slice, for a message mapServerEvent does not model', async () => {
+      const { deps, sockets } = makeDeps();
+      const calls: [string, string][] = [];
+      deps.onUnhandledMessage = (type, detail) => calls.push([type, detail]);
+      const aai = await connectAndReady(deps, sockets, 'sess-1');
+
+      sockets[0]!.triggerMessage({ type: 'session.updated', config: { voice: 'alba' } });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]![0]).toBe('session.updated');
+      const detail = calls[0]![1];
+      expect(detail.length).toBeLessThanOrEqual(200);
+      expect(JSON.parse(detail)).toEqual({ type: 'session.updated', config: { voice: 'alba' } });
+      // stats() and the deps hook both fire off the very same drop -- proving the delta
+      // count from the earlier test and this one are counting the same event, not two
+      // different mechanisms.
+      expect(aai.stats?.()).toEqual({ unknown_events: 1 });
+    });
+
+    it('truncates detail to 200 chars for a large unmodelled message, without throwing', async () => {
+      const { deps, sockets } = makeDeps();
+      const calls: [string, string][] = [];
+      deps.onUnhandledMessage = (type, detail) => calls.push([type, detail]);
+      await connectAndReady(deps, sockets, 'sess-1');
+
+      sockets[0]!.triggerMessage({ type: 'session.updated', huge: 'x'.repeat(500) });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]![1].length).toBe(200);
+    });
+
+    it('never calls deps.onUnhandledMessage for a transcript.agent.delta -- that type has its own dedicated channel', async () => {
+      const { deps, sockets } = makeDeps();
+      const calls: [string, string][] = [];
+      deps.onUnhandledMessage = (type, detail) => calls.push([type, detail]);
+      await connectAndReady(deps, sockets, 'sess-1');
+
+      sockets[0]!.triggerMessage({ type: 'transcript.agent.delta', reply_id: 'r1', item_id: 'i1', delta: 'hi' });
+
+      expect(calls).toHaveLength(0);
+    });
+
+    it('AaiSocket.onUnhandledMessage receives the same (type, detail) a caller registered before the message arrived', async () => {
+      const { deps, sockets } = makeDeps();
+      const aai = await connectAndReady(deps, sockets, 'sess-1');
+      const calls: [string, string][] = [];
+      aai.onUnhandledMessage?.((type, detail) => calls.push([type, detail]));
+
+      sockets[0]!.triggerMessage({ type: 'session.updated' });
+
+      expect(calls).toEqual([['session.updated', JSON.stringify({ type: 'session.updated' })]]);
+    });
+
+    it("falls back to type 'unknown' for a message with no string type field at all", async () => {
+      const { deps, sockets } = makeDeps();
+      const calls: [string, string][] = [];
+      deps.onUnhandledMessage = (type, detail) => calls.push([type, detail]);
+      await connectAndReady(deps, sockets, 'sess-1');
+
+      sockets[0]!.triggerMessage({ oops: true });
+
+      expect(calls).toEqual([['unknown', JSON.stringify({ oops: true })]]);
+    });
+  });
+
+  // aai-observability lane (2026-09-16, item 3): `transcript.agent.delta`'s own dedicated
+  // channel -- structured (reply_id, delta) fields, never folded into the generic
+  // onUnhandledMessage flood-prone path (see both methods' own doc comments in
+  // aai/types.ts).
+  describe('AaiSocket.onAgentTranscriptDelta (aai-observability lane, 2026-09-16)', () => {
+    it('fires once per transcript.agent.delta chunk with the reply_id and delta text', async () => {
+      const { deps, sockets } = makeDeps();
+      const aai = await connectAndReady(deps, sockets, 'sess-1');
+      const calls: [string, string][] = [];
+      aai.onAgentTranscriptDelta?.((replyId, delta) => calls.push([replyId, delta]));
+
+      sockets[0]!.triggerMessage({ type: 'transcript.agent.delta', reply_id: 'a1', item_id: 'i1', delta: 'Hel' });
+      sockets[0]!.triggerMessage({ type: 'transcript.agent.delta', reply_id: 'a1', item_id: 'i1', delta: 'lo' });
+
+      expect(calls).toEqual([
+        ['a1', 'Hel'],
+        ['a1', 'lo'],
+      ]);
+      expect(aai.stats?.()).toEqual({ unknown_events: 2 });
+    });
+  });
 });

@@ -112,6 +112,19 @@ export interface AaiConnectDeps {
    *  close() is currently waiting on it or not. Optional so every existing test/caller
    *  that doesn't pass it sees no behavior change. */
   onSessionEnded?: (msg: Record<string, unknown>) => void;
+  /** aai-observability lane (2026-09-16, dead-transcript investigation finding 1
+   *  continued): same pattern as `onSessionEnded` just above -- called from `wire()`'s null
+   *  branch (below) every time a server message arrives that `mapServerEvent` does not
+   *  model, other than `transcript.agent.delta` (see `AaiSocket.onAgentTranscriptDelta`'s
+   *  own doc comment in `types.ts` for why that one type is excluded here and given its own
+   *  channel instead). This deps-level hook is the seam a test drives directly against the
+   *  real adapter (`aai-session.test.ts`), independent of `CallSession` -- production
+   *  (`index.ts`) does not need to wire it at all to get live behavior, because the actual
+   *  channel `CallSession` subscribes through is `RealAaiSocket.onUnhandledMessage` (the
+   *  `AaiSocket` interface method, called from this same `wire()` branch below);
+   *  `PendingAaiSocket` relays THAT method the same way it already relays `on()`. Optional
+   *  so every existing test/caller that doesn't pass it sees no behavior change. */
+  onUnhandledMessage?: (type: string, detail: string) => void;
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -217,6 +230,13 @@ class RealAaiSocket implements AaiSocket {
   /** Server messages whose type this adapter does not model -- never used for control
    *  flow, kept only so a caller (e.g. the live smoke script) can report it if useful. */
   unknownEventCount = 0;
+  /** aai-observability lane (2026-09-16): subscribers for `AaiSocket.onUnhandledMessage`
+   *  (every unmodelled message except `transcript.agent.delta`) and
+   *  `AaiSocket.onAgentTranscriptDelta` (that one type, separately) -- see both methods'
+   *  own doc comments in `types.ts`. Populated by `onUnhandledMessage`/
+   *  `onAgentTranscriptDelta` below, read by `wire()`'s null branch. */
+  private unhandledHandlers: ((type: string, detail: string) => void)[] = [];
+  private agentDeltaHandlers: ((reply_id: string, delta: string) => void)[] = [];
   /** Defect 2 fix: set by `close()` while it's waiting for AssemblyAI's own
    *  `session.ended` to arrive, cleared (and called) either by that message showing up
    *  (`wire()`'s message handler, below) or by the timeout in `close()` itself -- whichever
@@ -246,6 +266,27 @@ class RealAaiSocket implements AaiSocket {
       const evt = mapServerEvent(msg);
       if (!evt) {
         this.unknownEventCount += 1;
+        // aai-observability lane (2026-09-16): surface WHAT was dropped, not just that
+        // something was -- `transcript.agent.delta` (PROVEN fields, docs/aai-docs-check-
+        // 2026-09-01.md line 85: reply_id, item_id, delta, start_ms, end_ms) gets its own
+        // dedicated, aggregated channel (see `onAgentTranscriptDelta`'s own doc comment for
+        // why); every other unmodelled type goes through the generic, rate-limited channel
+        // instead.
+        const rawType = typeof msg.type === 'string' ? msg.type : 'unknown';
+        if (rawType === 'transcript.agent.delta') {
+          const replyId = typeof msg.reply_id === 'string' ? msg.reply_id : 'unknown';
+          const delta = typeof msg.delta === 'string' ? msg.delta : '';
+          for (const h of this.agentDeltaHandlers) h(replyId, delta);
+        } else {
+          let detail: string;
+          try {
+            detail = JSON.stringify(msg).slice(0, 200);
+          } catch {
+            detail = '<unserializable>';
+          }
+          this.deps.onUnhandledMessage?.(rawType, detail);
+          for (const h of this.unhandledHandlers) h(rawType, detail);
+        }
         return;
       }
       this.emit(evt);
@@ -362,6 +403,20 @@ class RealAaiSocket implements AaiSocket {
    *  nothing and lets the live smoke script (or any future ops surface) report it. */
   stats(): { unknown_events: number } {
     return { unknown_events: this.unknownEventCount };
+  }
+
+  /** aai-observability lane (2026-09-16): see `AaiSocket.onUnhandledMessage`'s doc comment
+   *  in `types.ts` -- registers a handler invoked from `wire()`'s null branch for every
+   *  unmodelled message except `transcript.agent.delta`. */
+  onUnhandledMessage(handler: (type: string, detail: string) => void): void {
+    this.unhandledHandlers.push(handler);
+  }
+
+  /** aai-observability lane (2026-09-16): see `AaiSocket.onAgentTranscriptDelta`'s doc
+   *  comment in `types.ts` -- registers a handler invoked from `wire()`'s null branch for
+   *  every `transcript.agent.delta` chunk. */
+  onAgentTranscriptDelta(handler: (reply_id: string, delta: string) => void): void {
+    this.agentDeltaHandlers.push(handler);
   }
 
   /** Defect 2 fix (timing-analysis.md §E): used to send `session.end` and call

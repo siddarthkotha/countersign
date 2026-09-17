@@ -105,6 +105,15 @@ const DEFAULT_INITIAL_PROMPT =
 
 class PendingAaiSocket implements AaiSocket {
   private handlers: ((evt: AaiEvent) => void)[] = [];
+  /** aai-observability lane (2026-09-16, KNOWN GAP fix from finding 1: this class used to
+   *  implement only send/on/close, so `CallSession`'s `stats?.()` check -- and now its
+   *  `onUnhandledMessage?.()`/`onAgentTranscriptDelta?.()` registrations too -- were always
+   *  `undefined` in production, a no-op, for every real call. Relayed the same way `on()`
+   *  already is: registrations made here before `real` resolves are still honored, because
+   *  `real.onUnhandledMessage`/`real.onAgentTranscriptDelta` are wired to forward into THESE
+   *  same lists once the connect settles (below). */
+  private unhandledHandlers: ((type: string, detail: string) => void)[] = [];
+  private agentDeltaHandlers: ((reply_id: string, delta: string) => void)[] = [];
   private queued: object[] = [];
   private real: AaiSocket | null = null;
   private closedBeforeReady = false;
@@ -122,6 +131,9 @@ class PendingAaiSocket implements AaiSocket {
         recordMintSuccess(state);
         this.real = real;
         real.on((evt) => this.emit(evt));
+        // aai-observability lane (2026-09-16): same relay shape as `on()` just above.
+        real.onUnhandledMessage?.((type, detail) => this.emitUnhandled(type, detail));
+        real.onAgentTranscriptDelta?.((replyId, delta) => this.emitAgentDelta(replyId, delta));
         for (const msg of this.queued) real.send(msg);
         this.queued = [];
       })
@@ -148,6 +160,14 @@ class PendingAaiSocket implements AaiSocket {
     for (const h of this.handlers) h(evt);
   }
 
+  private emitUnhandled(type: string, detail: string): void {
+    for (const h of this.unhandledHandlers) h(type, detail);
+  }
+
+  private emitAgentDelta(reply_id: string, delta: string): void {
+    for (const h of this.agentDeltaHandlers) h(reply_id, delta);
+  }
+
   send(msg: object): void {
     if (this.real) this.real.send(msg);
     else this.queued.push(msg);
@@ -155,6 +175,28 @@ class PendingAaiSocket implements AaiSocket {
 
   on(handler: (evt: AaiEvent) => void): void {
     this.handlers.push(handler);
+  }
+
+  /** aai-observability lane (2026-09-16, item 1): see `AaiSocket.onUnhandledMessage`'s doc
+   *  comment (aai/types.ts). Registering here before `real` exists is fine -- see the
+   *  constructor's own relay wiring above. */
+  onUnhandledMessage(handler: (type: string, detail: string) => void): void {
+    this.unhandledHandlers.push(handler);
+  }
+
+  /** aai-observability lane (2026-09-16, item 3): see `AaiSocket.onAgentTranscriptDelta`'s
+   *  doc comment (aai/types.ts). */
+  onAgentTranscriptDelta(handler: (reply_id: string, delta: string) => void): void {
+    this.agentDeltaHandlers.push(handler);
+  }
+
+  /** aai-observability lane (2026-09-16, item 2): the KNOWN GAP finding 1 left open --
+   *  before this, `CallSession.checkAaiUnknownEvents`'s `this.opts.aai.stats?.()` was always
+   *  `undefined` in production because this class (the real `opts.aai` for every live call)
+   *  implemented only send/on/close. Delegates to the real socket once connected; `0` before
+   *  that (nothing dropped yet -- there is no live socket to have dropped anything on). */
+  stats(): { unknown_events: number } {
+    return this.real?.stats?.() ?? { unknown_events: 0 };
   }
 
   close(): void {

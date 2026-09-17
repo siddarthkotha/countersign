@@ -15,6 +15,12 @@ export class FakeAaiSocket implements AaiSocket {
 
   private handlers: ((evt: AaiEvent) => void)[] = [];
   private closed = false;
+  /** aai-observability lane (2026-09-16, item 4): mirrors `RealAaiSocket`'s own subscriber
+   *  lists (aai/session.ts) so a test can drive `CallSession`'s `aai_unhandled_message` /
+   *  `aai_transcript_deltas` diagnostics through the exact same `AaiSocket` interface a real
+   *  call uses, without a real AssemblyAI connection (LAW: tests never call the live API). */
+  private unhandledHandlers: ((type: string, detail: string) => void)[] = [];
+  private agentDeltaHandlers: ((reply_id: string, delta: string) => void)[] = [];
 
   send(msg: object): void {
     if (this.closed) return;
@@ -50,5 +56,34 @@ export class FakeAaiSocket implements AaiSocket {
     if (this.closed) return false;
     this.debugDropCount += 1;
     return true;
+  }
+
+  /** aai-observability lane (2026-09-16, item 4): see `AaiSocket.onUnhandledMessage`'s doc
+   *  comment in `types.ts`. */
+  onUnhandledMessage(handler: (type: string, detail: string) => void): void {
+    this.unhandledHandlers.push(handler);
+  }
+
+  /** aai-observability lane (2026-09-16, item 4): see `AaiSocket.onAgentTranscriptDelta`'s
+   *  doc comment in `types.ts`. */
+  onAgentTranscriptDelta(handler: (reply_id: string, delta: string) => void): void {
+    this.agentDeltaHandlers.push(handler);
+  }
+
+  /** Test entry point mirroring `emit()` above, for a server message this fake's `AaiEvent`
+   *  union has no shape for at all (aai/session.ts's `mapServerEvent` default branch) --
+   *  lets a test drive `CallSession`'s `aai_unhandled_message` diagnostics with no real
+   *  AssemblyAI connection. */
+  emitUnhandledMessage(type: string, detail: string): void {
+    if (this.closed) return;
+    for (const h of this.unhandledHandlers) h(type, detail);
+  }
+
+  /** Test entry point for a `transcript.agent.delta` chunk -- see `emitUnhandledMessage`'s
+   *  own doc comment for why deltas get their own dedicated entry point (matching the real
+   *  adapter's own split). */
+  emitAgentDelta(reply_id: string, delta: string): void {
+    if (this.closed) return;
+    for (const h of this.agentDeltaHandlers) h(reply_id, delta);
   }
 }

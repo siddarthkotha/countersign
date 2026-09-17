@@ -27,6 +27,38 @@ export interface AaiSocket {
    *  Optional: `FakeAaiSocket` (dev mode / most tests) has no resume logic to exercise, so
    *  it need not implement this. */
   debugForceDrop?(): boolean;
+  /** aai-observability lane (2026-09-16, dead-transcript investigation finding 1 continued):
+   *  registers a handler fired once for every server message this adapter's own
+   *  `mapServerEvent` (session.ts) does not model at all (the `default` branch) -- EXCEPT
+   *  `transcript.*.delta`, which never reaches this channel at all (see
+   *  `onAgentTranscriptDelta` below for why that one high-frequency type gets its own
+   *  dedicated, aggregated channel instead of firing here per chunk -- without that split
+   *  this channel would flood on every reply). Carries the raw message `type` and a
+   *  <=200-char slice of its JSON, so `CallSession` -- the only place with the per-reply
+   *  state to correlate this against -- can record a rate-limited `aai_unhandled_message`
+   *  diagnostic instead of the previous silent `stats().unknown_events` bump alone.
+   *  `PendingAaiSocket` (index.ts) relays this the same way it already relays `on()`, so a
+   *  handler registered before the real connection resolves still receives everything the
+   *  real adapter emits once it exists. Optional: `FakeAaiSocket` implements it for tests
+   *  (item 4 of this lane's task); any `AaiSocket` that doesn't need to drive this test path
+   *  need not. */
+  onUnhandledMessage?(handler: (type: string, detail: string) => void): void;
+  /** aai-observability lane (2026-09-16), item 3: registers a handler fired once per
+   *  `transcript.agent.delta` chunk (docs/aai-docs-check-2026-09-01.md line 85, PROVEN
+   *  fields: `reply_id`, `item_id`, `delta`, `start_ms`, `end_ms`) -- the unmodelled event
+   *  type the dead-transcript investigation's own open question is about: did the words for
+   *  a reply that never produced a final `transcript.agent` at least show up as deltas?
+   *  Deliberately a SEPARATE channel from `onUnhandledMessage` above (not a `type ===
+   *  'transcript.agent.delta'` case a caller has to filter out of that one) for two reasons:
+   *  (1) deltas are the highest-frequency unmodelled message by far (one per streamed
+   *  chunk, not one per reply), so folding them into the same rate-limited log there would
+   *  either flood it or starve the rarer types of their own budget; (2) the caller needs
+   *  structured `(reply_id, delta)` fields, not a re-parse of a 200-char-truncated JSON
+   *  string that may have cut the delta text off mid-chunk. `CallSession` aggregates these
+   *  per reply id itself (count, total length, last <=120 chars) -- this adapter tracks
+   *  none of that bookkeeping, only relays. Optional, same reasoning as
+   *  `onUnhandledMessage`. */
+  onAgentTranscriptDelta?(handler: (reply_id: string, delta: string) => void): void;
 }
 
 /** Client -> AssemblyAI message that asks the agent to generate a reply right now, without

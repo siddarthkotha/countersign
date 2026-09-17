@@ -192,6 +192,87 @@ export class CallSession {
       this.lastKnownAaiUnknownEvents = stats.unknown_events;
     }
   }
+  /** aai-observability lane (2026-09-16, item 1): every server message
+   *  `opts.aai.onUnhandledMessage` reports (everything `aai/session.ts`'s `mapServerEvent`
+   *  does not model, except `transcript.agent.delta` -- see `recordAgentDelta` below for
+   *  that one), keyed by raw message TYPE, counted per call. Rate-limited so one chatty
+   *  unmodelled type can never flood the flight recorder: the first
+   *  `UNHANDLED_MESSAGE_LOG_CAP` occurrences of a given type each get their own
+   *  `aai_unhandled_message` diagnostic (carrying the truncated JSON `detail`); the instant
+   *  the cap is crossed, exactly one `aai_unhandled_message_capped` notice fires for that
+   *  type and nothing more is logged live for it. `recordUnhandledMessageSummary` (called
+   *  once, from `end()`) walks this map so the bundle's last word on every type -- even one
+   *  that stayed under the cap the whole call -- is its TRUE total count, not just however
+   *  many individual entries happened to get logged. */
+  private static readonly UNHANDLED_MESSAGE_LOG_CAP = 20;
+  private readonly unhandledMessageCounts = new Map<string, number>();
+
+  private recordUnhandledMessage(type: string, detail: string): void {
+    const count = (this.unhandledMessageCounts.get(type) ?? 0) + 1;
+    this.unhandledMessageCounts.set(type, count);
+    if (count <= CallSession.UNHANDLED_MESSAGE_LOG_CAP) {
+      this.diag('aai_unhandled_message', { type, detail });
+    }
+    if (count === CallSession.UNHANDLED_MESSAGE_LOG_CAP + 1) {
+      this.diag('aai_unhandled_message_capped', { type });
+    }
+  }
+
+  /** Called once, from `end()`. See `unhandledMessageCounts`'s own doc comment. */
+  private recordUnhandledMessageSummary(): void {
+    for (const [type, total] of this.unhandledMessageCounts) {
+      this.diag('aai_unhandled_message_summary', { type, total });
+    }
+  }
+
+  /** aai-observability lane (2026-09-16, item 3): per-reply accounting for
+   *  `transcript.agent.delta` chunks (`opts.aai.onAgentTranscriptDelta`) -- the unmodelled
+   *  event type the dead-transcript investigation's own open question is about: did a
+   *  reply's words show up as deltas even though no final `transcript.agent` ever arrived
+   *  for it? Reply id -> running {count of delta chunks, summed delta text length, last
+   *  <=120 chars of delta text accumulated so far}. Never pruned (same convention as
+   *  `replyAudioBytes`/`replyTranscripts` above -- one call's volume is small and bounded by
+   *  the session cap). Read once per reply, at `reply.done`, by `checkTranscriptDeltas`. */
+  private readonly agentDeltaStats = new Map<string, { count: number; total_length: number; last_chars: string }>();
+  private static readonly AGENT_DELTA_TAIL_CHARS = 120;
+
+  private recordAgentDelta(replyId: string, delta: string): void {
+    const existing = this.agentDeltaStats.get(replyId) ?? { count: 0, total_length: 0, last_chars: '' };
+    existing.count += 1;
+    existing.total_length += delta.length;
+    const combined = existing.last_chars + delta;
+    existing.last_chars =
+      combined.length > CallSession.AGENT_DELTA_TAIL_CHARS
+        ? combined.slice(combined.length - CallSession.AGENT_DELTA_TAIL_CHARS)
+        : combined;
+    this.agentDeltaStats.set(replyId, existing);
+  }
+
+  /** Called from the `reply.done` case in `dispatchAaiEvent`, after `replyTranscripts` for
+   *  this reply is already final (nothing later appends to it for a reply id once its own
+   *  `reply.done` has fired). Logs `aai_transcript_deltas` ONLY when this reply ended with
+   *  no non-empty final `transcript.agent` recorded AND at least one delta chunk was seen
+   *  for it -- the exact shape of the two PROVEN dead-transcript incidents this lane exists
+   *  to catch (scripts/rehearse/reports/2026-09-16T17-50-00-miller-patient and
+   *  .../19-31-28-dana-patient): if the deltas show real accumulated text, the words were on
+   *  the wire and a finalize event was dropped or never sent; if the deltas are also empty
+   *  (or none arrived at all), AssemblyAI produced no transcript signal for this reply at
+   *  all. A no-op (no diagnostic) for the ordinary case where a final transcript DID arrive,
+   *  or where no delta was ever recorded for this reply id either (ordinary empty replies,
+   *  e.g. an interrupted reply with nothing spoken yet, are not this finding). */
+  private checkTranscriptDeltas(replyId: string): void {
+    const finalTranscript = this.replyTranscripts.get(replyId);
+    if (finalTranscript !== undefined && finalTranscript.trim().length > 0) return;
+    const stats = this.agentDeltaStats.get(replyId);
+    if (!stats) return;
+    this.diag('aai_transcript_deltas', {
+      reply_id: replyId,
+      delta_count: stats.count,
+      delta_total_length: stats.total_length,
+      last_chars: stats.last_chars,
+    });
+  }
+
   /** Flight recorder: true once the FIRST `reply.audio` frame of the CURRENT reply has been
    *  recorded -- reset by `reply.started` -- so a 50-frame reply produces exactly one
    *  `reply.audio.first` diag event instead of one per frame. */
@@ -1287,6 +1368,14 @@ export class CallSession {
     this.startMs = opts.now();
     this.agentName = resolveAgentName(opts.agent_name);
     opts.aai.on((evt) => this.handleAaiEvent(evt));
+    // aai-observability lane (2026-09-16, items 1 and 3): registers this session's own
+    // `aai_unhandled_message` / delta-accounting handlers on whatever `AaiSocket` this call
+    // holds -- a no-op for any `AaiSocket` that doesn't implement these optional methods
+    // (today: `FakeAaiSocket` implements both for tests; `index.ts`'s `PendingAaiSocket`
+    // relays both to the real adapter once connected). See `recordUnhandledMessage` and
+    // `recordAgentDelta` below for what each one does.
+    opts.aai.onUnhandledMessage?.((type, detail) => this.recordUnhandledMessage(type, detail));
+    opts.aai.onAgentTranscriptDelta?.((replyId, delta) => this.recordAgentDelta(replyId, delta));
   }
 
   start(): void {
@@ -1393,6 +1482,10 @@ export class CallSession {
     // since tests only ever emit shapes it knows), so this is a no-op for every fake-AAI call
     // and every test that doesn't supply one.
     this.checkAaiUnknownEvents();
+    // aai-observability lane (2026-09-16, item 1): the ONE point every unhandled-message
+    // type's TRUE total is guaranteed to be recorded, even a type that never crossed
+    // `UNHANDLED_MESSAGE_LOG_CAP` and so never got its own `_capped` notice.
+    this.recordUnhandledMessageSummary();
     this.diag('session_ended', { reason });
     try {
       this.opts.aai.close();
@@ -1825,6 +1918,11 @@ export class CallSession {
         this.clearReplyCreateLostTimer();
         this.recordGoalCompletionAction(evt.reply_id, evt.status);
         this.diag('reply.done', { status: evt.status });
+        // aai-observability lane (2026-09-16, item 3): `replyTranscripts` for this reply is
+        // final now (nothing later appends to it for this reply id) -- checked here, once
+        // per reply, regardless of `evt.status` (an interrupted reply with a dropped
+        // finalize is exactly as interesting as a completed one).
+        this.checkTranscriptDeltas(evt.reply_id);
         if (evt.status === 'interrupted') {
           this.opts.onServerEvent({ type: 'flush' });
           // docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md: "If reply.done.status == 'interrupted'
