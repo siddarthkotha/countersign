@@ -2448,7 +2448,7 @@
       "agent_id": "",
       "started_at": "2026-09-12T15:09:10.151Z",
       "lane_note": "pushed 9:59 AM after the full gate + reviews; deploy poll running",
-      "held_because": "needs a build that passes miller twice in a row plus the founder voice; not before push 42"
+      "held_because": "2026-09-17 8:04 AM CDT: GO recommended on deploy 44 (10/10, 0 dead replies); waits for the founder to play cases 5, 7, 8, 11"
     },
     {
       "id": "CHEAT-SHEET-ON-LANDING",
@@ -2572,9 +2572,9 @@
     {
       "id": "LEDGER-OPEN-BUNDLES",
       "title": "credits ledger: bundles with a start and no end time are invisible to daily totals and the reading window (crashed or in-progress calls)",
-      "status": "held",
+      "status": "done",
       "held_because": "pre-existing gap, billing accuracy only; fix after the demo work, Haiku",
-      "note": "2026-09-16 6:24 PM CDT: from the push-42 review"
+      "note": "2026-09-17 8:16 AM CDT: landed 80c20ed+4bdf9b7; in push 45"
     },
     {
       "id": "CLOSE-MATCH-FIRST-CLAUSE",
@@ -2682,10 +2682,18 @@
     {
       "id": "NEGATION-LOOKBACK-NARROW",
       "title": "beneficiary negation guard drops claims on unrelated \"not\" within three words (\"not sure, but wire it to Meridian\"); scope the negation to the verb",
-      "status": "held",
+      "status": "done",
       "held_because": "fails safe (re-ask); after push 44; Sonnet, test-first",
       "priority": "P2",
-      "note": "2026-09-17 7:40 AM CDT"
+      "note": "2026-09-17 8:10 AM CDT: landed 052750b; in push 45"
+    },
+    {
+      "id": "NEGATION-INTERJECTION",
+      "title": "\"do not, I repeat, wire it to Northgate\" is not read as negated (aside between cue and verb); LAW 2 bounded",
+      "status": "held",
+      "held_because": "known limitation, fails toward ESCALATE; revisit only if a live record shows it",
+      "priority": "P3",
+      "note": "2026-09-17 8:35 AM CDT"
     }
   ]
 }
