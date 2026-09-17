@@ -166,4 +166,90 @@ describe('CallSession -- question reask survives a transcript.agent that lands a
     expect(diagEvents.filter((e) => e.kind === 'question_reask_sent')).toHaveLength(QUESTION_REASK_MAX_EMPTY);
     expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(false);
   });
+
+  it('a later reply that resolves synchronously does not leave an EARLIER reply of the SAME rendering\'s stale empty-transcript wait free to fire a second, duplicate re-ask (idempotency fix, 2026-09-16c)', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newLiveSession(clock, CALL_B, aai, sent, diagEvents);
+
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    expect(session.last?.state).toBe('CHALLENGE');
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+    const challengeId = session.last?.goal.challenge?.challenge_id;
+
+    const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    const baseline = replyCreates().length; // c1's own fresh-question proactive send (Design E)
+
+    // Reply A: empty at reply.done -- arms `armQuestionTranscriptWait` (1500ms from right now,
+    // since no fake-timer time has been advanced yet, i.e. due at real-elapsed 1500ms).
+    clock.now = 1500;
+    aai.emit({ type: 'reply.started', reply_id: 'reask-a' });
+    clock.now = 1800;
+    aai.emit({ type: 'reply.done', reply_id: 'reask-a', status: 'completed' });
+
+    // 300ms later (PROVEN live shape): reply B, for the SAME still-unanswered rendering, ends
+    // with real, non-empty, non-matching content -- `maybeReaskQuestion`'s synchronous branch
+    // decides immediately (`questionReaskLastReplyWasEmpty = false`) and arms its own
+    // CLOSE_RETRY_MIN_GAP_MS (400ms)-spaced reask timer, due at real-elapsed 700ms -- well
+    // before reply A's own stale wait is due at 1500ms.
+    clock.now = 1800 + 300;
+    vi.advanceTimersByTime(300);
+    aai.emit({ type: 'reply.started', reply_id: 'reask-b' });
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'reask-b',
+      reply_id: 'reask-b',
+      text: 'Checking the record.',
+      interrupted: false,
+    });
+    aai.emit({ type: 'reply.done', reply_id: 'reask-b', status: 'completed' });
+
+    // Advance to reply B's own reask timer firing (real-elapsed 700ms): this actually SENDS
+    // the (correctly counted) re-ask reply.create and arms REPLY_CREATE_LOST_MS (1500ms) --
+    // `replyCreateAwaitingStart` is now true, which would otherwise mask a stale duplicate
+    // send below behind an unrelated guard. A live AssemblyAI acks a `reply.create` in tens of
+    // ms, well under that 1500ms window -- simulate that realistic ack immediately (still at
+    // real-elapsed 700ms) so the guard clears the way a live call actually would, rather than
+    // accidentally hiding the bug behind `replyCreateAwaitingStart` staying true for 1500ms.
+    vi.advanceTimersByTime(400);
+    aai.emit({ type: 'reply.started', reply_id: 'reask-b-followup' });
+    // Reported interrupted (not completed) purely so this ack reply itself never re-enters
+    // `maybeReaskQuestion`/`recordGoalCompletionAction` (both gated on `status === 'completed'`
+    // -- session.ts:1983/1910) and so cannot advance the goal or arm/clear anything on its own;
+    // it exists ONLY to flip `speaking`/`replyCreateAwaitingStart` back to their normal idle
+    // values, exactly as a real AssemblyAI ack would, before reply A's stale wait comes due.
+    aai.emit({ type: 'reply.done', reply_id: 'reask-b-followup', status: 'interrupted' });
+
+    // Advance past reply A's stale 1500ms wait (due at real-elapsed 1500ms) and the further
+    // 400ms re-ask gap it would arm if left uncleared (due at real-elapsed 1900ms) -- both
+    // `speaking` and `replyCreateAwaitingStart` are idle again by then, so nothing but this
+    // fix stands between a cleared stale wait and a genuine duplicate spoken re-ask.
+    vi.advanceTimersByTime(1300);
+
+    // Exactly ONE re-ask goes out for this rendering -- reply A's stale wait must never get a
+    // second, redundant one out once reply B already resolved the rendering synchronously.
+    expect(replyCreates().length).toBe(baseline + 1);
+    const reaskEvents = diagEvents.filter((e) => e.kind === 'question_reask_sent');
+    expect(reaskEvents).toHaveLength(1);
+    // Booked against the COUNTED budget (questionReaskCount), not the forgiven-empty one --
+    // reply B's own content was real and non-matching, never empty, so its own reask must
+    // consume an attempt, not a free pass. A mis-booked stale send from reply A's wait
+    // flipping the shared "last reply was empty" flag back to true after B already decided
+    // would either duplicate this send or corrupt this count -- both are ruled out by the two
+    // assertions above and this one together.
+    expect((reaskEvents[0]!.detail as { attempt: number }).attempt).toBe(1);
+    // Reply A's own stale wait never got to fire its own verdict at all -- it was cleared the
+    // instant reply B's `reply.done` was processed for the same still-current rendering, so it
+    // can never conclude (on its own, now-irrelevant empty transcript) that the question was
+    // or wasn't asked.
+    expect(diagEvents.filter((e) => e.kind === 'question_transcript_wait_resolved')).toHaveLength(0);
+    // The goal itself never advanced either way (the interrupted ack reply is inert by
+    // construction, and reply B's own content never matched) -- this test only proves the
+    // RE-ASK bookkeeping, not a change in what the engine is still waiting on.
+    expect(session.last?.goal.challenge?.challenge_id).toBe(challengeId);
+  });
 });

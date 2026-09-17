@@ -604,6 +604,31 @@ export class CallSession {
    *  convention `closeTranscriptWaitReplyId` already uses. */
   private questionTranscriptWaitTimer: ReturnType<typeof setTimeout> | null = null;
   private questionTranscriptWaitReplyId: string | null = null;
+  /** Idempotency fix (2026-09-16c, Sonnet review of 4c65ead -- Important): `armCloseTranscriptWait`
+   *  is CLOSE's ONLY entry point for arming its wait, so a later reply's own call always
+   *  supersedes an earlier one's stale timer for free -- there is no second, wait-free branch
+   *  that can leave one dangling. `maybeReaskQuestion` is not shaped that way: its EMPTY branch
+   *  goes through `armQuestionTranscriptWait` (which already replaces a stale wait for a
+   *  DIFFERENT reply id, same "latest wins" convention), but its synchronous NON-empty branch
+   *  decides and arms `armQuestionReaskTimer` directly, without ever touching
+   *  `questionTranscriptWaitTimer` at all. PROVEN reachable: reply A ends empty (arms a
+   *  1500ms wait); 300ms later reply B, for the SAME still-unanswered rendering, ends with
+   *  real, non-empty, non-matching content and takes the synchronous branch --
+   *  `questionReaskLastReplyWasEmpty` is correctly set false and B's own reask is sent and
+   *  counted. Reply A's wait is still pending throughout; when it fires it re-reads A's own
+   *  (still empty) transcript, flips the SHARED `questionReaskLastReplyWasEmpty` flag back to
+   *  true, and re-arms `armQuestionReaskTimer` -- either a second, duplicate spoken re-ask (if
+   *  B's own send already completed) or a mis-booked budget slot (if B's own timer was still
+   *  pending, corrupting the flag it reads at ITS fire time). Fix, mirroring CLOSE's own single-
+   *  entry-point shape: every `reply.done` reaching this point for the CURRENT rendering --
+   *  empty or not -- first clears any pending wait for a DIFFERENT reply id (it is superseded
+   *  the instant a newer reply has its own say) and records itself as `questionReaskLatestReplyId`;
+   *  the wait's own callback re-checks that its `replyId` is still that latest id at fire time
+   *  and returns silently otherwise -- a defensive second guard, since the `clearTimeout` above
+   *  already prevents a superseded wait from ever running its callback at all in this same
+   *  single-threaded dispatch model, but it costs nothing to also make the callback itself
+   *  provably inert against a future call path that stops clearing eagerly. */
+  private questionReaskLatestReplyId: string | null = null;
 
   /** Design E (2026-09-15, turn-order design change -- docs/TEST-PLAN.md "The turn order
    *  design change (E)"): the JSON key (`JSON.stringify(goal)`, same convention
@@ -1991,6 +2016,19 @@ export class CallSession {
     const label = this.replyGoalAtStart.get(replyId) ?? null;
     if (label !== goal.code) return; // the goal moved on before this reply even finished
 
+    // Idempotency fix (2026-09-16c): THIS reply.done is now the newest word on the current
+    // rendering, whatever it turns out to decide below -- clear any wait `armQuestionTranscriptWait`
+    // left pending from an EARLIER reply of the same rendering (see `questionReaskLatestReplyId`'s
+    // own doc comment for the full incident) before deciding anything else, exactly the "latest
+    // reply wins" guarantee `armCloseTranscriptWait` already gives CLOSE for free by being its
+    // only entry point.
+    this.questionReaskLatestReplyId = replyId;
+    if (this.questionTranscriptWaitTimer && this.questionTranscriptWaitReplyId !== replyId) {
+      clearTimeout(this.questionTranscriptWaitTimer);
+      this.questionTranscriptWaitTimer = null;
+      this.questionTranscriptWaitReplyId = null;
+    }
+
     const goalKey = JSON.stringify(goal);
     if (goalKey !== this.questionReaskGoalKey) {
       this.questionReaskGoalKey = goalKey;
@@ -2078,6 +2116,11 @@ export class CallSession {
       this.questionTranscriptWaitTimer = null;
       this.questionTranscriptWaitReplyId = null;
       if (this.ended || this.goodbyeConfirmed) return;
+      // Idempotency fix (2026-09-16c, defensive second guard -- see `questionReaskLatestReplyId`'s
+      // own doc comment): a newer reply.done for this same rendering already clears this timer
+      // outright via `clearTimeout`, so this branch should be unreachable in practice, but a
+      // stale wait must never be allowed to decide anything once a newer reply already has.
+      if (this.questionReaskLatestReplyId !== replyId) return;
       if (!this.last || JSON.stringify(this.last.goal) !== goalKey) return; // goal moved on -- cancel
 
       const transcript = this.replyTranscripts.get(replyId) ?? '';
