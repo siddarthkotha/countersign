@@ -664,17 +664,20 @@ function eligibleUtterances(
   maxReasks: number,
 ): Utterance[] {
   // TIE FIX (2026-09-16, engine-tie lane, PROVEN by instrumented investigation +
-  // packages/server/test/browser-ws.test.ts's flaky attacker leg, 6/10 fail alone): the server
-  // logs `challenge_issued` at `reply.done`, strictly AFTER the question audio finishes, so a
-  // caller utterance/action recorded at the SAME millisecond as `issuedAction.t_ms` can only be
-  // the caller's reply, never a part of the question being asked. It must count as AFTER
-  // issuance, not excluded by it -- hence `>=` here and at every sibling comparison against
-  // `issuedAction.t_ms` (this function's `nextAgentActionT` filter below, and
-  // `challengeReplyWindowStatus`'s bounding-action check).
+  // packages/server/test/browser-ws.test.ts's flaky attacker leg, 6/10 fail alone), REVIEWED
+  // AND NARROWED (2026-09-16, engine-tie-2 lane): the server logs `challenge_issued` at
+  // `reply.done`, strictly AFTER the question audio finishes, so a caller utterance/action
+  // recorded at the SAME millisecond as `issuedAction.t_ms` can only be the caller's reply,
+  // never a part of the question being asked -- so the LOWER bound below (the caller-utterance
+  // filter's own `t_ms >= issuedAction.t_ms`) is inclusive: a same-ms reply counts as AFTER
+  // issuance, not excluded by it. The UPPER bound just below (`nextAgentActionT`'s filter) stays
+  // STRICT `>`: a same-ms agent action is not the NEXT action -- with `>=` a second challenge (or
+  // readback) issued in the same tick as this one, sharing its t_ms, would close this challenge's
+  // own eligible window to zero width and grade its tied reply UNANSWERED instead of PASS.
   const nextAgentActionT = actions
     .filter(
       (a) =>
-        a.t_ms >= issuedAction.t_ms &&
+        a.t_ms > issuedAction.t_ms &&
         ((a.kind === 'challenge_issued' && a.challenge_id !== issuedAction.challenge_id) || a.kind === 'readback_issued'),
     )
     .reduce<number | undefined>((min, a) => (min === undefined || a.t_ms < min ? a.t_ms : min), undefined);
@@ -736,12 +739,15 @@ function challengeReplyWindowStatus(
   issuedAction: AgentAction,
   windowMs: number,
 ): 'OPEN' | 'CLOSED' {
-  // TIE FIX (2026-09-16, engine-tie lane): same `>=` reasoning as `eligibleUtterances` above --
-  // a bounding action logged at the exact same millisecond as `issuedAction.t_ms` still counts
-  // as after it, since issuance is logged at reply.done, after the question audio.
+  // TIE FIX (2026-09-16, engine-tie lane), REVIEWED AND NARROWED (2026-09-16, engine-tie-2
+  // lane): this is an UPPER bound, same as `eligibleUtterances`'s `nextAgentActionT` filter, and
+  // stays STRICT `>` for the same reason -- a same-ms agent action is not the next action. With
+  // `>=`, a sibling challenge (or readback) issued in the same tick as this one, sharing its
+  // t_ms, would count as bounding THIS challenge's window too, closing it before the tied reply
+  // is ever collected by `eligibleUtterances` above.
   const bounded = actions.some(
     (a) =>
-      a.t_ms >= issuedAction.t_ms &&
+      a.t_ms > issuedAction.t_ms &&
       ((a.kind === 'challenge_issued' && a.challenge_id !== issuedAction.challenge_id) || a.kind === 'readback_issued'),
   );
   if (bounded) return 'CLOSED';

@@ -1167,4 +1167,35 @@ describe('gradeChallenges — a caller reply logged at the SAME millisecond as c
     const result = gradeChallenges(conversation, twoActions, [spec, spec2], SEED, []);
     expect(result['tie-1']?.result).toBe('PASS');
   });
+
+  // REVIEW FIX (2026-09-16, engine-tie-2 lane): the review of the 2026-09-16 tie fix found that
+  // only the LOWER bound (the caller-utterance filter above, `u.t_ms >= issuedAction.t_ms`)
+  // should be inclusive. The two UPPER-bound comparisons (`nextAgentActionT`'s filter, and
+  // `challengeReplyWindowStatus`'s bounding-action check) must stay STRICT `>`: with `>=` a
+  // SECOND agent action stamped at the exact same millisecond as issuance (e.g. two challenges
+  // issued back-to-back in one tick, both logged at t=9) makes c1's own eligible window empty
+  // (bounded by c2's action at the same instant) and its tied reply grades UNANSWERED instead of
+  // PASS. This is the shape the existing test above (spec2 at t=20) does not cover, since its
+  // sibling action is not actually tied with `issuedAction`'s own t_ms.
+  it('a challenge tied with a DIFFERENT sibling challenge_issued at its OWN issuance instant still grades from the tied reply', () => {
+    const specC1: ChallengeSpec = { ...spec, challenge_id: 'c1' };
+    const specC2: ChallengeSpec = { ...spec, challenge_id: 'c2' };
+    const twoActions: AgentAction[] = [issuedAction('a1', 'c1', 9), issuedAction('a2', 'c2', 9)];
+    const conversation = [utt('u1', 9, 'Calder and Finch')];
+    const result = gradeChallenges(conversation, twoActions, [specC1, specC2], SEED, []);
+    expect(result['c1']).toEqual({
+      result: 'PASS',
+      quote: { utterance_id: 'u1', text: 'Calder and Finch' },
+      eligible_utterance_ids: ['u1'],
+    });
+    // Engine-defined behavior for the symmetric case: c2's own window is bounded the same way
+    // (no agent action strictly after its t=9 issuance either), so the SAME tied reply is also
+    // eligible for c2, and since specC2 shares spec's field/accept_tokens, it grades PASS too --
+    // a single tied reply can answer more than one challenge issued at that exact instant.
+    expect(result['c2']).toEqual({
+      result: 'PASS',
+      quote: { utterance_id: 'u1', text: 'Calder and Finch' },
+      eligible_utterance_ids: ['u1'],
+    });
+  });
 });
