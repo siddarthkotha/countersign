@@ -2729,26 +2729,42 @@
     {
       "id": "SEED-FACT-FINAL-VALUE",
       "title": "seed-fact grading matches accept tokens anywhere in the reply; a same-breath correction to a WRONG name still passes if the right tokens appear earlier; needs final-value-wins like trap and live-commitment grading",
-      "status": "running",
+      "status": "done",
       "held_because": "engine, after push 46; Sonnet test-first; founder sees it as ruling 9b",
       "priority": "P1",
-      "note": "2026-09-17 10:02 AM CDT: lane launched from c61abfd; lands for push 47"
+      "note": "2026-09-17 10:35 AM CDT: landed; ruling 9b proposed to the founder"
     },
     {
       "id": "DIAG-ISSUED-CHALLENGES",
       "title": "diagnostics bundle lacks the issued-challenge actions (challenge_id, fact_id, kind, t_ms); the live double issuance on 09-15-29 cannot be diagnosed from the record",
-      "status": "running",
+      "status": "done",
       "held_because": "observability, server; after push 46; Haiku",
       "priority": "P1",
-      "note": "2026-09-17 10:02 AM CDT: lane launched from c61abfd; lands for push 47"
+      "note": "2026-09-17 10:30 AM CDT: landed dcc508b+e0956dd, verified on main"
     },
     {
       "id": "BENEFICIARY-NO-VERB",
       "title": "\"The amount is $84,600 to Meridian Supply\" yields no beneficiary claim (no verb before \"to NAME\")",
-      "status": "running",
+      "status": "done",
       "held_because": "engine extraction; after push 46; Sonnet test-first",
       "priority": "P2",
-      "note": "2026-09-17 10:02 AM CDT: lane launched from c61abfd; lands for push 47"
+      "note": "2026-09-17 10:26 AM CDT: landed 1379803; push 47"
+    },
+    {
+      "id": "FINAL-VALUE-TWO-UTTERANCES",
+      "title": "a same-breath correction split across two utterances (\"Marcus Obi.\" / \"No wait, Elena Park.\") still grades PASS; extend final-value-wins across the reply window",
+      "status": "held",
+      "held_because": "engine; not a regression; after the founder play-through; Sonnet test-first",
+      "priority": "P2",
+      "note": "2026-09-17 10:41 AM CDT"
+    },
+    {
+      "id": "BENEFICIARY-SPOKEN-AMOUNT",
+      "title": "\"eighty four thousand five hundred to Meridian Supply\" (amount as words, no $) matches no beneficiary cue",
+      "status": "held",
+      "held_because": "engine extraction; after the founder play-through; reuse normalizeSpokenDigits",
+      "priority": "P2",
+      "note": "2026-09-17 10:41 AM CDT"
     }
   ]
 }
