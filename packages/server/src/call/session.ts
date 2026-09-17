@@ -1374,8 +1374,23 @@ export class CallSession {
     // (today: `FakeAaiSocket` implements both for tests; `index.ts`'s `PendingAaiSocket`
     // relays both to the real adapter once connected). See `recordUnhandledMessage` and
     // `recordAgentDelta` below for what each one does.
-    opts.aai.onUnhandledMessage?.((type, detail) => this.recordUnhandledMessage(type, detail));
-    opts.aai.onAgentTranscriptDelta?.((replyId, delta) => this.recordAgentDelta(replyId, delta));
+    // Review finding (2026-09-16): these run synchronously inside the AssemblyAI socket's
+    // message loop, like `handleAaiEvent`, so a throw here must never escape uncaught either.
+    // Observation can fail; the call must not.
+    opts.aai.onUnhandledMessage?.((type, detail) => {
+      try {
+        this.recordUnhandledMessage(type, detail);
+      } catch (err) {
+        this.diag('error', { message: err instanceof Error ? err.message : String(err), where: 'recordUnhandledMessage' });
+      }
+    });
+    opts.aai.onAgentTranscriptDelta?.((replyId, delta) => {
+      try {
+        this.recordAgentDelta(replyId, delta);
+      } catch (err) {
+        this.diag('error', { message: err instanceof Error ? err.message : String(err), where: 'recordAgentDelta' });
+      }
+    });
   }
 
   start(): void {
