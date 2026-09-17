@@ -2614,9 +2614,9 @@
     {
       "id": "DEAD-AGENT-TRANSCRIPTS",
       "title": "live: after an untranscribed automatic reply, AssemblyAI delivers no agent transcripts for the rest of the call (miller-2 on 41, dana on 42); server then re-asks blind and the call idles out",
-      "status": "running",
+      "status": "done",
       "priority": "P0",
-      "note": "2026-09-16 8:55 PM CDT: third occurrence with logging on (20-51-12); no unmodelled types, no deltas; empty-automatic-reply hypothesis now prime; lanes holding-phrase + degraded-close",
+      "note": "2026-09-17 7:06 AM CDT: holding phrase 3a107ee + degraded mode e7ba96f on main; measured on ten calls after push 44",
       "held_because": "mechanism UNKNOWN until the observability push (43) records the next occurrence live; then fix (delta assembly, degraded-session handling, or session.update guard) from evidence"
     },
     {
@@ -2637,10 +2637,10 @@
     {
       "id": "AAI-OBSERVABILITY-NOISE",
       "title": "drop the per-change aai_unknown_events event now that per-type detail exists; treat session.updated and transcript.user.delta as known-ignored (routine, 50+ per call) so the ring stays readable",
-      "status": "held",
+      "status": "done",
       "held_because": "after the free-play batch finishes; Haiku; must ship before the founder session so bundles stay readable",
       "priority": "P1",
-      "note": "2026-09-16 8:20 PM CDT: PROVEN from 20-13-55 and 20-16-27 bundles"
+      "note": "2026-09-17 6:57 AM CDT: landed 5d11899; placeholder test file to delete by hand"
     },
     {
       "id": "OUT-OF-SCOPE-ROLE-PICK",
@@ -2661,9 +2661,31 @@
     {
       "id": "APPROVER-CONTRADICTION-MISS",
       "title": "two different approver names volunteered in one call (\"approved by Marcus Obie, I believe\" then \"I meant to say Elena Park, not Marcus Obie\") did not register as a contradiction; STAGE at row 11 (free-play 2026-09-16T20-57-05)",
-      "status": "running",
+      "status": "done",
       "priority": "P0",
-      "note": "2026-09-16 9:03 PM CDT: Sonnet lane approver-contradiction (engine)"
+      "note": "2026-09-17 6:52 AM CDT: landed 3e7e697; ruling 8 proposed to the founder (applied, reversible)"
+    },
+    {
+      "id": "IDENTITY-FALSE-POSITIVE",
+      "title": "\"Marcus is the one who approved this transfer\" read as an identity switch and froze an honest Dana (free-play 21-35-48); identity.ts continuation regex gap",
+      "status": "done",
+      "priority": "P0",
+      "note": "2026-09-17 7:16 AM CDT: landed cf0e748+b3ce9a7"
+    },
+    {
+      "id": "CLAIMS-REGEX-GAPS",
+      "title": "account \"ends in 4471\" and beneficiary \"wire transfer of $X to NAME\" never register as claims (free-play 21-32-40); claims.ts patterns",
+      "status": "done",
+      "priority": "P0",
+      "note": "2026-09-17 7:26 AM CDT: landed f8d1088+9fb115a"
+    },
+    {
+      "id": "NEGATION-LOOKBACK-NARROW",
+      "title": "beneficiary negation guard drops claims on unrelated \"not\" within three words (\"not sure, but wire it to Meridian\"); scope the negation to the verb",
+      "status": "held",
+      "held_because": "fails safe (re-ask); after push 44; Sonnet, test-first",
+      "priority": "P2",
+      "note": "2026-09-17 7:40 AM CDT"
     }
   ]
 }
