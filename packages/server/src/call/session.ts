@@ -34,7 +34,7 @@ import { deriveScreenState } from '../screen/state.js';
 import { validateToolArgs } from './validate.js';
 import { stallKindFor, stallLineFor, type StallKind } from './stalls.js';
 import { argsForTerminalTool } from './terminalActions.js';
-import { transcriptMatchesCloseSentence } from './closeMatch.js';
+import { transcriptMatchesCloseSentence, normalizeForCloseMatch } from './closeMatch.js';
 import { QUESTION_GOALS, verbatimQuestionSentence, transcriptAsksQuestion, looksLikeAnswerAttempt } from './questionMatch.js';
 
 export interface CallSessionOpts {
@@ -1015,7 +1015,7 @@ export class CallSession {
    *  `armDegradedInflightStrikeCheck` (while still in flight, past
    *  DEGRADED_INFLIGHT_STRIKE_MS) -- see the class-field doc comment above
    *  `DEGRADED_MODE_STRIKE_THRESHOLD` for the dedup guarantee and the diag shapes. */
-  private recordDegradedStrike(replyId: string, detail: { in_flight: boolean }): void {
+  private recordDegradedStrike(replyId: string, detail: { in_flight: boolean; reason?: string }): void {
     if (this.repliesCountedAsDegradedStrike.has(replyId)) return; // one strike per reply, however it was caught
     this.repliesCountedAsDegradedStrike.add(replyId);
     if (this.degradedStrikeCount === 0) this.degradedStreakStartTMs = this.nowT();
@@ -1024,6 +1024,15 @@ export class CallSession {
     this.diag('degraded_strike', {
       reply_id: replyId,
       in_flight: detail.in_flight,
+      // Fix B (2026-09-17, deploy 45 live finding, record 2026-09-17T08-35-38-dana-patient):
+      // `reason` distinguishes WHICH detector caught this strike -- undefined for the two
+      // pre-existing paths (armDegradedStrikeCheck's reply.done wait, and
+      // checkDegradedInflightStrike's audio-inactivity check), 'max_audio_only' for
+      // `armDegradedMaxAudioOnlyCheck` below (a reply that never went quiet long enough to
+      // trip the inactivity check, but ran with audio and no transcript past an absolute
+      // ceiling). Omitted (not `null`) when absent, so the existing tests' `toMatchObject`
+      // assertions against this diag's shape are unaffected.
+      ...(detail.reason ? { reason: detail.reason } : {}),
       follows_instructed_reply_done_ms: this.replyFollowsInstructedDoneMs.get(replyId) ?? null,
       strike_count: this.degradedStrikeCount,
     });
@@ -1118,12 +1127,78 @@ export class CallSession {
     this.recordDegradedStrike(replyId, { in_flight: true });
   }
 
+  /** DEGRADED-TRANSCRIPTS mode, path (c) (Fix B, 2026-09-17, PROVEN live -- deploy 45, record
+   *  scripts/rehearse/reports/2026-09-17T08-35-38-dana-patient, main checkout, gitignored): an
+   *  automatic reply streamed audio CONTINUOUSLY from 111.3s to 179.1s (68s), never once going
+   *  quiet for `DEGRADED_INFLIGHT_STRIKE_MS` (12s) at a stretch, and produced no transcript at
+   *  all -- `checkDegradedInflightStrike`'s own audio-INACTIVITY design (by construction) never
+   *  fires for a reply that keeps streaming real frames on schedule; inactivity alone cannot
+   *  catch a reply that is unhealthy in a DIFFERENT way (real audio, forever, no transcript).
+   *
+   *  `DEGRADED_MAX_AUDIO_ONLY_MS` is a second, independent, ABSOLUTE ceiling measured from the
+   *  reply's own FIRST relayed audio frame (`reply.audio.first`) -- unlike the inactivity
+   *  check, this timer is armed exactly ONCE per reply and never re-armed/reset by further
+   *  audio frames arriving on schedule. 20s, chosen with real margin above the longest
+   *  legitimate TRANSCRIBED reply this codebase has measured (`CLOSE_REPLY_STUCK_MS`'s own
+   *  79-sample max of 12,668ms) -- a real, healthy, fully-transcribed reply is never this long
+   *  with nothing to show for it.
+   *
+   *  Armed alongside `armDegradedInflightStrikeCheck`, from the exact same `reply.audio.first`
+   *  call site. Guards mirror `checkDegradedInflightStrike`'s own (already finished via
+   *  `repliesWithDone`, superseded by a newer reply via `currentReplyId`, already has a real
+   *  transcript): only when NONE of those apply does this record a strike
+   *  (`recordDegradedStrike`, `in_flight: true`, `reason: 'max_audio_only'`) -- deduped by the
+   *  same per-reply set every other strike path already shares, so a reply already struck by
+   *  the inactivity path (or one that finishes normally and strikes at its own reply.done) is
+   *  never double-counted. Cleared explicitly (never left to fire against a reply that has
+   *  moved on) at that SAME reply's own `reply.done`, at the first real (non-empty) transcript
+   *  chunk for it, and at `end()` -- see `clearDegradedMaxAudioOnlyTimer`'s own call sites. */
+  private static readonly DEGRADED_MAX_AUDIO_ONLY_MS = 20_000;
+  private degradedMaxAudioOnlyTimer: ReturnType<typeof setTimeout> | null = null;
+  private degradedMaxAudioOnlyReplyId: string | null = null;
+
+  private armDegradedMaxAudioOnlyCheck(replyId: string): void {
+    this.clearDegradedMaxAudioOnlyTimer();
+    this.degradedMaxAudioOnlyReplyId = replyId;
+    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+      this.degradedStrikeTimers.delete(timer);
+      this.degradedMaxAudioOnlyTimer = null;
+      this.degradedMaxAudioOnlyReplyId = null;
+      if (this.ended) return;
+      if (this.repliesWithDone.has(replyId)) return; // finished already -- the reply.done path owns it
+      if (this.currentReplyId !== replyId) return; // superseded by a newer reply -- stale check
+      const transcript = this.replyTranscripts.get(replyId) ?? '';
+      if (transcript.trim().length > 0) return; // healthy
+      this.recordDegradedStrike(replyId, { in_flight: true, reason: 'max_audio_only' });
+    }, CallSession.DEGRADED_MAX_AUDIO_ONLY_MS);
+    timer.unref?.();
+    this.degradedStrikeTimers.add(timer);
+    this.degradedMaxAudioOnlyTimer = timer;
+  }
+
+  /** Cancels the pending max-audio-only check for whichever reply it is currently watching, if
+   *  any -- called from that reply's own `reply.done`, from the first real transcript chunk
+   *  recorded for it, and from `end()` (via `clearDegradedStrikeTimers`, below). A no-op when
+   *  nothing is pending, or when a DIFFERENT reply's own transcript/reply.done fires (only the
+   *  reply this timer is currently watching can clear it -- matches `armDegradedMaxAudioOnlyCheck`'s
+   *  own "one at a time" shape, since only one reply is ever in flight). */
+  private clearDegradedMaxAudioOnlyTimer(replyId?: string): void {
+    if (!this.degradedMaxAudioOnlyTimer) return;
+    if (replyId !== undefined && this.degradedMaxAudioOnlyReplyId !== replyId) return;
+    clearTimeout(this.degradedMaxAudioOnlyTimer);
+    this.degradedStrikeTimers.delete(this.degradedMaxAudioOnlyTimer);
+    this.degradedMaxAudioOnlyTimer = null;
+    this.degradedMaxAudioOnlyReplyId = null;
+  }
+
   /** Cancels every pending strike-check timer (both paths) -- called once, from `end()`.
    *  Belt-and-braces only: each callback already re-checks `this.ended` at fire time, so a
    *  timer left uncleared could never act on a call that has already ended either way. */
   private clearDegradedStrikeTimers(): void {
     for (const timer of this.degradedStrikeTimers) clearTimeout(timer);
     this.degradedStrikeTimers.clear();
+    this.degradedMaxAudioOnlyTimer = null;
+    this.degradedMaxAudioOnlyReplyId = null;
   }
 
   private clearCloseTimers(): void {
@@ -1625,6 +1700,101 @@ export class CallSession {
     this.armCloseTranscriptWait(replyId, this.degradedTranscriptsMode, status);
   }
 
+  /** HOLD-WITHOUT-FOLLOW-UP fix (2026-09-17, PROVEN live -- deploy 45, record
+   *  scripts/rehearse/reports/2026-09-17T08-46-58-judge-out-of-scope, main checkout,
+   *  gitignored): the standing rule (prompt.ts's `STANDING_RULES`) makes AssemblyAI's own
+   *  automatic reply say exactly "One moment." whenever it must speak with nothing new to say.
+   *  Normally harmless -- the server's own instructed `reply.create`
+   *  (`mustForceSpeak`/`isFreshQuestionGoal`) follows right behind with the real content the
+   *  instant the goal actually changes because of the caller's turn. PROVEN live: when the
+   *  caller's turn does NOT change the goal (chatter, an already-answered point, an
+   *  off-script remark that keeps the state in OUT_OF_SCOPE) nothing else fires -- the
+   *  automatic "One moment." plays, and then nothing, for the whole 31s idle window, until the
+   *  idle reaper ends the call.
+   *
+   *  `maybeArmHoldFollowup`, called from `reply.done` ONLY when nothing else already sent a
+   *  `reply.create` for this same event (`!this.replyCreateAwaitingStart` at the call site,
+   *  the same guard `scheduleCloseIfNeeded` is already gated behind), arms a SHORT one-shot
+   *  timer (`HOLD_FOLLOWUP_MS`) the instant a COMPLETED reply's own accumulated transcript
+   *  leniently matches the holding line (`normalizeForCloseMatch`, the same normalization
+   *  closeMatch.ts already uses for CLOSE, folding casing/punctuation/whitespace -- "One
+   *  moment." survives minor STT drift the same way a close sentence does). When the timer
+   *  fires, it re-sends the CURRENT goal's own line through the EXACT SAME instructed-send
+   *  path a goal CHANGE already uses (`instructedSentenceFor`/`sendReplyCreate`) -- restating
+   *  what the caller is actually being asked/told, instead of leaving them in silence.
+   *
+   *  Guards, deliberately mirroring every other force-speak mechanism in this file:
+   *   - never once `this.ended` or the goodbye is already confirmed (nothing is ever owed
+   *     after that);
+   *   - never for the CLOSE goal (checked both at arm time and again at fire time) -- CLOSE's
+   *     own hang-up machinery (`scheduleCloseIfNeeded`/`armCloseRetryTimer`) already owns that
+   *     goal's retries end-to-end; a follow-up here would race or duplicate a goodbye;
+   *   - never while DEGRADED-TRANSCRIPTS mode is on -- a reply with real audio but a LOST
+   *     transcript in degraded mode cannot be trusted to have actually said "One moment." at
+   *     all (the same reasoning `maybeReaskQuestion`/`armCloseTranscriptWait` already apply to
+   *     their own paths);
+   *   - only a `status === 'completed'` reply counts -- an interrupted "One moment." means the
+   *     caller is ALREADY talking over it, and their own incoming `transcript.user` clears
+   *     this mechanism anyway (see below);
+   *   - at most one armed follow-up per caller turn (`holdFollowupArmedForTurn`, reset the
+   *     next time the caller speaks) so a caller who keeps chattering without ever making a
+   *     request is not spammed with repeated restatements;
+   *   - re-checked at FIRE time, not just arm time: `this.speaking`/`this.replyCreateAwaitingStart`
+   *     (something else is already speaking or about to -- the exact two guards every other
+   *     timer-driven send in this file already reuses, e.g. `armCloseRetryTimer`) and the
+   *     goal must still be the SAME rendering that was armed against (`JSON.stringify`, same
+   *     convention `questionReaskArmedGoalKey` already uses) -- a caller who spoke and moved
+   *     the engine to a genuinely different goal in the meantime must never get a stale
+   *     restatement of the OLD one.
+   *
+   *  Cleared (never fires) the instant the caller speaks again (any `transcript.user` --
+   *  `dispatchAaiEvent`'s own case resets `holdFollowupArmedForTurn` and cancels the pending
+   *  timer, the same "a genuine new turn supersedes whatever was pending" rule
+   *  `previousCallerTranscriptAtMs` already follows) and at `end()`. */
+  private static readonly HOLD_FOLLOWUP_MS = 2_500;
+  private holdFollowupTimer: ReturnType<typeof setTimeout> | null = null;
+  private holdFollowupArmedForTurn = false;
+
+  private maybeArmHoldFollowup(replyId: string, status: string): void {
+    if (this.ended || this.goodbyeConfirmed) return;
+    if (!this.last) return;
+    if (this.degradedTranscriptsMode) return;
+    const goal = this.last.goal;
+    if (goal.code === 'CLOSE') return;
+    if (this.holdFollowupArmedForTurn) return; // at most one per caller turn
+    if (status !== 'completed') return; // interrupted -- the caller is already talking over it
+    const transcript = this.replyTranscripts.get(replyId) ?? '';
+    if (!normalizeForCloseMatch(transcript).includes('one moment')) return;
+
+    this.holdFollowupArmedForTurn = true;
+    this.armHoldFollowupTimer(goal);
+  }
+
+  private armHoldFollowupTimer(goalAtArmTime: PhrasingGoal): void {
+    this.clearHoldFollowupTimer();
+    const goalKeyAtArmTime = JSON.stringify(goalAtArmTime);
+    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+      this.holdFollowupTimer = null;
+      if (this.ended || this.goodbyeConfirmed) return;
+      if (this.speaking || this.replyCreateAwaitingStart) return;
+      if (!this.last) return;
+      const goal = this.last.goal;
+      if (goal.code === 'CLOSE') return;
+      if (JSON.stringify(goal) !== goalKeyAtArmTime) return; // the caller/engine already moved on
+      this.diag('hold_followup_sent', { goal_code: goal.code });
+      this.sendReplyCreate(goal.code, 'hold_followup', this.instructedSentenceFor(goal));
+    }, CallSession.HOLD_FOLLOWUP_MS);
+    timer.unref?.();
+    this.holdFollowupTimer = timer;
+  }
+
+  private clearHoldFollowupTimer(): void {
+    if (this.holdFollowupTimer) {
+      clearTimeout(this.holdFollowupTimer);
+      this.holdFollowupTimer = null;
+    }
+  }
+
   constructor(opts: CallSessionOpts) {
     this.opts = opts;
     this.startMs = opts.now();
@@ -1724,6 +1894,7 @@ export class CallSession {
     this.ended = true;
     this.clearCloseTimers();
     this.clearDegradedStrikeTimers();
+    this.clearHoldFollowupTimer();
     // Red team item 4 (founder ruling, 2026-09-09): before anything else about ending the
     // call, record the structured fact that it ended -- LAW 3 forbids the SERVER from
     // deciding what that means (a rejected first attempt at this fix, branch
@@ -2030,6 +2201,13 @@ export class CallSession {
         // and would otherwise let a stalled reply mask real caller silence).
         if (evt.type === 'transcript.user') {
           this.opts.onActivity?.();
+          // HOLD-WITHOUT-FOLLOW-UP fix: a genuine new caller turn supersedes whatever
+          // hold-followup was pending -- the caller is talking again, so whatever restatement
+          // was armed is no longer needed (and `holdFollowupArmedForTurn` resets so the NEXT
+          // silence-after-a-holding-line gets its own one-shot chance to arm). See
+          // `maybeArmHoldFollowup`'s own doc comment.
+          this.holdFollowupArmedForTurn = false;
+          this.clearHoldFollowupTimer();
           // Design E (2026-09-15): marks the tick this event's trailing `this.tick()` (below)
           // runs as caller-turn-triggered -- see `tickTriggeredByCallerTurn`'s own doc
           // comment for why the proactive QUESTION_GOALS send is scoped to this, not to
@@ -2058,7 +2236,12 @@ export class CallSession {
           // DEGRADED-TRANSCRIPTS mode: a non-empty chunk is proof the agent-transcript
           // channel is (still, or again) alive -- see `noteAgentTranscriptSeen`'s own doc
           // comment.
-          if (evt.text.trim().length > 0) this.noteAgentTranscriptSeen(evt.reply_id);
+          if (evt.text.trim().length > 0) {
+            this.noteAgentTranscriptSeen(evt.reply_id);
+            // Fix B: a real transcript chunk for the reply the max-audio-only timer is
+            // watching means it is healthy -- nothing left to check for it.
+            this.clearDegradedMaxAudioOnlyTimer(evt.reply_id);
+          }
         }
         // Flight recorder: role, length, and text all recorded. This is diagnostics (not
         // evidence per LAW 4) -- the text is recorded so live calls can be analyzed post-hoc
@@ -2180,7 +2363,14 @@ export class CallSession {
           // DEGRADED_INFLIGHT_STRIKE_MS with no transcript at all is caught here, rather than
           // waiting for its own (possibly very distant) reply.done -- see
           // `armDegradedInflightStrikeCheck`'s own doc comment.
-          if (this.currentReplyId) this.armDegradedInflightStrikeCheck(this.currentReplyId);
+          if (this.currentReplyId) {
+            this.armDegradedInflightStrikeCheck(this.currentReplyId);
+            // Fix B: the absolute audio-only ceiling, armed alongside the inactivity check
+            // from this same first-frame point -- see `armDegradedMaxAudioOnlyCheck`'s own
+            // doc comment for why this is a NECESSARY addition, not a duplicate, of the
+            // inactivity check just above.
+            this.armDegradedMaxAudioOnlyCheck(this.currentReplyId);
+          }
         }
         return;
 
@@ -2191,6 +2381,9 @@ export class CallSession {
         // `maybeArmCloseOnTranscript` (indirectly, via a later `transcript.agent` event) for
         // it -- see `repliesWithDone`'s own doc comment.
         this.repliesWithDone.add(evt.reply_id);
+        // Fix B: this reply is finished (whether it struck or not) -- nothing left for the
+        // max-audio-only ceiling to watch for it.
+        this.clearDegradedMaxAudioOnlyTimer(evt.reply_id);
         // DEGRADED-TRANSCRIPTS mode, path (a): a completed reply that had real audio relayed
         // and (after the existing late-transcript wait) still has no transcript counts one
         // strike -- see `armDegradedStrikeCheck`'s own doc comment. Interrupted replies are
@@ -2263,6 +2456,12 @@ export class CallSession {
         // `evt.status`: an interrupted close still means nothing more is owed if the close
         // line was already heard (see `scheduleCloseIfNeeded`'s own doc comment).
         if (!this.replyCreateAwaitingStart) this.scheduleCloseIfNeeded(evt.reply_id, evt.status);
+        // HOLD-WITHOUT-FOLLOW-UP fix: only when NOTHING else already sent (or is about to
+        // send) a `reply.create` for this same event -- same `!this.replyCreateAwaitingStart`
+        // guard `scheduleCloseIfNeeded` is already gated behind, just above -- does a
+        // completed reply whose transcript was only the standing holding line get a chance to
+        // arm the short restatement follow-up. See `maybeArmHoldFollowup`'s own doc comment.
+        if (!this.replyCreateAwaitingStart) this.maybeArmHoldFollowup(evt.reply_id, evt.status);
         break;
 
       case 'input.speech.started':

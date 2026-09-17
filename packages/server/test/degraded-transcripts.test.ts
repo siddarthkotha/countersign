@@ -667,3 +667,103 @@ describe('CallSession -- DEGRADED-TRANSCRIPTS mode: READBACK completion is never
     expect(amountClaim?.kind).not.toBe('CONFIRMED');
   });
 });
+
+// Fix B (2026-09-17, PROVEN live -- deploy 45, record scripts/rehearse/reports/
+// 2026-09-17T08-35-38-dana-patient, main checkout, gitignored): a real automatic reply
+// streamed audio CONTINUOUSLY from 111.3s to 179.1s (68s) with no transcript at all --
+// `checkDegradedInflightStrike`'s own audio-INACTIVITY design never fired because audio
+// never actually stopped arriving for DEGRADED_INFLIGHT_STRIKE_MS (12s) at a stretch. This
+// suite proves the second, independent, ABSOLUTE ceiling (`DEGRADED_MAX_AUDIO_ONLY_MS`, 20s,
+// measured from `reply.audio.first`, never re-armed) that catches exactly this shape.
+
+describe('CallSession -- DEGRADED-TRANSCRIPTS mode: absolute audio-only ceiling (Fix B)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('an automatic reply that streams audio CONTINUOUSLY (never idle long enough to trip the inactivity check) with no transcript strikes ONCE at the DEGRADED_MAX_AUDIO_ONLY_MS absolute ceiling, not the inactivity check', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    newSession(clock, CALL_B, aai, sent, diagEvents);
+
+    clock.now = 1000;
+    aai.emit({ type: 'reply.started', reply_id: 'long-dead' });
+    // First frame -- arms BOTH the audio-inactivity check (fires at +12s of inactivity) and
+    // the new absolute ceiling (fires at +20s, period, never re-armed).
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
+
+    // A frame every 2s -- comfortably inside the 12s inactivity window at every single point,
+    // so `checkDegradedInflightStrike` never strikes; this is the exact live shape (audio
+    // arriving on schedule, never actually silent) the inactivity design cannot catch by
+    // construction.
+    for (let i = 0; i < 8; i++) {
+      clock.now += 2_000;
+      vi.advanceTimersByTime(2_000);
+      aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
+    }
+    // 16s elapsed -- still short of the 20s absolute ceiling.
+    expect(diagEvents.filter((e) => e.kind === 'degraded_strike')).toHaveLength(0);
+
+    clock.now += 2_000;
+    vi.advanceTimersByTime(2_000); // 18s
+    expect(diagEvents.filter((e) => e.kind === 'degraded_strike')).toHaveLength(0);
+
+    clock.now += 2_000;
+    vi.advanceTimersByTime(2_000); // 20s -- the absolute ceiling fires, even though the last
+    // frame arrived only 2s ago (comfortably inside the inactivity window).
+    const strikes = diagEvents.filter((e) => e.kind === 'degraded_strike');
+    expect(strikes).toHaveLength(1);
+    expect(strikes[0]!.detail).toMatchObject({ reply_id: 'long-dead', in_flight: true, reason: 'max_audio_only' });
+
+    // Continuing on to 25s total (matching a 25s continuous audio-only reply) -- no SECOND
+    // strike for the same reply (dedup with the existing per-reply strike set).
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
+    clock.now += 5_000;
+    vi.advanceTimersByTime(5_000); // 25s
+    expect(diagEvents.filter((e) => e.kind === 'degraded_strike')).toHaveLength(1);
+  });
+
+  it('a reply whose transcript arrives before the DEGRADED_MAX_AUDIO_ONLY_MS ceiling (at 15s of a 25s-total reply) never strikes from the absolute ceiling', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    newSession(clock, CALL_B, aai, sent, diagEvents);
+
+    clock.now = 1000;
+    aai.emit({ type: 'reply.started', reply_id: 'long-healthy2' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') }); // arms the 20s ceiling
+
+    clock.now += 5_000;
+    vi.advanceTimersByTime(5_000); // 5s
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
+
+    clock.now += 5_000;
+    vi.advanceTimersByTime(5_000); // 10s
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(100).toString('base64') });
+
+    clock.now += 5_000;
+    vi.advanceTimersByTime(5_000); // 15s -- a real transcript chunk arrives now, well before
+    // the 20s absolute ceiling would otherwise fire.
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'long-healthy2-t',
+      text: 'Still checking the record, thanks for your patience.',
+      reply_id: 'long-healthy2',
+      interrupted: false,
+    });
+
+    // Advance the remaining 10s of this 25s-total reply, well past the 20s absolute ceiling --
+    // the ceiling timer was already cleared by the transcript arrival, so it never fires.
+    clock.now += 10_000;
+    vi.advanceTimersByTime(10_000); // 25s
+    aai.emit({ type: 'reply.done', reply_id: 'long-healthy2', status: 'completed' });
+    vi.advanceTimersByTime(DEGRADED_STRIKE_WAIT_MS);
+
+    expect(diagEvents.filter((e) => e.kind === 'degraded_strike')).toHaveLength(0);
+  });
+});
