@@ -239,3 +239,144 @@ describe('CallSession -- HOLD-WITHOUT-FOLLOW-UP fix', () => {
     expect(diagEvents.filter((e) => e.kind === 'hold_followup_sent')).toHaveLength(0);
   });
 });
+
+// Review fixes (2026-09-17, both FAIL on the first cut -- see the class-field doc comment on
+// `maybeArmHoldFollowup`/`sendReplyCreate` in call/session.ts for the full incident, defects 1
+// and 2). Neither defect was covered by the four cases above.
+describe('CallSession -- HOLD-WITHOUT-FOLLOW-UP fix: review fixes', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('(defect 1) a completed reply that speaks a legitimate STALL line (which CONTAINS "one moment" but is not the bare standing line) arms nothing -- STALL is excluded and the match is exact, not substring', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_JUDGE, aai, sent, diagEvents);
+
+    const internals = session as unknown as {
+      maybeArmHoldFollowup: (replyId: string, status: string) => void;
+      replyTranscripts: Map<string, string>;
+    };
+
+    // A real check (SSO context) is genuinely still running -- the engine's own STALL goal.
+    session.last = {
+      ...session.last!,
+      state: 'EVIDENCE',
+      goal: { code: 'STALL', hint: 'A check is still running.', keyterms: [], turn_detection_hint: 'default' },
+    };
+    // One of stalls.ts's own eight legitimate sso lines -- CONTAINS "one moment" but says more.
+    internals.replyTranscripts.set('s1', 'One moment, verifying the sign-in session.');
+
+    internals.maybeArmHoldFollowup('s1', 'completed');
+    vi.advanceTimersByTime(HOLD_FOLLOWUP_MS + 1_000);
+
+    expect(diagEvents.filter((e) => e.kind === 'hold_followup_sent')).toHaveLength(0);
+    expect(replyCreatesOf(aai)).toHaveLength(0);
+  });
+
+  it('(defect 1) the match is exact, not substring, independent of the STALL exclusion: a non-STALL goal whose completed reply says more than the bare holding line arms nothing', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_JUDGE, aai, sent, diagEvents);
+
+    const internals = session as unknown as {
+      maybeArmHoldFollowup: (replyId: string, status: string) => void;
+      replyTranscripts: Map<string, string>;
+    };
+
+    session.last = {
+      ...session.last!,
+      state: 'OUT_OF_SCOPE',
+      goal: { code: 'EXPLAIN_OUT_OF_SCOPE', hint: 'Explain plainly this is a demo.', keyterms: [], turn_detection_hint: 'default' },
+    };
+    // NOT one of stalls.ts's own lines, but still more than the bare standing line.
+    internals.replyTranscripts.set('s2', 'One moment, let me check on that for you.');
+
+    internals.maybeArmHoldFollowup('s2', 'completed');
+    vi.advanceTimersByTime(HOLD_FOLLOWUP_MS + 1_000);
+
+    expect(diagEvents.filter((e) => e.kind === 'hold_followup_sent')).toHaveLength(0);
+    expect(replyCreatesOf(aai)).toHaveLength(0);
+  });
+
+  it('(defect 2) hold under ASK_CHALLENGE -> exactly ONE instructed reply.create follows within 5s (the faster, budgeted re-ask wins over the now-superseded follow-up) and exactly one challenge_issued action for the rendering', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_JUDGE, aai, sent, diagEvents);
+
+    const CHALLENGE_SPEAK = 'Just to confirm, this transfer goes to Northgate Partners. Is that correct?';
+    session.last = {
+      ...session.last!,
+      state: 'CHALLENGE',
+      goal: {
+        code: 'ASK_CHALLENGE',
+        hint: CHALLENGE_SPEAK,
+        keyterms: [],
+        turn_detection_hint: 'patient',
+        challenge: {
+          challenge_id: 'sess-hold-followup-challenge-1',
+          kind: 'TRAP_FACT',
+          field: 'beneficiary',
+          ask: 'Confirm the request back to the caller as if summarizing, but say "Northgate Partners" in place of their beneficiary, then pause.',
+          speak: CHALLENGE_SPEAK,
+          expect: { trap_value: 'Northgate Partners', true_claim_id: 'claim-1' },
+        },
+      },
+    };
+
+    const internals = session as unknown as {
+      maybeReaskQuestion: (replyId: string, status: string) => void;
+      maybeArmHoldFollowup: (replyId: string, status: string) => void;
+      recordGoalCompletionAction: (replyId: string, status: string) => void;
+      replyGoalAtStart: Map<string, string>;
+      replyTranscripts: Map<string, string>;
+    };
+
+    // The reply that answers OUR OWN outstanding instructed ask says only the standing
+    // holding line -- the exact race the review flagged: BOTH the re-ask and the
+    // hold-followup are armed off the very same completed reply, in the same order
+    // `dispatchAaiEvent`'s own `reply.done` case already uses.
+    internals.replyGoalAtStart.set('q1', 'ASK_CHALLENGE');
+    internals.replyTranscripts.set('q1', 'One moment.');
+    internals.maybeReaskQuestion('q1', 'completed');
+    internals.maybeArmHoldFollowup('q1', 'completed');
+
+    expect(replyCreatesOf(aai)).toHaveLength(0); // both are only ARMED so far, nothing sent yet
+
+    // The re-ask fires first (400ms) and actually asks the real question -- this send is what
+    // must cancel the still-pending 2500ms hold-followup.
+    vi.advanceTimersByTime(400);
+    expect(replyCreatesOf(aai)).toHaveLength(1);
+    const reask = replyCreatesOf(aai)[0] as { type: string; instructions?: string };
+    expect(reask.instructions).toContain(CHALLENGE_SPEAK);
+    expect(diagEvents.filter((e) => e.kind === 'question_reask_sent')).toHaveLength(1);
+
+    // That re-asked reply genuinely delivers the real question this time -- recorded the same
+    // way `dispatchAaiEvent`'s own reply.done case would (`recordGoalCompletionAction`, called
+    // before `maybeReaskQuestion` in the real dispatch order but hermetically equivalent here
+    // since neither reads the other's output).
+    internals.replyGoalAtStart.set('q2', 'ASK_CHALLENGE');
+    internals.replyTranscripts.set('q2', CHALLENGE_SPEAK);
+    internals.recordGoalCompletionAction('q2', 'completed');
+
+    // Advance the rest of the way out to 5s (measured from the hold reply itself) -- the
+    // now-superseded hold-followup timer must NEVER fire a second, redundant send.
+    vi.advanceTimersByTime(5_000 - 400);
+
+    expect(replyCreatesOf(aai)).toHaveLength(1); // exactly ONE instructed send followed the hold
+    expect(diagEvents.filter((e) => e.kind === 'hold_followup_sent')).toHaveLength(0);
+    const challengeIssued = session.logs.actions.filter(
+      (a) => a.kind === 'challenge_issued' && (a as { challenge_id?: string }).challenge_id === 'sess-hold-followup-challenge-1'
+    );
+    expect(challengeIssued).toHaveLength(1);
+  });
+});

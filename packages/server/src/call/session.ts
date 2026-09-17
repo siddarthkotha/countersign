@@ -1715,13 +1715,32 @@ export class CallSession {
    *  `maybeArmHoldFollowup`, called from `reply.done` ONLY when nothing else already sent a
    *  `reply.create` for this same event (`!this.replyCreateAwaitingStart` at the call site,
    *  the same guard `scheduleCloseIfNeeded` is already gated behind), arms a SHORT one-shot
-   *  timer (`HOLD_FOLLOWUP_MS`) the instant a COMPLETED reply's own accumulated transcript
-   *  leniently matches the holding line (`normalizeForCloseMatch`, the same normalization
-   *  closeMatch.ts already uses for CLOSE, folding casing/punctuation/whitespace -- "One
-   *  moment." survives minor STT drift the same way a close sentence does). When the timer
-   *  fires, it re-sends the CURRENT goal's own line through the EXACT SAME instructed-send
-   *  path a goal CHANGE already uses (`instructedSentenceFor`/`sendReplyCreate`) -- restating
-   *  what the caller is actually being asked/told, instead of leaving them in silence.
+   *  timer (`HOLD_FOLLOWUP_MS`) the instant a COMPLETED reply's own accumulated transcript is
+   *  the BARE standing holding line and NOTHING else (`normalizeForCloseMatch`, the same
+   *  normalization closeMatch.ts already uses for CLOSE, folding casing/punctuation/whitespace
+   *  -- an EXACT equality check against `"one moment"`, not a substring: "One moment." survives
+   *  minor STT drift the same way a close sentence does, but a reply that says anything MORE
+   *  than that is never mistaken for the bare standing line -- see the review-fix note below).
+   *  When the timer fires, it re-sends the CURRENT goal's own line through the EXACT SAME
+   *  instructed-send path a goal CHANGE already uses (`instructedSentenceFor`/`sendReplyCreate`)
+   *  -- restating what the caller is actually being asked/told, instead of leaving them in
+   *  silence.
+   *
+   *  Review fix (2026-09-17, Critical -- FAIL on the first cut): the bare-substring match
+   *  above used to be `.includes('one moment')`, which also matched every one of
+   *  `stalls.ts`'s own eight legitimate STALL holding lines that happen to CONTAIN the phrase
+   *  ("One moment, verifying the sign-in session.", "One moment, checking the file on this
+   *  request.", "One moment, confirming with the registered device.", "One moment while that
+   *  check completes.", "One moment longer, verifying a detail.", "One moment, I don't want
+   *  to rush this.") -- a caller simply waiting on a real SSO/history/OOB lookup would hear
+   *  their own stall line restated 2.5s later, as if it were a silent hold. Fixed two ways,
+   *  both required (either alone still lets the other shape through): (1) the match is now an
+   *  EXACT equality against the normalized bare line, never a substring, so any stall line
+   *  with further content words never matches; (2) the STALL goal is excluded outright
+   *  (below), belt-and-braces against a FUTURE stall line that happened to normalize to
+   *  exactly "one moment" with nothing else -- STALL's own varying holding lines are already a
+   *  legitimate, intentional "still working" signal (`pickStallLine`/`usedStalls`), never a
+   *  silent dead end the way an UNCHANGED goal with nothing else to say is.
    *
    *  Guards, deliberately mirroring every other force-speak mechanism in this file:
    *   - never once `this.ended` or the goodbye is already confirmed (nothing is ever owed
@@ -1729,6 +1748,8 @@ export class CallSession {
    *   - never for the CLOSE goal (checked both at arm time and again at fire time) -- CLOSE's
    *     own hang-up machinery (`scheduleCloseIfNeeded`/`armCloseRetryTimer`) already owns that
    *     goal's retries end-to-end; a follow-up here would race or duplicate a goodbye;
+   *   - never for the STALL goal (review fix above) -- a real check is genuinely still
+   *     running, and STALL's own library already keeps the caller informed of that;
    *   - never while DEGRADED-TRANSCRIPTS mode is on -- a reply with real audio but a LOST
    *     transcript in degraded mode cannot be trusted to have actually said "One moment." at
    *     all (the same reasoning `maybeReaskQuestion`/`armCloseTranscriptWait` already apply to
@@ -1747,10 +1768,24 @@ export class CallSession {
    *     the engine to a genuinely different goal in the meantime must never get a stale
    *     restatement of the OLD one.
    *
+   *  Review fix (2026-09-17, Important -- FAIL on the first cut, defect 2): for a QUESTION_GOALS
+   *  code, a bare "One moment." reply arms BOTH this follow-up (2500ms) AND the pre-existing
+   *  question re-ask (`maybeReaskQuestion`/`armQuestionReaskTimer`, 400ms) independently -- the
+   *  re-ask is faster and asks the real question first, but nothing used to stop this
+   *  follow-up from ALSO firing 2.1s later and re-sending (a second instructed reply.create, a
+   *  second `challenge_issued`/`readback_issued`/`elicit_issued` action for the very same
+   *  rendering). Fixed at the single choke point every instructed send in this class already
+   *  funnels through: `sendReplyCreate` itself now clears any pending hold-followup timer and
+   *  marks the turn as already followed-up the instant ANY instructed reply.create actually
+   *  goes out, whichever mechanism sent it -- see that method's own doc comment. The re-ask
+   *  wins for question goals (it is faster and budgeted, `QUESTION_REASK_MAX`); this follow-up
+   *  is simply the mechanism that yields.
+   *
    *  Cleared (never fires) the instant the caller speaks again (any `transcript.user` --
    *  `dispatchAaiEvent`'s own case resets `holdFollowupArmedForTurn` and cancels the pending
    *  timer, the same "a genuine new turn supersedes whatever was pending" rule
-   *  `previousCallerTranscriptAtMs` already follows) and at `end()`. */
+   *  `previousCallerTranscriptAtMs` already follows), the instant ANY instructed reply.create
+   *  actually sends (`sendReplyCreate`, defect 2 fix above), and at `end()`. */
   private static readonly HOLD_FOLLOWUP_MS = 2_500;
   private holdFollowupTimer: ReturnType<typeof setTimeout> | null = null;
   private holdFollowupArmedForTurn = false;
@@ -1761,10 +1796,14 @@ export class CallSession {
     if (this.degradedTranscriptsMode) return;
     const goal = this.last.goal;
     if (goal.code === 'CLOSE') return;
+    if (goal.code === 'STALL') return; // review fix: STALL's own varying holding lines are legitimate, never a silent dead end
     if (this.holdFollowupArmedForTurn) return; // at most one per caller turn
     if (status !== 'completed') return; // interrupted -- the caller is already talking over it
     const transcript = this.replyTranscripts.get(replyId) ?? '';
-    if (!normalizeForCloseMatch(transcript).includes('one moment')) return;
+    // Review fix: EXACT match against the bare normalized line, never a substring -- a stall
+    // line ("One moment, verifying the sign-in session.") also CONTAINS "one moment" but is
+    // never the bare standing line this mechanism exists to catch.
+    if (normalizeForCloseMatch(transcript) !== 'one moment') return;
 
     this.holdFollowupArmedForTurn = true;
     this.armHoldFollowupTimer(goal);
@@ -3347,6 +3386,18 @@ export class CallSession {
     // another CLOSE retry (the words were heard) and not any other goal's reply.create
     // either. See the class-field doc comment on `goodbyeConfirmed` above.
     if (this.goodbyeConfirmed) return;
+    // HOLD-WITHOUT-FOLLOW-UP fix, defect 2 (2026-09-17 review): ANY instructed send that
+    // actually goes out from here -- a goal change, a question re-ask, a CLOSE retry, the
+    // idle-goodbye override, or the hold-followup's own restatement -- means the caller is
+    // about to hear something real. Clear whatever hold-followup timer is pending (it is now
+    // redundant: for a QUESTION_GOALS code the re-ask is faster, 400ms vs 2500ms, and always
+    // wins the race) and mark the turn as already followed-up so `maybeArmHoldFollowup` cannot
+    // arm a FRESH one later in this same caller turn either -- at most one instructed send
+    // ever follows a single hold, regardless of which mechanism sent it. A no-op the vast
+    // majority of the time (no hold-followup timer is ever pending), and harmless even then:
+    // `holdFollowupArmedForTurn` resets on the caller's own next turn either way.
+    this.clearHoldFollowupTimer();
+    this.holdFollowupArmedForTurn = true;
     if (goalCode === 'CLOSE' && (opts?.countAttempt ?? true)) {
       this.closeReplySendCount += 1;
     }
