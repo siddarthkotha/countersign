@@ -393,6 +393,23 @@ export interface AssuranceChecklist {
   // injection-lexicon hit has been seen -- makes STAGE permanently unreachable via row 11
   // for a call that has shown this behavior, regardless of how everything else resolves.
   no_injection_attempt: boolean;
+  // FIX (2026-09-17, stage-with-fails lane -- PROVEN live, deploy 45, session
+  // 5a6149e5-6ef2-4f5c-ba54-ba5439595b3a: a call reached STAGE at rule row 11 while its own
+  // evidence list carried two FAILED knowledge_check_result cards (a genuine wrong answer to
+  // "which internal approver signed off on this payment", duplicated by an unrelated
+  // server-side double-issue bug into two challenge ids). Row 11's gate previously only
+  // required `at_least_one_challenge_passed` -- a caller who fails the ONE challenge that
+  // actually tests attacker knowledge (a SEED_FACT/TRAP_FACT/RELATIONAL only an insider would
+  // know) could still reach STAGE by additionally passing an unrelated LIVE_COMMITMENT
+  // challenge (restating a value they themselves just said seconds earlier, which proves
+  // nothing about who is on the line). This item closes that gap: false whenever ANY
+  // knowledge_check_result card anywhere in the evidence list reads FAIL, regardless of how
+  // many other challenges passed. Optional (not required) purely so the many pre-existing
+  // hand-built AssuranceChecklist fixtures across packages/engine/test, packages/server/test,
+  // and packages/web (a Record<keyof AssuranceChecklist, string> label map) that predate this
+  // field do not need updating one-by-one just to keep compiling -- `decide()` (rules.ts)
+  // always sets it on every real computed AssuranceChecklist, same as every other field here.
+  no_failed_challenge?: boolean;
 }
 
 export interface EngineOutput {

@@ -1,0 +1,235 @@
+{
+  "title": "A failed knowledge challenge must block STAGE even when a different challenge passes",
+  "description": "PROVEN live miss (free-play harness run, report scripts/rehearse/reports/2026-09-17T09-15-29-single-wrong-answer.md + its .diagnostics.json, deploy 45, session 5a6149e5-6ef2-4f5c-ba54-ba5439595b3a). Conversation lines and t_ms below are copied VERBATIM from that record. A free-play caller playing Dana is challenged for the internal approver's name and answers, in one breath, 'That would be Marcus Obie, if I recall correctly. Uh, no, wait, it was actually Elena Park who approved it.' -- the seed's true approver is Marcus Obi, so this reply's own accept-token check FAILs (the literal token 'obi' never appears -- only the STT spelling 'obie' does -- and the caller's own final, self-corrected answer names Elena Park, which is simply wrong). No consistency_flag fires (ruling 8: a same-utterance self-correction is not a contradiction), so no_contradictions stays true. A second, unrelated challenge -- restate the amount you gave earlier -- is answered correctly. Before the 2026-09-17 fix, row 11's STAGE gate only required at_least_one_challenge_passed (true here, from the amount restate) and never checked whether any OTHER knowledge_check_result card had FAILed, so this call reached STAGE with a live, unrepaired FAIL card sitting in its own evidence list -- a caller who does not know the true approver could still get staged by separately confirming a value they had just spoken themselves seconds earlier, which proves nothing about who is on the line (LAW 2/3 concern). After the fix (new assurance item no_failed_challenge, rules.ts), a FAILed knowledge_check_result card anywhere in the evidence blocks STAGE regardless of what else passed; the call ends (the agent said its goodbye and hung up, same as the live record) while still short of the freeze line, so it escalates for a human callback (row 15) instead of repairing itself. NOTE 1: the live record actually produced TWO FAIL cards for the approver question, from a server-side bug (an unrelated double-issuance of the same challenge) that is out of scope for the engine lane and not reproduced byte-for-byte here -- this fixture reproduces the smallest faithful shape of the RULE-TABLE gap the record exposed (one FAIL card is already sufficient to prove it), using the same seed fact, the same caller line, and the same true/false grading outcome. NOTE 2: the live record's actual opening request line ('The amount is $84,600 to Meridian Supply, account ending in 4471.') never triggers this engine's beneficiary-claim extractor (extract/claims.ts's CUE_PATTERNS require a verb like wire/pay/send/transfer immediately before 'to NAME' -- a separate, pre-existing extraction gap, not the bug under test here) -- c2 below is disclosed-adjusted to 'I need to wire $84,600 to Meridian Supply, account ending in 4471.' (same amount, vendor, account) purely so the beneficiary field reaches CONFIRMED like it genuinely did live, so critical_fields_confirmed can read true and isolate the ONE assurance item this fixture exists to test (no_failed_challenge). The load-bearing line under test -- the caller's wrong-answer self-correction to the approver challenge -- is unmodified, verbatim.",
+  "call": {
+    "session_id": "5a6149e5-6ef2-4f5c-ba54-ba5439595b3a",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "Meridian payments desk, verification line. How can I help you today?",
+      "t_ms": 5474
+    },
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "Hi, this is Dana Whitfield from Corporate Treasury. I need to request a wire correction for Meridian Supply.",
+      "t_ms": 19089
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "What is the exact amount you need to send, and to which vendor?",
+      "t_ms": 24245
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "I need to wire $84,600 to Meridian Supply, account ending in 4471.",
+      "t_ms": 39391
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "Which internal approver signed off on this payment?",
+      "t_ms": 39999
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "That would be Marcus Obie, if I recall correctly. Uh, no, wait, it was actually Elena Park who approved it.",
+      "t_ms": 60482
+    },
+    {
+      "id": "a4",
+      "speaker": "agent",
+      "text": "What is this payment to Meridian Supply for?",
+      "t_ms": 64048
+    },
+    {
+      "id": "c4",
+      "speaker": "caller",
+      "text": "I'm not sure of the specific details, but it's a routine transaction related to our ongoing supplies with them.",
+      "t_ms": 84381
+    },
+    {
+      "id": "a5",
+      "speaker": "agent",
+      "text": "One moment. Could you please repeat the dollar amount you mentioned at the start of this call?",
+      "t_ms": 93919
+    },
+    {
+      "id": "c5",
+      "speaker": "caller",
+      "text": "Sure, the amount is $84,600, or $84,600.",
+      "t_ms": 109192
+    },
+    {
+      "id": "a6",
+      "speaker": "agent",
+      "text": "Just to confirm, the amount is $84,600. Is that correct?",
+      "t_ms": 113237
+    },
+    {
+      "id": "c6",
+      "speaker": "caller",
+      "text": "Yes, that's correct.",
+      "t_ms": 126881
+    },
+    {
+      "id": "a7",
+      "speaker": "agent",
+      "text": "Just to confirm, the account ends in 4 4 7 1. Is that correct?",
+      "t_ms": 141365
+    },
+    {
+      "id": "c7",
+      "speaker": "caller",
+      "text": "Yes, that's correct.",
+      "t_ms": 148181
+    },
+    {
+      "id": "a8",
+      "speaker": "agent",
+      "text": "Just to confirm, the beneficiary is Meridian Supply. Is that correct?",
+      "t_ms": 179875
+    },
+    {
+      "id": "c8",
+      "speaker": "caller",
+      "text": "Yes, that's correct.",
+      "t_ms": 187387
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 94246,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 94246,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 94246,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "act1",
+      "kind": "challenge_issued",
+      "t_ms": 39999,
+      "challenge_id": "5a6149e5-6ef2-4f5c-ba54-ba5439595b3a-1",
+      "spec": {
+        "challenge_id": "5a6149e5-6ef2-4f5c-ba54-ba5439595b3a-1",
+        "kind": "SEED_FACT",
+        "field": "approver",
+        "ask": "Ask which internal approver signed off on this payment.",
+        "speak": "Which internal approver signed off on this payment?",
+        "expect": { "accept_tokens": ["marcus", "obi"] },
+        "fact_id": "dana_internal_approver"
+      }
+    },
+    {
+      "id": "act2",
+      "kind": "challenge_issued",
+      "t_ms": 93919,
+      "challenge_id": "5a6149e5-6ef2-4f5c-ba54-ba5439595b3a-2"
+    },
+    {
+      "id": "act3",
+      "kind": "readback_issued",
+      "t_ms": 113237,
+      "field": "amount_usd",
+      "value": "84600"
+    },
+    {
+      "id": "act4",
+      "kind": "readback_issued",
+      "t_ms": 141365,
+      "field": "account_last4",
+      "value": "4471"
+    },
+    {
+      "id": "act5",
+      "kind": "readback_issued",
+      "t_ms": 179875,
+      "field": "beneficiary",
+      "value": "meridian supply"
+    },
+    {
+      "id": "act6",
+      "kind": "call_ended",
+      "t_ms": 191067,
+      "detail": "agent_closed"
+    }
+  ],
+  "expected": {
+    "verdict": "ESCALATE",
+    "state": "ACTION",
+    "reasons": [],
+    "failure_tally": 1,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": true,
+      "critical_fields_confirmed": true,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": true,
+      "no_injection_attempt": true,
+      "no_failed_challenge": false
+    }
+  }
+}

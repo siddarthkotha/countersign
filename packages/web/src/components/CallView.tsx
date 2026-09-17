@@ -87,6 +87,10 @@ const ASSURANCE_LABELS: Record<keyof AssuranceChecklist, string> = {
   // items from rulings A/B, replacing the rules lane's placeholder wording.
   at_least_one_challenge_passed: 'At least one question answered correctly',
   no_injection_attempt: 'No attempt to override the agent',
+  // FIX (2026-09-17, stage-with-fails lane, packages/engine/src/types.ts): required only
+  // because ASSURANCE_LABELS is a Record over every AssuranceChecklist key, including this
+  // new optional one -- label-only ripple, no behavior change in this file.
+  no_failed_challenge: 'No failed knowledge check',
 };
 
 const ASSURANCE_KEYS = Object.keys(ASSURANCE_LABELS) as (keyof AssuranceChecklist)[];
