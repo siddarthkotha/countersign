@@ -677,6 +677,72 @@ export class CallSession {
    *  mechanism. A separate named constant, not a shared one, so either wait's duration can be
    *  tuned independently later without coupling the two mechanisms. */
   private static readonly QUESTION_TRANSCRIPT_WAIT_MS = 1_500;
+
+  /** Double-ask fix (2026-09-18, P0 founder-observed live defect, two shapes -- see
+   *  scripts/rehearse/reports/founder-2026-09-18/ under 32cbb410/95b9ad42/391e2a37 (contrast)):
+   *  the number of times `recordGoalCompletionAction` has actually LOGGED a
+   *  challenge_issued/readback_issued/elicit_issued action for the CURRENT QUESTION_GOALS
+   *  rendering (`questionAskedGoalKey`, the same `JSON.stringify(goal)` convention every other
+   *  per-rendering key in this file already uses). Reset the instant the rendering itself
+   *  changes (a different challenge/field/value); incremented only on an actual successful
+   *  log, via `noteQuestionAsked`.
+   *
+   *  Two independent PROVEN live shapes read this:
+   *   (1) AssemblyAI's own automatic reply (never one WE instructed -- no `reply_create_sent`
+   *       preceded it) can land AFTER our instructed reply already asked and logged the
+   *       rendering, saying nothing but the bare standing holding line ("One moment.", exactly
+   *       -- `normalizeForCloseMatch`, same equality `maybeArmHoldFollowup` already uses).
+   *       `maybeReaskQuestion`/`maybeArmHoldFollowup` used to read only THAT reply's own
+   *       transcript and, finding no match, treat the whole rendering as never having been
+   *       asked -- re-asking (and re-logging) a question the caller had already heard.
+   *       PROVEN live: 32cbb410 57.8/59.4/60.1/65.5s (account_last4), 72.1/77.4s
+   *       (beneficiary); 95b9ad42 36.9/45.8s (amount), 52.2/60.8s (account) -- readback spoken
+   *       twice back to back with no caller turn in between. Contrast 391e2a37 49.3-58.7s: the
+   *       automatic holding line landing BEFORE the instructed ask is unaffected -- at that
+   *       point the rendering has not been asked yet (`questionAskedCount` is still 0), so
+   *       nothing here suppresses the real, still-owed ask.
+   *       Fix: both `maybeReaskQuestion` and `maybeArmHoldFollowup` refuse to fire AT ALL, for
+   *       ANY reply whose own transcript is nothing but that bare holding line, once this
+   *       rendering's own `questionAskedCount` is already >= 1 -- a rendering already asked
+   *       once needs no repair from either mechanism; a bare holding line proves nothing about
+   *       whether the question itself was ever put to the caller. Deliberately NARROW (bare
+   *       holding line only, not "any reply that doesn't itself ask"): an automatic reply that
+   *       says something ELSE non-trivial instead (a paraphrase, a restatement) is a
+   *       genuinely different, ambiguous shape this fix leaves exactly as before (see
+   *       packages/server/test/challenge-issued-reask-binding.test.ts, unchanged by this fix).
+   *   (2) The system_prompt for an unresolved QUESTION_GOALS rendering stays standing until
+   *       the engine itself moves the goal on, so AssemblyAI's own ambient automatic replies
+   *       can independently restate the SAME real question multiple times, with no caller turn
+   *       and no `reply.create` from us at all in between (we cannot detect or stop that
+   *       generation -- it never touches this class). PROVEN live: 95b9ad42 78.4/83.5/97.6/
+   *       110.4s, one LIVE_COMMITMENT challenge (`...-3`) logged FOUR times through the
+   *       caller's own "I did not mention anyone." twice. `recordGoalCompletionAction` itself
+   *       refuses to log more than QUESTION_ASKED_MAX (2) total occurrences of the same
+   *       rendering, however it was spoken, so recorded evidence (LAW 4) can never claim a
+   *       rendering was legitimately delivered more than twice -- the engine's own
+   *       answer-window timeout (engine/challenges.ts, a different lane, PROVEN unaffected by
+   *       this file) still owns deciding what a second non-answer means; this file only ever
+   *       stops COUNTING and RE-SENDING past the cap. FOUND BUT NOT FIXED: this cannot stop
+   *       AssemblyAI's own ambient audio from actually being spoken a 3rd/4th time -- that
+   *       generation is driven by the standing `system_prompt` (prompt.ts), a different lane
+   *       from this P0 fix's own scope (packages/server/src/call/session.ts only). */
+  private static readonly QUESTION_ASKED_MAX = 2;
+  private questionAskedGoalKey: string | null = null;
+  private questionAskedCount = 0;
+
+  /** True exactly when `replyId`'s own accumulated transcript is nothing but the bare standing
+   *  holding line ("One moment.", leniently normalized -- same `normalizeForCloseMatch`
+   *  equality `maybeArmHoldFollowup` already uses for the identical shape) AND the CURRENT
+   *  rendering (`goal`) has already been asked at least once (`questionAskedGoalKey`/
+   *  `questionAskedCount`, see that field's own doc comment). Shared by `maybeReaskQuestion`
+   *  and `maybeArmHoldFollowup` so the two mechanisms can never disagree on when a bare hold
+   *  reply is allowed to be read as "this rendering still needs asking". */
+  private bareHoldAfterAlreadyAsked(goal: PhrasingGoal, replyId: string): boolean {
+    if (this.questionAskedGoalKey !== JSON.stringify(goal) || this.questionAskedCount < 1) return false;
+    const transcript = this.replyTranscripts.get(replyId) ?? '';
+    return normalizeForCloseMatch(transcript) === 'one moment';
+  }
+
   /** Review fix (2026-09-15, Important -- FAIL on the first cut): the reask used to call
    *  `sendReplyCreate` SYNCHRONOUSLY at `reply.done`, with none of the spacing round 4 gave
    *  the CLOSE retry (`CLOSE_RETRY_MIN_GAP_MS`/`armCloseRetryTimer` above) for exactly the
@@ -1847,6 +1913,14 @@ export class CallSession {
     // never the bare standing line this mechanism exists to catch.
     if (normalizeForCloseMatch(transcript) !== 'one moment') return;
 
+    // Double-ask fix (2026-09-18, P0): a bare holding-line reply for a rendering ALREADY asked
+    // at least once proves nothing about whether the real question was ever put to the caller
+    // -- see `bareHoldAfterAlreadyAsked`'s own doc comment. Without this, once `maybeReaskQuestion`
+    // (this same reply.done's own earlier call, faster at 400ms) correctly refuses to fire for
+    // the identical reason, THIS mechanism would otherwise become the one that re-sends the
+    // duplicate 2500ms later instead.
+    if (QUESTION_GOALS.has(goal.code) && this.bareHoldAfterAlreadyAsked(goal, replyId)) return;
+
     this.holdFollowupArmedForTurn = true;
     this.armHoldFollowupTimer(goal);
   }
@@ -2759,6 +2833,7 @@ export class CallSession {
     }
     if (goal.code === 'ASK_CHALLENGE' && goal.challenge) {
       if (!asked) return;
+      if (!this.noteQuestionAsked(goal)) return; // cap reached -- see `questionAskedGoalKey`'s own doc comment
       const t_ms = this.nowT();
       this.logs.actions.push({
         id: this.nextActionId(),
@@ -2778,6 +2853,7 @@ export class CallSession {
       });
     } else if (goal.code === 'READBACK' && goal.readback) {
       if (!asked) return;
+      if (!this.noteQuestionAsked(goal)) return; // cap reached -- see `questionAskedGoalKey`'s own doc comment
       const t_ms = this.nowT();
       this.logs.actions.push({
         id: this.nextActionId(),
@@ -2796,6 +2872,7 @@ export class CallSession {
       });
     } else if (goal.code === 'ELICIT_MISSING_CRITICAL' && goal.elicit) {
       if (!asked) return;
+      if (!this.noteQuestionAsked(goal)) return; // cap reached -- see `questionAskedGoalKey`'s own doc comment
       const t_ms = this.nowT();
       this.logs.actions.push({
         id: this.nextActionId(),
@@ -2812,6 +2889,25 @@ export class CallSession {
         reply_id: replyId,
       });
     }
+  }
+
+  /** Tracks `questionAskedGoalKey`/`questionAskedCount` for `goal` (see that field's own doc
+   *  comment) -- resets the count the instant the rendering itself changes (a fresh JSON key),
+   *  then returns false WITHOUT incrementing once `QUESTION_ASKED_MAX` has already been
+   *  reached for it (the caller must then skip logging/re-sending this occurrence), true
+   *  otherwise (having incremented for this occurrence). Called only from
+   *  `recordGoalCompletionAction`, once per QUESTION_GOALS branch, only after that branch has
+   *  already confirmed `asked` -- never touches the count for an occurrence that did not
+   *  actually ask anything. */
+  private noteQuestionAsked(goal: PhrasingGoal): boolean {
+    const key = JSON.stringify(goal);
+    if (key !== this.questionAskedGoalKey) {
+      this.questionAskedGoalKey = key;
+      this.questionAskedCount = 0;
+    }
+    if (this.questionAskedCount >= CallSession.QUESTION_ASKED_MAX) return false;
+    this.questionAskedCount += 1;
+    return true;
   }
 
   /** Question-reask fix (2026-09-14, PROVEN live failure -- see
@@ -2878,6 +2974,18 @@ export class CallSession {
 
     const label = this.replyGoalAtStart.get(replyId) ?? null;
     if (label !== goal.code) return; // the goal moved on before this reply even finished
+
+    // Double-ask fix (2026-09-18, P0 founder-observed live defect -- see `questionAskedGoalKey`'s
+    // own class-field doc comment for the full incident): a bare holding-line reply ("One
+    // moment.", exactly) for a rendering that has ALREADY been asked at least once by an
+    // EARLIER reply proves nothing about whether the real question was ever put to the caller
+    // -- most commonly an AssemblyAI automatic reply landing AFTER our own instructed ask
+    // already completed and logged. Reasking here would talk over a caller who already heard
+    // (and may already be answering) the real question. Deliberately narrow: an automatic
+    // reply that says something ELSE non-trivial (a paraphrase/restatement, not the bare line)
+    // is a different, ambiguous shape this leaves unchanged -- see
+    // packages/server/test/challenge-issued-reask-binding.test.ts.
+    if (this.bareHoldAfterAlreadyAsked(goal, replyId)) return;
 
     // Idempotency fix (2026-09-16c): THIS reply.done is now the newest word on the current
     // rendering, whatever it turns out to decide below -- clear any wait `armQuestionTranscriptWait`
