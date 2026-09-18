@@ -2783,10 +2783,11 @@
       "files": [
         "packages/server/src/**"
       ],
-      "status": "held",
+      "status": "done",
       "held_because": "after the founder play-through 2026-09-18; one live record; candidate: clear the pending challenge goal before the CLOSE instruction or make the close matcher reject a non-close first attempt faster",
       "agent_id": "",
-      "started_at": ""
+      "started_at": "",
+      "lane_note": "landed 6552e54, push 48 2026-09-18 10:19 AM: CLOSE attempt 1 carries the exact-words wrapper"
     },
     {
       "id": "READBACK-EMBEDDED-RESTATEMENT",
@@ -2796,6 +2797,50 @@
       ],
       "status": "held",
       "held_because": "engine; after the founder play-through; Haiku first, test-first: a restatement containing the exact normalized value (and no negation) resolves the readback as CONFIRMED",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "BENEFICIARY-VERB-STT-WRITE",
+      "title": "STT wrote 'I need to write it to Meridian Supply' (founder call da346951, 2026-09-18); extract/claims.ts verb cues (pay/wire/send/transfer) never match 'write', so the beneficiary stayed unclaimed and the first trap fell through to the approver field; P2 extraction",
+      "files": [
+        "packages/engine/src/extract/claims.ts"
+      ],
+      "status": "held",
+      "held_because": "after push 49; Haiku lane, test-first with the founder's verbatim line; 'write it to NAME' and 'right it to NAME' as STT variants of 'wire it to'",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "UNREQUESTED-SECOND-REPLY",
+      "title": "case 5 founder record c9d45637: a second reply.started at 82209 ms with no reply_create_sent (an AssemblyAI continuation nobody asked for) spoke stale content after the verdict; P1 if it recurs on deploy 48+",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "held",
+      "held_because": "check the first live records after deploy 48 (CLOSE attempt 1 now wrapped); if it recurs, trace whether our session.update triggers it",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "CHALLENGE-WINDOW-REASK-REGRADE",
+      "title": "engine: a same-id re-issue never closes/re-bounds a challenge window, so a later unrelated utterance re-grades an UNANSWERED card to FAIL (one 'Yes.' graded against two challenges, founder call da346951); server test challenge-issued-reask-binding.test.ts documents it as KNOWN GAP",
+      "files": [
+        "packages/engine/src/challenges.ts"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "a4d8faea1f3253e19",
+      "started_at": "2026-09-18T15:22:00Z"
+    },
+    {
+      "id": "INSTRUCTED-REPLY-FLAG-NOT-KEYED",
+      "title": "session.ts wasInstructedReply is a global flag off replyCreateAwaitingStart, not keyed by reply_id: an ambient AssemblyAI reply.started while our send is outstanding would be taken as ours and clear the real binding (pre-existing since 2026-09-13; review finding on f85a702); P2",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "held",
+      "held_because": "pre-existing, theoretical; key the binding by reply_id when a live record shows the collision; also the replyGoalAtStart/replyInstructedGoal maps are never deleted (bounded by the minute cap)",
       "agent_id": "",
       "started_at": ""
     }
