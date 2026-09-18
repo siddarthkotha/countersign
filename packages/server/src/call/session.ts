@@ -607,6 +607,30 @@ export class CallSession {
    *  `replyGoalAtStart`'s own doc comment for why this must NOT be re-derived from
    *  `this.last` at label time. Null whenever no `reply.create` is outstanding. */
   private pendingRequestedGoal: GoalCode | null = null;
+  /** Challenge-issuance binding fix (2026-09-18, P0 founder-observed live defect -- see
+   *  scripts/rehearse/reports/founder-2026-09-18/da346951-c57a-4e53-8cbe-11fa6d039427.diagnostics.json):
+   *  `replyGoalAtStart`/`pendingRequestedGoal` above only ever carry the goal's CODE
+   *  ('ASK_CHALLENGE'), which stays identical across a re-ask that lands on a DIFFERENT
+   *  `ChallengeSpec` -- not enough for `recordGoalCompletionAction` to know WHICH challenge a
+   *  reply was actually instructed to speak. `pendingRequestedFullGoal` is the sibling that
+   *  carries the FULL `PhrasingGoal` (including `goal.challenge`/`goal.readback`/`goal.elicit`)
+   *  that was in force -- and therefore composed into `instructions` -- at the exact instant
+   *  `sendReplyCreate` sent it. Same "set at send, consumed at the next `reply.started`"
+   *  lifecycle as `pendingRequestedGoal`, never re-derived from `this.last` at label time, for
+   *  the identical reason: by completion time, `this.last.goal` may already have raced ahead to
+   *  a genuinely different challenge (`engine/challenges.ts`'s own answer-window timeout,
+   *  anchored to the challenge's ORIGINAL issuance and not reset by a re-ask -- a separate,
+   *  engine-lane concern this fix does not touch). Null whenever no `reply.create` is
+   *  outstanding. */
+  private pendingRequestedFullGoal: PhrasingGoal | null = null;
+  /** Sibling of `replyGoalAtStart`, keyed the same way, carrying the FULL snapshot from
+   *  `pendingRequestedFullGoal` instead of just the code -- see that field's own doc comment.
+   *  Read by `recordGoalCompletionAction` in place of `this.last.goal` for any reply this map
+   *  has an entry for (i.e. every INSTRUCTED reply of ours); a reply with no entry (an ambient
+   *  automatic AssemblyAI reply nobody asked for) falls back to `this.last.goal`, unchanged
+   *  from before this fix -- there is no better source of truth for what an unrequested reply
+   *  was phrased under. */
+  private readonly replyInstructedGoal = new Map<string, PhrasingGoal>();
   /** True from the moment `sendReplyCreate` actually sends one until the `reply.started`
    *  it asked for arrives. Folded into the same "busy" check both `maybeSendReplyCreateForTick`
    *  and `maybeSendReplyCreateAfterReplyDone` use alongside `this.speaking` -- without this,
@@ -2335,6 +2359,17 @@ export class CallSession {
         const requestedGoal = wasInstructedReply ? this.pendingRequestedGoal : (this.last?.goal?.code ?? null);
         if (requestedGoal) this.replyGoalAtStart.set(evt.reply_id, requestedGoal);
         if (wasInstructedReply) this.instructedReplyIds.add(evt.reply_id);
+        // Challenge-issuance binding fix (2026-09-18): same "label from what was actually
+        // requested, never from `this.last`" reasoning as `requestedGoal` above, one level more
+        // specific -- an INSTRUCTED reply binds to the FULL goal snapshot `sendReplyCreate` took
+        // at send time (`pendingRequestedFullGoal`), so `recordGoalCompletionAction` can later
+        // log the challenge/readback/elicit this reply was actually told to speak, not whatever
+        // the engine has advanced to by the time it completes. A non-instructed (ambient) reply
+        // gets no entry here at all -- it falls back to `this.last.goal` at completion time,
+        // unchanged from before this fix.
+        if (wasInstructedReply && this.pendingRequestedFullGoal) {
+          this.replyInstructedGoal.set(evt.reply_id, this.pendingRequestedFullGoal);
+        }
         // Occurrence-4 follow-on (see the DEGRADED-TRANSCRIPTS class-field doc comment):
         // records, for THIS reply, how long it started after the previous reply's own
         // reply.done -- but only when that previous reply was one of ours (an ambient
@@ -2348,6 +2383,7 @@ export class CallSession {
         );
         this.replyCreateAwaitingStart = false;
         this.pendingRequestedGoal = null;
+        this.pendingRequestedFullGoal = null;
         // Round 4, requirement 5: this reply.create (if any was outstanding) is no longer at
         // risk of being "lost" -- something started.
         this.clearReplyCreateLostTimer();
@@ -2640,10 +2676,31 @@ export class CallSession {
    *  -- only (a) that `readback_issued`/`elicit_issued` never again claims a question that
    *  was never asked, and (b) that an un-asked readback/elicit no longer inflates
    *  `computeReadbackReaskExhausted`'s own per-field cap (compose.ts) with a "re-ask" that
-   *  was not actually one. */
+   *  was not actually one.
+   *
+   *  Challenge-issuance binding fix (2026-09-18, P0 founder-observed live defect -- see
+   *  scripts/rehearse/reports/founder-2026-09-18/da346951-c57a-4e53-8cbe-11fa6d039427.diagnostics.json):
+   *  this used to read `this.last.goal` unconditionally -- correct for the FIRST ask of a
+   *  question (nothing has had a chance to move the engine on yet), but wrong for a REPLY THAT
+   *  RE-ASKS an earlier question: `engine/challenges.ts`'s own `challenge_answer_window_ms`
+   *  timeout (15s, anchored to the challenge's ORIGINAL issuance, not reset by a re-ask -- a
+   *  separate, engine-lane concern this fix does not touch) can grade the earlier challenge
+   *  UNANSWERED and advance `this.last.goal.challenge` to a genuinely DIFFERENT challenge
+   *  WHILE the re-ask reply (which is re-speaking the EARLIER challenge's own sentence,
+   *  correctly) is still in flight -- PROVEN live: the re-ask reply's own `transcript.agent`
+   *  chunk fires a trailing `tick()` before this reply's `reply.done` is even processed, and
+   *  that tick is what raced the goal forward. Reading `this.last.goal` at THAT point logged
+   *  `challenge_issued` for the NEW challenge, misattributing a question the caller was never
+   *  actually asked (LAW 4 violation: the action log must describe what was actually spoken,
+   *  never what the engine happens to be computing by the time the log entry is written).
+   *  Fix: prefer `replyInstructedGoal.get(replyId)` -- the exact goal `sendReplyCreate`
+   *  snapshotted at the instant THIS reply was instructed -- falling back to `this.last.goal`
+   *  only for a reply with no such snapshot (an ambient automatic AssemblyAI reply we never
+   *  asked for, unchanged from before this fix: there is no better source of truth for what an
+   *  unrequested reply was phrased under). */
   private recordGoalCompletionAction(replyId: string, status: string): void {
     if (status !== 'completed' || !this.last) return;
-    const goal: PhrasingGoal = this.last.goal;
+    const goal: PhrasingGoal = this.replyInstructedGoal.get(replyId) ?? this.last.goal;
     const transcript = this.replyTranscripts.get(replyId) ?? '';
     let asked = transcriptAsksQuestion(transcript, verbatimQuestionSentence(goal));
     // DEGRADED-TRANSCRIPTS mode: reads the mode value as of THIS reply's own reply.done
@@ -3451,6 +3508,12 @@ export class CallSession {
     this.opts.aai.send(msg);
     this.replyCreateAwaitingStart = true;
     this.pendingRequestedGoal = goalCode;
+    // Challenge-issuance binding fix (2026-09-18): snapshot the FULL goal in force RIGHT NOW --
+    // every call site above composed `instructions` from exactly this `this.last.goal` moments
+    // before calling here, synchronously, so this is guaranteed to be the same goal (same
+    // `challenge`/`readback`/`elicit`) that was actually instructed. See `pendingRequestedFullGoal`'s
+    // own class-field doc comment for why this cannot be re-derived from `this.last` later.
+    this.pendingRequestedFullGoal = this.last?.goal ?? null;
     this.armReplyCreateLostTimer();
     this.logs.actions.push({
       id: this.nextActionId(),
@@ -3483,6 +3546,7 @@ export class CallSession {
       this.diag('reply_create_lost', {});
       this.replyCreateAwaitingStart = false;
       this.pendingRequestedGoal = null;
+      this.pendingRequestedFullGoal = null;
       if (this.last?.goal.code === 'CLOSE') {
         this.closeLastReplyWasEmpty = false;
         this.closeLostStreak += 1;
