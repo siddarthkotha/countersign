@@ -971,13 +971,31 @@ export class CallSession {
    *  null for ELICIT_IDENTITY/PROBE_CONSISTENCY/ELICIT_REQUEST -- their `hint` is a
    *  paraphrase instruction, not a line a person would say), falls back to the same
    *  paraphrase-instruction wrapper `maybeReaskQuestion` already used before this fix (now
-   *  shared, not duplicated, between the proactive send and the reactive reask). Undefined
-   *  for a non-QUESTION_GOALS code -- CLOSE's own instructed wrapper is a distinct,
-   *  unchanged mechanism (`scheduleCloseIfNeeded`'s close_retry path, `currentCloseSentence`)
-   *  that this fix deliberately leaves alone: CLOSE's tick_end send stays bare (relying on
-   *  the standing `system_prompt` alone, exactly as before this fix) so its own tail-wait/
-   *  transcript-wait/stuck-watchdog machinery and its tests are untouched. */
+   *  shared, not duplicated, between the proactive send and the reactive reask).
+   *
+   *  P0 fix (2026-09-18, PROVEN live from three founder calls the same morning plus a harness
+   *  bundle, all under scripts/rehearse/reports/ -- see close-attempt1-instructions.test.ts's
+   *  own header comment): CLOSE now ALSO gets a one-shot wrapper here, the exact same "say
+   *  exactly this" text `armCloseRetryTimer`'s close_retry already sends
+   *  (`currentCloseSentence()`'s CLOSE branch and this one read the identical `goal.hint`, so
+   *  they can never disagree). Before this fix, CLOSE's tick_end send (attempt 1, from
+   *  `maybeSendReplyCreateForTick`) went out BARE, relying solely on the standing
+   *  `system_prompt` from the `session.update` this same tick just sent -- proven live to be
+   *  sent in the SAME millisecond as the reply.create that follows it (case 5's own
+   *  diagnostics: `session_config_updated` CLOSE and `reply_create_sent` tick_end both at
+   *  t=78125), too fast for AssemblyAI to reliably have applied it yet (docs/TEST-PLAN.md:
+   *  "system_prompt applies on the next turn"). With no instructions to fall back on,
+   *  attempt 1 composed under whatever context it still had and, in every live/harness record
+   *  gathered 2026-09-18, never said the close line -- only the WRAPPED close_retry did. This
+   *  closes that race by giving attempt 1 the same one-shot override the retry always had;
+   *  CLOSE's own tail-wait/transcript-wait/stuck-watchdog machinery is unchanged (it keys off
+   *  reply id and transcript content, never off whether `instructions` was sent). Still
+   *  undefined for every other non-QUESTION_GOALS code (ANNOUNCE_*, STALL, CONTAIN*, GREET) --
+   *  none of those has a single verbatim sentence to wrap. */
   private instructedSentenceFor(goal: PhrasingGoal): string | undefined {
+    if (goal.code === 'CLOSE') {
+      return `Say exactly this and nothing else: "${goal.hint}"`;
+    }
     if (!QUESTION_GOALS.has(goal.code)) return undefined;
     const sentence = verbatimQuestionSentence(goal);
     return sentence

@@ -1278,6 +1278,14 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     session.start();
     driveToSealedStage(session, aai, clock);
 
+    // P0 fix (2026-09-18): attempt 1 (tick_end, sent inside `driveToSealedStage`) now ALSO
+    // carries the "Say exactly this" one-shot wrapper (see
+    // close-attempt1-instructions.test.ts), so that text is no longer what distinguishes "no
+    // retry sent yet" from "the retry went out" -- a reply.create COUNT is (`replyCreateCount`
+    // baseline, taken right before 'a5' starts).
+    const replyCreateCount = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+    const baseline = replyCreateCount();
+
     clock.now = 7500;
     aai.emit({ type: 'reply.started', reply_id: 'a5' });
     aai.emit({ type: 'transcript.agent', item_id: 'a5', text: 'Your requ', reply_id: 'a5', interrupted: true });
@@ -1285,11 +1293,13 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'interrupted' });
 
     // Not sent yet -- waits the transcript window, then the spacing gap.
-    expect(aai.sent.at(-1)).not.toMatchObject({ instructions: expect.stringContaining('Say exactly this') });
+    expect(replyCreateCount()).toBe(baseline);
     vi.advanceTimersByTime(1500); // CLOSE_TRANSCRIPT_WAIT_MS
-    expect(aai.sent.at(-1)).not.toMatchObject({ instructions: expect.stringContaining('Say exactly this') });
+    expect(replyCreateCount()).toBe(baseline);
     vi.advanceTimersByTime(400); // CLOSE_RETRY_MIN_GAP_MS
-    // Not matched -- a retry reply.create goes out instead of arming the hang-up.
+    // A retry reply.create goes out instead of arming the hang-up -- carries the same wrapper
+    // attempt 1 did.
+    expect(replyCreateCount()).toBe(baseline + 1);
     expect(aai.sent.at(-1)).toEqual({ type: 'reply.create', instructions: expect.stringContaining('Say exactly this') });
     vi.advanceTimersByTime(1500);
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
@@ -1564,10 +1574,16 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       expect(replyCreateCount()).toBe(countBeforeStray);
 
       // 'a4' completes: reply.create goes out NOW (its recorded goal, READBACK, differs from
-      // the current goal, CLOSE) -- and this reply.done must NOT end the call.
+      // the current goal, CLOSE) -- and this reply.done must NOT end the call. P0 fix
+      // (2026-09-18): this send (reason `reply_done_goal_diverged`) goes through the SAME
+      // `instructedSentenceFor` this test file's CLOSE-attempt-1 sibling covers, so it now
+      // carries the "Say exactly this" wrapper too, not a bare `{ type: 'reply.create' }`.
       clock.now = 6500;
       aai.emit({ type: 'reply.done', reply_id: 'a4', status: 'completed' });
-      expect(aai.sent.at(-1)).toEqual({ type: 'reply.create' });
+      expect(aai.sent.at(-1)).toEqual({
+        type: 'reply.create',
+        instructions: `Say exactly this and nothing else: "${session.last!.goal.hint}"`,
+      });
       vi.advanceTimersByTime(1500);
       expect(sent.some((e) => e.type === 'ended')).toBe(false);
 
