@@ -318,6 +318,35 @@ describe('extractCuedNames', () => {
     expect(extractCuedNames('Corporate Treasury approved this')).toEqual([]);
   });
 
+  // ROOT-CAUSE FIX (2026-09-18, founder live record scripts/rehearse/reports/
+  // founder-2026-09-18/95b9ad42-7798-40d0-918a-7187295f5fb0.diagnostics.json, PROVEN by
+  // direct engine replay -- no live call needed): the founder's own verbatim closing line
+  // "It's approved." matched the reversed approver cue "(NAME) approved" because the NAME
+  // pattern's char class (`[A-Za-z.']*`) allows an apostrophe, so the sentence-initial
+  // capital of the contraction "It's" was read as a one-word person name. This created a
+  // real approver STATED claim with value "its" -- not empty, so nothing downstream ever
+  // caught it -- which `selectLiveCommitment` (challenges.ts) then legitimately picked as a
+  // real commitment to challenge ("Can you restate the approver you gave me earlier?"), a
+  // question the caller had never actually been asked to answer because he never named
+  // anyone. Closed-class function words (pronouns, contractions, demonstratives) are never
+  // person/organisation names regardless of sentence-initial capitalization -- the same
+  // principle the existing department stoplist above already applies to "Treasury"/
+  // "Finance"/etc, extended here to this second closed class.
+  it('excludes closed-class pronouns/contractions/demonstratives in reversed approver cue "(Name) approved" (2026-09-18 founder live defect)', () => {
+    expect(extractCuedNames("It's approved.")).toEqual([]);
+    expect(extractCuedNames("This is Dana with Field Corporate Treasury. I need to wire to Meridian Supply $84,500, account ending 4471, moving today. It's approved.")).toEqual(
+      [{ field: 'beneficiary', value: 'Meridian Supply', quote: 'Meridian Supply' }],
+    );
+    expect(extractCuedNames('That approved it.')).toEqual([]);
+    expect(extractCuedNames('This approved the transfer.')).toEqual([]);
+    // A real person name directly before "approved" elsewhere in the same sentence is
+    // unaffected -- the stoplist only rejects the captured NAME itself being one of these
+    // closed-class words, never a name that legitimately cues the pattern.
+    expect(extractCuedNames('Actually, Elena Park approved it.')).toEqual([
+      { field: 'approver', value: 'Elena Park', quote: 'Elena Park' },
+    ]);
+  });
+
   // PROVEN gap (docs/analysis/case11-freeplay-2026-09-17.md run 21-32-40): the caller's own
   // exact words at t=24071 -- "...a wire transfer of $84,100— ah, sorry, wait, I meant
   // $84,500 to Meridian Supply." -- never matched, because the old beneficiary pattern

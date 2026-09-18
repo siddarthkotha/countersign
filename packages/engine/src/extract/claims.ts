@@ -104,6 +104,34 @@ const DEPARTMENT_STOPLIST = new Set([
   'treasury',
 ]);
 
+// PROVEN false positive (founder live record 2026-09-18, scripts/rehearse/reports/
+// founder-2026-09-18/95b9ad42-7798-40d0-918a-7187295f5fb0.diagnostics.json): "It's
+// approved." matched the reversed approver cue "(NAME) approved" -- the NAME pattern's char
+// class (`[A-Za-z.']*`) allows an apostrophe, so the sentence-initial capital of the
+// contraction "It's" was captured as if it were a one-word person name, creating a real
+// approver claim with junk value "its" that the engine then legitimately tried to challenge
+// the caller to restate -- a value he never actually stated. Closed-class function words
+// (pronouns, contractions, demonstratives, interrogatives) are never person/organisation
+// names regardless of capitalization, the same principle `isDepartmentName` below already
+// applies to department words. Checked as a WHOLE-NAME match (case-insensitive, apostrophe
+// stripped) so it only rejects the captured name itself being one of these words -- a real
+// name elsewhere in the same sentence, or a multi-word name that merely contains one of
+// these as a non-final word, is unaffected.
+const NON_NAME_WORD_STOPLIST = new Set([
+  'it', 'its', 'that', 'thats', 'this', 'thiss', 'there', 'theres', 'here', 'heres',
+  'what', 'whats', 'who', 'whos', 'which', 'they', 'theyre', 'he', 'hes', 'she', 'shes',
+]);
+
+/** True when `name` (the exact captured span, trimmed) is nothing but a single closed-class
+ *  function word -- an apostrophe/contraction is stripped before the stoplist check so
+ *  "It's" and "It" both match the same "it" entry. A multi-word name is never rejected by
+ *  this check, even if one of its words happens to appear in the stoplist. */
+function isNonNameWord(name: string): boolean {
+  if (name.includes(' ')) return false;
+  const bare = name.toLowerCase().replace(/[^a-z]/g, '');
+  return NON_NAME_WORD_STOPLIST.has(bare);
+}
+
 // Check if a name looks like a department name rather than a person name. A department
 // name is one or more words from the stoplist, optionally with "department" or "management".
 function isDepartmentName(name: string): boolean {
@@ -307,6 +335,10 @@ function collectCuedNameMatches(text: string): RawCuedNameMatch[] {
       const rawName = (m.groups?.name ?? m[1])!;
       const name = trimName(rawName);
       if (name.length === 0) continue;
+      // A closed-class function word (pronoun/contraction/demonstrative) is never a real
+      // name, whichever cue pattern captured it (2026-09-18 founder live defect, "It's
+      // approved" -- see NON_NAME_WORD_STOPLIST's own doc comment above).
+      if (isNonNameWord(name)) continue;
       // For the reversed approver pattern "(NAME) approved", exclude department names.
       if (isReversedApproverPattern && isDepartmentName(name)) continue;
       const nameStart = m.index + m[0].indexOf(rawName);

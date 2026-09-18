@@ -90,6 +90,12 @@ function selectLiveCommitment(
     if (claim.kind !== 'STATED' && claim.kind !== 'CONFIRMED') continue;
     if (issued.some((s) => s.field === field)) continue;
     if (callerTurnsAfter(conversation, claim.t_ms) < 2) continue;
+    // FIX (2026-09-18, founder live defect, P0, defense in depth alongside the
+    // extract/claims.ts NON_NAME_WORD_STOPLIST fix): a claim whose normalized value is
+    // empty was never actually a committable value the caller stated -- challenging the
+    // caller to "restate" it asks something that structurally cannot have a true answer.
+    // See this file's own describe block in test/challenges.test.ts for the full defect.
+    if (String(claim.value).trim().length === 0) continue;
     if (!best || claim.t_ms < best.claim.t_ms) best = { field, claim };
   }
   if (!best) return null;
@@ -462,6 +468,19 @@ export function selectChallenge(
 
 const REFUSAL_RE = /(not going to|won't|will not|can't tell|cannot tell|don't know|do not know|refuse)/;
 
+/** FIX (2026-09-18, founder live defect, P0): a truthful denial that the caller ever stated
+ *  the value a LIVE_COMMITMENT challenge asks them to restate -- "I did not mention
+ *  anyone.", "I never said an approver." (both verbatim from the founder's live record
+ *  scripts/rehearse/reports/founder-2026-09-18/95b9ad42-7798-40d0-918a-7187295f5fb0.
+ *  diagnostics.json). Matches "did not"/"didn't"/"never"/"haven't"/"have not", directly
+ *  followed by mention(ed)/say/said/give/gave/name(d)/state(d), plus the bare "no one"/
+ *  "nobody" shape -- deliberately narrow (this is what actually recognizes the challenge's
+ *  own premise as false, not a general refusal-to-answer) so it never swallows an ordinary
+ *  wrong-name answer, which still carries none of these phrases and falls through to the
+ *  existing name-signal check unaffected. */
+const DENIAL_OF_COMMITMENT_RE =
+  /\b(?:did\s+not|didn'?t|never|haven'?t|have\s+not)\s+(?:mention(?:ed)?|say|said|give|gave|named?|stated?)\b|\b(?:no\s+one|nobody)\b/i;
+
 const NAME_FIELDS: ClaimField[] = ['beneficiary', 'approver', 'counsel', 'escrow_institution'];
 function isNameField(field: ClaimField): field is 'beneficiary' | 'approver' | 'counsel' | 'escrow_institution' {
   return (NAME_FIELDS as ClaimField[]).includes(field);
@@ -698,7 +717,13 @@ export function isAnswerShapedFor(spec: ChallengeSpec, rawText: string, seed: Se
       const claim = claims.find((c) => c.id === expect.commitment_claim_id);
       const committedNorm = claim ? normalizeText(String(claim.value)) : '';
       if (committedNorm.length > 0 && normText.includes(committedNorm)) return true;
-      return hasNameSignal(spec.field, rawText, seed);
+      if (hasNameSignal(spec.field, rawText, seed)) return true;
+      // FIX (2026-09-18, founder live defect, P0): a truthful "I never said that" denial
+      // carries none of the above name signals by design -- recognize it as answer-shaped
+      // too, so it grades (AMBIGUOUS, via gradeLiveCommitment's existing fallback) instead
+      // of being left AWAITING and re-asked forever. See DENIAL_OF_COMMITMENT_RE's own doc
+      // comment for the exact founder live record this reproduces.
+      return DENIAL_OF_COMMITMENT_RE.test(rawText);
     }
     return hasFieldSignal(spec.field, rawText);
   }

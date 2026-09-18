@@ -1532,3 +1532,104 @@ describe('gradeChallenges — challenge_issued anchors to the MOST RECENT (re-)i
     });
   });
 });
+
+// P0 ROOT-CAUSE FIX (2026-09-18, founder live record scripts/rehearse/reports/
+// founder-2026-09-18/95b9ad42-7798-40d0-918a-7187295f5fb0.diagnostics.json, PROVEN by direct
+// engine replay, no live call needed -- the founder quit the live demo over this): his
+// verbatim opener "This is Dana with Field Corporate Treasury. I need to wire to Meridian
+// Supply $84,500, account ending 4471, moving today. It's approved." never named an
+// approver -- "It's approved" is a statement that the request IS approved, not a naming of
+// WHO approved it. But `extractCuedNames`'s reversed approver cue "(NAME) approved" matched
+// the sentence-initial capital of the contraction "It's" as if it were a one-word person
+// name (fixed separately in test/extract.test.ts + src/extract/claims.ts), creating a real
+// STATED approver claim with value "its". `selectLiveCommitment` (this file) had no check
+// that a claim's value actually LOOKS like a name/committable value, so it legitimately
+// picked this junk claim as the oldest LIVE_COMMITMENT candidate and issued "Can you restate
+// the approver you gave me earlier?" -- a question the caller could never truthfully answer,
+// because he never named anyone. He answered honestly, twice: "I did not mention anyone."
+// (t=87973, t=102974) -- verbatim STT, LAW 4. `isAnswerShapedFor`'s commitment_claim_id
+// name-field branch only recognized a committed-value substring match or a name-shaped
+// signal (`hasNameSignal`) as "answer-shaped"; a plain denial has neither, so the challenge
+// was left AWAITING and the server re-issued the SAME question four times (78.4s, 83.5s,
+// 97.6s, 110.4s) before the caller gave up and offered "Marcus OB." -- a name he never
+// actually claimed as an approver, which the call then graded FAIL. Two independent fixes:
+// (b) `selectLiveCommitment` now refuses a claim whose normalized value is empty (defense in
+// depth alongside the extraction fix, for any future path that could produce an empty
+// commitment); (c) `isAnswerShapedFor`'s name-field commitment branch now recognizes a
+// truthful "I never said that" denial as answer-shaped, so it grades immediately instead of
+// looping -- and `gradeLiveCommitment`'s existing fallback (no cued name, no bare-capitalized
+// span) already returns AMBIGUOUS for it, never FAIL, so an honest denial is never punished.
+describe('LIVE_COMMITMENT — a challenge on a caller-unstated value never traps an honest denial in a re-ask loop (2026-09-18 founder live defect, P0)', () => {
+  describe('(b) selectLiveCommitment refuses a claim with an empty normalized value', () => {
+    it('never selects LIVE_COMMITMENT for a field whose only claim has an empty value, even though the field is otherwise eligible', () => {
+      // Empty-value approver claim, old enough (many caller turns after it) to otherwise
+      // qualify. No identity/beneficiary/escrow claim exists, so RELATIONAL and every
+      // identity-scoped SEED_FACT entry in MERIDIAN are structurally unreachable (see the
+      // seed's own identity_ids scoping) -- TRAP_FACT is pre-issued below to remove it as a
+      // confound, isolating this assertion to LIVE_COMMITMENT selection alone. With the fix,
+      // nothing is left to select: selectChallenge must return null, never a LIVE_COMMITMENT
+      // on the empty claim.
+      const claims: Claim[] = [claim('c-empty', 'approver', 'STATED', '', 1000, "It's")];
+      const conversation: Utterance[] = [
+        utt('u1', 1000, "it's approved"),
+        utt('u2', 2000, 'still here'),
+        utt('u3', 3000, 'one more thing'),
+      ];
+      const alreadyIssuedTrap: ChallengeSpec = {
+        challenge_id: 'sess-empty-1',
+        kind: 'TRAP_FACT',
+        field: 'counsel',
+        ask: 'x',
+        expect: { trap_value: 'Whitmore & Bass', true_claim_id: 'irrelevant' },
+      };
+      const spec = selectChallenge(claims, [alreadyIssuedTrap], {}, SEED, 'sess-empty', conversation);
+      expect(spec).toBeNull();
+    });
+  });
+
+  describe('(c) a truthful denial that the value was ever stated grades AMBIGUOUS immediately, never FAIL, never left AWAITING', () => {
+    // Junk-but-non-empty approver claim (value "its"), the exact shape the live defect
+    // produced pre-extraction-fix -- non-empty, so fix (b)'s guard alone does not stop
+    // `selectLiveCommitment` from picking it; this describe block tests the grading-side
+    // fix in isolation, independent of the extraction fix.
+    const junkClaim = claim('c-approver', 'approver', 'STATED', 'its', 1000, "It's");
+    const spec: ChallengeSpec = {
+      challenge_id: 'g5-1',
+      kind: 'LIVE_COMMITMENT',
+      field: 'approver',
+      ask: 'Ask the caller to restate the approver they gave earlier. Do not say the value yourself.',
+      speak: 'Can you restate the approver you gave me earlier?',
+      expect: { commitment_claim_id: 'c-approver' },
+    };
+    const actions: AgentAction[] = [issuedAction('a1', 'g5-1', 2000)];
+
+    it('isAnswerShapedFor recognizes the founder\'s own denial as answer-shaped (was false, causing the endless re-ask)', () => {
+      expect(isAnswerShapedFor(spec, 'I did not mention anyone.', SEED, [junkClaim])).toBe(true);
+    });
+
+    it('a second, differently-worded denial is also recognized as answer-shaped', () => {
+      expect(isAnswerShapedFor(spec, 'I never said an approver.', SEED, [junkClaim])).toBe(true);
+    });
+
+    it('grades the founder\'s verbatim denial AMBIGUOUS on the FIRST reply -- no re-ask, never FAIL', () => {
+      const conversation = [utt('u1', 3000, 'I did not mention anyone.')];
+      const result = gradeChallenges(conversation, actions, [spec], SEED, [junkClaim]);
+      expect(result['g5-1']?.result).toBe('AMBIGUOUS');
+    });
+
+    it('grades "I never said an approver." the same way: AMBIGUOUS, not FAIL, not left AWAITING', () => {
+      const conversation = [utt('u1', 3000, 'I never said an approver.')];
+      const result = gradeChallenges(conversation, actions, [spec], SEED, [junkClaim]);
+      expect(result['g5-1']?.result).toBe('AMBIGUOUS');
+    });
+
+    // Regression guard: a denial must not swallow a genuinely WRONG name answer into a
+    // free pass -- an actual (mistaken or dishonest) name restatement still grades FAIL,
+    // exactly as it did before this fix.
+    it('still grades a genuine (wrong) name restatement FAIL, not AMBIGUOUS', () => {
+      const conversation = [utt('u1', 3000, 'Marcus OB.')];
+      const result = gradeChallenges(conversation, actions, [spec], SEED, [junkClaim]);
+      expect(result['g5-1']?.result).toBe('FAIL');
+    });
+  });
+});

@@ -1,0 +1,171 @@
+{
+  "title": "Dana: \"It's approved.\" creates no junk approver claim; the golden path still stages cleanly",
+  "description": "Regression fixture for the founder's live record 2026-09-18 (scripts/rehearse/reports/founder-2026-09-18/95b9ad42-7798-40d0-918a-7187295f5fb0.diagnostics.json, deployed_commit shown in that file, current main at the time of the fix was 44958e6): the founder's own verbatim closing clause \"It's approved.\" (LAW 4 -- reproduced byte for byte here) is a statement that the request IS approved, never a naming of WHO approved it. Pre-fix, `extractCuedNames`'s reversed approver cue \"(NAME) approved\" matched the sentence-initial capital of the contraction \"It's\" as if it were a one-word person name (src/extract/claims.ts's NAME pattern allows an apostrophe), creating a real approver STATED claim with junk value \"its\". `selectLiveCommitment` then legitimately picked this junk claim as a genuine commitment to challenge and issued \"Can you restate the approver you gave me earlier?\" -- a question the caller could never truthfully answer, since he never named anyone; he answered honestly (\"I did not mention anyone.\", verbatim, t=87973/102974) and the server re-issued the same question four times (78.4s, 83.5s, 97.6s, 110.4s) before he gave up and offered a name he never actually claimed, which then graded FAIL. Fixed in three places: (1) src/extract/claims.ts's NON_NAME_WORD_STOPLIST -- a closed-class function word (pronoun/contraction/demonstrative) is never a real name, so \"It's approved\" now extracts NO approver claim at all (test/extract.test.ts); (2) src/challenges.ts's selectLiveCommitment -- defense in depth, refuses any claim whose normalized value is empty; (3) src/challenges.ts's isAnswerShapedFor -- a truthful \"I never said that\" denial to a LIVE_COMMITMENT challenge now grades AMBIGUOUS immediately instead of looping forever (both (2) and (3) proven directly at the unit level in test/challenges.test.ts's own describe block for this defect, using hand-built claims so the grading fix is exercised independent of the extraction fix). This fixture proves fix (1) holds through the REAL end-to-end engine on the founder's own words: replaying his exact opener (plus a fixture-authored TRAP_FACT correction and the standard readback sequence, same shape as scenario-a-dana-legitimate.json) produces NO approver evidence card at all -- the junk claim never exists to be challenged -- and the call still reaches STAGE with every AssuranceChecklist item true, exactly like the unaffected golden path.",
+  "call": {
+    "session_id": "sess-its-approved",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana with Field Corporate Treasury. I need to wire to Meridian Supply $84,500, account ending 4471, moving today. It's approved.",
+      "t_ms": 1000
+    },
+    {
+      "id": "a1t",
+      "speaker": "agent",
+      "text": "Just to confirm, this transfer goes to Northgate Partners. Is that correct?",
+      "t_ms": 1200
+    },
+    {
+      "id": "c1t",
+      "speaker": "caller",
+      "text": "No, that's wrong -- it's Meridian Supply, not Northgate Partners.",
+      "t_ms": 1400
+    },
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "To confirm: $84,500 to Meridian Supply, account ending 4471. Is that right?",
+      "t_ms": 2000
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 2500
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "And the account ending 4471, correct?",
+      "t_ms": 3000
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "Yes, correct.",
+      "t_ms": 3500
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "And Meridian Supply is the beneficiary, correct?",
+      "t_ms": 4000
+    },
+    {
+      "id": "c4",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 4500
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 1500,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 1600,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 1700,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "ch1",
+      "kind": "challenge_issued",
+      "t_ms": 1200,
+      "challenge_id": "sess-its-approved-1"
+    },
+    {
+      "id": "r1",
+      "kind": "readback_issued",
+      "t_ms": 2000,
+      "field": "amount_usd",
+      "value": "84500"
+    },
+    {
+      "id": "r2",
+      "kind": "readback_issued",
+      "t_ms": 3000,
+      "field": "account_last4",
+      "value": "4471"
+    },
+    {
+      "id": "r3",
+      "kind": "readback_issued",
+      "t_ms": 4000,
+      "field": "beneficiary",
+      "value": "Meridian Supply"
+    }
+  ],
+  "expected": {
+    "verdict": "STAGE",
+    "state": "ACTION",
+    "reasons": [],
+    "failure_tally": 0,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": true,
+      "critical_fields_confirmed": true,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": true,
+      "no_injection_attempt": true
+    }
+  }
+}
