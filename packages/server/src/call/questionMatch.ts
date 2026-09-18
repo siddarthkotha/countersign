@@ -256,41 +256,65 @@ function questionSentencesOf(text: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-/** The restate-or-supply cues actually present in LIVE_COMMITMENT and RELATIONAL's own
- *  composed sentences (packages/engine/src/challenges.ts, grepped 2026-09-18): LIVE_COMMITMENT's
- *  `speak` is always `Can you restate the ${spokenField(field)} you gave me earlier?` (line
- *  110); RELATIONAL's is always `Can you give me the last four digits of the account attached
- *  to the ${humanField} you named?` (line 406) -- both contain "can you", and each also has its
- *  own distinctive verb ("restate" / "give me"). SEED_FACT's own `speak`
- *  (`askToQuestion(entry.ask)`, line 351) is a bare WH-question mechanically built from
- *  seed/meridian.ts's own `ask` strings ("Which law firm is our counsel of record...", "Who the
- *  target company's CEO is...", "What this payment ... is for") -- NONE of them contain any of
- *  these three cues, so a SEED_FACT rendering is NEVER suppressed through this label branch --
- *  see `LoadBearingKind`'s own doc comment for why that is a disclosed trade-off, not a bug.
- *  Deliberately NOT the fuller list ("repeat"/"confirm"/"tell me"/"say again"/"what is"/"could
- *  you") the review suggested as options: none of those appear in any engine-composed sentence
- *  TODAY either, and adding them would be an unjustified guess at wording the engine has never
- *  actually produced, not a fix for a PROVEN shape -- "restate the deadline you provided
- *  earlier" (the PROVEN paraphrase) already matches on "restate" alone. */
-const LABEL_RESTATE_CUES: readonly string[] = ['can you', 'restate', 'give me'];
+/** Second-pass tightening (2026-09-18 continued, P0 BLOCKING -- push 52 review, PROVEN by
+ *  running the real engine against two further probes): the first pass's rule -- a "?" plus
+ *  the label plus one of `LABEL_RESTATE_CUES` ANYWHERE in the same sentence chunk -- still
+ *  wrongly suppressed whenever the cue phrase actually attaches to a DIFFERENT verb than the
+ *  one it looks like it modifies:
+ *   - "Can you hold while I check the deadline?" -- "can you" attaches to "hold" (the caller is
+ *     asked to wait), never to a restate of the deadline; the old rule matched anyway because
+ *     "can you" and "deadline" both merely occur somewhere in the one sentence.
+ *   - "Give me a moment, I am looking at the deadline?" -- "give me" attaches to "a moment", not
+ *     the label; same false-positive shape.
+ *  Same-sentence co-occurrence cannot tell "cue modifies the label" from "cue modifies some
+ *  other verb, label is merely mentioned later in the same sentence" -- a token-distance window
+ *  alone has the identical problem (RELATIONAL's own sentence needs "can you" up to 3 tokens
+ *  from the label -- "can you give me THE last four digits" -- while probe (m) has "can you"
+ *  only 5 tokens from "deadline" with "hold while i check the" in between; picking a window
+ *  that admits the RELATIONAL gap but excludes probe (m)'s slightly larger one is not a
+ *  principled distinction, it is curve-fitting to two examples).
+ *
+ *  Fix: require the cue to be LITERALLY ADJACENT to the label -- the label immediately follows
+ *  the cue phrase, with at most the single article "the" between them, exactly the shape every
+ *  engine-composed sentence this branch exists for actually has:
+ *   - LIVE_COMMITMENT (challenges.ts line 110): `Can you restate the ${spokenField(field)} you
+ *     gave me earlier?` -- "restate the deadline", zero tokens between "restate" and "the".
+ *   - RELATIONAL (challenges.ts line 406): `Can you give me the last four digits of the account
+ *     attached to the ${humanField} you named?` -- "give me the last four digits of the
+ *     account", zero tokens between "give me" and "the".
+ *   - The PROVEN live paraphrase this whole label branch exists for, "Could you please restate
+ *     the deadline you provided earlier?" (test (i)/(p)) -- "restate the deadline", same
+ *     adjacency, "please" sits BEFORE "restate", never between it and the label.
+ *  Three literal patterns cover every engine-composed shape above plus the "can you <verb> the
+ *  <label>" shape the review named as an example: "restate the <label>", "give me the
+ *  <label>", and "can you restate/give me the <label>" (the third is redundant with the first
+ *  two whenever "can you" immediately precedes them, which is the only way it appears in any
+ *  engine sentence today, but is kept explicit per the review's own worked example rather than
+ *  relying on that redundancy silently). Neither probe (m) nor (n) matches any of the three:
+ *  "hold"/"a moment" sit where "the <label>" needs to be. Deliberately NOT a looser "cue within
+ *  N tokens of label" rule -- see the paragraph above for why no single N separates the kept
+ *  cases from the two new probes; literal adjacency is the simplest rule that is provably
+ *  correct on every case this codebase has (12 pre-existing + probes (m)-(q)), not merely
+ *  tuned to pass them. SEED_FACT is still never suppressed through this branch at all: none of
+ *  these three patterns can appear without "restate"/"give me" being present at all, and
+ *  SEED_FACT's own `speak` (askToQuestion(entry.ask), line 351) never contains either. */
+const LABEL_ATTACHMENT_PATTERNS: readonly ((label: string) => RegExp)[] = [
+  (label) => new RegExp(`\\brestate the ${label}\\b`),
+  (label) => new RegExp(`\\bgive me the ${label}\\b`),
+  (label) => new RegExp(`\\bcan you (?:restate|give me) the ${label}\\b`),
+];
 
-/** True when ONE sentence-like chunk (`questionSentencesOf`) satisfies all three of: contains
- *  a literal "?"; names `normalizedLabel` (the field's spoken label, e.g. "deadline"); AND
- *  carries one of `LABEL_RESTATE_CUES` -- all three in the SAME chunk, never merely somewhere
- *  in the whole transcript. PROVEN over-suppression this closes (push 52 review, live-
- *  reproduced against main 65622b9, field "deadline"): "One moment, I am checking the deadline
- *  for you?" and "Is the deadline today?" each mention the label and end in "?" but ask the
- *  caller nothing -- neither is a restate-or-supply request, and the old bare containment
- *  check (label + "?" ANYWHERE in the transcript, no cue, no same-sentence requirement)
- *  suppressed our own real question for both, riding the rendering to UNANSWERED and an idle
- *  escalation on what should have been a clean PASS. "Could you please restate the deadline
- *  you provided earlier?" (the PROVEN live paraphrase this whole label branch exists for)
- *  still matches: one sentence, one "?", the label, and "restate". */
+/** True when ONE sentence-like chunk (`questionSentencesOf`) contains a literal "?" AND one of
+ *  `LABEL_ATTACHMENT_PATTERNS` matches -- see that constant's own doc comment for exactly which
+ *  three literal shapes count and why (the cue must ATTACH to the label, not merely share a
+ *  sentence with it). `normalizedLabel` is regex-escaped before being spliced into each
+ *  pattern, since a spoken field label ("last four digits of the account") is plain text, never
+ *  attacker-controlled regex syntax, but escaping costs nothing and removes the question. */
 function sentenceNamesLabelWithRestateCue(sentence: string, normalizedLabel: string): boolean {
   if (!sentence.includes('?')) return false;
   const normalized = normalizeText(sentence);
-  if (!normalized.includes(normalizedLabel)) return false;
-  return LABEL_RESTATE_CUES.some((cue) => normalized.includes(cue));
+  const escapedLabel = normalizedLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return LABEL_ATTACHMENT_PATTERNS.some((build) => build(escapedLabel).test(normalized));
 }
 
 /** Joins each maximal run of consecutive digit-shaped tokens in `normalizeText(text)` into one

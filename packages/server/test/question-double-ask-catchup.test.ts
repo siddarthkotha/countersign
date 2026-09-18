@@ -693,3 +693,123 @@ describe('CallSession -- push-52 review fix: the LIVE_COMMITMENT/SEED_FACT/RELAT
     expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${OUR_SEED_FACT_SENTENCE}"`);
   });
 });
+
+// Push-52 review, SECOND pass (2026-09-18 continued, P0 BLOCKING): the same-sentence "?" +
+// cue tightening above still wrongly suppresses when the cue phrase attaches to a DIFFERENT
+// verb than the one it appears to modify -- "can you" belongs to "hold", not "restate"; "give
+// me" belongs to "a moment", not the label. A bare "cue anywhere in the sentence" test cannot
+// tell those apart. Fix: `sentenceNamesLabelWithRestateCue` now requires the cue to ATTACH to
+// the label -- "restate the <label>", "give me the <label>", or "can you restate/give me the
+// <label>" -- literal adjacency (at most the single article "the" between cue and label),
+// never merely co-occurrence in the same sentence.
+describe('CallSession -- push-52 review fix, second pass: the label branch requires the cue to ATTACH to the label, not merely share a sentence with it', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const OUR_SENTENCE = 'Can you restate the deadline you gave me earlier?';
+
+  function probeDeadlineLabel(ambientText: string): { replyCreates: { type?: string; instructions?: string }[]; challengeIssuedCount: number } {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_B, aai, sent, diagEvents);
+
+    const challenge: ChallengeSpec = {
+      challenge_id: 'sess-catchup-deadline-attach-probe',
+      kind: 'LIVE_COMMITMENT',
+      field: 'deadline',
+      ask: 'Ask the caller to restate the deadline they gave earlier. Do not say the value yourself.',
+      speak: OUR_SENTENCE,
+      expect: { commitment_claim_id: 'claim-deadline-attach-probe' },
+    };
+    session.last = {
+      ...session.last!,
+      state: 'CHALLENGE',
+      goal: { code: 'ASK_CHALLENGE', hint: OUR_SENTENCE, keyterms: [], turn_detection_hint: 'patient', challenge },
+    };
+
+    const internals = session as unknown as {
+      owedQuestionGoalKey: string | null;
+      replyTranscripts: Map<string, string>;
+      recordGoalCompletionAction: (replyId: string, status: string) => void;
+      maybeSendReplyCreateAfterReplyDone: (replyId: string) => void;
+    };
+    internals.owedQuestionGoalKey = JSON.stringify(session.last.goal);
+    internals.replyTranscripts.set('auto-1', ambientText);
+
+    internals.recordGoalCompletionAction('auto-1', 'completed');
+    internals.maybeSendReplyCreateAfterReplyDone('auto-1');
+
+    const challengeIssuedCount = session.logs.actions.filter(
+      (a) => a.kind === 'challenge_issued' && (a as { challenge_id?: string }).challenge_id === challenge.challenge_id
+    ).length;
+    return { replyCreates: replyCreatesOf(aai), challengeIssuedCount };
+  }
+
+  it('(m) MUST STOP suppressing: "Can you hold while I check the deadline?" -- "can you" attaches to "hold", never to a restate of the deadline', () => {
+    const { replyCreates } = probeDeadlineLabel('Can you hold while I check the deadline?');
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${OUR_SENTENCE}"`);
+  });
+
+  it('(n) MUST STOP suppressing: "Give me a moment, I am looking at the deadline?" -- "give me" attaches to "a moment", never to the deadline', () => {
+    const { replyCreates } = probeDeadlineLabel('Give me a moment, I am looking at the deadline?');
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${OUR_SENTENCE}"`);
+  });
+
+  it('(o) MUST KEEP suppressing: "Can you restate the deadline you gave me earlier?" -- the engine\'s own LIVE_COMMITMENT sentence, verbatim', () => {
+    const { replyCreates, challengeIssuedCount } = probeDeadlineLabel('Can you restate the deadline you gave me earlier?');
+    expect(replyCreates).toHaveLength(0);
+    expect(challengeIssuedCount).toBe(1);
+  });
+
+  it('(p) MUST KEEP suppressing: "Could you please restate the deadline you provided earlier?" -- reconfirmed once more alongside its new siblings', () => {
+    const { replyCreates, challengeIssuedCount } = probeDeadlineLabel('Could you please restate the deadline you provided earlier?');
+    expect(replyCreates).toHaveLength(0);
+    expect(challengeIssuedCount).toBe(1);
+  });
+
+  it('(q) MUST KEEP suppressing: "Can you give me the last four digits of the account attached to the beneficiary you named?" -- the engine\'s own RELATIONAL sentence, verbatim, field label per spokenField', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_B, aai, sent, diagEvents);
+
+    const RELATIONAL_SENTENCE = 'Can you give me the last four digits of the account attached to the beneficiary you named?';
+    const challenge: ChallengeSpec = {
+      challenge_id: 'sess-catchup-relational-attach-probe',
+      kind: 'RELATIONAL',
+      field: 'account_last4',
+      ask: 'Ask for the last four digits of the account attached to the beneficiary they named.',
+      speak: RELATIONAL_SENTENCE,
+      expect: { accept_tokens: ['4471'] },
+    };
+    session.last = {
+      ...session.last!,
+      state: 'CHALLENGE',
+      goal: { code: 'ASK_CHALLENGE', hint: RELATIONAL_SENTENCE, keyterms: [], turn_detection_hint: 'patient', challenge },
+    };
+
+    const internals = session as unknown as {
+      owedQuestionGoalKey: string | null;
+      replyTranscripts: Map<string, string>;
+      recordGoalCompletionAction: (replyId: string, status: string) => void;
+      maybeSendReplyCreateAfterReplyDone: (replyId: string) => void;
+    };
+    internals.owedQuestionGoalKey = JSON.stringify(session.last.goal);
+    internals.replyTranscripts.set('auto-1', RELATIONAL_SENTENCE);
+
+    internals.recordGoalCompletionAction('auto-1', 'completed');
+    internals.maybeSendReplyCreateAfterReplyDone('auto-1');
+
+    const challengeIssuedCount = session.logs.actions.filter(
+      (a) => a.kind === 'challenge_issued' && (a as { challenge_id?: string }).challenge_id === challenge.challenge_id
+    ).length;
+    expect(replyCreatesOf(aai)).toHaveLength(0);
+    expect(challengeIssuedCount).toBe(1);
+  });
+});
