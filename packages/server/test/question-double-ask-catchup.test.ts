@@ -31,7 +31,7 @@
 // question.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { MERIDIAN, mockToolResult } from '@countersign/engine';
-import type { CallContext, ServerEvent } from '@countersign/engine';
+import type { CallContext, ServerEvent, ChallengeSpec } from '@countersign/engine';
 import { CallSession } from '../src/call/session.js';
 import { FakeAaiSocket } from '../src/aai/fake.js';
 import scenarioB from '../../engine/corpus/scenario-b-miller-fraud.json' with { type: 'json' };
@@ -275,5 +275,264 @@ describe('CallSession -- double-ask catch-up fix (P1, 2026-09-18 continued): the
     // No further instructed send once nothing new is owed.
     vi.advanceTimersByTime(1000);
     expect(replyCreatesOf(aai)).toHaveLength(1);
+  });
+});
+
+// Content-match extension (2026-09-18 continued, P1 follow-up): the exact-sentence fix above
+// only catches an ambient reply that speaks the rendering's EXACT composed words. Two further
+// live records prove a PARAPHRASE still gets logged twice by the caller's ear:
+//   scripts/rehearse/reports/2026-09-18T14-44-58-barge-in-interrupt.diagnostics.json
+//     graded repeated_question 4x (30.761/54.261/73.501/93.551) -- three are the SAME exact-
+//     sentence shape (a)/(b) above already close; the FIRST (30.761) is a TRAP_FACT paraphrase:
+//     ambient "One moment. You are requesting a wire for eighty four thousand five hundred
+//     dollars to Northgate Partners?" (25031, logged via transcriptAsksQuestion's bare-"?"
+//     branch) vs our own "Just to confirm, this transfer goes to Northgate Partners. Is that
+//     correct?" (30443/30761) -- same trap value, different wording.
+//   scripts/rehearse/reports/2026-09-18T14-48-35-prompt-injection-midcall.diagnostics.json
+//     graded repeated_question 3x (80.601/99.121/126.702) -- the first two are the SAME exact-
+//     sentence shape (READBACK amount/account); the THIRD (126.702) is a LIVE_COMMITMENT
+//     paraphrase: ambient "Could you please restate the deadline you provided earlier?"
+//     (123150) vs our own "Can you restate the deadline you gave me earlier?" (126392) -- no
+//     caller-stated value in either sentence, but both name the SAME field's spoken label,
+//     "deadline".
+//
+// Fix (questionMatch.ts): `loadBearingValueFor`/`transcriptContainsLoadBearingValue`/
+// `replyCoversCurrentRendering` -- see each function's own doc comment. Combined effect on the
+// double-ask cap (QUESTION_ASKED_MAX = 2, question-double-ask-cap.test.ts's own describe
+// block, unrelated mechanism, unchanged): `replyCoversCurrentRendering`'s two branches
+// (exact-sentence, or "?" + load-bearing value) are each PROVABLY a strict subset of
+// `transcriptAsksQuestion`'s own true condition (recordGoalCompletionAction's own `asked`
+// check, which runs on every completed reply BEFORE this catch-up path, whether the reply is
+// ours or ambient) -- transcriptAsksQuestion's very first branch is the same bare-"?" check my
+// content-match path already requires, and its sentence branch is the identical substring
+// check the exact-sentence path uses. So whenever this fix suppresses the catch-up send, the
+// reply that triggered the suppression was ALREADY logged as one issuance by
+// recordGoalCompletionAction -- a rendering can therefore never end with ZERO logged
+// issuances because of this fix; every test below asserts at least one.
+describe('CallSession -- double-ask catch-up fix, content-match extension (P1, 2026-09-18 continued): a PARAPHRASED ambient reply that still names the load-bearing value is also covered', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('(d) ASK_CHALLENGE TRAP_FACT paraphrase: PROVEN live text from 2026-09-18T14-44-58-barge-in-interrupt (25031/30761, the Dana Whitfield scenario -- same greeting/opening line as that record) -- an ambient reply differently worded but still stating the trap value gets no catch-up send, and exactly one challenge_issued', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_DANA, aai, sent, diagEvents);
+
+    // Verbatim caller line from the record's own transcript.user event at 17682.
+    clock.now = 1000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c1',
+      text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
+    });
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+    expect(session.last?.goal.challenge?.kind).toBe('TRAP_FACT');
+    expect(session.last?.goal.challenge?.expect).toMatchObject({ trap_value: 'Northgate Partners' });
+
+    const challengeIssuedActions = () => session.logs.actions.filter((a) => a.kind === 'challenge_issued');
+
+    // PROVEN live text, verbatim from the record's own transcript.agent event at 24779/25031 --
+    // a paraphrase of the trap, not the engine's own composed sentence, but it states the same
+    // trap value and ends with "?".
+    clock.now = 1004;
+    aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'x-auto-1',
+      reply_id: 'auto-1',
+      text: 'One moment. You are requesting a wire for eighty four thousand five hundred dollars to Northgate Partners?',
+      interrupted: false,
+    });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+    expect(replyCreatesOf(aai)).toHaveLength(0); // still busy -- deferred, not lost
+
+    clock.now = 1300;
+    aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'completed' });
+
+    // THE FIX: no catch-up send, even though the wording differs from the engine's own trap
+    // sentence -- and the rendering is NOT left with zero issuances: the ambient reply's own
+    // "?" already logged one (recordGoalCompletionAction, unrelated to and unchanged by this
+    // fix, runs before this catch-up path on every completed reply).
+    expect(replyCreatesOf(aai)).toHaveLength(0);
+    expect(challengeIssuedActions().length).toBeGreaterThanOrEqual(1);
+    expect(challengeIssuedActions()).toHaveLength(1); // exactly one -- not the PROVEN live two
+  });
+
+  it('(e) ASK_CHALLENGE LIVE_COMMITMENT paraphrase ("deadline"): PROVEN live text from 2026-09-18T14-48-35-prompt-injection-midcall (123150/126392/126702) -- an ambient reply differently worded but still naming the challenge\'s own spoken field label gets no catch-up send, and exactly one challenge_issued', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_B, aai, sent, diagEvents);
+
+    // LIVE_COMMITMENT never embeds the caller's own earlier-stated value in its own `speak`
+    // sentence (it's asking the caller to restate it) -- only the field's spoken label
+    // ("deadline") is shared between the two wordings. Built by hand and invoked directly
+    // (same pattern question-double-ask-cap.test.ts's own (d) tests use -- `session.last =
+    // ...` survives only until the next real event runs the engine's own `tick()`/`evaluate()`
+    // and recomputes it fresh, so this drives `recordGoalCompletionAction`/
+    // `maybeSendReplyCreateAfterReplyDone` directly rather than through `aai.emit`, exactly as
+    // those tests do) rather than through the engine, since reaching a live
+    // LIVE_COMMITMENT-on-deadline rendering naturally needs a much longer corpus drive than
+    // this fix is about.
+    const OUR_SENTENCE = 'Can you restate the deadline you gave me earlier?';
+    const challenge: ChallengeSpec = {
+      challenge_id: 'sess-catchup-deadline-challenge-1',
+      kind: 'LIVE_COMMITMENT',
+      field: 'deadline',
+      ask: 'Ask the caller to restate the deadline they gave earlier. Do not say the value yourself.',
+      speak: OUR_SENTENCE,
+      expect: { commitment_claim_id: 'claim-deadline-1' },
+    };
+    session.last = {
+      ...session.last!,
+      state: 'CHALLENGE',
+      goal: { code: 'ASK_CHALLENGE', hint: OUR_SENTENCE, keyterms: [], turn_detection_hint: 'patient', challenge },
+    };
+
+    const internals = session as unknown as {
+      owedQuestionGoalKey: string | null;
+      replyTranscripts: Map<string, string>;
+      recordGoalCompletionAction: (replyId: string, status: string) => void;
+      maybeSendReplyCreateAfterReplyDone: (replyId: string) => void;
+    };
+    // Simulates a caller-turn-triggered fresh rendering whose own instructed send is deferred
+    // (busy guard) -- the exact state `maybeSendReplyCreateForTick` leaves behind before an
+    // ambient reply's own `reply.done` reaches the catch-up path under test.
+    internals.owedQuestionGoalKey = JSON.stringify(session.last.goal);
+    // PROVEN live text, verbatim from the record's own transcript.agent event at 123150.
+    internals.replyTranscripts.set('auto-1', 'Could you please restate the deadline you provided earlier?');
+
+    const challengeIssuedActions = () =>
+      session.logs.actions.filter((a) => a.kind === 'challenge_issued' && (a as { challenge_id?: string }).challenge_id === challenge.challenge_id);
+
+    // recordGoalCompletionAction first (matches the real `reply.done` handler's own order,
+    // requirement 3): the ambient reply's own bare "?" logs one issuance, exactly as it does
+    // live. Then the catch-up path under test.
+    internals.recordGoalCompletionAction('auto-1', 'completed');
+    internals.maybeSendReplyCreateAfterReplyDone('auto-1');
+
+    // THE FIX: no catch-up send -- the ambient's own paraphrase names the same subject
+    // ("deadline") and ends with "?" -- and the rendering keeps its one logged issuance (from
+    // the ambient reply itself), never zero.
+    expect(replyCreatesOf(aai)).toHaveLength(0);
+    expect(challengeIssuedActions().length).toBeGreaterThanOrEqual(1);
+    expect(challengeIssuedActions()).toHaveLength(1);
+  });
+
+  it('(f) unaffected: a goal with NO load-bearing value at all (ELICIT_IDENTITY) still gets our own instructed ask sent once, even when the ambient reply asks an unrelated "?" question', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_B, aai, sent, diagEvents);
+
+    expect(session.last?.goal.code).toBe('GREET');
+    // `session.last = ...` (like (e) above) survives only until the next real event re-runs
+    // the engine's own `tick()`/`evaluate()` -- driven directly for the same reason.
+    session.last = { ...session.last!, state: 'CLAIM', goal: { code: 'ELICIT_IDENTITY', hint: 'Ask who is calling.', keyterms: [], turn_detection_hint: 'default' } };
+
+    const internals = session as unknown as {
+      owedQuestionGoalKey: string | null;
+      replyTranscripts: Map<string, string>;
+      recordGoalCompletionAction: (replyId: string, status: string) => void;
+      maybeSendReplyCreateAfterReplyDone: (replyId: string) => void;
+    };
+    internals.owedQuestionGoalKey = JSON.stringify(session.last.goal);
+    internals.replyTranscripts.set('auto-1', 'One moment. Is this line secure?');
+
+    internals.recordGoalCompletionAction('auto-1', 'completed');
+    internals.maybeSendReplyCreateAfterReplyDone('auto-1');
+
+    // ELICIT_IDENTITY has no verbatim sentence AND no load-bearing value
+    // (`loadBearingValueFor` returns null) -- the exact-sentence path and the content-match
+    // path both fall through, so the catch-up send still goes out, unchanged from before
+    // either fix.
+    const replyCreates = replyCreatesOf(aai);
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toContain('who is calling');
+  });
+
+  it('(g) unaffected (degraded transcripts): a reply with no transcript at all still gets our own instructed ask sent once', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_B, aai, sent, diagEvents);
+
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+    const sentence1 = session.last!.goal.challenge!.speak!;
+
+    // The ambient reply starts and completes with NO transcript.agent event at all (audio
+    // landed, nothing transcribed) -- the degraded-transcripts shape.
+    clock.now = 1004;
+    aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+    expect(replyCreatesOf(aai)).toHaveLength(0); // still busy -- deferred, not lost
+
+    clock.now = 1300;
+    aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'completed' });
+
+    // Neither check ever matches an empty transcript -- the catch-up send still goes out,
+    // unchanged from before either fix.
+    const replyCreates = replyCreatesOf(aai);
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${sentence1}"`);
+  });
+
+  it('(h) unaffected: a reply that MENTIONS the load-bearing value but asks nothing (no "?") still gets our own instructed ask sent once', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_DANA, aai, sent, diagEvents);
+
+    clock.now = 1000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c1',
+      text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
+    });
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+    expect(session.last?.goal.challenge?.expect).toMatchObject({ trap_value: 'Northgate Partners' });
+    const sentence1 = session.last!.goal.challenge!.speak!;
+
+    const challengeIssuedActions = () => session.logs.actions.filter((a) => a.kind === 'challenge_issued');
+
+    // The ambient reply names the trap value but never asks anything -- no "?", no imperative
+    // opener.
+    clock.now = 1004;
+    aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'x-auto-1',
+      reply_id: 'auto-1',
+      text: 'One moment. This concerns Northgate Partners.',
+      interrupted: false,
+    });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+    expect(replyCreatesOf(aai)).toHaveLength(0); // still busy -- deferred, not lost
+
+    clock.now = 1300;
+    aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'completed' });
+
+    // Not counted as asked at all (no "?" -- recordGoalCompletionAction's own `asked` stays
+    // false, unrelated to and unchanged by this fix) -- and the content-match path requires a
+    // "?" too, so the catch-up send still goes out, carrying our own real sentence, exactly
+    // once.
+    const replyCreates = replyCreatesOf(aai);
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${sentence1}"`);
+    expect(challengeIssuedActions()).toHaveLength(0); // not yet -- the instructed reply hasn't completed yet
   });
 });

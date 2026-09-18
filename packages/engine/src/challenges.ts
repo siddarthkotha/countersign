@@ -240,9 +240,14 @@ function arraysEqual(a: string[], b: string[]): boolean {
 
 // Exported for compose.ts's `isLegalSpec`: a recorded SEED_FACT spec's `field` must equal
 // this same mapping for its `fact_id`, or it's not a spec `selectSeedFact` could have built.
+// Also exported (index.ts, 2026-09-18 continued, double-ask catch-up lane) for
+// call/session.ts's own reuse: the load-bearing "subject" of a LIVE_COMMITMENT/SEED_FACT/
+// RELATIONAL challenge's speak sentence is this same spoken field label -- see
+// questionMatch.ts's own `loadBearingValueFor` doc comment for why. No behavior change here;
+// purely a wider export of an already-stable, already-tested function.
 /** Correction (2026-09-04, caught on a live call): challenge directions interpolated the raw
  *  ClaimField id, so the agent said "restate the amount_usd" out loud. Spoken labels only. */
-function spokenField(field: string): string {
+export function spokenField(field: string): string {
   if (field === 'amount_usd') return 'amount in dollars';
   if (field === 'account_last4') return 'last four digits of the account';
   return field.replace(/_/g, ' ');

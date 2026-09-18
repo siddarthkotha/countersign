@@ -13,7 +13,8 @@
 // decide whether a completed reply actually delivered that question, never the engine and
 // never a verdict (LAW 3 unaffected: this only ever decides whether to ask AssemblyAI to
 // speak the SAME already-computed question again, never what the question is).
-import type { GoalCode, PhrasingGoal } from '@countersign/engine';
+import type { GoalCode, PhrasingGoal, ClaimField } from '@countersign/engine';
+import { normalizeText, normalizeSpokenDigits, extractSpokenAmounts, spokenField } from '@countersign/engine';
 import { normalizeForCloseMatch } from './closeMatch.js';
 
 /** The goal codes whose whole point is to put ONE question to the caller -- see each case's
@@ -165,6 +166,137 @@ export function transcriptAsksExactSentence(accumulatedTranscript: string, verba
   const sentence = normalizeForCloseMatch(verbatimSentence);
   if (sentence.length === 0) return false;
   return normalizeForCloseMatch(accumulatedTranscript).includes(sentence);
+}
+
+/** Content-match fix (2026-09-18 continued, P1 -- PROVEN live from TWO further records,
+ *  scripts/rehearse/reports/2026-09-18T14-44-58-barge-in-interrupt.diagnostics.json (graded
+ *  repeated_question 4x, at 30.761/54.261/73.501/93.551) and
+ *  2026-09-18T14-48-35-prompt-injection-midcall.diagnostics.json (repeated_question 3x, at
+ *  80.601/99.121/126.702)): `transcriptAsksExactSentence` alone only catches an ambient reply
+ *  that speaks the CURRENT rendering's exact composed words. `-barge-in-interrupt`'s own
+ *  30.443/30.761 pair PROVES a reply that PARAPHRASES it still gets logged twice, once per
+ *  wording, and a human hears it as the same question asked twice regardless: the ambient
+ *  reply says "One moment. You are requesting a wire for eighty four thousand five hundred
+ *  dollars to Northgate Partners?" (25031, logged via `transcriptAsksQuestion`'s bare-"?"
+ *  branch -- this reply IS labelled, from `recordGoalCompletionAction`'s own perspective,
+ *  since it is the CURRENT goal at the time); our own catch-up then sends the TRAP_FACT
+ *  challenge's real sentence, "Just to confirm, this transfer goes to Northgate Partners. Is
+ *  that correct?" (30443/30761) -- same trap value, "Northgate Partners", completely different
+ *  wording around it.
+ *
+ *  `loadBearingValueFor` names the one piece of CONTENT that proves a reply actually delivered
+ *  the current rendering, independent of exact wording -- a READBACK's own field value (in
+ *  whichever spoken form: digits, spaced-out digits, or a spelled-out dollar amount) or an
+ *  ASK_CHALLENGE's own trap value / spoken field-label subject (see that function's own doc
+ *  comment for what "subject" means for a non-TRAP_FACT kind). `transcriptContainsLoadBearingValue`
+ *  is deliberately conjunctive with a literal "?" (never `transcriptAsksQuestion`'s broader
+ *  imperative-opener heuristic -- this function is stricter, not looser, than that one): a
+ *  reply that only MENTIONS the value with no question at all ("The account you gave me was
+ *  4471.") is not "asking" anything, and must still let the real ask through
+ *  (question-double-ask-catchup.test.ts's own (e)/(f) guard this). A goal with no single
+ *  load-bearing value (ELICIT_IDENTITY/ELICIT_REQUEST/PROBE_CONSISTENCY, or an ASK_CHALLENGE
+ *  goal with no `challenge` at all) returns null from `loadBearingValueFor` and this function is
+ *  never even reached for it -- `replyCoversCurrentRendering` below falls through to
+ *  `transcriptAsksExactSentence` alone in that case, unchanged from before this fix. */
+export function transcriptContainsLoadBearingValue(accumulatedTranscript: string, field: ClaimField, value: string): boolean {
+  if (accumulatedTranscript.trim().length === 0) return false;
+  if (!accumulatedTranscript.includes('?')) return false;
+  const normalizedValue = normalizeText(value);
+  if (normalizedValue.length === 0) return false;
+  // Digit-shaped fields (account_last4, amount_usd): match a contiguous digit run in the
+  // transcript -- handles both an already-numeral STT rendering ("4471", "$84,500" -> "84500"
+  // once normalizeText strips the "$"/",") and a spaced-out spoken-digit rendering ("4 4 7 1")
+  // via `digitRuns`, which folds `normalizeSpokenDigits`' own spelled-word conversion in first
+  // (a no-op here whenever the transcript already contains digit characters, exactly like this
+  // record's own "4 4 7 1" -- see normalizeSpokenDigits' own doc comment for why -- but still
+  // catches a hypothetical fully spelled-out account number, e.g. "four four seven one").
+  if (field === 'account_last4' || field === 'amount_usd') {
+    if (digitRuns(normalizeSpokenDigits(accumulatedTranscript)).includes(normalizedValue)) return true;
+    if (field === 'amount_usd') {
+      const expectedUsd = Number(value);
+      if (!Number.isNaN(expectedUsd) && extractSpokenAmounts(accumulatedTranscript).some((hit) => hit.value_usd === expectedUsd)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  // Every other field (beneficiary, and the ASK_CHALLENGE "subject" label
+  // `loadBearingValueFor` hands this function) is prose -- whole-phrase containment, same
+  // normalization the close matcher and `transcriptAsksExactSentence` above already use.
+  return normalizeText(accumulatedTranscript).includes(normalizedValue);
+}
+
+/** Joins each maximal run of consecutive digit-shaped tokens in `normalizeText(text)` into one
+ *  string -- "4 4 7 1" (four separate single-digit tokens) and "4471" (one already-merged
+ *  token, e.g. an amount's numeral form once `normalizeText` has stripped its "$"/",") both
+ *  become the run "4471"; anything else breaks a run. Mirrors ledger.ts's own
+ *  `isExactRestatement` digit-joining fallback (`field === 'account_last4' && remainder.every
+ *  (t => /^\d$/.test(t))`), generalized here to ANY digit-shaped token (not just single
+ *  digits) and to scanning a whole transcript for a run ANYWHERE in it, not just checking
+ *  whether the ENTIRE remainder is one -- this function answers "does this longer sentence
+ *  CONTAIN the value", ledger's answers "does this whole utterance EQUAL it". */
+function digitRuns(text: string): string[] {
+  const tokens = normalizeText(text)
+    .split(' ')
+    .filter((w) => w.length > 0);
+  const runs: string[] = [];
+  let current = '';
+  for (const tok of tokens) {
+    if (/^\d+$/.test(tok)) {
+      current += tok;
+    } else if (current.length > 0) {
+      runs.push(current);
+      current = '';
+    }
+  }
+  if (current.length > 0) runs.push(current);
+  return runs;
+}
+
+/** The single load-bearing value `goal`'s own composed sentence puts into words, when one
+ *  exists -- the piece of CONTENT that proves a reply actually delivered THIS rendering, as
+ *  opposed to merely asking a question shaped like it (see `transcriptContainsLoadBearingValue`
+ *  above for the full PROVEN incident this exists for). READBACK always has one: `goal.readback`
+ *  itself IS a `{ field, value }` pair, straight from the engine (fsm.ts's `readbackSentence`
+ *  composes the sentence from the exact same claim value). ASK_CHALLENGE has one for every kind
+ *  its own `speak` sentence actually names something specific:
+ *   - TRAP_FACT: the wrong value `trapSentence` (challenges.ts) states back --
+ *     `goal.challenge.expect.trap_value` -- the PROVEN live shape (this function's own doc
+ *     comment incident) that first showed the exact-sentence-only fix wasn't enough.
+ *   - LIVE_COMMITMENT / SEED_FACT / RELATIONAL: none of these embed a CALLER-supplied value in
+ *     their own `speak` sentence (they're asking the caller to SUPPLY one) -- but every one of
+ *     them does name its own `field`'s spoken label somewhere in that sentence (`spokenField`,
+ *     re-exported from challenges.ts: "amount in dollars", "last four digits of the account",
+ *     "deadline", ...) -- the "subject" the caller can hear it's asking about, PROVEN live
+ *     (prompt-injection-midcall's own 123150/126392 "deadline" pair: "Could you please restate
+ *     the deadline you provided earlier?" vs "Can you restate the deadline you gave me
+ *     earlier?" -- different wording, same subject). Null for every other goal code (no
+ *     `challenge`, or `challenge.expect` is missing altogether). */
+export function loadBearingValueFor(goal: PhrasingGoal): { field: ClaimField; value: string } | null {
+  if (goal.code === 'READBACK' && goal.readback) {
+    return { field: goal.readback.field, value: goal.readback.value };
+  }
+  if (goal.code === 'ASK_CHALLENGE' && goal.challenge) {
+    const { challenge } = goal;
+    if (challenge.kind === 'TRAP_FACT' && 'trap_value' in challenge.expect) {
+      return { field: challenge.field, value: challenge.expect.trap_value };
+    }
+    return { field: challenge.field, value: spokenField(challenge.field) };
+  }
+  return null;
+}
+
+/** THE combined check `call/session.ts`'s catch-up path (`maybeSendReplyCreateAfterReplyDone`)
+ *  actually calls: true when the completed reply either spoke the rendering's own exact
+ *  composed sentence (`transcriptAsksExactSentence`) or asked SOME question that names the
+ *  rendering's own load-bearing content (`transcriptContainsLoadBearingValue`, only reached
+ *  when `loadBearingValueFor` finds one). See each function's own doc comment for the two
+ *  separate PROVEN live incidents this closes. */
+export function replyCoversCurrentRendering(accumulatedTranscript: string, goal: PhrasingGoal): boolean {
+  if (transcriptAsksExactSentence(accumulatedTranscript, verbatimQuestionSentence(goal))) return true;
+  const loadBearing = loadBearingValueFor(goal);
+  if (!loadBearing) return false;
+  return transcriptContainsLoadBearingValue(accumulatedTranscript, loadBearing.field, loadBearing.value);
 }
 
 /** Fragment-brake fix (2026-09-15, PROVEN live from a fresh sample against deploy 39 --

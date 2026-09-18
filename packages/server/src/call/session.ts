@@ -39,7 +39,7 @@ import {
   QUESTION_GOALS,
   verbatimQuestionSentence,
   transcriptAsksQuestion,
-  transcriptAsksExactSentence,
+  replyCoversCurrentRendering,
   looksLikeAnswerAttempt,
 } from './questionMatch.js';
 
@@ -3923,8 +3923,10 @@ export class CallSession {
    *  Double-ask fix (2026-09-18 continued, P1 -- see the `owedQuestion` branch's own inline
    *  comment below for the full PROVEN incident and reasoning): the `owedQuestion` branch no
    *  longer sends unconditionally -- it first checks whether the reply that JUST completed
-   *  (often UNLABELLED -- an AssemblyAI ambient reply we never instructed) already spoke this
-   *  exact rendering's own words (`transcriptAsksExactSentence`), and skips the send if so. */
+   *  (often UNLABELLED -- an AssemblyAI ambient reply we never instructed) already covered this
+   *  rendering (`replyCoversCurrentRendering` -- either the exact composed sentence, or a
+   *  paraphrase that still names the rendering's own load-bearing value), and skips the send
+   *  if so. */
   private maybeSendReplyCreateAfterReplyDone(replyId: string): void {
     if (this.ended || !this.last) return;
     if (this.speaking || this.replyCreateAwaitingStart) return;
@@ -3949,18 +3951,34 @@ export class CallSession {
       // `maybeReaskQuestion` already has this exact guard for a LABELLED reply
       // (`transcriptAsksQuestion(transcript, sentence)`, above in this file) -- this is the
       // same check, applied here for the first time to an UNLABELLED one. Deliberately
-      // `transcriptAsksExactSentence` (questionMatch.ts), not the more lenient
+      // `replyCoversCurrentRendering` (questionMatch.ts), not the more lenient
       // `transcriptAsksQuestion`: the latter's bare-"?" branch would wrongly suppress our own
       // ask whenever the ambient reply asked ANY question at all, including a completely
       // unrelated one -- the PROVEN shape design-e-turn-order.test.ts's own (F3) exercises
       // ("One moment. Who is calling and what is your authorization code?"), which must still
-      // get our own instructed ask right after it, unregressed. A goal with no single verbatim
-      // sentence (ELICIT_IDENTITY/ELICIT_REQUEST/PROBE_CONSISTENCY) can never match here
-      // (`verbatimQuestionSentence` returns null for those), and neither can an empty
-      // transcript (the degraded-transcripts shape: audio landed, no chunk) -- both fall
-      // through to the unconditional send below, unchanged from before this fix.
+      // get our own instructed ask right after it, unregressed.
+      //
+      // Content-match fix (2026-09-18 continued, P1 -- PROVEN live from TWO further records,
+      // both graded repeated_question by the experience grader:
+      // 2026-09-18T14-44-58-barge-in-interrupt.diagnostics.json (30.761/54.261/73.501/93.551)
+      // and 2026-09-18T14-48-35-prompt-injection-midcall.diagnostics.json
+      // (80.601/99.121/126.702)): an ambient reply does not always speak the rendering's exact
+      // words -- `-barge-in-interrupt`'s own 25031/30761 pair shows an ambient PARAPHRASE of
+      // the TRAP_FACT challenge ("You are requesting a wire for eighty four thousand five
+      // hundred dollars to Northgate Partners?") still gets logged as asked (bare "?"), and
+      // this branch's exact-sentence-only check still sent our own differently-worded copy
+      // right after it -- same trap value, "Northgate Partners", different wording, still two
+      // issuances of one rendering. `replyCoversCurrentRendering` (questionMatch.ts) also
+      // catches this: a "?" plus the rendering's own load-bearing value (a READBACK field's
+      // value in any spoken form; an ASK_CHALLENGE's trap value or spoken field-label subject --
+      // see `loadBearingValueFor`'s own doc comment) counts too. A goal with no single load-
+      // bearing value (ELICIT_IDENTITY/ELICIT_REQUEST/PROBE_CONSISTENCY, or an ASK_CHALLENGE
+      // goal with no `challenge`) falls back to the exact-sentence check alone, and an empty
+      // transcript (the degraded-transcripts shape: audio landed, no chunk) never matches
+      // either way -- both fall through to the unconditional send below, unchanged from
+      // before this fix.
       const replyTranscript = this.replyTranscripts.get(replyId) ?? '';
-      if (transcriptAsksExactSentence(replyTranscript, verbatimQuestionSentence(goal))) {
+      if (replyCoversCurrentRendering(replyTranscript, goal)) {
         this.lastAskedQuestionKey = JSON.stringify(goal);
         this.pendingQuestionAnswerAttemptSeen = false;
         this.owedQuestionGoalKey = null;
