@@ -3186,6 +3186,67 @@
       "held_because": "lower priority than the cue attachment; revisit if a deploy-52 record shows it",
       "agent_id": "",
       "started_at": ""
+    },
+    {
+      "id": "LABEL-PARAPHRASE-SYNONYMS",
+      "title": "P1: two repeats survive on deploy 52 because the ambient reply paraphrased the LABEL itself ('restate the dollar amount' vs the engine's 'amount in dollars'); match the field concept with a minimal per-field synonym set justified from the engine and seed strings, cue attachment preserved",
+      "files": [
+        "packages/server/src/call/questionMatch.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T21:00:00Z",
+      "lane_note": "80cb964 on main: the label check now runs BEFORE the digit branch (which was shadowing it for amount_usd and account_last4, so even the canonical label never matched) plus a minimal per-field synonym map justified from engine strings; 50/50 in questionMatch.test.ts, 17/17 catchup"
+    },
+    {
+      "id": "TURN-DETECTION-EMPTY-VS-OMITTED",
+      "title": "P1: after removing the explicit thresholds we still send turn_detection as an EMPTY OBJECT on connect and on every goal change, and the turn still ends about 6 ms after the VAD boundary (PROVEN, barge-in record 15-46-44 at 33.5 s); check the live docs whether an empty object differs from omitting the key and whether repeated session.updates reset adaptive pacing",
+      "files": [
+        "packages/server/src/aai/config.ts",
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T21:00:00Z",
+      "lane_note": "f880b91 on main: the turn_detection key is omitted from the wire entirely, on connect and on every goal change; diag logs turn_detection_omitted; whether {} differed from omission is UNKNOWN (docs silent), the next batch is the test"
+    },
+    {
+      "id": "LAW-F-FLOOR-JUSTIFICATION-WRONG",
+      "title": "correction to the founder: I justified removing the brief's law (f) min_silence floor partly on AssemblyAI entity-aware waiting doing the same job; PROVEN wrong today, that behaviour is scoped to TOOL PARAMETERS and Countersign offers zero tools by design (LIVE_SESSION_TOOLS empty, allowedTools returns [] in every state), so only the generic adaptive pacing could ever have helped; decide whether to restore a floor if the next batch still shows cut-offs",
+      "files": [
+        "packages/server/src/aai/config.ts",
+        "docs/BRIEF.md"
+      ],
+      "status": "held",
+      "held_because": "founder decision after the deploy-53 batch; options measured: accept the cut-off and rely on the client barge-in that demonstrably yields, raise vad_threshold (different mechanism, unmeasured for this failure), or restore a fixed floor at about 700 ms added latency on every finished turn",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "GRADER-LEGIT-REASK",
+      "title": "harness: repeated_question counts a legitimate re-ask of an UNANSWERED challenge as a defect (PROVEN in the deploy-52 injection record: the caller dodged with an injection attempt, the engine correctly held the challenge open and re-asked); refine so a repeat needs a prior graded card or no caller utterance in between",
+      "files": [
+        "scripts/rehearse/experienceGrading.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T21:10:00Z",
+      "lane_note": "ba4ed51 on main: a reissue counts only when the card was already graded at that timestamp or no caller utterance occurred in between; before/after moved exactly two records (founder 95b9ad42 5 to 3, deploy-52 injection 1 to 0) and nothing else; the founder three still FAIL"
+    },
+    {
+      "id": "EVALUATE-DIAG-DEDUP-HIDES-GRADING",
+      "title": "P1 harness fidelity (push-53 review): applyEvaluate only writes an evaluate diag when verdict/state/goal/reasons change, so three readback confirmations in one call produce no intermediate snapshots and the grader's 'was it already graded' condition is effectively dead for readbacks; a future re-ask right after a genuine answer would go unflagged; fix by also diagging on an evidence-card-set change",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "scripts/rehearse/experienceGrading.ts"
+      ],
+      "status": "held",
+      "held_because": "after the deploy-53 batch; diagnostics-only change, but it is what makes the grader trustworthy for shapes the founder has not hit yet",
+      "agent_id": "",
+      "started_at": ""
     }
   ]
 }

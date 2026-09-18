@@ -4,10 +4,10 @@ Every number below is either PROVEN (a real subtraction between two events a liv
 
 How to regenerate this file: `npm run latency:table` (reads every `*.diagnostics.json` under `scripts/rehearse/reports/`, which is gitignored and lives only on the machine that ran the rehearsals -- see docs/REHEARSAL-HARNESS.md).
 
-Runs with a diagnostics bundle: n=249, date range 2026-09-09 to 2026-09-18.
+Runs with a diagnostics bundle: n=257, date range 2026-09-09 to 2026-09-18.
 15 additional `.md` rehearsal report(s) exist in the same directory with NO matching `.diagnostics.json` bundle (older runs, before the flight-recorder fetch was added 2026-09-09) -- every column here is UNKNOWN for those runs; they are not counted in any `n` above.
 
-**Perceived response latency (headline number -- the gap a judge actually feels, ESTIMATE, harness wall clock, all runs/all targets): p50=635ms, p95=1868ms (n=1320 turns; 136 turn(s) excluded as n/a -- see section 3b for the exact method and the per-target/per-scenario breakdown).**
+**Perceived response latency (headline number -- the gap a judge actually feels, ESTIMATE, harness wall clock, all runs/all targets): p50=635ms, p95=1863ms (n=1352 turns; 142 turn(s) excluded as n/a -- see section 3b for the exact method and the per-target/per-scenario breakdown).**
 
 ## Method, per column
 
@@ -271,6 +271,14 @@ Runs with a diagnostics bundle: n=249, date range 2026-09-09 to 2026-09-18.
 | 2026-09-18T14-51-43-miller-patient.diagnostics.json | 2026-09-18 | deployed | miller-patient | 329ms | 170ms | greeting | 54791ms | 9302ms | 6 | 3 | 2 |
 | 2026-09-18T14-54-05-identity-switch.diagnostics.json | 2026-09-18 | deployed | identity-switch | 329ms | 177ms | greeting | 126492ms | 10094ms | 9 | 6 | 1 |
 | 2026-09-18T14-54-40-judge-out-of-scope.diagnostics.json | 2026-09-18 | deployed | judge-out-of-scope | 340ms | 178ms | greeting | UNKNOWN | UNKNOWN | 2 | 2 | 0 |
+| 2026-09-18T15-45-18-corrected-critical-field.diagnostics.json | 2026-09-18 | deployed | corrected-critical-field | 481ms | 173ms | greeting | 75834ms | 4450ms | 5 | 5 | 0 |
+| 2026-09-18T15-46-44-barge-in-interrupt.diagnostics.json | 2026-09-18 | deployed | barge-in-interrupt | 422ms | 178ms | greeting | 79396ms | 4549ms | 5 | 4 | 2 |
+| 2026-09-18T15-48-04-hangup-after-request.diagnostics.json | 2026-09-18 | deployed | hangup-after-request | 431ms | 174ms | greeting | 70210ms | 7917ms | 1 | 1 | 0 |
+| 2026-09-18T15-49-51-prompt-injection-midcall.diagnostics.json | 2026-09-18 | deployed | prompt-injection-midcall | 478ms | 40ms | greeting | 100443ms | 4455ms | 6 | 6 | 1 |
+| 2026-09-18T15-51-24-dana-patient.diagnostics.json | 2026-09-18 | deployed | dana-patient | 344ms | 172ms | greeting | 78403ms | 12627ms | 5 | 5 | 0 |
+| 2026-09-18T15-52-39-miller-patient.diagnostics.json | 2026-09-18 | deployed | miller-patient | 646ms | 181ms | greeting | 47709ms | 9742ms | 6 | 3 | 2 |
+| 2026-09-18T15-54-39-identity-switch.diagnostics.json | 2026-09-18 | deployed | identity-switch | 353ms | 221ms | greeting | 102820ms | 12434ms | 6 | 6 | 1 |
+| 2026-09-18T15-55-16-judge-out-of-scope.diagnostics.json | 2026-09-18 | deployed | judge-out-of-scope | 383ms | 180ms | greeting | UNKNOWN | UNKNOWN | 2 | 2 | 0 |
 
 ## 1. Socket connect to AssemblyAI ready -- p50/p95 across runs
 
@@ -278,21 +286,21 @@ Runs with a diagnostics bundle: n=249, date range 2026-09-09 to 2026-09-18.
 | --- | --- | --- | --- |
 | local / scenario-a-dana-legitimate | 3 | 979ms | 1105ms |
 | local / all scenarios | 3 | 979ms | 1105ms |
-| deployed / barge-in-interrupt | 26 | 410ms | 713ms |
-| deployed / corrected-critical-field | 18 | 390ms | 641ms |
-| deployed / dana-patient | 31 | 423ms | 635ms |
-| deployed / hangup-after-request | 20 | 401ms | 603ms |
-| deployed / identity-switch | 18 | 369ms | 490ms |
-| deployed / judge-out-of-scope | 19 | 378ms | 706ms |
-| deployed / miller-patient | 30 | 427ms | 689ms |
+| deployed / barge-in-interrupt | 27 | 422ms | 712ms |
+| deployed / corrected-critical-field | 19 | 390ms | 636ms |
+| deployed / dana-patient | 32 | 423ms | 632ms |
+| deployed / hangup-after-request | 21 | 401ms | 589ms |
+| deployed / identity-switch | 19 | 359ms | 483ms |
+| deployed / judge-out-of-scope | 20 | 379ms | 703ms |
+| deployed / miller-patient | 31 | 428ms | 685ms |
 | deployed / miller-silent-after-amount | 15 | 363ms | 512ms |
-| deployed / prompt-injection-midcall | 21 | 399ms | 481ms |
+| deployed / prompt-injection-midcall | 22 | 402ms | 481ms |
 | deployed / scenario-a-dana-legitimate | 9 | 581ms | 633ms |
 | deployed / scenario-b-miller-fraud | 5 | 438ms | 467ms |
 | deployed / single-wrong-answer | 17 | 396ms | 473ms |
 | deployed / structuring-two-wires | 17 | 390ms | 799ms |
-| deployed / all scenarios | 246 | 402ms | 680ms |
-| all targets / all scenarios | 249 | 405ms | 696ms |
+| deployed / all scenarios | 254 | 404ms | 670ms |
+| all targets / all scenarios | 257 | 405ms | 692ms |
 
 ## 2. Ready to first agent audio -- p50/p95 across runs, split by whether a greeting was configured
 
@@ -302,9 +310,9 @@ Runs with a diagnostics bundle: n=249, date range 2026-09-09 to 2026-09-18.
 | --- | --- | --- | --- |
 | local / first reply, greeting_configured unknown -- older bundle (includes caller talk time before the agent speaks) | 3 | 17394ms | 17489ms |
 | deployed / first reply, greeting_configured unknown -- older bundle (includes caller talk time before the agent speaks) | 4 | 17876ms | 18144ms |
-| deployed / greeting | 242 | 175ms | 199ms |
+| deployed / greeting | 250 | 175ms | 200ms |
 | all targets / first reply, greeting_configured unknown -- older bundle (includes caller talk time before the agent speaks) | 7 | 17499ms | 18115ms |
-| all targets / greeting | 242 | 175ms | 199ms |
+| all targets / greeting | 250 | 175ms | 200ms |
 
 ## 3a. Server relay gap after AssemblyAI's end-of-turn event (not perceived latency) -- p50/p95 across ALL TURNS, not runs
 
@@ -314,21 +322,21 @@ Runs with a diagnostics bundle: n=249, date range 2026-09-09 to 2026-09-18.
 | --- | --- | --- | --- |
 | local / scenario-a-dana-legitimate | 21 | 11ms | 35ms |
 | local / all scenarios | 21 | 11ms | 35ms |
-| deployed / barge-in-interrupt | 195 | 9ms | 3974ms |
-| deployed / corrected-critical-field | 110 | 12ms | 4034ms |
-| deployed / dana-patient | 216 | 12ms | 3956ms |
-| deployed / hangup-after-request | 24 | 8ms | 11387ms |
-| deployed / identity-switch | 137 | 10ms | 3992ms |
-| deployed / judge-out-of-scope | 124 | 6ms | 4019ms |
-| deployed / miller-patient | 130 | 11ms | 4015ms |
+| deployed / barge-in-interrupt | 200 | 9ms | 3973ms |
+| deployed / corrected-critical-field | 115 | 12ms | 4032ms |
+| deployed / dana-patient | 221 | 11ms | 3956ms |
+| deployed / hangup-after-request | 25 | 8ms | 11360ms |
+| deployed / identity-switch | 143 | 10ms | 3977ms |
+| deployed / judge-out-of-scope | 126 | 6ms | 4010ms |
+| deployed / miller-patient | 136 | 11ms | 4045ms |
 | deployed / miller-silent-after-amount | 62 | 9ms | 8483ms |
-| deployed / prompt-injection-midcall | 148 | 10ms | 5520ms |
+| deployed / prompt-injection-midcall | 154 | 10ms | 5121ms |
 | deployed / scenario-a-dana-legitimate | 56 | 9ms | 114ms |
 | deployed / scenario-b-miller-fraud | 18 | 7ms | 181ms |
 | deployed / single-wrong-answer | 118 | 9ms | 3955ms |
 | deployed / structuring-two-wires | 98 | 8ms | 3954ms |
-| deployed / all scenarios | 1436 | 10ms | 3976ms |
-| all targets / all scenarios | 1457 | 10ms | 3974ms |
+| deployed / all scenarios | 1472 | 10ms | 3974ms |
+| all targets / all scenarios | 1493 | 10ms | 3973ms |
 
 ## 3b. Perceived response latency (the gap a judge feels) -- ESTIMATE, p50/p95 across ALL TURNS, not runs
 
@@ -338,21 +346,21 @@ Method: harness wall clock from the synthetic caller's last audio frame to the a
 | --- | --- | --- | --- |
 | local / scenario-a-dana-legitimate | 29 | 657ms | 1813ms |
 | local / all scenarios | 29 | 657ms | 1813ms |
-| deployed / barge-in-interrupt | 165 | 617ms | 3857ms |
-| deployed / corrected-critical-field | 97 | 655ms | 4606ms |
-| deployed / dana-patient | 181 | 636ms | 2981ms |
-| deployed / hangup-after-request | 19 | 528ms | 1003ms |
-| deployed / identity-switch | 120 | 639ms | 1786ms |
-| deployed / judge-out-of-scope | 116 | 8ms | 732ms |
-| deployed / miller-patient | 93 | 665ms | 1486ms |
+| deployed / barge-in-interrupt | 169 | 617ms | 3853ms |
+| deployed / corrected-critical-field | 102 | 645ms | 4600ms |
+| deployed / dana-patient | 186 | 637ms | 2964ms |
+| deployed / hangup-after-request | 20 | 535ms | 966ms |
+| deployed / identity-switch | 126 | 638ms | 1785ms |
+| deployed / judge-out-of-scope | 118 | 8ms | 729ms |
+| deployed / miller-patient | 96 | 665ms | 1519ms |
 | deployed / miller-silent-after-amount | 51 | 639ms | 1831ms |
-| deployed / prompt-injection-midcall | 149 | 636ms | 1839ms |
+| deployed / prompt-injection-midcall | 155 | 634ms | 1838ms |
 | deployed / scenario-a-dana-legitimate | 68 | 620ms | 1772ms |
 | deployed / scenario-b-miller-fraud | 17 | 628ms | 803ms |
 | deployed / single-wrong-answer | 122 | 737ms | 4480ms |
 | deployed / structuring-two-wires | 93 | 653ms | 1861ms |
-| deployed / all scenarios | 1291 | 635ms | 1874ms |
-| all targets / all scenarios | 1320 | 635ms | 1868ms |
+| deployed / all scenarios | 1323 | 634ms | 1860ms |
+| all targets / all scenarios | 1352 | 635ms | 1863ms |
 
 ## 4. Connect to terminal verdict -- p50/p95 across runs
 
@@ -360,21 +368,21 @@ Method: harness wall clock from the synthetic caller's last audio frame to the a
 | --- | --- | --- | --- |
 | local / scenario-a-dana-legitimate | 2 | 105374ms | 115844ms |
 | local / all scenarios | 2 | 105374ms | 115844ms |
-| deployed / barge-in-interrupt | 26 | 109231ms | 170036ms |
-| deployed / corrected-critical-field | 18 | 90629ms | 168475ms |
-| deployed / dana-patient | 31 | 84177ms | 166915ms |
-| deployed / hangup-after-request | 17 | 67191ms | 86321ms |
-| deployed / identity-switch | 18 | 137684ms | 177752ms |
+| deployed / barge-in-interrupt | 27 | 108028ms | 169432ms |
+| deployed / corrected-critical-field | 19 | 87972ms | 166741ms |
+| deployed / dana-patient | 32 | 83367ms | 166526ms |
+| deployed / hangup-after-request | 18 | 67464ms | 83902ms |
+| deployed / identity-switch | 19 | 136690ms | 177161ms |
 | deployed / judge-out-of-scope | 0 | UNKNOWN | UNKNOWN |
-| deployed / miller-patient | 30 | 47928ms | 89454ms |
+| deployed / miller-patient | 31 | 47709ms | 88749ms |
 | deployed / miller-silent-after-amount | 15 | 73587ms | 91649ms |
-| deployed / prompt-injection-midcall | 21 | 117678ms | 172881ms |
+| deployed / prompt-injection-midcall | 22 | 116337ms | 172774ms |
 | deployed / scenario-a-dana-legitimate | 9 | 81496ms | 97781ms |
 | deployed / scenario-b-miller-fraud | 5 | 45133ms | 83094ms |
 | deployed / single-wrong-answer | 16 | 136735ms | 194758ms |
 | deployed / structuring-two-wires | 15 | 100215ms | 141218ms |
-| deployed / all scenarios | 221 | 86572ms | 173708ms |
-| all targets / all scenarios | 223 | 87014ms | 173643ms |
+| deployed / all scenarios | 228 | 86210ms | 173480ms |
+| all targets / all scenarios | 230 | 86461ms | 173416ms |
 
 ## 5. Verdict to call end -- p50/p95 across runs
 
@@ -382,18 +390,18 @@ Method: harness wall clock from the synthetic caller's last audio frame to the a
 | --- | --- | --- | --- |
 | local / scenario-a-dana-legitimate | 2 | 13975ms | 26527ms |
 | local / all scenarios | 2 | 13975ms | 26527ms |
-| deployed / barge-in-interrupt | 26 | 10938ms | 45007ms |
-| deployed / corrected-critical-field | 18 | 9027ms | 30077ms |
-| deployed / dana-patient | 31 | 9674ms | 18948ms |
-| deployed / hangup-after-request | 17 | 11883ms | 18538ms |
-| deployed / identity-switch | 18 | 11493ms | 24205ms |
+| deployed / barge-in-interrupt | 27 | 10675ms | 45006ms |
+| deployed / corrected-critical-field | 19 | 6594ms | 29914ms |
+| deployed / dana-patient | 32 | 10804ms | 18918ms |
+| deployed / hangup-after-request | 18 | 10142ms | 18524ms |
+| deployed / identity-switch | 19 | 12434ms | 23597ms |
 | deployed / judge-out-of-scope | 0 | UNKNOWN | UNKNOWN |
-| deployed / miller-patient | 30 | 12147ms | 28604ms |
+| deployed / miller-patient | 31 | 11640ms | 28510ms |
 | deployed / miller-silent-after-amount | 15 | 18452ms | 45004ms |
-| deployed / prompt-injection-midcall | 21 | 13146ms | 45004ms |
+| deployed / prompt-injection-midcall | 22 | 13128ms | 43839ms |
 | deployed / scenario-a-dana-legitimate | 9 | 15534ms | 48371ms |
 | deployed / scenario-b-miller-fraud | 5 | 15005ms | 19770ms |
 | deployed / single-wrong-answer | 16 | 12545ms | 37564ms |
 | deployed / structuring-two-wires | 15 | 15005ms | 28502ms |
-| deployed / all scenarios | 221 | 12898ms | 45002ms |
-| all targets / all scenarios | 223 | 12898ms | 44800ms |
+| deployed / all scenarios | 228 | 12751ms | 44295ms |
+| all targets / all scenarios | 230 | 12751ms | 44093ms |
