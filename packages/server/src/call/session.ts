@@ -2032,6 +2032,18 @@ export class CallSession {
    *  through to ending immediately, same as before this fix. */
   end(reason: string): void {
     if (this.ended) return;
+    // Bug fix (2026-09-18 review, finding F1): a tick-end settle timer armed by an EARLIER
+    // caller-turn tick's fresh question must never survive ANY path through this method --
+    // including the idle-defer branch just below, which can `return` (twice) before
+    // `this.ended` is ever set true and before `clearCloseTimers()` (which also clears this
+    // timer, but only on the immediate-end path further down) is ever reached. Clearing it
+    // here, first, unconditionally, covers every return in this method the same way
+    // `clearCloseTimers()` already covers the immediate path -- calling it twice (once here,
+    // once inside `clearCloseTimers()` on the immediate path) is a harmless no-op the second
+    // time. `armTickEndSendTimer`'s own fire-time re-validation is a second, independent
+    // safety net for this same failure mode -- this clear just stops it from ever needing to
+    // fire at all once a call is ending.
+    this.clearTickEndSendTimer();
     if (reason === 'idle_timeout' && !this.idleDeferAttempted) {
       this.idleDeferAttempted = true;
       this.logCallEnded('idle_timeout');
@@ -2492,7 +2504,30 @@ export class CallSession {
         // hard cap. A no-op the instant this reply's own transcript/reply.done arrives (both
         // clear it), and superseded automatically if a newer reply starts first.
         if (this.currentCloseSentence()) this.armCloseStuckWatchdog(evt.reply_id);
-        this.diag('reply.started', {});
+        // REPLY-ID-IN-DIAG (board item, 2026-09-18): the underlying AssemblyAI event already
+        // carries `reply_id` -- this diag used to drop it, leaving no way to correlate a
+        // `reply.started` diagnostic with the `reply.done`/`transcript` events for the SAME
+        // reply from the flight recorder alone. LAW 4: diagnostics, not evidence -- reply ids
+        // are AssemblyAI's own opaque handles, never caller-quoted content.
+        this.diag('reply.started', { reply_id: evt.reply_id });
+        // F2 (2026-09-18 review): `AUTOMATIC_REPLY_SETTLE_MS` (150ms) was margined against the
+        // WRONG quantity -- our own 0-1ms trigger gap against AssemblyAI's own automatic
+        // reply, not the actual gap between a caller's turn ending and ANY reply.started
+        // (ours or AssemblyAI's automatic one) arriving, which is what the settle window
+        // actually has to outlast. This records that gap directly, every time, so it can be
+        // measured from real/rehearsal traffic instead of re-estimated from three records --
+        // never used to gate anything itself (see `AUTOMATIC_REPLY_SETTLE_MS`'s own doc
+        // comment: the 150ms value is UNCHANGED here, still an ESTIMATE pending this
+        // measurement). `gap_ms` is null when no caller transcript has landed yet this call
+        // (e.g. the GREET-triggered automatic reply, before the caller has said anything).
+        // `ours` is `wasInstructedReply`, captured above BEFORE `replyCreateAwaitingStart` is
+        // reset just below -- true only when THIS reply is one WE asked AssemblyAI to speak
+        // (a `reply.create` of ours was outstanding), never an ambient automatic reply.
+        this.diag('turn_to_reply_gap', {
+          gap_ms: this.previousCallerTranscriptAtMs !== null ? this.nowT() - this.previousCallerTranscriptAtMs : null,
+          ours: wasInstructedReply,
+          reply_id: evt.reply_id,
+        });
         break;
 
       case 'reply.audio':
@@ -2592,7 +2627,9 @@ export class CallSession {
         this.replyCreateAwaitingStart = false;
         this.clearReplyCreateLostTimer();
         this.recordGoalCompletionAction(evt.reply_id, evt.status);
-        this.diag('reply.done', { status: evt.status });
+        // REPLY-ID-IN-DIAG (board item, 2026-09-18): same reasoning as `reply.started`'s own
+        // diag just above -- the underlying event already carries `reply_id`, this dropped it.
+        this.diag('reply.done', { status: evt.status, reply_id: evt.reply_id });
         // aai-observability lane (2026-09-16, item 3): `replyTranscripts` for this reply is
         // final now (nothing later appends to it for this reply id) -- checked here, once
         // per reply, regardless of `evt.status` (an interrupted reply with a dropped
@@ -3573,9 +3610,20 @@ export class CallSession {
       // set until the deferred send below actually goes out (or the busy-guard catch-up path
       // sends in its place), so a reply that starts before then is still recognized as "this
       // exact question is still owed" at its own `reply.done`.
-      this.armTickEndSendTimer(finalGoal, this.instructedSentenceFor(goal));
+      this.armTickEndSendTimer();
       return;
     }
+    // Bug fix (2026-09-18 review, finding F1): reached only when `forceSpeak` is true and
+    // `freshQuestion` is false -- the goal just moved to something that must be spoken NOW
+    // (CLOSE, ANNOUNCE_*, or a HOLDING_GOALS exit) and is itself not a fresh question. Any
+    // tick-end settle timer armed by an EARLIER caller-turn tick's fresh question is now moot
+    // -- the call has moved on to a different rendering being sent synchronously right below.
+    // `armTickEndSendTimer`'s own fire-time re-validation (comparing `owedQuestionGoalKey`
+    // against the CURRENT goal) would also catch this later, on its own, but clearing here
+    // avoids leaving a dangling timer to no-op for the rest of the settle window and matches
+    // the review's explicit ask ("clear ... on a goal change to a non-question goal").
+    this.clearTickEndSendTimer();
+    this.owedQuestionGoalKey = null;
     this.sendReplyCreate(finalGoal, 'tick_end', this.instructedSentenceFor(goal));
   }
 
@@ -3631,17 +3679,38 @@ export class CallSession {
   private static readonly AUTOMATIC_REPLY_SETTLE_MS = 150;
   private tickEndSendTimer: ReturnType<typeof setTimeout> | null = null;
 
-  private armTickEndSendTimer(goalCode: GoalCode, instructions: string | undefined): void {
+  /** Bug fix (2026-09-18 review, finding F1): this used to close over `goalCode`/`instructions`
+   *  captured at ARM time and send them unconditionally at fire time, checking only
+   *  `this.ended`/`this.speaking`/`this.replyCreateAwaitingStart` -- never re-reading
+   *  `this.last.goal`. Every OTHER deferred send path in this class
+   *  (`maybeSendReplyCreateAfterReplyDone`'s `owedQuestion` check, `armHoldFollowupTimer`,
+   *  the `questionReaskTimer` callback) instead re-derives the CURRENT goal and compares it
+   *  against its own stored key before sending -- this timer now follows the same convention.
+   *  A NON-caller-turn tick can move `this.last.goal` on to something else entirely (CLOSE,
+   *  a different QUESTION_GOALS rendering, an OUT_OF_SCOPE explainer that is neither
+   *  `mustForceSpeak` nor a fresh question) without ever calling `clearTickEndSendTimer` --
+   *  see that method's own call sites -- so trusting values captured at arm time let a caller
+   *  turn's fresh question go out AFTER the call had already moved on and said something
+   *  else, sometimes after the goodbye itself was already confirmed heard. Takes no arguments
+   *  now: everything it needs is read fresh, at fire time, from `this.last`. */
+  private armTickEndSendTimer(): void {
     this.clearTickEndSendTimer();
     this.tickEndSendTimer = setTimeout(() => {
       this.tickEndSendTimer = null;
-      if (this.ended) return;
+      if (this.ended || !this.last) return;
+      const goal = this.last.goal;
+      // The ONLY thing owed by this timer is the exact rendering `owedQuestionGoalKey`
+      // recorded when it was armed -- if that key is gone (already sent some other way) or
+      // no longer matches the CURRENT goal (the call moved on), there is nothing left to
+      // send. Same convention `maybeSendReplyCreateAfterReplyDone`'s `owedQuestion` check
+      // already uses.
+      if (this.owedQuestionGoalKey === null || this.owedQuestionGoalKey !== JSON.stringify(goal)) return;
       // An automatic reply (or anything else) started in the settle window -- the busy-guard
       // catch-up path (`maybeSendReplyCreateAfterReplyDone`, reading `owedQuestionGoalKey`,
       // still set) owns sending this once whatever is speaking now finishes.
       if (this.speaking || this.replyCreateAwaitingStart) return;
       this.owedQuestionGoalKey = null;
-      this.sendReplyCreate(goalCode, 'tick_end', instructions);
+      this.sendReplyCreate(goal.code, 'tick_end', this.instructedSentenceFor(goal));
     }, CallSession.AUTOMATIC_REPLY_SETTLE_MS);
   }
 

@@ -10,7 +10,7 @@
 //     pattern as browser-ws.test.ts/http.test.ts: session start -> ws attach -> live events
 //     -> GET mid-call -> end -> GET after end -> client POST (valid/oversize/bad-shape) ->
 //     unknown id -> 404.
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { request as httpRequest } from 'node:http';
@@ -1040,6 +1040,109 @@ describe('CallSession — onDiagnostic', () => {
     const doneEvents = events.filter((e) => e.kind === 'reply.done');
     expect(doneEvents).toHaveLength(1);
     expect((doneEvents[0]!.detail as { status: string }).status).toBe('completed');
+  });
+
+  // F2 (2026-09-18 review, board item REPLY-ID-IN-DIAG): the underlying AssemblyAI event
+  // already carries `reply_id` on both `reply.started` and `reply.done` -- these diag events
+  // used to drop it (`{}` and `{status: evt.status}` respectively), leaving no way to
+  // correlate a `reply.started` diagnostic with the `reply.done`/`transcript` events for the
+  // SAME reply from the flight recorder alone.
+  it('reply.started and reply.done diag details carry the reply_id verbatim', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const events: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, aai, events);
+
+    session.start();
+    clock.now = 1000;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    clock.now = 2000;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    const startedEvent = events.find((e) => e.kind === 'reply.started');
+    expect(startedEvent?.detail).toEqual({ reply_id: 'a1' });
+    const doneEvent = events.find((e) => e.kind === 'reply.done');
+    expect(doneEvent?.detail).toEqual({ status: 'completed', reply_id: 'a1' });
+  });
+
+  // F2 (2026-09-18 review, finding F2): `AUTOMATIC_REPLY_SETTLE_MS` (150ms) was margined
+  // against the WRONG quantity -- our own 0-1ms trigger gap against AssemblyAI's own
+  // automatic reply, not the actual gap between a caller's turn ending and ANY reply.started
+  // (ours or an automatic one) arriving, which is what the settle window actually has to
+  // outlast. `turn_to_reply_gap` records that gap directly, on every reply.started, so it can
+  // be measured from real/rehearsal traffic. Never used to gate anything -- see
+  // `AUTOMATIC_REPLY_SETTLE_MS`'s own doc comment: the 150ms value stays an ESTIMATE, pending
+  // this measurement.
+  it('turn_to_reply_gap is recorded on every reply.started, with gap_ms from the last transcript.user, ours=true for our own instructed reply', () => {
+    vi.useFakeTimers();
+    try {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const events: { kind: string; detail: unknown }[] = [];
+      const session = newSession(clock, aai, events);
+
+      session.start();
+      clock.now = 1000;
+      aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+      expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+
+      // Nothing else speaks -- the settle timer's own fallback sends OUR instructed
+      // reply.create, AUTOMATIC_REPLY_SETTLE_MS (150ms) after the caller's own turn --
+      // AssemblyAI's own reply.started for it (simulated here) follows.
+      clock.now = 1150;
+      vi.advanceTimersByTime(150);
+      expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(true);
+      aai.emit({ type: 'reply.started', reply_id: 'r1' });
+
+      const gapEvents = events.filter((e) => e.kind === 'turn_to_reply_gap');
+      expect(gapEvents).toHaveLength(1);
+      const detail = gapEvents[0]!.detail as { gap_ms: number | null; ours: boolean; reply_id: string };
+      expect(detail.gap_ms).toBe(150); // 1150 - 1000, PROVEN from this test's own clock
+      expect(detail.ours).toBe(true); // our own instructed reply.create was outstanding
+      expect(detail.reply_id).toBe('r1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('turn_to_reply_gap records ours=false for an ambient automatic reply nobody instructed', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const events: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, aai, events);
+
+    session.start();
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+
+    // AssemblyAI's own automatic reply starts before our own instructed send (settle window
+    // not elapsed yet) -- nothing of ours is outstanding.
+    clock.now = 1005;
+    aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
+
+    const gapEvents = events.filter((e) => e.kind === 'turn_to_reply_gap');
+    expect(gapEvents).toHaveLength(1);
+    const detail = gapEvents[0]!.detail as { gap_ms: number | null; ours: boolean; reply_id: string };
+    expect(detail.gap_ms).toBe(5); // 1005 - 1000
+    expect(detail.ours).toBe(false);
+    expect(detail.reply_id).toBe('auto-1');
+  });
+
+  it('turn_to_reply_gap records gap_ms: null when no caller transcript has landed yet this call (the GREET-triggered automatic reply)', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const events: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, aai, events);
+
+    session.start(); // GREET -- caller has not said anything yet
+    clock.now = 500;
+    aai.emit({ type: 'reply.started', reply_id: 'greet-1' });
+
+    const gapEvents = events.filter((e) => e.kind === 'turn_to_reply_gap');
+    expect(gapEvents).toHaveLength(1);
+    const detail = gapEvents[0]!.detail as { gap_ms: number | null; ours: boolean; reply_id: string };
+    expect(detail.gap_ms).toBeNull();
+    expect(detail.reply_id).toBe('greet-1');
   });
 
   it('a second reply gets its own single first-audio event', () => {

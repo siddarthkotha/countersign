@@ -397,3 +397,247 @@ describe('Design E: the automatic reply is a holding beat only; the server\'s ow
     expect(internals.speaking).toBe(true);
   });
 });
+
+// P0 review fix (2026-09-18, findings F1-F3 on top of e99e17f's own P0 fix above):
+// F1. `armTickEndSendTimer`'s callback used to close over `goalCode`/`instructions` captured
+//     at ARM time and never re-read `this.last.goal` at FIRE time (every other deferred send
+//     path in this class -- `maybeSendReplyCreateAfterReplyDone`'s `owedQuestion` check, the
+//     `questionReaskTimer` callback -- re-derives the current goal and compares it against its
+//     own stored key first). A non-caller-turn tick could move the goal on (to CLOSE, or
+//     anywhere else) without ever clearing this timer -- `end('idle_timeout')`'s own
+//     idle-defer branch can `return` (twice) before `this.ended` is set or `clearCloseTimers`
+//     is ever reached, and the synchronous `forceSpeak` send path didn't clear it either.
+//     "Today only the busy-guard's timing prevents a stale question from being spoken" (review
+//     finding, PROVEN by code reading, no live incident needed to reproduce it deterministically
+//     with a fake clock).
+// F2. `AUTOMATIC_REPLY_SETTLE_MS` (150ms) stays an ESTIMATE -- ONLY covered by
+//     call/session.ts's own doc comment plus the new `turn_to_reply_gap` diagnostic
+//     (session.test.ts/diagnostics.test.ts cover that directly); not retested here.
+// F3. The live-observed shape where the automatic reply asks its OWN unrequested question
+//     (not a bare holding line) composes exactly like test (b) above.
+describe('P0 review fix (2026-09-18, F1): the tick-end settle timer re-validates against the CURRENT goal at fire time, and end() clears it on every path', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('(F1-a) a stale settle timer for a question the call has since moved on from (goal now CLOSE) is never sent, even once nothing is busy and the settle window elapses', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession(clock, CALL_B, aai, sent);
+    session.start();
+
+    // c1 lands on a fresh ASK_CHALLENGE rendering -- arms the tick-end settle timer (150ms),
+    // not yet fired.
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+    const staleSentence = session.last!.goal.challenge!.speak!;
+    expect(replyCreatesOf(aai)).toHaveLength(0);
+
+    // Before that timer ever fires, the call ends via the idle-timeout path with a request
+    // already on record (row 15) -- nothing is speaking, so the resulting CLOSE reply.create
+    // goes out synchronously, in the SAME tick that discovers CLOSE.
+    clock.now = 30000;
+    session.end('idle_timeout');
+    expect(session.last?.goal.code).toBe('CLOSE');
+    const closeSentence = session.last!.goal.hint;
+    const afterEnd = replyCreatesOf(aai);
+    expect(afterEnd).toHaveLength(1);
+    expect(afterEnd[0]!.instructions).toBe(`Say exactly this and nothing else: "${closeSentence}"`);
+
+    // That first CLOSE reply completes, but says only a generic holding line -- NOT the close
+    // sentence (a live-plausible shape: an interrupted/paraphrased/degraded first attempt) --
+    // so `goodbyeConfirmed` stays false and a close_retry is armed (CLOSE_RETRY_MIN_GAP_MS =
+    // 400ms, well outside this test's own 150ms settle window). Speaking/awaiting both clear
+    // once this reply is done, well before either the settle window OR the retry elapses --
+    // note this is NOT the same as the goodbye being heard: `sendReplyCreate`'s own unrelated
+    // `goodbyeConfirmed` guard (round 5, pre-dating this fix) would otherwise mask this exact
+    // race by refusing ANY further send once the close line is transcript-confirmed, so a
+    // confirmed-goodbye version of this test would not actually exercise the bug.
+    clock.now = 30050;
+    aai.emit({ type: 'reply.started', reply_id: 'close-1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'x-close-1', text: 'One moment.', reply_id: 'close-1', interrupted: false });
+    clock.now = 30100;
+    aai.emit({ type: 'reply.done', reply_id: 'close-1', status: 'completed' });
+
+    // The settle window from c1's OWN fresh question elapses now, inside the close-retry gap
+    // -- PROVEN failure mode (review finding F1): before the fix, this fired anyway
+    // (goalCode/instructions captured at arm time, never re-checked against the current goal)
+    // and sent a SECOND, STALE reply.create for the already-abandoned ASK_CHALLENGE question,
+    // interleaved with the still-unconfirmed CLOSE goodbye.
+    vi.advanceTimersByTime(150);
+    const afterWindow = replyCreatesOf(aai);
+    expect(afterWindow).toHaveLength(1); // still just the CLOSE one -- nothing stale went out
+    expect(afterWindow.some((m) => m.instructions === `Say exactly this and nothing else: "${staleSentence}"`)).toBe(false);
+  });
+
+  it('(F1-b) end() clears the settle timer even on the idle-defer path that can return before clearCloseTimers is ever reached', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession(clock, CALL_B, aai, sent);
+    session.start();
+
+    // c1 lands on a fresh ASK_CHALLENGE rendering -- arms the settle timer.
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+    const staleSentence = session.last!.goal.challenge!.speak!;
+    expect(replyCreatesOf(aai)).toHaveLength(0);
+
+    // An ambient automatic reply for this same turn starts speaking BEFORE the settle window
+    // elapses -- the busy guard is now active.
+    clock.now = 1005;
+    aai.emit({ type: 'reply.started', reply_id: 'auto-x' });
+    const internals = session as unknown as { speaking: boolean };
+    expect(internals.speaking).toBe(true);
+
+    // The call ends via idle-timeout while 'auto-x' is still speaking -- row 15 turns the
+    // verdict ESCALATE/CLOSE, but the busy guard blocks a SYNCHRONOUS CLOSE send: the
+    // idle-defer branch returns (goal already CLOSE) WITHOUT ever reaching `clearCloseTimers`.
+    clock.now = 30000;
+    session.end('idle_timeout');
+    expect(session.last?.goal.code).toBe('CLOSE');
+    expect(replyCreatesOf(aai)).toHaveLength(0); // CLOSE itself is still deferred (busy)
+
+    // 'auto-x' finishes -- the busy-guard catch-up path (`maybeSendReplyCreateAfterReplyDone`)
+    // sends CLOSE now. This catch-up send is NOT the `owedQuestion` branch (the CURRENT goal,
+    // CLOSE, does not match the stale ASK_CHALLENGE key `owedQuestionGoalKey` still holds) --
+    // it does not clear the tick-end timer either, so only `end()`'s own top-of-method clear
+    // is what can save this.
+    clock.now = 30100;
+    aai.emit({ type: 'transcript.agent', item_id: 'x-auto-x', text: 'One moment.', reply_id: 'auto-x', interrupted: false });
+    aai.emit({ type: 'reply.done', reply_id: 'auto-x', status: 'completed' });
+    const closeSentence = session.last!.goal.hint;
+    const afterCatchUp = replyCreatesOf(aai);
+    expect(afterCatchUp).toHaveLength(1);
+    expect(afterCatchUp[0]!.instructions).toBe(`Say exactly this and nothing else: "${closeSentence}"`);
+
+    // That CLOSE reply completes, but says only a generic holding line -- NOT the close
+    // sentence (a live-plausible shape: interrupted/paraphrased/degraded) -- so
+    // `goodbyeConfirmed` stays false. This matters: `sendReplyCreate`'s own UNRELATED
+    // `goodbyeConfirmed` guard (round 5, pre-dating this fix) refuses ANY further send once
+    // the close line is transcript-confirmed, which would otherwise mask this exact race --
+    // a confirmed-goodbye version of this step would not actually exercise the bug.
+    clock.now = 30200;
+    aai.emit({ type: 'reply.started', reply_id: 'close-1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'x-close-1', text: 'One moment.', reply_id: 'close-1', interrupted: false });
+    aai.emit({ type: 'reply.done', reply_id: 'close-1', status: 'completed' });
+
+    // The settle window from c1's OWN fresh question (armed at the very start, 150ms) elapses
+    // now, inside the close-retry gap (CLOSE_RETRY_MIN_GAP_MS = 400ms) -- PROVEN failure mode
+    // (review finding F1):
+    // before the fix, `end()`'s own idle-defer early return left this timer armed,
+    // `this.ended` was still false, and nothing was speaking any more by this point -- it
+    // fired and sent the stale ASK_CHALLENGE question AFTER the caller had already heard the
+    // goodbye.
+    vi.advanceTimersByTime(150);
+    const afterWindow = replyCreatesOf(aai);
+    expect(afterWindow).toHaveLength(1); // still just the one CLOSE send -- nothing stale
+    expect(afterWindow.some((m) => m.instructions === `Say exactly this and nothing else: "${staleSentence}"`)).toBe(false);
+  });
+
+  it('(F1-c) the normal case is unchanged: a fresh question with nothing else ever speaking still sends exactly once, once the settle window elapses', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession(clock, CALL_B, aai, sent);
+    session.start();
+
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+    const sentence = session.last!.goal.challenge!.speak!;
+    expect(replyCreatesOf(aai)).toHaveLength(0);
+
+    vi.advanceTimersByTime(150);
+    const replyCreates = replyCreatesOf(aai);
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${sentence}"`);
+
+    // Advancing further changes nothing -- the timer only ever fires once.
+    vi.advanceTimersByTime(1000);
+    expect(replyCreatesOf(aai)).toHaveLength(1);
+  });
+
+  // F3 (review finding): the PROVEN live shape (2026-09-18, 95b9ad42/32cbb410) -- the
+  // automatic reply is not always a bare holding line; it can ask its OWN unrequested
+  // question ("One moment. Who is calling and what is your authorization code?"). This must
+  // compose exactly like test (b) in the describe block above: no merged send (our own
+  // instructed reply.create never overlaps the ambient one -- these are always two separate,
+  // sequential `reply.create`/`reply.done` cycles, never one word-interleaved reply the way
+  // the live incident's own AssemblyAI-side merge was), and our instructed question sent
+  // right after the ambient reply's own reply.done, carrying our OWN exact sentence, never
+  // the ambient reply's wording.
+  //
+  // `questionMatch.ts`'s own `transcriptAsksQuestion` (unchanged by this fix, pre-existing
+  // since the 2026-09-14 question-reask fix -- see that module's own doc comment) treats ANY
+  // reply whose transcript contains a literal "?" as having satisfied the CURRENT goal's
+  // question-asked bookkeeping, regardless of whose reply it was or what it actually asked --
+  // deliberately lenient, and safe under LAW 3: `recordGoalCompletionAction`'s own comment is
+  // explicit that this only ever lets the engine treat the question as issued (so its own
+  // challenge-selection logic advances), never grades anything -- grading stays exclusively
+  // the caller's own words, via the engine's `gradeChallenges`, completely untouched by this.
+  // So the ambient reply's own "?" here DOES register one `challenge_issued` for this
+  // rendering (not a bug this fix introduces or is scoped to close) -- what this test proves
+  // is the part THIS fix (F1/F3) actually owns: it registers exactly once (not merged into
+  // two, not lost), and our own separate, correctly-sequenced instructed send still goes out
+  // right after, carrying our own exact words.
+  it('(F3) an ambient automatic reply that asks its own unrequested question inside the settle window never merges with ours, and our instructed send still goes out separately, right after its reply.done', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession(clock, CALL_B, aai, sent);
+    session.start();
+
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+    const sentence = session.last!.goal.challenge!.speak!;
+    expect(replyCreatesOf(aai)).toHaveLength(0); // deferred -- settle window not elapsed yet
+    expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(false);
+
+    // The reply that answers first is AssemblyAI's own automatic one -- PROVEN live shape
+    // (95b9ad42/32cbb410, 2026-09-18): not a bare holding line, but its OWN
+    // STANDING_RULES-violating question, never anything any goal in this codebase asks for.
+    clock.now = 1050;
+    aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'x-auto-1',
+      text: 'One moment. Who is calling and what is your authorization code?',
+      reply_id: 'auto-1',
+      interrupted: false,
+    });
+    // No send while 'auto-1' is still in flight -- no merge, no collision: our own reply.create
+    // never overlaps the ambient one, unlike the live incident's single garbled, word-
+    // interleaved reply.
+    expect(replyCreatesOf(aai)).toHaveLength(0);
+
+    clock.now = 1300;
+    aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'completed' });
+
+    // Exactly one challenge_issued for this rendering -- registered once (from 'auto-1's own
+    // "?", per `transcriptAsksQuestion`'s pre-existing lenient matching, unchanged here), not
+    // merged into two and not lost. Our OWN instructed send goes out separately, right after
+    // 'auto-1's own reply.done (the busy-guard catch-up path), carrying OUR exact challenge
+    // sentence -- never the ambient reply's own wording, and never combined with it into one
+    // message.
+    const issued = session.logs.actions.filter((a) => a.kind === 'challenge_issued');
+    expect(issued).toHaveLength(1);
+    const replyCreates = replyCreatesOf(aai);
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${sentence}"`);
+    expect(replyCreates[0]!.instructions).not.toContain('authorization code');
+
+    // No further instructed send -- the settle window elapsing changes nothing further.
+    vi.advanceTimersByTime(1000);
+    expect(replyCreatesOf(aai)).toHaveLength(1);
+    expect(session.logs.actions.filter((a) => a.kind === 'challenge_issued')).toHaveLength(1);
+  });
+});
