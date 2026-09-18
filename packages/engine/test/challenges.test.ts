@@ -1819,6 +1819,89 @@ describe('LIVE_COMMITMENT — a denial that still names the committed value is g
     });
   });
 
+  // REVIEW FINDING (2026-09-19b, PROVEN by the reviewer running the real grader): the
+  // 2026-09-19a attachment fix above only ever checked for a negation immediately BEFORE the
+  // committed value's own span -- so a TRAILING negation after the committed value, followed
+  // by a genuinely different, asserted name ("Marcus Obi? No. Elena Park."), still graded
+  // PASS, because `deniesCommitted` was false (nothing attached right before "Marcus Obi")
+  // and the code returned PASS the instant it saw the committed value present, never checking
+  // whether a real alternate ALSO followed. Restructured (see `gradeLiveCommitment`'s own doc
+  // comment) to compute every alternate-name candidate FIRST and only return PASS once none
+  // of them are ASSERTED (as opposed to themselves negated, e.g. "Marcus Obi, not Elena
+  // Park." -- the negation there attaches to Elena Park, not to Marcus Obi, so it doesn't
+  // count as a real alternate and the reply still PASSes).
+  describe('DEFECT A regression (2026-09-19b review finding): an asserted alternate name FAILs regardless of where a negation sits relative to the committed value', () => {
+    const marcusClaim = claim('c-marcus-b', 'approver', 'STATED', 'Marcus Obi', 1000, 'Marcus Obi approved it');
+    const marcusSpec: ChallengeSpec = {
+      challenge_id: 'p3-marcus-1',
+      kind: 'LIVE_COMMITMENT',
+      field: 'approver',
+      ask: 'Ask the caller to restate the approver they gave earlier. Do not say the value yourself.',
+      speak: 'Can you restate the approver you gave me earlier?',
+      expect: { commitment_claim_id: 'c-marcus-b' },
+    };
+    const marcusActions: AgentAction[] = [issuedAction('amb', 'p3-marcus-1', 2000)];
+
+    it('RED/GREEN: "Marcus Obi? No. Elena Park." -- committed value present, but a trailing negation does not shield the ASSERTED alternate that follows -- FAILs', () => {
+      const conversation = [utt('u1', 3000, 'Marcus Obi? No. Elena Park.')];
+      const result = gradeChallenges(conversation, marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      expect(result['p3-marcus-1']?.result).toBe('FAIL');
+    });
+
+    it('"Marcus Obi, not Elena Park." -- the negation attaches to the OTHER name (Elena Park is negated, not asserted) -- still PASSes under the restructure', () => {
+      const conversation = [utt('u1', 3000, 'Marcus Obi, not Elena Park.')];
+      const result = gradeChallenges(conversation, marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      expect(result['p3-marcus-1']?.result).toBe('PASS');
+    });
+
+    it('regression guard: P1-P4 (2026-09-19a probes) are unaffected by the 2026-09-19b restructure', () => {
+      const p1 = gradeChallenges([utt('u1', 3000, 'No, it was Marcus Obi, like I said.')], marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      expect(p1['p3-marcus-1']?.result).toBe('PASS');
+      const p2 = gradeChallenges([utt('u1', 3000, 'Not Elena, Marcus Obi.')], marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      expect(p2['p3-marcus-1']?.result).toBe('PASS');
+      const p4 = gradeChallenges([utt('u1', 3000, 'No, Marcus Obi.')], marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      expect(p4['p3-marcus-1']?.result).toBe('PASS');
+    });
+
+    it('regression guard: A1/A2/A1b (single- and two-word committed, denial shapes) are unaffected by the restructure', () => {
+      const singleClaim = claim('c-approver-2t', 'approver', 'STATED', 'Marcus', 1000, 'Marcus approved it');
+      const singleSpec: ChallengeSpec = { ...marcusSpec, challenge_id: 'p3-single-1', expect: { commitment_claim_id: 'c-approver-2t' } };
+      const singleActions: AgentAction[] = [issuedAction('ast', 'p3-single-1', 2000)];
+      const a1 = gradeChallenges([utt('u1', 3000, 'I never said Marcus, it was Elena.')], singleActions, [singleSpec], SEED, [singleClaim]);
+      expect(a1['p3-single-1']?.result).toBe('FAIL');
+      const a2 = gradeChallenges([utt('u1', 3000, 'I never said Marcus.')], singleActions, [singleSpec], SEED, [singleClaim]);
+      expect(a2['p3-single-1']?.result).toBe('AMBIGUOUS');
+      const bareTwoWord = gradeChallenges([utt('u1', 3000, 'I never said Marcus Obi.')], marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      expect(bareTwoWord['p3-marcus-1']?.result).toBe('AMBIGUOUS');
+    });
+  });
+
+  // TWO PRE-EXISTING GAPS (2026-09-19b review finding, found by the reviewer, explicitly NOT
+  // fixed in this lane -- documented here per the reviewer's own instruction so they can be
+  // boarded separately):
+  describe('DEFECT A -- known gaps, documented but NOT fixed here (boarded separately)', () => {
+    const marcusClaim = claim('c-marcus-gap', 'approver', 'STATED', 'Marcus Obi', 1000, 'Marcus Obi approved it');
+    const marcusSpec: ChallengeSpec = {
+      challenge_id: 'p3-gap-1',
+      kind: 'LIVE_COMMITMENT',
+      field: 'approver',
+      ask: 'Ask the caller to restate the approver they gave earlier. Do not say the value yourself.',
+      speak: 'Can you restate the approver you gave me earlier?',
+      expect: { commitment_claim_id: 'c-marcus-gap' },
+    };
+    const marcusActions: AgentAction[] = [issuedAction('agap', 'p3-gap-1', 2000)];
+
+    it('GAP (documented, not fixed): "It wasn\'t Marcus Obi." wrongly PASSes -- negate_lexicon has no contractions; normalizeText turns "wasn\'t" into "wasnt", which is not a recognized negation trigger', () => {
+      const result = gradeChallenges([utt('u1', 3000, "It wasn't Marcus Obi.")], marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      expect(result['p3-gap-1']?.result).toBe('PASS'); // documents the gap; NOT the desired behavior
+    });
+
+    it('side effect of the 2026-09-19b fix (verified, not deliberately targeted): a standalone "Not Marcus Obi." now grades AMBIGUOUS instead of the old FAIL -- the same "not"/"no"-prefixed capMatch-span filter added for P2 also stops it from being misread as its own two-word name', () => {
+      const result = gradeChallenges([utt('u1', 3000, 'Not Marcus Obi.')], marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      expect(result['p3-gap-1']?.result).toBe('AMBIGUOUS');
+    });
+  });
+
   describe('DEFECT A4: regression guard -- TRAP_FACT grading of a negated true value is unchanged by this fix', () => {
     // gradeTrapFact is untouched by this fix; this only proves it still behaves as
     // documented: mentioning the TRUE value is always PASS for a TRAP_FACT challenge,

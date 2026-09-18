@@ -927,68 +927,80 @@ function gradeLiveCommitment(
     // branch did, with no negation awareness -- so a reply that DENIES having given the
     // committed value while still naming it ("I never said Marcus, it was Elena.") matched
     // `normText.includes(committedNorm)` and graded PASS, exactly like an honest restatement.
+    // FIX (2026-09-19a, review finding): a bare negation-proximity check for `deniesCommitted`
+    // then wrongly FAILed an honest restatement whenever a negate word merely landed near the
+    // committed value ("No, it was Marcus Obi, like I said.").
     //
-    // FIX (2026-09-19, review finding, PROVEN false-positive by running this grader for real:
-    // "No, it was Marcus Obi, like I said." / "Not Elena, Marcus Obi." / "That is not
-    // something I'd get wrong -- Robert Miller." all wrongly FAILed an honest restatement):
-    // `deniesCommitted` originally reused `negateNearTrapValue`'s PROXIMITY check (any
-    // negate-lexicon word within 4 tokens of the committed value, either direction) --
-    // correct for TRAP_FACT (`gradeTrapFact`, UNCHANGED here), where a trap value is
-    // something the AGENT asserted and ANY nearby negation legitimately signals the caller
-    // rejecting it, but wrong here: a LIVE_COMMITMENT reply can legitimately carry a
-    // negation word NEAR the committed value while still asserting that value as the answer
-    // -- "No," as a bare discourse interjection, a negation attached to a DIFFERENT name
-    // ("Not Elena, Marcus Obi" -- "not" attaches to Elena, correcting TO Marcus Obi), or a
-    // negation attached to an unrelated aside ("...I'd get wrong -- Robert Miller"). Replaced
-    // with `negationAttachedToCommittedValue` (below), which checks ATTACHMENT, not mere
-    // proximity: only when a negation phrase's own tokens end IMMEDIATELY (zero gap) before
-    // the committed value's own token span. Local to this branch only.
-    const deniesCommitted = normText.includes(committedNorm) && negationAttachedToCommittedValue(normText, committedNorm);
-    if (!deniesCommitted && normText.includes(committedNorm)) return 'PASS';
-
+    // FIX (2026-09-19b, second review finding, PROVEN false-positive by running this grader
+    // for real: "Marcus Obi? No. Elena Park." graded PASS when it must FAIL -- the committed
+    // value IS present, but so is a genuinely different, ASSERTED name after a trailing "No."):
+    // restructured entirely around ASSERTED-OCCURRENCE, not "does the committed value merely
+    // appear" first. `hasAssertedOccurrence` (below) is the one negation primitive: a value's
+    // own token span occurs at a position NOT immediately preceded by "not" or the two-word
+    // phrase "never said" (this codebase's fixed vocabulary for "I did not give X" -- no new
+    // negation shapes added here, same as 2026-09-19a). Order now is: (1) find every
+    // ALTERNATE-name candidate the reply could contain (cued-verb hits, bare two-capitalized-
+    // word spans, seed-known phrases, seed-known words) -- an alternate is only counted if
+    // ASSERTED (that occurrence's own text is not itself negated, e.g. "Marcus Obi, not Elena
+    // Park." does NOT count "Elena Park" -- the negation attaches to IT, not to Marcus Obi);
+    // any ASSERTED alternate anywhere in the reply is FAIL, full stop, regardless of where a
+    // negation elsewhere sits relative to the committed value (this is what fixes "Marcus Obi?
+    // No. Elena Park." -- the trailing "No." never attaches to "Elena Park" as a rejection of
+    // it, so "Elena Park" is asserted, so FAIL); (2) only once NO alternate is asserted does
+    // the committed value's OWN assertedness decide PASS vs AMBIGUOUS -- present and asserted
+    // is PASS, present but only as a negated occurrence ("I never said Marcus.") is AMBIGUOUS,
+    // absent entirely is AMBIGUOUS. TRAP_FACT/`gradeTrapFact`/`negateNearTrapValue` untouched.
     const cued = extractCuedNames(rawText).filter((h) => h.field === field);
-    for (const hit of cued) {
-      if (normalizeText(hit.value) !== committedNorm) return 'FAIL';
-    }
-    const capMatch = rawText.match(/\b[A-Z][A-Za-z.']*\s+[A-Z][A-Za-z.']*\b/);
-    if (capMatch && normalizeText(capMatch[0]) !== committedNorm) return 'FAIL';
+    // Cue-verb patterns ("approved by X" / "X approved") are inherently directive within this
+    // narrow extraction grammar -- there is no negated form of them to distinguish, so any hit
+    // differing from the committed value always counts (unchanged from before this restructure).
+    const assertedCuedAlt = cued.some((h) => normalizeText(h.value) !== committedNorm);
 
-    if (deniesCommitted) {
-      // A denial that offers no cue-verb-anchored alternate name (caught above) can still
-      // carry a cue-less same-breath swap ("it was Elena") -- the exact shape `hasNameSignal`'s
-      // own doc comment already names as a known gap for a bare seed-known single word with no
-      // cue verb to anchor an `extractCuedNames` hit. Recognized here the same way
-      // `hasNameSignal` recognizes it elsewhere (seed-known person/org whole phrases, or a
-      // seed-known PERSON name word), EXCLUDING any seed phrase whose words are ALL contained
-      // in the committed value's own words -- so a bare "I never said Marcus." (no alternative
-      // at all) does NOT count "marcus" against itself and correctly falls through to
-      // AMBIGUOUS, once, below; only a genuinely DIFFERENT seed-known name in the same reply
-      // makes this FAIL, the same direction as an explicit wrong-name restatement.
-      //
-      // FIX (2026-09-19, review finding): the original guard excluded only the exact full
-      // `committedNorm` phrase (`phrase !== committedNorm`), not the seed's own single-word
-      // ALIAS phrases that are part of the committed name -- `seedNameTokens`/`addPersonName`
-      // adds an identity's alias ("marcus") as its own whole phrase, distinct from the full
-      // name phrase ("marcus obi") -- so for a two-word committed value, a bare denial with NO
-      // alternative at all ("I never said Marcus Obi.") would see its own alias "marcus"
-      // survive the `!== committedNorm` filter and wrongly count as an "alternate" name.
-      // Fixed by excluding any phrase whose words are entirely a subset of the committed
-      // value's own words, not just the one phrase that happens to equal it exactly.
-      const known = seedNameTokens(seed);
-      const committedWords = new Set(committedNorm.split(' ').filter(Boolean));
-      const hasAltPhrase = known.phrases.some((phrase) => {
-        const phraseWords = phrase.split(' ').filter(Boolean);
-        if (phraseWords.length > 0 && phraseWords.every((w) => committedWords.has(w))) return false;
-        return hasNamePhrase(normText, [phrase]);
-      });
-      const hasAltWord = normText
-        .split(' ')
-        .filter(Boolean)
-        .some((w) => known.words.has(w) && !committedWords.has(w));
-      if (hasAltPhrase || hasAltWord) return 'FAIL';
-    }
+    // FIX (2026-09-19b): sentence-initial "Not <Name>"/"No <Name>" collides with the bare
+    // two-capitalized-word span check (a separate, PRE-EXISTING gap -- a STANDALONE "Not
+    // Marcus Obi" reply misreads as a two-word name and FAILs instead of AMBIGUOUS; not fixed
+    // here, reported separately) -- filtered out here only so it can never be double-counted
+    // as a SECOND, spurious alternate-name candidate in a reply that also contains a genuine
+    // alternate, e.g. "Not Elena, Marcus Obi." must never let "Not Elena" itself register
+    // alongside the real "Elena" alt-name check below.
+    const capSpans = [...rawText.matchAll(/\b[A-Z][A-Za-z.']*\s+[A-Z][A-Za-z.']*\b/g)]
+      .map((m) => normalizeText(m[0]))
+      .filter((spanNorm) => spanNorm.length > 0 && !/^(?:not|no)\s/.test(spanNorm));
+    const assertedCapAlt = capSpans.some((spanNorm) => spanNorm !== committedNorm && hasAssertedOccurrence(normText, spanNorm));
 
-    return 'AMBIGUOUS';
+    // Seed-known name signal (same shape `hasNameSignal` uses elsewhere): a whole seeded
+    // person/org/place phrase, or a single word from a seeded PERSON name, EXCLUDING any
+    // phrase/word that is itself part of the committed value's own words (so the committed
+    // value's own alias, e.g. "marcus" as part of "marcus obi", is never counted against
+    // itself -- FIX 2026-09-19a, unchanged here).
+    const known = seedNameTokens(seed);
+    const committedWords = new Set(committedNorm.split(' ').filter(Boolean));
+    const altPhraseCandidates = known.phrases.filter((phrase) => {
+      const phraseWords = phrase.split(' ').filter(Boolean);
+      if (phraseWords.length > 0 && phraseWords.every((w) => committedWords.has(w))) return false;
+      return hasNamePhrase(normText, [phrase]);
+    });
+    const assertedAltPhrase = altPhraseCandidates.some((phrase) => hasAssertedOccurrence(normText, phrase));
+
+    // FIX (2026-09-19b): a bare single-word check must not independently re-flag the SECOND
+    // word of a multi-word name already handled (and found negated) at the phrase level above
+    // -- "Marcus Obi, not Elena Park.": checking "park" in isolation, its own immediate
+    // predecessor is "elena" (not a negation trigger), so a naive per-word check would wrongly
+    // call it asserted even though the whole "Elena Park" span is negated. Skipped here
+    // whenever the immediately preceding token is ALSO a known seed-name word -- that pair is
+    // already covered by `altPhraseCandidates` above.
+    const tokens = normText.split(' ').filter(Boolean);
+    const altWordCandidates = tokens.filter((w, idx) => {
+      if (!known.words.has(w) || committedWords.has(w)) return false;
+      const prev = idx > 0 ? tokens[idx - 1] : undefined;
+      return prev === undefined || !known.words.has(prev);
+    });
+    const assertedAltWord = altWordCandidates.some((w) => hasAssertedOccurrence(normText, w));
+
+    if (assertedCuedAlt || assertedCapAlt || assertedAltPhrase || assertedAltWord) return 'FAIL';
+
+    if (!normText.includes(committedNorm)) return 'AMBIGUOUS';
+    return hasAssertedOccurrence(normText, committedNorm) ? 'PASS' : 'AMBIGUOUS';
   }
   return normText.includes(committedNorm) ? 'PASS' : 'AMBIGUOUS';
 }
@@ -1064,44 +1076,55 @@ function negateNearTrapValue(normText: string, trapValueNorm: string, seed: Seed
   return false;
 }
 
-/** FIX (2026-09-19, LIVE_COMMITMENT-denial lane, review finding): is a negation ATTACHED to
- *  `committedNorm` -- i.e. is the caller denying THIS value specifically -- as opposed to a
- *  negation word merely occurring somewhere nearby in the reply? Used only by
- *  `gradeLiveCommitment`'s name-field branch (see its own doc comment for the full false-
- *  positive this replaces: `negateNearTrapValue`'s proximity check read "No, it was Marcus
- *  Obi, like I said." / "Not Elena, Marcus Obi." / "...I'd get wrong -- Robert Miller." as
- *  denials of the committed value purely because a negate-lexicon word landed within 4 tokens
- *  of it, in either direction, with no regard for what the negation actually modifies).
+/** FIX (2026-09-19a, LIVE_COMMITMENT-denial lane, review finding; RESTRUCTURED 2026-09-19b,
+ *  second review finding): is `valueNorm`'s own token span present in `normText` at a
+ *  position that is ASSERTED -- i.e. NOT immediately preceded by a negation phrase attached
+ *  to it -- as opposed to merely occurring somewhere in the reply? Used by
+ *  `gradeLiveCommitment`'s name-field branch for BOTH the committed value itself and every
+ *  candidate alternate-name signal (see that branch's own doc comment for the two false-
+ *  positives this fixes in sequence: `negateNearTrapValue`'s proximity check originally read
+ *  "No, it was Marcus Obi, like I said." / "Not Elena, Marcus Obi." / "...I'd get wrong --
+ *  Robert Miller." as denials purely because a negate-lexicon word landed within 4 tokens,
+ *  either direction, with no regard for what the negation modifies; the first, narrower
+ *  attachment-only fix then missed "Marcus Obi? No. Elena Park." -- a TRAILING negation
+ *  after the committed value, followed by a genuinely different, asserted name -- because it
+ *  only ever checked attachment immediately BEFORE the committed value, never asked whether
+ *  an ALTERNATE name elsewhere in the reply was itself asserted or negated).
  *
- *  Deliberately narrow, by design: only fires when a negation phrase's own tokens end
- *  IMMEDIATELY (zero-token gap) before the committed value's own token span starts --
- *   - bare "not" directly preceding the value ("not Marcus Obi") -- "not" grammatically
- *     negates whatever follows it directly, unlike bare "no" (a free-standing discourse
- *     interjection in natural speech, e.g. "No, it was X" / "No, X" -- never treated as
- *     attached here, which is exactly what keeps "No, Marcus Obi." and "No, it was Marcus
- *     Obi, like I said." both PASSing);
- *   - the two-word phrase "never said" directly preceding the value ("never said Marcus
- *     Obi") -- this codebase's own fixed way (b89f933, DENIAL_OF_COMMITMENT_RE) of saying
- *     "I did not state X", regardless of what comes after.
- *  Any OTHER negate-lexicon word ("wrong", "incorrect", "that's not") landing next to the
- *  value is deliberately NOT treated as attachment -- PROVEN too loose by "That is not
- *  something I'd get wrong -- Robert Miller.": "wrong" sits immediately before "Robert
- *  Miller" there purely as a self-deprecating aside ("I would not get this wrong"), not as a
- *  rejection of the name that follows, and a token-adjacency rule for that word alone cannot
- *  tell the two apart. Only checks the value immediately AFTER a negation (not negation
- *  immediately after the value) -- every probe this fixes, and both regression guards (A1's
- *  "I never said Marcus Obi, it was Elena Park." and A2's "I never said Marcus."), are this
- *  shape; widening further is left for a future, separately-tested case rather than guessed
- *  at here. */
-function negationAttachedToCommittedValue(normText: string, committedNorm: string): boolean {
-  if (committedNorm.length === 0) return false;
+ *  Deliberately narrow, by design, same two triggers as the 2026-09-19a fix -- no new
+ *  negation shapes added in this restructure:
+ *   - bare "not" directly preceding the value's own span ("not Marcus Obi") -- "not"
+ *     grammatically negates whatever follows it directly, unlike bare "no" (a free-standing
+ *     discourse interjection in natural speech, e.g. "No, it was X" / "No, X" -- never
+ *     treated as attached, which is what keeps "No, Marcus Obi." and "No, it was Marcus Obi,
+ *     like I said." both PASSing, and -- checked against the value "Elena Park" rather than
+ *     the committed value -- what makes "Marcus Obi? No. Elena Park." FAIL: "no" doesn't
+ *     attach to "Elena Park" either, so that occurrence of "Elena Park" reads as ASSERTED);
+ *   - the two-word phrase "never said" directly preceding the value's own span ("never said
+ *     Marcus Obi") -- this codebase's own fixed way (b89f933, DENIAL_OF_COMMITMENT_RE) of
+ *     saying "I did not state X", regardless of what comes after.
+ *  Any OTHER negate-lexicon word ("wrong", "incorrect", "that's not") landing next to a value
+ *  is deliberately NOT treated as attachment -- PROVEN too loose by "That is not something
+ *  I'd get wrong -- Robert Miller.": "wrong" sits immediately before "Robert Miller" there
+ *  purely as a self-deprecating aside, not a rejection of the name that follows.
+ *
+ *  Checks EVERY occurrence of `valueNorm` and returns true as soon as ONE of them is
+ *  asserted (a value mentioned twice, once negated and once asserted, still counts as
+ *  asserted overall -- the caller DID, somewhere in the reply, offer it as real). Only ever
+ *  checks the value immediately AFTER a negation (not a negation immediately after the
+ *  value) -- every probe fixed by either lane, and every regression guard, is this shape;
+ *  widening further is left for a future, separately-tested case rather than guessed at
+ *  here. */
+function hasAssertedOccurrence(normText: string, valueNorm: string): boolean {
+  if (valueNorm.length === 0) return false;
   const tokens = normText.split(' ').filter(Boolean);
-  const committedTokens = committedNorm.split(' ').filter(Boolean);
-  if (committedTokens.length === 0) return false;
-  for (let i = 0; i + committedTokens.length <= tokens.length; i++) {
-    if (!committedTokens.every((t, j) => tokens[i + j] === t)) continue;
-    if (i >= 1 && tokens[i - 1] === 'not') return true;
-    if (i >= 2 && tokens[i - 2] === 'never' && tokens[i - 1] === 'said') return true;
+  const valueTokens = valueNorm.split(' ').filter(Boolean);
+  if (valueTokens.length === 0) return false;
+  for (let i = 0; i + valueTokens.length <= tokens.length; i++) {
+    if (!valueTokens.every((t, j) => tokens[i + j] === t)) continue;
+    const precededByNot = i >= 1 && tokens[i - 1] === 'not';
+    const precededByNeverSaid = i >= 2 && tokens[i - 2] === 'never' && tokens[i - 1] === 'said';
+    if (!precededByNot && !precededByNeverSaid) return true;
   }
   return false;
 }
