@@ -1,0 +1,235 @@
+{
+  "title": "Re-ask reopens the window: an honest caller answers right after the re-issue, not left hanging",
+  "description": "FIX (2026-09-18, reask-window lane, P0 -- founder-observed live defect, motivated by scripts/rehearse/reports/founder-2026-09-18/da346951-c57a-4e53-8cbe-11fa6d039427.diagnostics.json). Dana calls with the same opening line as terse-answers-stage.json (identity, approver, beneficiary, amount, account all stated up front). The approver TRAP_FACT challenge is issued, but the caller says NOTHING at all for the full 15s answer window -- the server correctly re-asks the SAME question (a fresh challenge_issued action carrying the SAME challenge_id, the server-side binding fix of 2026-09-18), and only THEN does the caller reply ('It was Marcus.', the same honest-but-cue-less correction terse-answers-stage.json already proves grades AMBIGUOUS, not PASS or FAIL). Before this fix, `gradeChallenges` anchored the answer window on the ORIGINAL issuance action, never the re-issue, so the re-ask had no effect at all: this exact reply, arriving well after `challenge_answer_window_ms` had elapsed from the ORIGINAL issuance, would already have been graded UNANSWERED the instant the re-issue was logged, before the caller had any real chance to answer it -- turning an honest caller's own (if late) reply into a stale, wrongly-timed-out card. This fixture proves the reissue is a no-op for the FINAL, single-shot verdict this file's own `expected` block checks (root-caused and explained in test/challenges.test.ts's own describe block, since a static corpus replay -- one `evaluate()` call over the complete final log -- cannot itself distinguish the pre-fix and post-fix behavior: both only see the caller's reply once it exists in the log, and both grade it the same way once it's there; the actual defect was only observable INTERMEDIATE-state, tick-by-tick, and is covered by the unit tests). What this fixture DOES prove, end to end through the real engine (not a copy): a same-challenge_id re-issue action never corrupts `reconstructIssued`'s existing dedup (one knowledge_check_result card for the approver challenge, not two), the caller's honest late reply still grades correctly (AMBIGUOUS, same as the un-delayed original), and the call still reaches STAGE. The caller's readback confirmation of the amount is the founder's own verbatim word from that live call ('Yes.', LAW 4) -- reused here in the role it actually fits (a bare readback confirmation), not forced into the knowledge-check content it did not answer live.",
+  "call": {
+    "session_id": "sess-reask-yes",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury. This has been approved by Marcus Obi. I need to wire it to Meridian Supply, $84,500, account ending 4471.",
+      "t_ms": 1000
+    },
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "Just to confirm, this was approved by Northgate Partners. Is that correct?",
+      "t_ms": 1200
+    },
+    {
+      "id": "a1b",
+      "speaker": "agent",
+      "text": "Just to confirm, this was approved by Northgate Partners. Is that correct?",
+      "t_ms": 16600
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "Sorry -- it was Marcus.",
+      "t_ms": 17200
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "Can you give me the last four digits of the account attached to the beneficiary you named?",
+      "t_ms": 17400
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "Forty-four, seventy-one.",
+      "t_ms": 17600
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "To confirm: $84,500. Is that right?",
+      "t_ms": 17800
+    },
+    {
+      "id": "c4",
+      "speaker": "caller",
+      "text": "Yes.",
+      "t_ms": 18000
+    },
+    {
+      "id": "a4",
+      "speaker": "agent",
+      "text": "And the account ending 4471, correct?",
+      "t_ms": 18200
+    },
+    {
+      "id": "c5",
+      "speaker": "caller",
+      "text": "Yes, correct.",
+      "t_ms": 18400
+    },
+    {
+      "id": "a5",
+      "speaker": "agent",
+      "text": "And Meridian Supply is the beneficiary, correct?",
+      "t_ms": 18600
+    },
+    {
+      "id": "c6",
+      "speaker": "caller",
+      "text": "Yes, that's right.",
+      "t_ms": 18800
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 19300,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 19400,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "known_vendors": [
+          "Meridian Supply"
+        ],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 19500,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "ch1",
+      "kind": "challenge_issued",
+      "t_ms": 1200,
+      "challenge_id": "sess-reask-yes-1",
+      "spec": {
+        "challenge_id": "sess-reask-yes-1",
+        "kind": "TRAP_FACT",
+        "field": "approver",
+        "ask": "Confirm the request back to the caller as if summarizing, but say \"Northgate Partners\" in place of their approver, then pause.",
+        "speak": "Just to confirm, this was approved by Northgate Partners. Is that correct?",
+        "expect": {
+          "trap_value": "Northgate Partners",
+          "true_claim_id": "cl-4"
+        }
+      }
+    },
+    {
+      "id": "ch1b",
+      "kind": "challenge_issued",
+      "t_ms": 16600,
+      "challenge_id": "sess-reask-yes-1",
+      "spec": {
+        "challenge_id": "sess-reask-yes-1",
+        "kind": "TRAP_FACT",
+        "field": "approver",
+        "ask": "Confirm the request back to the caller as if summarizing, but say \"Northgate Partners\" in place of their approver, then pause.",
+        "speak": "Just to confirm, this was approved by Northgate Partners. Is that correct?",
+        "expect": {
+          "trap_value": "Northgate Partners",
+          "true_claim_id": "cl-4"
+        }
+      }
+    },
+    {
+      "id": "ch2",
+      "kind": "challenge_issued",
+      "t_ms": 17400,
+      "challenge_id": "sess-reask-yes-2",
+      "spec": {
+        "challenge_id": "sess-reask-yes-2",
+        "kind": "RELATIONAL",
+        "field": "account_last4",
+        "ask": "Ask for the last four digits of the account attached to the beneficiary they named.",
+        "speak": "Can you give me the last four digits of the account attached to the beneficiary you named?",
+        "expect": {
+          "accept_tokens": [
+            "4471"
+          ]
+        }
+      }
+    },
+    {
+      "id": "r1",
+      "kind": "readback_issued",
+      "t_ms": 17800,
+      "field": "amount_usd",
+      "value": "84500"
+    },
+    {
+      "id": "r2",
+      "kind": "readback_issued",
+      "t_ms": 18200,
+      "field": "account_last4",
+      "value": "4471"
+    },
+    {
+      "id": "r3",
+      "kind": "readback_issued",
+      "t_ms": 18600,
+      "field": "beneficiary",
+      "value": "Meridian Supply"
+    }
+  ],
+  "expected": {
+    "verdict": "STAGE",
+    "state": "ACTION",
+    "reasons": [],
+    "failure_tally": 0.5,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": true,
+      "critical_fields_confirmed": true,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": true,
+      "no_injection_attempt": true
+    }
+  }
+}

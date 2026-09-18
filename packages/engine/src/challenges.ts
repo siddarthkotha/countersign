@@ -725,7 +725,38 @@ export function isAnswerShapedFor(spec: ChallengeSpec, rawText: string, seed: Se
  *  against was the seeded `max_challenge_reasks`, but the window this function collected
  *  was always capped at literal 2 regardless of what the seed said, so a seed configured
  *  with a different `max_challenge_reasks` had no actual effect on either the window size
- *  or the grading cap it feeds. */
+ *  or the grading cap it feeds.
+ *
+ *  FIX (2026-09-18, reask-window lane -- P0, PROVEN by the founder's live call
+ *  scripts/rehearse/reports/founder-2026-09-18/da346951-c57a-4e53-8cbe-11fa6d039427.diagnostics.json
+ *  and, at the unit level, by packages/server/test/challenge-issued-reask-binding.test.ts's own
+ *  documented "KNOWN GAP, not this fix's scope"): `issuedAction` passed in here must be the MOST
+ *  RECENT `challenge_issued` action for this challenge_id (see `gradeChallenges`'s own
+ *  anchor-selection fix, right below where this function is called) -- before this fix,
+ *  `gradeChallenges` anchored on the FIRST-ever action for a challenge_id instead, so a re-ask
+ *  (a fresh action, same challenge_id, per the 2026-09-15 fix noted above) had NO effect on this
+ *  function OR `challengeReplyWindowStatus`: the answer window was always measured from the
+ *  ORIGINAL issuance, never the re-issue that's supposed to re-open it. Concretely, a challenge
+ *  whose re-ask reply had not yet arrived was reported UNANSWERED (via `challengeReplyWindowStatus`)
+ *  the instant it was checked, even a single millisecond after the re-ask, purely because real
+ *  elapsed time since the ORIGINAL issuance had already exceeded the window -- exactly the
+ *  founder's live shape. Design intent (this fix's own task brief): an utterance grades against
+ *  at most one challenge -- the most recently issued (or re-issued) challenge whose window is
+ *  OPEN at that utterance's time; a re-issue of the same id re-opens/extends that id's window
+ *  FROM THE RE-ISSUE TIME and closes nothing else (the whole point of a re-ask: a card that was
+ *  UNANSWERED at the original window's expiry can still be answered by the first eligible
+ *  utterance after the re-issue). This function's own bounding rule (only a genuinely DIFFERENT
+ *  challenge_issued or a readback_issued action closes the window) is otherwise UNCHANGED --
+ *  several existing corpus fixtures depend on a caller reply arriving well after
+ *  `challenge_answer_window_ms` from issuance still being graded as long as nothing genuinely
+ *  different has bounded the window since. A version of this fix that ALSO capped this
+ *  function's own upper bound at `issuedAction.t_ms + windowMs` (closing it purely on elapsed
+ *  time, even with eligible utterances present) was written and is PROVEN, by `npm test`, to
+ *  break three of those fixtures (corrected-critical-field-freeplay-no-identity-switch.json,
+ *  single-wrong-answer-freeplay-failed-challenge-blocks-stage.json,
+ *  single-wrong-answer-volunteered-escalates.json) -- reverted; see the CONFLICT note on the
+ *  matching describe block in test/challenges.test.ts for the full reasoning, reported to the
+ *  founder as a residual, deliberately-not-closed gap rather than chosen silently. */
 function eligibleUtterances(
   conversation: Utterance[],
   actions: AgentAction[],
@@ -1080,7 +1111,18 @@ export function gradeChallenges(
   const out: Record<string, { result: ChallengeResult; quote?: Quote; eligible_utterance_ids: string[] }> = {};
 
   for (const spec of issued) {
-    const issuedAction = actions.find((a) => a.kind === 'challenge_issued' && a.challenge_id === spec.challenge_id);
+    // FIX (2026-09-18, reask-window lane): anchor on the MOST RECENT `challenge_issued`
+    // action for this challenge_id, never the first. A re-ask (server/call/session.ts's
+    // `recordGoalCompletionAction`, post its own 2026-09-18 binding fix) logs a fresh action
+    // with the SAME challenge_id every time the question is actually re-spoken -- using the
+    // first (original) issuance as the anchor here ignored every re-ask entirely, so
+    // `eligibleUtterances`/`challengeReplyWindowStatus` always measured the answer window from
+    // the ORIGINAL issuance, never the re-issue that's supposed to re-open it. See
+    // `eligibleUtterances`'s own doc comment for the full defect and design intent.
+    const issuedAction = actions.reduce<AgentAction | undefined>((latest, a) => {
+      if (a.kind !== 'challenge_issued' || a.challenge_id !== spec.challenge_id) return latest;
+      return latest === undefined || a.t_ms > latest.t_ms ? a : latest;
+    }, undefined);
     if (!issuedAction) {
       out[spec.challenge_id] = { result: 'UNANSWERED', eligible_utterance_ids: [] };
       continue;

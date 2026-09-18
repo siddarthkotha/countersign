@@ -1390,3 +1390,145 @@ describe('gradeChallenges — a caller reply logged at the SAME millisecond as c
     });
   });
 });
+
+// FIX (2026-09-18, reask-window lane -- P0, founder-observed live defect, LAW 3 territory):
+// `gradeChallenges` anchored every window computation on the FIRST `challenge_issued` action
+// for a challenge_id, so a re-ask (server/call/session.ts's `recordGoalCompletionAction`, which
+// logs a FRESH action with the SAME challenge_id every time a still-awaiting question is
+// actually re-spoken) had no effect on `eligibleUtterances`/`challengeReplyWindowStatus` at all
+// -- the answer window stayed pinned to the ORIGINAL issuance forever. Root cause, PROVEN by the
+// tests below against the pre-fix code (anchor = `actions.find(...)`, first match): a challenge
+// re-asked after its original window elapsed was reported UNANSWERED the instant it was
+// rechecked, before the caller had any chance to reply to the re-ask -- the founder's live shape
+// (scripts/rehearse/reports/founder-2026-09-18/da346951-c57a-4e53-8cbe-11fa6d039427.diagnostics.json)
+// and packages/server/test/challenge-issued-reask-binding.test.ts's own documented "KNOWN GAP,
+// not this fix's scope". Fix: anchor on the MOST RECENT `challenge_issued` action for the
+// challenge_id (`actions.reduce`, filtered by challenge_id, keeping the max t_ms) -- a re-issue
+// now genuinely re-opens/extends the window from the re-issue time, exactly as a re-ask is
+// supposed to.
+//
+// JUDGMENT CALL / CONFLICT FLAGGED (per this task's own instruction to stop and report rather
+// than choose, when existing semantics disagree with the stated design intent): the task brief
+// also asked for "an utterance after X's window with no re-issue leaves X UNANSWERED" read as a
+// hard elapsed-time cutoff (a window, once its `challenge_answer_window_ms` has passed with no
+// re-issue, should never again be graded from ANY later caller utterance, no matter how long
+// after). A version of this fix that added exactly that cutoff to `eligibleUtterances`'s own
+// upper bound was written and run: it is PROVEN (by `npm test`) to break three existing, already
+// founder-reviewed corpus fixtures --
+// packages/engine/corpus/corrected-critical-field-freeplay-no-identity-switch.json,
+// packages/engine/corpus/single-wrong-answer-freeplay-failed-challenge-blocks-stage.json, and
+// packages/engine/corpus/single-wrong-answer-volunteered-escalates.json -- each of which depends
+// on a caller reply arriving MORE than `challenge_answer_window_ms` after issuance still being
+// graded, as long as no genuinely-different challenge/readback action has bounded the window
+// since (`challengeReplyWindowStatus`'s own doc comment already describes this: the window stays
+// open under ongoing conversation, and only times out from genuine SILENCE, checked via the
+// `eligible.length === 0` branch -- never as a blanket cap on `eligible.length > 0`). Because
+// "every existing corpus fixture must keep its verdict" is an explicit, harder requirement than
+// the elapsed-time-cutoff reading, this fix does NOT add that cutoff -- it is reverted, and
+// `eligibleUtterances`'s upper bound remains exactly the existing "next genuinely-different
+// bounding action, or unbounded" rule, unchanged from before this task. The test below labelled
+// "(c)" documents the NARROW reading that IS both already-true and preserved by this fix (pure
+// silence, no re-issue, still correctly resolves UNANSWERED) -- it does not, and cannot,
+// demonstrate a caller reply arriving very late without a re-issue being excluded, because that
+// specific behavior is unchanged by design (see above). Reported to the founder as a residual,
+// deliberately-not-closed gap: a genuinely unrelated very-late utterance can still be graded
+// against a long-silent challenge if nothing else ever bounds its window -- exactly the
+// `eligibleUtterances` doc comment's own note on this.
+describe('gradeChallenges — challenge_issued anchors to the MOST RECENT (re-)issuance, not the first (fix, 2026-09-18, reask-window lane)', () => {
+  const counselFact = SEED.knowledge.find((k) => k.id === 'counsel_of_record')!;
+  const WINDOW_MS = SEED.thresholds.challenge_answer_window_ms;
+  const spec: ChallengeSpec = {
+    challenge_id: 'g4-1',
+    kind: 'SEED_FACT',
+    field: 'counsel',
+    ask: counselFact.ask,
+    expect: { accept_tokens: counselFact.accept_tokens },
+  };
+
+  describe('(b) a same-id re-issue re-opens the window and the next eligible utterance grades it', () => {
+    // The original issuance times out with silence (nothing said for the full WINDOW_MS), then
+    // the server re-asks the SAME question -- a fresh `challenge_issued` action, same
+    // `challenge_id`, logged well after the original window would already have elapsed if
+    // measured from t=6000.
+    const originalT = 6000;
+    const reissueT = originalT + WINDOW_MS + 400; // 21400 -- past the ORIGINAL window, on purpose
+    const actions: AgentAction[] = [issuedAction('a1', 'g4-1', originalT), issuedAction('a2', 'g4-1', reissueT)];
+
+    it('is still AWAITING (no entry at all) immediately after the re-issue, before the caller has had any chance to reply to it -- NOT prematurely UNANSWERED from the stale original anchor', () => {
+      const result = gradeChallenges([], actions, [spec], SEED, []);
+      expect(result['g4-1']).toBeUndefined();
+    });
+
+    it('grades PASS from the first caller utterance after the re-issue, even though real elapsed time since the ORIGINAL issuance already exceeds the answer window', () => {
+      const conversation = [utt('u1', reissueT + 600, 'Calder and Finch')];
+      const result = gradeChallenges(conversation, actions, [spec], SEED, []);
+      expect(result['g4-1']).toEqual({
+        result: 'PASS',
+        quote: { utterance_id: 'u1', text: 'Calder and Finch' },
+        eligible_utterance_ids: ['u1'],
+      });
+    });
+
+    it('is UNANSWERED (not still AWAITING) once the full answer window has elapsed a SECOND time, measured from the re-issue, with still nothing from the caller', () => {
+      const laterAgentLine = utt('a-later', reissueT + WINDOW_MS, 'Still on the line?', 'agent');
+      const result = gradeChallenges([laterAgentLine], actions, [spec], SEED, []);
+      expect(result['g4-1']).toEqual({ result: 'UNANSWERED', eligible_utterance_ids: [] });
+    });
+  });
+
+  describe('(a) a sibling challenge\'s own re-issue never corrupts this challenge\'s anchor or grading', () => {
+    // g4-1 is issued exactly once, never re-asked. A completely separate challenge (g4-2, a
+    // different challenge_id) is issued after it and re-issued (same id, g4-2) much later still
+    // -- proving the `actions.reduce` anchor-selection added by this fix filters strictly by
+    // `challenge_id` and never picks up a later action that merely happens to be the latest in
+    // the whole action log but belongs to a DIFFERENT challenge.
+    const spec2: ChallengeSpec = { ...spec, challenge_id: 'g4-2' };
+    const actions: AgentAction[] = [
+      issuedAction('a1', 'g4-1', 6000),
+      issuedAction('a2', 'g4-2', 8000),
+      issuedAction('a3', 'g4-2', 40000), // g4-2's own re-issue, far later than anything g4-1 owns
+    ];
+
+    it('grades g4-1 from its own single issuance and its own answer, unaffected by g4-2\'s later re-issue', () => {
+      const conversation = [utt('u1', 7000, 'Calder and Finch')];
+      const result = gradeChallenges(conversation, actions, [spec, spec2], SEED, []);
+      expect(result['g4-1']).toEqual({
+        result: 'PASS',
+        quote: { utterance_id: 'u1', text: 'Calder and Finch' },
+        eligible_utterance_ids: ['u1'],
+      });
+    });
+
+    it('an utterance that grades g4-2 (after its own re-issue) never also grades g4-1 (already closed by g4-2\'s ORIGINAL, genuinely-different issuance at t=8000)', () => {
+      const conversation = [utt('u1', 41000, 'Calder and Finch')];
+      const result = gradeChallenges(conversation, actions, [spec, spec2], SEED, []);
+      expect(result['g4-2']).toEqual({
+        result: 'PASS',
+        quote: { utterance_id: 'u1', text: 'Calder and Finch' },
+        eligible_utterance_ids: ['u1'],
+      });
+      // g4-1's window was already bounded shut at t=8000 (g4-2's first, genuinely-different
+      // issuance) long before this utterance arrives at t=41000 -- it must not appear as PASS
+      // (or any other content-derived grade) for g4-1 too.
+      expect(result['g4-1']).toEqual({ result: 'UNANSWERED', eligible_utterance_ids: [] });
+    });
+  });
+
+  describe('(c) with NO re-issue at all, a fully-silent challenge stays UNANSWERED (preserved, narrow reading -- see the block comment above this describe)', () => {
+    // Verbatim caller line from the founder's live call that motivated this fix
+    // (scripts/rehearse/reports/founder-2026-09-18/da346951-c57a-4e53-8cbe-11fa6d039427.diagnostics.json,
+    // t=49999, 'Yes.') -- LAW 4: reused here as the literal transcript text under test, not a
+    // paraphrase. The point being proven is narrow: a challenge that is never re-asked, and
+    // receives no caller utterance at all within its own single answer window, resolves
+    // UNANSWERED -- unaffected by this fix, and unaffected by whatever the caller eventually
+    // says once genuine time has moved on with no reply ever having landed inside the window.
+    const soleAction: AgentAction[] = [issuedAction('a1', 'g4-3', 6000)];
+    const soleSpec: ChallengeSpec = { ...spec, challenge_id: 'g4-3' };
+
+    it('resolves UNANSWERED once the window elapses with nothing from the caller (no re-issue ever occurs)', () => {
+      const laterAgentLine = utt('a-later', 6000 + WINDOW_MS, 'Still on the line?', 'agent');
+      const result = gradeChallenges([laterAgentLine], soleAction, [soleSpec], SEED, []);
+      expect(result['g4-3']).toEqual({ result: 'UNANSWERED', eligible_utterance_ids: [] });
+    });
+  });
+});
