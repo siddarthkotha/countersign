@@ -60,6 +60,12 @@ function newSession(
 
 const replyCreatesOf = (aai: FakeAaiSocket) => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
 
+// P0 fix (2026-09-18, call/session.ts's own AUTOMATIC_REPLY_SETTLE_MS doc comment): a
+// caller-turn-triggered fresh QUESTION_GOALS send is now deferred by this many ms instead of
+// synchronous, so AssemblyAI's own automatic reply for the same turn (if one is coming) has
+// time to start first.
+const AUTOMATIC_REPLY_SETTLE_MS = 150; // CallSession.AUTOMATIC_REPLY_SETTLE_MS
+
 describe('CallSession -- double-ask fix (P0, 2026-09-18): a rendering already asked once is never re-asked by a bare holding-line reply', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -84,6 +90,7 @@ describe('CallSession -- double-ask fix (P0, 2026-09-18): a rendering already as
     // Answer the trap challenge correctly (refuse the trap value) -- this drives the engine on
     // to READBACK, the goal under test here (same conversation shape as hold-followup.test.ts's
     // own `driveToSealedStage` helper).
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 1200;
     aai.emit({ type: 'reply.started', reply_id: 'trap-ask' });
     aai.emit({ type: 'transcript.agent', item_id: 'trap-ask', reply_id: 'trap-ask', text: session.last!.goal.hint, interrupted: false });
@@ -99,6 +106,7 @@ describe('CallSession -- double-ask fix (P0, 2026-09-18): a rendering already as
 
     // The instructed reply (tick_end, auto-sent for the fresh READBACK goal) correctly speaks
     // the readback sentence.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 1500;
     aai.emit({ type: 'reply.started', reply_id: 'ask-1' });
     aai.emit({ type: 'transcript.agent', item_id: 'ask-1', reply_id: 'ask-1', text: readbackSentence, interrupted: false });
@@ -142,6 +150,7 @@ describe('CallSession -- double-ask fix (P0, 2026-09-18): a rendering already as
 
     const challengeIssuedActions = () => session.logs.actions.filter((a) => a.kind === 'challenge_issued');
 
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 1800;
     aai.emit({ type: 'reply.started', reply_id: 'ask-1' });
     aai.emit({ type: 'transcript.agent', item_id: 'ask-1', reply_id: 'ask-1', text: sentence1, interrupted: false });
@@ -181,6 +190,7 @@ describe('CallSession -- double-ask fix (P0, 2026-09-18): a rendering already as
     // The INSTRUCTED reply itself (tick_end) fails to ask anything -- nothing logged yet for
     // this rendering (`questionAskedCount` stays 0), so the pre-existing reask mechanism must
     // still repair it, unaffected by this fix.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 1800;
     aai.emit({ type: 'reply.started', reply_id: 'ask-1' });
     aai.emit({ type: 'transcript.agent', item_id: 'ask-1', reply_id: 'ask-1', text: 'Checking the record.', interrupted: false });
