@@ -4,6 +4,7 @@
 // `gradeChallenges` is the sole, deterministic grader, from plain transcript text.
 import { describe, expect, it } from 'vitest';
 import { fnv1a, gradeChallenges, isAnswerShapedFor, selectChallenge } from '../src/challenges';
+import { normalizeText } from '../src/normalize';
 import { MERIDIAN } from '../src/seed/meridian';
 import type { AgentAction, Claim, ChallengeResult, ChallengeSpec, Utterance } from '../src/types';
 
@@ -220,11 +221,16 @@ describe('TRAP_FACT never leaks a fact scoped to a different identity', () => {
   });
 
   it('general: for every identity and every knowledge-backed trap field, no issued challenge ever speaks a truth scoped to a different identity', () => {
-    // Known-safe collision: TRAP_DECOYS.approver ('Marcus Obi') is a plain decoy string
-    // that happens to equal Dana's own dana_internal_approver truth -- Marcus Obi really is
-    // the org's second approver for everyone, not a secret scoped away from anyone, so his
-    // name appearing as a decoy is not the scoping leak this suite guards against.
-    const KNOWN_SAFE_DECOYS = new Set(['marcus obi']);
+    // FIX (2026-09-18, founder live defect): TRAP_DECOYS.approver used to be 'Marcus Obi',
+    // which is not a scoping leak (Marcus Obi is the org's real second approver for
+    // everyone, not a secret scoped away from anyone) but IS a decoy that equals the seed's
+    // own truth -- a different, more serious bug (see the
+    // "TRAP_FACT approver: a decoy must never equal the seed truth..." describe block
+    // below), now fixed by replacing it with a synthetic name ('Priya Ramanathan') that
+    // matches no seed identity at all. This set is kept empty (not deleted) so a future
+    // decoy choice that reintroduces a real scoped-or-unscoped seed name still has an
+    // explicit, intentional place to be logged as safe, rather than silently allowed.
+    const KNOWN_SAFE_DECOYS = new Set<string>([]);
 
     const identityIds = SEED.identities.map((i) => i.id);
     for (const identityId of identityIds) {
@@ -252,6 +258,101 @@ describe('TRAP_FACT never leaks a fact scoped to a different identity', () => {
         }
       }
     }
+  });
+});
+
+// PROVEN defect, founder live record 2026-09-18 (scripts/rehearse/reports/
+// founder-2026-09-18/da346951-c57a-4e53-8cbe-11fa6d039427.diagnostics.json, deployed_commit
+// 4bb0fd3): Dana's opening line, per STT, was "...approved by Marcus OB." (AssemblyAI wrote
+// the seed's real second approver's name, 'Marcus Obi', as 'Marcus OB'). The engine issued a
+// TRAP_FACT on the approver field whose `trap_value` was the OLD `TRAP_DECOYS.approver`
+// constant, 'Marcus Obi' -- itself the seed's real second-approver name -- because
+// `selectTrapFact`'s old swap guard only compared that constant to the caller's own claim
+// STRING ("marcus ob"), never to the seed's canonical truth, so the STT variant slipped past
+// it undetected. The agent then asked "Just to confirm, this was approved by Marcus Obi. Is
+// that correct?" and the caller's honest, correct "Yes." graded FAIL ("caller accepted the
+// wrong value") instead of PASS -- see packages/engine/corpus/
+// approver-trap-stt-variant-honest-correction-stages.json for the same regression proven
+// through the full, real `evaluate()` pipeline end to end.
+describe('TRAP_FACT approver: a decoy must never equal the seed truth, regardless of STT transcription (2026-09-18 founder live defect)', () => {
+  // Several plausible STT renderings of the seed's true second approver, "Marcus Obi" --
+  // never exactly equal to the truth after `normalizeText`, same shape as the live "Marcus
+  // OB" miss. `selectTrapFact`'s guard must reject the truth as a decoy independently of
+  // which of these strings the caller's own claim happens to carry.
+  const STT_VARIANTS = ['Marcus OB', 'Markus Obi', 'Marcus O B', 'Marcus Obee'];
+
+  for (const variant of STT_VARIANTS) {
+    it(`claim transcribed as "${variant}": TRAP_FACT on approver never offers 'Marcus Obi' (the seed truth) as its trap_value`, () => {
+      const claims: Claim[] = [
+        claim('c-id', 'identity', 'STATED', 'dana-whitfield', 0, 'Dana Whitfield'),
+        claim('c-appr', 'approver', 'STATED', normalizeText(variant), 1000, variant),
+      ];
+      const conversation: Utterance[] = [utt('u1', 1000, `approved by ${variant}`)];
+      const spec = selectChallenge(claims, [], {}, SEED, `sess-stt-${variant}`, conversation);
+
+      expect(spec?.kind).toBe('TRAP_FACT');
+      expect(spec?.field).toBe('approver');
+      expect('trap_value' in spec!.expect ? spec!.expect.trap_value : null).not.toBeNull();
+      const trapValueNorm = normalizeText((spec!.expect as { trap_value: string }).trap_value);
+      // Never the seed's real second approver, under any spelling the seed itself carries.
+      const marcusObi = SEED.identities.find((i) => i.id === SEED.second_approver_id)!;
+      expect(trapValueNorm).not.toBe(normalizeText(marcusObi.name));
+      for (const alias of marcusObi.aliases) expect(trapValueNorm).not.toBe(normalizeText(alias));
+      // And never merely the caller's own (possibly STT-mangled) claim string either --
+      // a trap that just echoes back what the caller said isn't a trap at all.
+      expect(trapValueNorm).not.toBe(normalizeText(variant));
+    });
+  }
+
+  it('RED/GREEN reproduction: gradeChallenges no longer FAILs an honest correction of the (now genuinely false) approver trap', () => {
+    // Same claims/conversation shape as the live record: Dana's approver claim is the STT
+    // variant "Marcus OB".
+    const claims: Claim[] = [
+      claim('c-id', 'identity', 'STATED', 'dana-whitfield', 0, 'Dana Whitfield'),
+      claim('c-appr', 'approver', 'STATED', normalizeText('Marcus OB'), 1000, 'Marcus OB'),
+    ];
+    const conversation: Utterance[] = [utt('u1', 1000, 'approved by Marcus OB')];
+    const spec = selectChallenge(claims, [], {}, SEED, 'sess-stt-grade', conversation);
+    expect(spec?.kind).toBe('TRAP_FACT');
+    expect(spec?.field).toBe('approver');
+    const trapValue = (spec!.expect as { trap_value: string }).trap_value;
+    // Fixed decoy is guaranteed false (see the test above) -- an honest caller who rejects
+    // it and restates the true approver must be graded PASS, never FLAG/FAIL.
+    const fullConversation: Utterance[] = [
+      ...conversation,
+      { id: 'a1', speaker: 'agent', text: `Just to confirm, this was approved by ${trapValue}. Is that correct?`, t_ms: 1200 },
+      { id: 'c2', speaker: 'caller', text: `No, that's not right -- it was Marcus Obi, not ${trapValue}.`, t_ms: 1400 },
+    ];
+    const actions: AgentAction[] = [issuedAction('ch1', spec!.challenge_id, 1200)];
+    const results = gradeChallenges(fullConversation, actions, [spec!], SEED, claims);
+    expect(results[spec!.challenge_id]?.result).toBe('PASS');
+  });
+
+  it('RED reproduction (documents the pre-fix defect directly, does not exercise production code): the OLD TRAP_DECOYS.approver value (\'Marcus Obi\') offered as a trap_value, with the caller\'s claim recorded as the STT variant \'Marcus OB\', grades an honest confirming "Yes." as FAIL rather than PASS -- proving why a decoy equal to the seed truth is unsafe regardless of what gradeTrapFact does, independent of how selectTrapFact is fixed', () => {
+    const trueClaim = claim('c-appr', 'approver', 'STATED', normalizeText('Marcus OB'), 1000, 'Marcus OB');
+    const claims: Claim[] = [claim('c-id', 'identity', 'STATED', 'dana-whitfield', 0, 'Dana Whitfield'), trueClaim];
+    const buggySpec: ChallengeSpec = {
+      challenge_id: 'sess-old-bug-1',
+      kind: 'TRAP_FACT',
+      field: 'approver',
+      ask: 'Confirm the request back to the caller as if summarizing, but say "Marcus Obi" in place of their approver, then pause.',
+      speak: 'Just to confirm, this was approved by Marcus Obi. Is that correct?',
+      expect: { trap_value: 'Marcus Obi', true_claim_id: trueClaim.id },
+    };
+    const conversation: Utterance[] = [
+      utt('u1', 1000, 'approved by Marcus OB'),
+      { id: 'a1', speaker: 'agent', text: 'Just to confirm, this was approved by Marcus Obi. Is that correct?', t_ms: 1200 },
+      utt('c2', 1400, 'Yes.'),
+    ];
+    const actions: AgentAction[] = [issuedAction('ch1', buggySpec.challenge_id, 1200)];
+    const results = gradeChallenges(conversation, actions, [buggySpec], SEED, claims);
+    // This is the live defect, reproduced directly: an objectively true confirmation is
+    // graded FAIL because gradeTrapFact has no way to know the trap it was handed was
+    // secretly the truth. `selectTrapFact`'s `pickTrapDecoy` fix (2026-09-18) makes this
+    // spec unreachable in practice -- it can never be produced by real selection any more
+    // (see the tests above) -- so this case is deliberately not "fixed" in gradeTrapFact
+    // itself; it stands here only as evidence for why the guard belongs upstream.
+    expect(results[buggySpec.challenge_id]?.result).toBe('FAIL');
   });
 });
 

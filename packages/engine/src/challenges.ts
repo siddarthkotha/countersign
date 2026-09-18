@@ -45,11 +45,29 @@ const LIVE_COMMITMENT_FIELDS: ClaimField[] = [
 type TrapField = 'beneficiary' | 'counsel' | 'escrow_institution' | 'approver';
 const TRAP_FIELD_ORDER: TrapField[] = ['beneficiary', 'counsel', 'escrow_institution', 'approver'];
 
+/** FIX (2026-09-18, founder live record scripts/rehearse/reports/founder-2026-09-18/
+ *  da346951-c57a-4e53-8cbe-11fa6d039427.diagnostics.json, PROVEN): `beneficiary` and
+ *  `approver` used to decoy with the seed's own TRUE value for that field (Dana's real
+ *  vendor, Marcus Obi's real name) -- a decoy that equals the truth is not a decoy. Both
+ *  are now synthetic strings that appear nowhere in seed/meridian.ts as any identity's
+ *  name/alias or any payment's vendor/vendor_alias. `pickTrapDecoy` (below) additionally
+ *  guards these at selection time against the seed's canonical truths, so this constant
+ *  alone is not the only thing standing between a trap and a truth leak. */
 const TRAP_DECOYS: Record<TrapField, string> = {
   counsel: 'Whitmore & Bass',
   escrow_institution: 'Harbor Fidelity Trust',
-  beneficiary: 'Meridian Supply',
-  approver: 'Marcus Obi',
+  beneficiary: 'Northgate Partners',
+  approver: 'Priya Ramanathan',
+};
+
+/** Second-choice decoys, used only if `pickTrapDecoy`'s guard ever rejects the primary
+ *  `TRAP_DECOYS` entry (primary collides with the caller's own claim string, however it was
+ *  transcribed, or with a seed truth). Also synthetic, also absent from seed/meridian.ts. */
+const TRAP_DECOY_FALLBACKS: Record<TrapField, string> = {
+  counsel: 'Bregman & Ostrow',
+  escrow_institution: 'Cascade Trust Bank',
+  beneficiary: 'Sutton Grove Traders',
+  approver: 'Devon Iyer',
 };
 
 /** Count of caller utterances strictly after `t_ms`. Absent conversation ⇒ every claim is
@@ -130,6 +148,59 @@ function trapSentence(field: TrapField, trapValue: string): string {
   }
 }
 
+/** All canonical seed-truth strings a trap decoy for `field` must never equal, regardless of
+ *  who is calling or how their claim was transcribed. Distinct from `knowledgeTruthForField`
+ *  above, which only answers "was the CALLER's claim wrong" for the two knowledge-backed
+ *  fields (counsel/escrow_institution) so `selectTrapFact` can offer the truth back to a
+ *  caller who misstated it -- this answers a different question, "is this candidate decoy
+ *  itself secretly a real value", for every trap field, unconditionally:
+ *   - counsel / escrow_institution: the in-scope Hartwell knowledge truth, same gate.
+ *   - approver: the org's real second approver's name and aliases (seed.second_approver_id)
+ *     -- this is a single, org-wide fact, never identity-scoped, so it is always forbidden.
+ *   - beneficiary: every seeded vendor name/alias across every payment -- each one is
+ *     somebody's real beneficiary, so none of them is ever a safe "wrong" value to offer. */
+function knownTruthsForField(field: TrapField, seed: SeedConfig, claimed_identity_id: string | null): string[] {
+  if (field === 'counsel' || field === 'escrow_institution') {
+    const truth = knowledgeTruthForField(field, seed, claimed_identity_id);
+    return truth !== null ? [truth] : [];
+  }
+  if (field === 'approver') {
+    const approver = seed.identities.find((i) => i.id === seed.second_approver_id);
+    return approver ? [approver.name, ...approver.aliases] : [];
+  }
+  return seed.payments.flatMap((p) => [p.vendor, ...p.vendor_aliases]);
+}
+
+/** Picks a trap value for `field` that is guaranteed FALSE: never equal (after
+ *  `normalizeText`) to the caller's own claim string, however it was transcribed, and never
+ *  equal to any canonical seed truth for this field (see `knownTruthsForField`).
+ *
+ *  ROOT-CAUSE FIX (2026-09-18, founder live record scripts/rehearse/reports/
+ *  founder-2026-09-18/da346951-c57a-4e53-8cbe-11fa6d039427.diagnostics.json, PROVEN): the
+ *  previous guard compared the static `TRAP_DECOYS[field]` constant only to the caller's own
+ *  claim string ("does the decoy equal what THIS caller just said"). `TRAP_DECOYS.approver`
+ *  was itself the seed's real second-approver name ('Marcus Obi'), so an STT variant of the
+ *  true value ("Marcus OB" for "Marcus Obi") failed that string-equality check, the "trap"
+ *  silently asserted the truth back to the caller, and `gradeTrapFact` graded the caller's
+ *  honest, correct "Yes." as FAIL (any reply that doesn't restate the caller's OWN claim
+ *  string is read as accepting the -- supposedly false -- trap). Checking against the seed's
+ *  canonical truths directly (not just against one caller's own phrasing of them) makes this
+ *  fail-safe independent of transcription: a decoy can never leak a truth no matter how the
+ *  caller's claim was heard. Falls PRIMARY -> FALLBACK; both are checked against the same
+ *  guard so neither constant can silently become a truth-leaking trap if the seed changes. */
+function pickTrapDecoy(field: TrapField, seed: SeedConfig, claimed_identity_id: string | null, claimStr: string): string {
+  const forbidden = new Set(knownTruthsForField(field, seed, claimed_identity_id).map(normalizeText));
+  forbidden.add(normalizeText(claimStr));
+  const primary = TRAP_DECOYS[field];
+  if (!forbidden.has(normalizeText(primary))) return primary;
+  const fallback = TRAP_DECOY_FALLBACKS[field];
+  if (!forbidden.has(normalizeText(fallback))) return fallback;
+  // Both synthetic candidates forbidden -- should not happen given the names chosen above
+  // (verified absent from seed/meridian.ts), kept as a last-resort fail-safe rather than a
+  // crash: the tag guarantees this string is distinct from every forbidden value collected.
+  return `${fallback} (unverified)`;
+}
+
 function selectTrapFact(claims: Claim[], seed: SeedConfig, challengeId: string): ChallengeSpec | null {
   const claimedIdentity = currentClaim(claims, 'identity');
   const claimed_identity_id = claimedIdentity ? String(claimedIdentity.value) : null;
@@ -143,9 +214,7 @@ function selectTrapFact(claims: Claim[], seed: SeedConfig, challengeId: string):
       // The caller was wrong: the trap offers the truth.
       trapValue = truth;
     } else {
-      let decoy = TRAP_DECOYS[field];
-      if (normalizeText(decoy) === normalizeText(claimStr)) decoy = 'Northgate Partners';
-      trapValue = decoy;
+      trapValue = pickTrapDecoy(field, seed, claimed_identity_id, claimStr);
     }
     return {
       challenge_id: challengeId,
