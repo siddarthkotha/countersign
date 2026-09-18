@@ -2828,10 +2828,11 @@
       "files": [
         "packages/engine/src/challenges.ts"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
-      "agent_id": "a4d8faea1f3253e19",
-      "started_at": "2026-09-18T15:22:00Z"
+      "agent_id": "",
+      "started_at": "2026-09-18T15:22:00Z",
+      "lane_note": "landed d88a536 on main 2026-09-18 10:43 AM; gate + review running"
     },
     {
       "id": "INSTRUCTED-REPLY-FLAG-NOT-KEYED",
@@ -2841,6 +2842,28 @@
       ],
       "status": "held",
       "held_because": "pre-existing, theoretical; key the binding by reply_id when a live record shows the collision; also the replyGoalAtStart/replyInstructedGoal maps are never deleted (bounded by the minute cap)",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "CHALLENGE-WINDOW-LATE-UTTERANCE",
+      "title": "founder ruling 10 (proposed): with no re-issue, a very late unrelated caller utterance can still be graded against a long-silent challenge unless another challenge bounds the window; a hard elapsed-time cap breaks three founder-reviewed fixtures (corrected-critical-field-freeplay-no-identity-switch, single-wrong-answer-freeplay-failed-challenge-blocks-stage, single-wrong-answer-volunteered-escalates) that rely on late answers still grading; decide: keep (late answers count, current) or cap (silence ends the window)",
+      "files": [
+        "packages/engine/src/challenges.ts"
+      ],
+      "status": "held",
+      "held_because": "founder decision; recommendation: keep the current semantics (a late honest answer counting is safer for judges who pause than a cap that turns pauses into UNANSWERED), revisit only if a live record shows an unrelated late utterance flipping a card",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "ANSWER-BEFORE-REASK-DROPPED",
+      "title": "engine: with the window anchored on the latest issuance (d88a536), a correct answer that arrives between the original ask and a re-ask falls before the reopened window and is not graded (review finding, untested edge; re-asks only fire while the challenge is awaiting, so it needs a late transcript); P2",
+      "files": [
+        "packages/engine/src/challenges.ts"
+      ],
+      "status": "held",
+      "held_because": "needs a live record showing it; candidate: grade from the earliest issuance but bound by the latest re-issue plus window",
       "agent_id": "",
       "started_at": ""
     }
