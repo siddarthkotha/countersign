@@ -1237,6 +1237,72 @@ function finalValueOverride(eligible: Utterance[], acceptTokens: string[], seed:
   return acceptTokensPresentIn(last, acceptTokens) ? 'PASS' : 'FAIL';
 }
 
+/** LIVE_COMMITMENT counterpart of `finalValueOverride` above (2026-09-18, DEFECT A mirror,
+ *  P1 review finding, PROVEN by running `gradeChallenges` against the real MERIDIAN seed):
+ *  for a LIVE_COMMITMENT on a name field, "Elena Park? No, Marcus Obi." -- the caller names
+ *  a wrong value, immediately rejects it, and restates the committed one -- graded FAIL. The
+ *  existing whole-reply `hasAssertedOccurrence` check (used by `gradeLiveCommitment`'s
+ *  name-field branch) only ever looks for a negation ATTACHED IMMEDIATELY BEFORE a value's
+ *  own span; it has no notion of "which name did the caller mean by the END of the
+ *  sentence", only "is this exact span preceded by a negation". So the leading "Elena Park"
+ *  -- asserted by that narrower rule, since nothing attaches directly BEFORE it -- counted
+ *  as an asserted alternate even though the very next words ("No, Marcus Obi.") reject it.
+ *  This is the mirror of DEFECT A (89a2576): that fix made a TRAILING negation elsewhere in
+ *  the reply no longer excuse an asserted alternate; this fix makes a TRAILING negation
+ *  immediately AFTER a value's own span able to un-assert THAT value, for the one shape
+ *  (same-breath self-correction) this codebase already has a named mechanism for.
+ *
+ *  Reuses `splitOnCorrectionCues` and `gradeLiveCommitment` themselves (both unchanged)
+ *  rather than inventing a third negation mechanism: splits the single eligible reply on
+ *  every `seed.correction_lexicon` cue plus a bare "no" (see below for why "no" is added
+ *  only HERE, never to the shared lexicon array), then re-runs `gradeLiveCommitment`'s own
+ *  unchanged name-field logic against ONLY the caller's LAST piece -- the same "grade the
+ *  final asserted value" rule `finalValueOverride` already established for SEED_FACT/
+ *  RELATIONAL (2026-09-17), extended to the one other grader (`gradeLiveCommitment`) that
+ *  has its own notion of an asserted alternate. If the last piece is pure uncertainty
+ *  ("I'm not sure"), AMBIGUOUS, matching `finalValueOverride`'s identical rule.
+ *
+ *  Bare "no" is added to a LOCAL copy of the cue list only, never written into
+ *  `seed.correction_lexicon` itself -- that array is shared with `finalValueOverride` and
+ *  with `isUncertainPiece`'s neighbor `UNCERTAINTY_LEXICON` (which contains the phrase "no
+ *  idea"); a global "no" cue would split "no idea" into two pieces and break that whole-
+ *  phrase match for SEED_FACT/RELATIONAL replies uninvolved in this fix. Scoped to this
+ *  function's own local `cues` array, that risk does not exist. Adding "no" here is safe
+ *  because `splitOnCorrectionCues`'s own leading-cue behavior already gives a LEADING bare
+ *  "no" the correct meaning for LIVE_COMMITMENT: a cue at the very start of the reply
+ *  produces an empty first piece, filtered out, collapsing `pieces.length` to 1 -- "no split
+ *  found" -- so "No, Marcus Obi." and "No, it was Marcus Obi, like I said." both still fall
+ *  through to the unchanged whole-reply path below, exactly as before this fix (matches
+ *  `hasAssertedOccurrence`'s own established rule that a LEADING bare "no" is a discourse
+ *  interjection, never an attached negation -- P1/P4, 2026-09-19b). A MID-reply bare "no",
+ *  immediately after a name the caller just said, is exactly the new shape this catches.
+ *
+ *  Scope, same restriction as `finalValueOverride`: only runs when the challenge's entire
+ *  eligible reply is a single caller utterance (a correction spread across separate turns is
+ *  left to the unchanged whole-reply-joined path, same reasoning as `finalValueOverride`'s
+ *  own doc comment), and only for name fields -- `amount_usd`/`account_last4`/`deadline`
+ *  LIVE_COMMITMENT challenges are graded by their own field-specific extractors with no
+ *  notion of an "asserted alternate" to get wrong in the first place; widening scope there
+ *  without a proven defect would be guessing. Returns null (falls through to the
+ *  pre-existing whole-reply check, byte for byte unchanged) whenever no correction cue is
+ *  found at all -- zero regression risk for every non-self-correcting reply, including every
+ *  LIVE_COMMITMENT fixture in the existing corpus. */
+function liveCommitmentFinalValueOverride(
+  field: ClaimField,
+  claim: Claim,
+  eligible: Utterance[],
+  seed: SeedConfig,
+): ChallengeResult | null {
+  if (!isNameField(field)) return null;
+  if (eligible.length !== 1) return null;
+  const cues = [...seed.correction_lexicon, 'no'];
+  const pieces = splitOnCorrectionCues(eligible[0]!.text, cues);
+  if (pieces.length <= 1) return null;
+  const last = pieces[pieces.length - 1]!;
+  if (isUncertainPiece(last)) return 'AMBIGUOUS';
+  return gradeLiveCommitment(field, claim, last, normalizeText(last), seed);
+}
+
 function gradeTrapFact(trueClaim: Claim | undefined, rawText: string, seed: SeedConfig, trapValue: string): ChallengeResult {
   const normText = normalizeText(rawText);
   const trueVal = trueClaim ? normalizeText(String(trueClaim.value)) : null;
@@ -1389,7 +1455,13 @@ export function gradeChallenges(
     } else if ('commitment_claim_id' in expect) {
       const commitmentClaimId = expect.commitment_claim_id;
       const claim = claims.find((c) => c.id === commitmentClaimId);
-      result = gradeLiveCommitment(spec.field, claim, rawText, normText, seed);
+      // FIX (2026-09-18, DEFECT A mirror, P1 review finding): a same-breath self-correction
+      // ("Elena Park? No, Marcus Obi.") is graded on the caller's FINAL asserted value first
+      // -- see `liveCommitmentFinalValueOverride`'s own doc comment. Returns null (falls
+      // through to the pre-existing whole-reply `gradeLiveCommitment` call, byte for byte
+      // unchanged) whenever no correction was found at all.
+      const override = claim ? liveCommitmentFinalValueOverride(spec.field, claim, eligible, seed) : null;
+      result = override ?? gradeLiveCommitment(spec.field, claim, rawText, normText, seed);
     } else {
       const trueClaimId = expect.true_claim_id;
       const trueClaim = claims.find((c) => c.id === trueClaimId);

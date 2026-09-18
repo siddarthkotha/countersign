@@ -1968,4 +1968,96 @@ describe('LIVE_COMMITMENT — a denial that still names the committed value is g
       expect(result['p1-b-dl']?.result).toBe('AMBIGUOUS');
     });
   });
+
+  // P1 REVIEW FINDING (2026-09-18, mirror of DEFECT A/89a2576): `gradeLiveCommitment`'s
+  // whole-reply `hasAssertedOccurrence` check only ever looks for a negation attached
+  // IMMEDIATELY BEFORE a value's own span, never after -- so a same-breath self-correction
+  // that names a WRONG value first, immediately rejects it, then restates the COMMITTED
+  // value ("Elena Park? No, Marcus Obi.") wrongly FAILed: the leading "Elena Park" is
+  // asserted by that narrower rule (nothing attaches directly before it), even though the
+  // very next words reject it. Fixed by `liveCommitmentFinalValueOverride` (see its own doc
+  // comment): reuses `splitOnCorrectionCues`/`finalValueOverride`'s established "same-breath
+  // correction" mechanism (2026-09-17) rather than widening the negation-attachment rule
+  // itself, and grades ONLY the caller's LAST piece with `gradeLiveCommitment`, unchanged.
+  describe('LIVE_COMMITMENT self-correction family (2026-09-18, P1, mirror of DEFECT A): the caller names a wrong value, rejects it, then restates the committed one', () => {
+    const marcusClaim = claim('c-marcus-sc', 'approver', 'STATED', 'Marcus Obi', 1000, 'Marcus Obi approved it');
+    const marcusSpec: ChallengeSpec = {
+      challenge_id: 'p4-marcus-1',
+      kind: 'LIVE_COMMITMENT',
+      field: 'approver',
+      ask: 'Ask the caller to restate the approver they gave earlier. Do not say the value yourself.',
+      speak: 'Can you restate the approver you gave me earlier?',
+      expect: { commitment_claim_id: 'c-marcus-sc' },
+    };
+    const marcusActions: AgentAction[] = [issuedAction('asc', 'p4-marcus-1', 2000)];
+
+    function grade(text: string): ChallengeResult | undefined {
+      const result = gradeChallenges([utt('u1', 3000, text)], marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      return result['p4-marcus-1']?.result;
+    }
+
+    it('RED/GREEN: "Elena Park? No, Marcus Obi." -- wrong name, bare "No," rejection, then the committed value -- PASSes', () => {
+      expect(grade('Elena Park? No, Marcus Obi.')).toBe('PASS');
+    });
+
+    it('"Elena Park, no wait, Marcus Obi." -- the seed\'s own "no wait" correction cue -- PASSes', () => {
+      expect(grade('Elena Park, no wait, Marcus Obi.')).toBe('PASS');
+    });
+
+    it('"Elena Park. Actually it was Marcus Obi." -- the seed\'s own "actually" correction cue (correction_lexicon, not negate_lexicon) -- PASSes', () => {
+      expect(grade('Elena Park. Actually it was Marcus Obi.')).toBe('PASS');
+    });
+
+    it('regression guard: "Marcus Obi? No. Elena Park." -- committed value first, but the FINAL asserted name is the wrong one -- still FAILs', () => {
+      expect(grade('Marcus Obi? No. Elena Park.')).toBe('FAIL');
+    });
+
+    it('regression guard: "Marcus Obi, not Elena Park." -- negation attaches forward to the OTHER name -- still PASSes', () => {
+      expect(grade('Marcus Obi, not Elena Park.')).toBe('PASS');
+    });
+
+    it('regression guard: "I never said Marcus Obi, it was Elena Park." -- an explicit denial-plus-alternate -- still FAILs', () => {
+      expect(grade('I never said Marcus Obi, it was Elena Park.')).toBe('FAIL');
+    });
+
+    it('regression guard: "No, it was Marcus Obi, like I said." -- a LEADING bare "No," is a discourse interjection, not a correction split -- still PASSes', () => {
+      expect(grade('No, it was Marcus Obi, like I said.')).toBe('PASS');
+    });
+
+    it('regression guard: "Not Elena, Marcus Obi." -- unaffected by the override (no correction cue present) -- still PASSes', () => {
+      expect(grade('Not Elena, Marcus Obi.')).toBe('PASS');
+    });
+
+    it('regression guard: a bare denial with no alternative ("I never said Marcus Obi.") -- unaffected, still AMBIGUOUS, never PASS/FAIL', () => {
+      expect(grade('I never said Marcus Obi.')).toBe('AMBIGUOUS');
+    });
+
+    it('regression guard: TRAP_FACT (gradeTrapFact/negateNearTrapValue) is completely untouched by this lane', () => {
+      const counselClaim = claim('c-counsel-sc', 'counsel', 'STATED', 'Calder & Finch', 1000, 'Calder & Finch');
+      const trapSpec: ChallengeSpec = {
+        challenge_id: 'p4-trap-1',
+        kind: 'TRAP_FACT',
+        field: 'counsel',
+        ask: 'x',
+        speak: 'x',
+        expect: { trap_value: 'Whitmore & Bass', true_claim_id: 'c-counsel-sc' },
+      };
+      const trapActions: AgentAction[] = [issuedAction('atsc', 'p4-trap-1', 2000)];
+      const conversation = [utt('u1', 3000, "Whitmore and Bass? No, wait, it's Calder and Finch.")];
+      const result = gradeChallenges(conversation, trapActions, [trapSpec], SEED, [counselClaim]);
+      expect(result['p4-trap-1']?.result).toBe('PASS');
+    });
+
+    // NOT FIXED, reported per the review's own instruction: a second seed-known name
+    // appearing anywhere in the reply is read as contamination regardless of framing, even
+    // an explicit "is the backup" qualifier with no correction cue at all -- this function
+    // never runs here (no correction_lexicon phrase, no bare "no", so
+    // `liveCommitmentFinalValueOverride` returns null and the whole-reply path is
+    // unchanged), so this fix neither helps nor worsens it. Documented, not fixed -- the
+    // conservative "any second seed name is contamination" reading is left standing pending
+    // a founder ruling on whether "X is the backup" should be recognized as a non-assertion.
+    it('GAP (documented, not fixed, unaffected by this lane): "It was Marcus Obi. Elena Park is the backup." still FAILs -- a second seed-known name is read as contamination', () => {
+      expect(grade('It was Marcus Obi. Elena Park is the backup.')).toBe('FAIL'); // documents the gap; not the desired behavior, not this lane's fix
+    });
+  });
 });
