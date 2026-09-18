@@ -136,6 +136,23 @@ describe('end-to-end: real server path (no recorded corpus context/actions fed t
     });
   }
 
+  // P0 fix (2026-09-18, call/session.ts's own AUTOMATIC_REPLY_SETTLE_MS doc comment): a
+  // caller-turn-triggered fresh QUESTION_GOALS send is now deferred by this many REAL ms
+  // (no fake timers here -- this test drives a real HTTP+WS server) so AssemblyAI's own
+  // automatic reply for the same turn, if one is coming, has time to start first. Without a
+  // real wait between a caller turn and the next `aai.emit`, every proactive send in this
+  // burst borrows the PRIOR turn's still-outstanding instructed-reply slot instead of getting
+  // its own -- functionally fine turn-by-turn (the busy-guard catch-up path still delivers
+  // each one eventually), but it costs the LAST turn's own confirming send its only chance to
+  // complete before the test stops driving new events, so a required readback is never
+  // confirmed and STAGE is never reached. A short real sleep after each caller turn avoids
+  // that by letting the settle window's OWN fallback (or a normal ambient reply within it)
+  // resolve before the next turn arrives, same as real AssemblyAI traffic would.
+  function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  const AUTOMATIC_REPLY_SETTLE_MS = 150; // CallSession.AUTOMATIC_REPLY_SETTLE_MS
+
   async function pollUntil(cond: () => boolean, timeoutMs = 3000, stepMs = 5): Promise<void> {
     const startedAt = Date.now();
     while (!cond()) {
@@ -178,6 +195,7 @@ describe('end-to-end: real server path (no recorded corpus context/actions fed t
       text:
         "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
     });
+    await sleep(AUTOMATIC_REPLY_SETTLE_MS + 10);
 
     // A live, incremental call cannot skip straight to a readback the way the recorded
     // corpus's one-shot a1 does -- the server's own rule row 4 demands one passed knowledge
@@ -198,6 +216,7 @@ describe('end-to-end: real server path (no recorded corpus context/actions fed t
     aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
 
     aai.emit({ type: 'transcript.user', item_id: 'c2', text: "No, that's wrong. It's Meridian Supply." });
+    await sleep(AUTOMATIC_REPLY_SETTLE_MS + 10);
 
     // The challenge passed; the server now moves to CONSISTENCY_CHECK and reads back the
     // amount, then the account, then the beneficiary, running its own SSO/history/out-of-band
@@ -211,6 +230,7 @@ describe('end-to-end: real server path (no recorded corpus context/actions fed t
       aai.emit({ type: 'transcript.agent', item_id: replyId, text: 'Is that correct?', reply_id: replyId, interrupted: false });
       aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });
       aai.emit({ type: 'transcript.user', item_id: affirmTurns[i]!, text: "Yes, that's right." });
+      await sleep(AUTOMATIC_REPLY_SETTLE_MS + 10);
     }
 
     await pollUntil(() => lastStateOf(messages)?.state.verdict === 'STAGE', 3000);

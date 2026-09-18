@@ -33,6 +33,11 @@ const QUESTION_REASK_MAX_EMPTY = 2; // CallSession.QUESTION_REASK_MAX_EMPTY
 // emitted faster than that would supersede each other's pending wait instead of each being
 // counted, same as `armCloseRetryTimer`'s own spacing already requires downstream.
 const FULL_CYCLE_MS = QUESTION_TRANSCRIPT_WAIT_MS + REASK_GAP_MS + 100;
+// P0 fix (2026-09-18, call/session.ts's own AUTOMATIC_REPLY_SETTLE_MS doc comment): a
+// caller-turn-triggered fresh QUESTION_GOALS send is now deferred by this many ms instead of
+// synchronous, so AssemblyAI's own automatic reply for the same turn (if one is coming) has
+// time to start first.
+const AUTOMATIC_REPLY_SETTLE_MS = 150; // CallSession.AUTOMATIC_REPLY_SETTLE_MS
 
 function newLiveSession(
   clock: { now: number },
@@ -70,6 +75,7 @@ describe('CallSession -- question reask survives a transcript.agent that lands a
 
     clock.now = 1000;
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     expect(session.last?.state).toBe('CHALLENGE');
     expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
     const challengeId = session.last?.goal.challenge?.challenge_id;
@@ -122,6 +128,7 @@ describe('CallSession -- question reask survives a transcript.agent that lands a
 
     clock.now = 1000;
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     expect(session.last?.state).toBe('CHALLENGE');
     expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
     expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-1');
@@ -177,6 +184,10 @@ describe('CallSession -- question reask survives a transcript.agent that lands a
 
     clock.now = 1000;
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    // P0 fix (2026-09-18, AUTOMATIC_REPLY_SETTLE_MS): the proactive send is deferred now, not
+    // synchronous -- this advance is what makes 'reask-a' bind as the instructed reply. Every
+    // later "due at real-elapsed Xms" comment below is relative to THIS point, unaffected.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     expect(session.last?.state).toBe('CHALLENGE');
     expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
     const challengeId = session.last?.goal.challenge?.challenge_id;
@@ -185,7 +196,7 @@ describe('CallSession -- question reask survives a transcript.agent that lands a
     const baseline = replyCreates().length; // c1's own fresh-question proactive send (Design E)
 
     // Reply A: empty at reply.done -- arms `armQuestionTranscriptWait` (1500ms from right now,
-    // since no fake-timer time has been advanced yet, i.e. due at real-elapsed 1500ms).
+    // due at real-elapsed 1500ms from the settle advance above).
     clock.now = 1500;
     aai.emit({ type: 'reply.started', reply_id: 'reask-a' });
     clock.now = 1800;

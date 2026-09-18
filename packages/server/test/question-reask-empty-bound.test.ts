@@ -42,6 +42,11 @@ const QUESTION_REASK_MAX_EMPTY = 2; // CallSession.QUESTION_REASK_MAX_EMPTY
 // even gets armed, then that timer's own REASK_GAP_MS spacing on top -- see the timing-update
 // note above.
 const FULL_CYCLE_MS = QUESTION_TRANSCRIPT_WAIT_MS + REASK_GAP_MS + 100;
+// P0 fix (2026-09-18, call/session.ts's own AUTOMATIC_REPLY_SETTLE_MS doc comment): a
+// caller-turn-triggered fresh QUESTION_GOALS send is now deferred by this many ms instead of
+// synchronous, so AssemblyAI's own automatic reply for the same turn (if one is coming) has
+// time to start first.
+const AUTOMATIC_REPLY_SETTLE_MS = 150; // CallSession.AUTOMATIC_REPLY_SETTLE_MS
 
 function newLiveSession(
   clock: { now: number },
@@ -79,6 +84,7 @@ describe('CallSession -- question reask gives up after a bounded number of empty
 
     clock.now = 1000;
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     expect(session.last?.state).toBe('CHALLENGE');
     expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
     expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-1');
@@ -146,6 +152,7 @@ describe('CallSession -- question reask gives up after a bounded number of empty
 
     clock.now = 1000;
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     const sentence = session.last!.goal.challenge!.speak!;
     const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
     const baseline = replyCreates().length;

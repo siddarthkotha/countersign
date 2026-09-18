@@ -61,9 +61,18 @@ function replyCreatesOf(aai: FakeAaiSocket): { type?: string; instructions?: str
  *  correctly holds open for the caller's full `challenge_answer_window_ms`). */
 const FIRST_CHALLENGE_CONFIRMED_AT_MS = 1600;
 
+// P0 fix (2026-09-18, call/session.ts's own AUTOMATIC_REPLY_SETTLE_MS doc comment): a
+// caller-turn-triggered fresh QUESTION_GOALS send is now deferred by this many ms instead of
+// synchronous, so AssemblyAI's own automatic reply for the same turn (if one is coming) has
+// time to start first. Requires `vi.useFakeTimers()` active before this helper runs (every
+// caller of it already does this, at its own `it()`'s own start).
+const AUTOMATIC_REPLY_SETTLE_MS = 150; // CallSession.AUTOMATIC_REPLY_SETTLE_MS
+
 function askAndConfirmFirstChallenge(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
+  vi.useFakeTimers();
   clock.now = 1000;
   aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+  vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
   expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
   expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-1');
 
@@ -163,8 +172,11 @@ describe('BRAKE (2026-09-15): a fresh question discovered off a fragment landing
     // (2500ms, ESTIMATE).
     clock.now = FIRST_CHALLENGE_CONFIRMED_AT_MS + 6000;
     aai.emit({ type: 'transcript.user', item_id: 'frag1', text: 'And make it two point one million.' });
+    // P0 fix (2026-09-18): this fragment lands on a fresh, caller-turn-triggered question --
+    // no brake applies here, but the send is still deferred by AUTOMATIC_REPLY_SETTLE_MS now.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
 
-    // Sent immediately -- no brake, exactly as before this fix.
+    // Sent (after the settle window) -- no brake, exactly as before this fix.
     expect(replyCreatesOf(aai)).toHaveLength(baseline + 1);
     expect(diagEvents.slice(diagBaseline).some((e) => e.kind === 'question_fragment_brake_applied')).toBe(false);
     expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-2');
@@ -190,8 +202,11 @@ describe('BRAKE (2026-09-15): a fresh question discovered off a fragment landing
     // timing (the caller really is answering something, fast).
     clock.now = FIRST_CHALLENGE_CONFIRMED_AT_MS + 2200;
     aai.emit({ type: 'transcript.user', item_id: 'frag1', text: 'Baker McKenzie is our counsel of record.' });
+    // P0 fix (2026-09-18): see the sibling test above -- not braked, but still deferred by
+    // AUTOMATIC_REPLY_SETTLE_MS now.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
 
-    expect(replyCreatesOf(aai)).toHaveLength(baseline + 1); // sent immediately, not braked
+    expect(replyCreatesOf(aai)).toHaveLength(baseline + 1); // sent (after the settle window), not braked
     expect(diagEvents.slice(diagBaseline).some((e) => e.kind === 'question_fragment_brake_applied')).toBe(false);
   });
 });

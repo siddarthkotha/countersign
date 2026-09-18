@@ -73,10 +73,19 @@ describe('Design E: the automatic reply is a holding beat only; the server\'s ow
     vi.useRealTimers();
   });
 
+  // P0 fix (2026-09-18): CallSession.AUTOMATIC_REPLY_SETTLE_MS -- see that field's own doc
+  // comment in call/session.ts for the full PROVEN incident (three same-day live/harness
+  // records of a garbled, word-interleaved first-turn reply). A caller-turn-triggered fresh
+  // question no longer sends its instructed reply.create synchronously -- it is deferred by
+  // this many ms so AssemblyAI's own automatic reply for the SAME turn, if one is coming, has
+  // time to start (and flip `speaking`) first.
+  const AUTOMATIC_REPLY_SETTLE_MS = 150; // CallSession.AUTOMATIC_REPLY_SETTLE_MS
+
   // (a) immediate case: nothing is speaking when the caller turn's tick lands on a fresh
-  // QUESTION_GOALS rendering -- exactly one reply.create goes out synchronously, carrying the
-  // goal's own sentence.
-  it('(a-1) immediate: a caller turn landing on a fresh question goal with nothing in flight sends exactly one instructed reply.create, synchronously', () => {
+  // QUESTION_GOALS rendering -- no automatic reply ever starts, so the settle timer's own
+  // fallback sends exactly one reply.create once it elapses, carrying the goal's own sentence.
+  it('(a-1) fallback: a caller turn landing on a fresh question goal, with nothing starting to speak, sends exactly one instructed reply.create once the settle window elapses', () => {
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -90,31 +99,80 @@ describe('Design E: the automatic reply is a holding beat only; the server\'s ow
     expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
     const sentence = session.last!.goal.challenge!.speak!;
 
-    // Exactly one reply.create, sent immediately (no reply.started ever preceded it -- proof
-    // it was not deferred behind an in-flight reply), carrying the challenge's own sentence.
+    // Nothing sent yet -- the settle timer is armed, not fired.
+    expect(replyCreatesOf(aai)).toHaveLength(0);
+    const internals = session as unknown as { replyCreateAwaitingStart: boolean; speaking: boolean };
+    expect(internals.replyCreateAwaitingStart).toBe(false);
+
+    // Nothing ever starts speaking within the window -- the fallback fires and sends exactly
+    // one reply.create, carrying the challenge's own sentence. Measures the added latency:
+    // this is the exact, and only, delay a caller with no automatic reply on this turn incurs.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     const replyCreates = replyCreatesOf(aai);
     expect(replyCreates).toHaveLength(1);
     expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${sentence}"`);
-
-    const internals = session as unknown as { replyCreateAwaitingStart: boolean; speaking: boolean };
     expect(internals.replyCreateAwaitingStart).toBe(true); // outstanding, awaiting its own reply.started
     expect(internals.speaking).toBe(false);
   });
 
-  // (a-2) deferred case: a reply (the automatic one, phrased under the OLD goal) is already
-  // speaking when the caller turn arrives -- the instructed reply.create for the fresh
-  // question is deferred until that in-flight reply's own reply.done, then sent exactly once.
-  it('(a-2) deferred: a caller turn landing on a fresh question goal while a reply is in flight sends exactly one instructed reply.create, right after that reply\'s own reply.done', () => {
+  // (a-1b) THE PROVEN LIVE DEFECT, closed: if AssemblyAI's own automatic reply for this same
+  // turn starts speaking WITHIN the settle window, the instructed send is deferred to that
+  // reply's own reply.done (via the existing busy-guard + owedQuestionGoalKey catch-up path)
+  // instead of firing at all here -- the two can never collide/interleave into one garbled
+  // reply the way the live records show (95b9ad42/32cbb410, 2026-09-18).
+  it('(a-1b) PROVEN LIVE DEFECT closed: an automatic reply starting within the settle window defers the instructed send to its own reply.done, never sending both at once', () => {
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
     const session = newSession(clock, CALL_B, aai, sent);
     session.start();
 
-    // c1 reaches ASK_CHALLENGE and sends its own proactive reply.create immediately (a-1's
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
+    const sentence = session.last!.goal.challenge!.speak!;
+    expect(replyCreatesOf(aai)).toHaveLength(0);
+
+    // AssemblyAI's own automatic reply for this turn starts almost immediately (PROVEN live:
+    // 0-1ms after the caller's turn ended) -- well within the settle window.
+    vi.advanceTimersByTime(5);
+    aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
+    const internals = session as unknown as { speaking: boolean; replyCreateAwaitingStart: boolean };
+    expect(internals.speaking).toBe(true);
+
+    // The settle window elapses while 'auto-1' is still speaking -- the fallback must NOT
+    // fire (that would be exactly the live collision this fix closes): still zero sent.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+    expect(replyCreatesOf(aai)).toHaveLength(0);
+    expect(internals.speaking).toBe(true); // 'auto-1' still in flight -- never interrupted by our own send
+
+    // 'auto-1' finishes (a holding line, per the standing rule) -- THE instructed reply.create
+    // goes out now, exactly once, never overlapping 'auto-1'.
+    aai.emit({ type: 'transcript.agent', item_id: 'x-auto-1', text: 'One moment.', reply_id: 'auto-1', interrupted: false });
+    aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'completed' });
+    const replyCreates = replyCreatesOf(aai);
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${sentence}"`);
+  });
+
+  // (a-2) deferred case: a reply (the automatic one, phrased under the OLD goal) is already
+  // speaking when the caller turn arrives -- the instructed reply.create for the fresh
+  // question is deferred until that in-flight reply's own reply.done, then sent exactly once.
+  it('(a-2) deferred: a caller turn landing on a fresh question goal while a reply is in flight sends exactly one instructed reply.create, right after that reply\'s own reply.done', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession(clock, CALL_B, aai, sent);
+    session.start();
+
+    // c1 reaches ASK_CHALLENGE; nothing starts speaking within the settle window (P0 fix,
+    // 2026-09-18 -- see AUTOMATIC_REPLY_SETTLE_MS above), so the fallback send fires (a-1's
     // own shape) -- its reply.started arrives and starts a reply speaking.
     clock.now = 1000;
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     expect(replyCreatesOf(aai)).toHaveLength(1);
     clock.now = 1200;
     aai.emit({ type: 'reply.started', reply_id: 'a1' });
@@ -146,7 +204,7 @@ describe('Design E: the automatic reply is a holding beat only; the server\'s ow
   // transcriptAsksQuestion/recordGoalCompletionAction machinery unchanged -- this proves how
   // it composes with the new proactive send, not the matcher itself (see questionMatch.test.ts
   // for that).
-  it('(b) a holding-line automatic reply does not count as the question asked; the instructed reply that follows, carrying the real sentence, does', () => {
+  it('(b) an automatic reply that starts within the settle window and says only the holding line is followed by exactly one instructed reply.create, right after its own reply.done, which is what gets counted as asked', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
@@ -159,32 +217,30 @@ describe('Design E: the automatic reply is a holding beat only; the server\'s ow
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
     expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
     const sentence = session.last!.goal.challenge!.speak!;
-    expect(replyCreatesOf(aai)).toHaveLength(1); // the proactive instructed ask, from (a-1)
+    expect(replyCreatesOf(aai)).toHaveLength(0); // deferred -- settle window not elapsed yet
 
-    // The reply that answers first is AssemblyAI's own automatic one, saying only the new
-    // standing holding-beat line -- never the real question.
+    // The reply that answers first is AssemblyAI's own automatic one, starting well within the
+    // settle window (P0 fix, 2026-09-18) and saying only the new standing holding-beat line --
+    // never the real question. Our own instructed send is deferred (busy guard), not lost.
     clock.now = 1200;
     aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
     aai.emit({ type: 'transcript.agent', item_id: 'x-auto-1', text: 'One moment.', reply_id: 'auto-1', interrupted: false });
+    expect(replyCreatesOf(aai)).toHaveLength(0);
     clock.now = 1500;
     aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'completed' });
 
-    // Not counted as asked -- no challenge_issued logged, the goal is unchanged, and the
-    // reask machinery (unchanged, questionMatch.ts) arms because the holding line did not
-    // satisfy transcriptAsksQuestion.
+    // Not counted as asked (the holding line never satisfied transcriptAsksQuestion) -- but
+    // the deferred instructed send goes out immediately, right after 'auto-1's own reply.done
+    // (the busy-guard catch-up path, `maybeSendReplyCreateAfterReplyDone`), carrying the
+    // SAME sentence the old design's proactive send always did.
     expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(false);
     expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
-
-    // The spaced reask (+400ms, CallSession.CLOSE_RETRY_MIN_GAP_MS reused for the reask
-    // timer) fires, carrying the SAME instructed sentence.
-    vi.advanceTimersByTime(400);
     const replyCreates = replyCreatesOf(aai);
-    expect(replyCreates).toHaveLength(2);
-    expect(replyCreates.at(-1)!.instructions).toBe(`Say exactly this and nothing else: "${sentence}"`);
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${sentence}"`);
 
-    // This time the reply (the instructed one, or AssemblyAI's own automatic follow-up --
-    // indistinguishable by labelling, see session.ts's own doc comment on why the transcript
-    // is what decides it) actually carries the real sentence -- IS counted as asked.
+    // This reply (the instructed one) actually carries the real sentence -- IS counted as
+    // asked.
     clock.now = 2000;
     aai.emit({ type: 'reply.started', reply_id: 'r2' });
     aai.emit({ type: 'transcript.agent', item_id: 'x-r2', text: sentence, reply_id: 'r2', interrupted: false });
@@ -196,7 +252,7 @@ describe('Design E: the automatic reply is a holding beat only; the server\'s ow
 
     // No further reask -- the question is confirmed asked.
     vi.advanceTimersByTime(1000);
-    expect(replyCreatesOf(aai)).toHaveLength(2);
+    expect(replyCreatesOf(aai)).toHaveLength(1);
   });
 
   // (c) unchanged from today (round 5, 2026-09-14): after the verdict, the goodbye
@@ -309,6 +365,7 @@ describe('Design E: the automatic reply is a holding beat only; the server\'s ow
   // sends respect the exact same `this.speaking`/`replyCreateAwaitingStart` guards CLOSE's own
   // sends already do (session.ts's `maybeSendReplyCreateForTick`).
   it('(d) no reply.create is sent while a reply is in flight, even for a freshly-rendered question goal', () => {
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -317,6 +374,7 @@ describe('Design E: the automatic reply is a holding beat only; the server\'s ow
 
     clock.now = 1000;
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS); // nothing else starts speaking -- the fallback send fires
     expect(replyCreatesOf(aai)).toHaveLength(1); // the c1 proactive ask
 
     clock.now = 1200;

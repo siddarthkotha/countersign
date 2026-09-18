@@ -63,20 +63,36 @@ describe('EMPTY HOLDING REPLY (2026-09-15): an automatic reply with no transcrip
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
     expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
     const sentence = session.last!.goal.challenge!.speak!;
-    expect(replyCreatesOf(aai)).toHaveLength(1); // the proactive instructed ask (design E)
+    // P0 fix (2026-09-18, AUTOMATIC_REPLY_SETTLE_MS): the proactive instructed ask (design E)
+    // is deferred now, not synchronous -- nothing sent yet.
+    expect(replyCreatesOf(aai)).toHaveLength(0);
 
     // The reply that actually answers first is AssemblyAI's OWN automatic one -- truly empty:
     // reply.started then reply.done with NOTHING in between (no transcript.agent at all),
-    // PROVEN possible live (2026-09-15T08-06-07-corrected-critical-field bundle).
+    // PROVEN possible live (2026-09-15T08-06-07-corrected-critical-field bundle). Starting well
+    // within the settle window (no `vi.advanceTimersByTime` yet), so the deferred instructed
+    // send correctly waits for it (busy guard) rather than colliding with it.
     clock.now = 1200;
     aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
     clock.now = 1700;
     aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'completed' });
 
-    // Not counted as asked -- no challenge_issued logged, the goal is unchanged.
+    // Not counted as asked -- no challenge_issued logged, the goal is unchanged. The deferred
+    // instructed send goes out now, right after 'auto-1's own reply.done (busy-guard catch-up).
     expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(false);
     expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
     expect(session.last?.goal.challenge?.challenge_id).toBe('sess-b-1');
+    expect(replyCreatesOf(aai)).toHaveLength(1);
+    expect(replyCreatesOf(aai)[0]!.instructions).toBe(`Say exactly this and nothing else: "${sentence}"`);
+
+    // NOW the instructed reply.create just sent above ALSO gets answered by an empty reply
+    // (reply.started then reply.done with nothing in between) -- the exact same PROVEN live
+    // shape, this time for our own instructed ask rather than the ambient one.
+    clock.now = 2000;
+    aai.emit({ type: 'reply.started', reply_id: 'auto-2' });
+    clock.now = 2500;
+    aai.emit({ type: 'reply.done', reply_id: 'auto-2', status: 'completed' });
+    expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(false);
 
     // Late-transcript race fix (2026-09-16b, Sonnet review of bde7814): a transcript that is
     // still empty at reply.done now waits QUESTION_TRANSCRIPT_WAIT_MS (1500ms) for a late

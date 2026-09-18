@@ -228,3 +228,56 @@ records `transcript_duplicate_ignored` on the flight recorder when it does. That
 AssemblyAI issuing a distinct `item_id` per final turn. UNKNOWN as of this note: whether the
 live docs state that guarantee. Check before relying on it for anything beyond redelivery
 insurance; a per-turn collision would silently drop a genuine new utterance.
+
+## VERIFY-AT-BUILD re-check 2026-09-18 (P0: garbled first-turn reply, automatic-reply control)
+
+Re-fetched live (errand agent, WebFetch) on 2026-09-18 against
+`https://www.assemblyai.com/docs/voice-agents/voice-agent-api/api-spec/voice-agent-websocket`,
+`.../events-reference`, `.../turn-detection-and-interruptions`, and
+`https://www.assemblyai.com/docs/streaming/turn-detection`, triggered by a PROVEN live defect
+(founder quit the live demo 2026-09-18 over a garbled first-turn reply -- see
+`packages/server/test/design-e-turn-order.test.ts`'s "(a-1b) PROVEN LIVE DEFECT closed" test and
+`call/session.ts`'s `AUTOMATIC_REPLY_SETTLE_MS` doc comment for the full incident). Every
+question below is UNKNOWN -- docs silent -- except the schema, which is unchanged from the
+2026-09-13 VERIFY-AT-BUILD entry above:
+
+- **Automatic reply generation, and any way to disable/suppress it**: UNKNOWN. No page mentions
+  an automatic (non-`reply.create`-triggered) reply at all, let alone a flag to turn it off.
+- **Cancelling an in-flight reply**: UNKNOWN. The events reference lists `reply.started`,
+  `reply.audio`, `transcript.agent.delta`, `transcript.agent`, `reply.done` -- no
+  `reply.cancel`-shaped event anywhere.
+- **`reply.create` schema**: PROVEN, unchanged -- `{ type: "reply.create", instructions?:
+  string }`. Websocket spec: "Useful for status updates during a `hold`-mode tool call." Events
+  reference: `instructions` does "not modify `system_prompt`."
+- **Ordering/queueing/drop/merge behavior when `reply.create` is sent while an automatic reply
+  is already generating for the same turn**: UNKNOWN -- docs silent (automatic replies are not
+  documented, so no ordering guarantee against them exists to find).
+- **Whether `instructions` suppresses or replaces the automatic reply**: UNKNOWN, same reason.
+- **Whether `system_prompt` applies immediately or "on the next turn"**: the websocket spec says
+  only "Can be updated mid-session" -- UNKNOWN on immediate-vs-deferred application (the
+  `docs/TEST-PLAN.md` "applies on the next turn" phrasing is this repo's own PROVEN-from-live-
+  failure inference, not a documented guarantee).
+- **Whether two reply lifecycles can be open concurrently (a second `reply.started` before a
+  prior `reply.done`)**: UNKNOWN -- no constraint documented either way.
+
+PROVEN instead from three same-day records (2026-09-18) -- two founder calls
+(`scripts/rehearse/reports/founder-2026-09-18/95b9ad42-....diagnostics.json` and
+`32cbb410-....diagnostics.json`) and one harness bundle
+(`scripts/rehearse/reports/2026-09-18T10-54-17-barge-in-interrupt.diagnostics.json`): in all
+three, the server's own instructed `reply.create` (reason `tick_end`) went out 0-1ms after the
+caller's opening turn ended, and AssemblyAI returned exactly ONE `reply.started`/`reply.done`
+pair whose own `transcript.agent` was a word-interleaved merge of the server's instructed
+sentence and an unrequested, STANDING_RULES-violating question -- e.g. "Just toOne confirm,
+moment this transfer goes to Northgate Partners. Who is calling and what is. Is that your
+authorization correct? code?" (a merge of "Just to confirm, this transfer goes to Northgate
+Partners. Is that correct?" -- ours -- with "One moment. Who is calling and what is your
+authorization code?" -- AssemblyAI's own, never anything any goal in this codebase asks for).
+Since the wire-visible event stream never shows two `reply.started`s open at once, this is
+UNKNOWN at the mechanism level (AssemblyAI-internal: a true concurrent audio/token race, or one
+LLM call confused by receiving both intents in the same generation window) but PROVEN
+reproducible at the outcome level (3/3). Given docs offer no suppress/cancel/ordering
+mechanism, the fix (`call/session.ts`'s `AUTOMATIC_REPLY_SETTLE_MS` / `armTickEndSendTimer`)
+defers a caller-turn-triggered fresh-question send by 150ms (ESTIMATE, ~150x margin over the
+PROVEN 0-1ms observed trigger gap) so AssemblyAI's own automatic reply, if one is coming, gets
+a chance to start (and be caught by the existing busy-guard) before the server's own send goes
+out -- never a documented fix, since the docs give none to use.

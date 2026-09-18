@@ -59,13 +59,21 @@ function newSession(
  *  the Defect A sibling of this file, duplicates it a third time). By the end of this helper,
  *  ONE `reply.create` for CLOSE has already been sent (attempt 1, reason `tick_end` -- nothing
  *  is speaking when the final caller line's tick reaches SEALED). */
+// P0 fix (2026-09-18, call/session.ts's own AUTOMATIC_REPLY_SETTLE_MS doc comment): a
+// caller-turn-triggered fresh QUESTION_GOALS send is now deferred by this many ms instead of
+// synchronous, so AssemblyAI's own automatic reply for the same turn (if one is coming) has
+// time to start first. c1-c4 below each land on such a rendering.
+const AUTOMATIC_REPLY_SETTLE_MS = 150; // CallSession.AUTOMATIC_REPLY_SETTLE_MS
+
 function driveToSealedStage(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
+  vi.useFakeTimers();
   clock.now = 1000;
   aai.emit({
     type: 'transcript.user',
     item_id: 'c1',
     text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
   });
+  vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
   clock.now = 1500;
   aai.emit({ type: 'reply.started', reply_id: 'a1' });
   aai.emit({
@@ -80,6 +88,7 @@ function driveToSealedStage(session: CallSession, aai: FakeAaiSocket, clock: { n
 
   clock.now = 2500;
   aai.emit({ type: 'transcript.user', item_id: 'c2', text: "No, that's wrong. It's Meridian Supply." });
+  vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
   clock.now = 3000;
   aai.emit({ type: 'reply.started', reply_id: 'a2' });
   aai.emit({ type: 'transcript.agent', item_id: 'a2', text: session.last!.goal.hint, reply_id: 'a2', interrupted: false });
@@ -88,6 +97,7 @@ function driveToSealedStage(session: CallSession, aai: FakeAaiSocket, clock: { n
 
   clock.now = 4000;
   aai.emit({ type: 'transcript.user', item_id: 'c3', text: "Yes, that's right." });
+  vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
   clock.now = 4500;
   aai.emit({ type: 'reply.started', reply_id: 'a3' });
   aai.emit({ type: 'transcript.agent', item_id: 'a3', text: session.last!.goal.hint, reply_id: 'a3', interrupted: false });
@@ -96,6 +106,7 @@ function driveToSealedStage(session: CallSession, aai: FakeAaiSocket, clock: { n
 
   clock.now = 5500;
   aai.emit({ type: 'transcript.user', item_id: 'c4', text: 'Yes, correct.' });
+  vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
   clock.now = 6000;
   aai.emit({ type: 'reply.started', reply_id: 'a4' });
   aai.emit({ type: 'transcript.agent', item_id: 'a4', text: session.last!.goal.hint, reply_id: 'a4', interrupted: false });

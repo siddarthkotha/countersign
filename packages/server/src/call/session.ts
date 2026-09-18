@@ -1354,6 +1354,10 @@ export class CallSession {
       this.questionTranscriptWaitTimer = null;
       this.questionTranscriptWaitReplyId = null;
     }
+    // P0 fix (2026-09-18): same reasoning as `questionReaskTimer`/`questionTranscriptWaitTimer`
+    // just above -- not CLOSE-specific, but `end()` already funnels every pending send/wait
+    // timer through here.
+    this.clearTickEndSendTimer();
   }
 
   /** The close sentence currently owed, if any. Review fix (2026-09-15, Critical -- FAIL on
@@ -3564,9 +3568,97 @@ export class CallSession {
     if (freshQuestion) {
       this.lastAskedQuestionKey = JSON.stringify(goal);
       this.pendingQuestionAnswerAttemptSeen = false;
-      this.owedQuestionGoalKey = null;
+      // P0 fix (2026-09-18, see `armTickEndSendTimer`'s own doc comment for the full PROVEN
+      // incident): `owedQuestionGoalKey` is deliberately NOT cleared here any more -- it stays
+      // set until the deferred send below actually goes out (or the busy-guard catch-up path
+      // sends in its place), so a reply that starts before then is still recognized as "this
+      // exact question is still owed" at its own `reply.done`.
+      this.armTickEndSendTimer(finalGoal, this.instructedSentenceFor(goal));
+      return;
     }
     this.sendReplyCreate(finalGoal, 'tick_end', this.instructedSentenceFor(goal));
+  }
+
+  /** P0 fix (2026-09-18, PROVEN live from three same-day records -- two founder calls,
+   *  scripts/rehearse/reports/founder-2026-09-18/95b9ad42-....diagnostics.json and
+   *  32cbb410-....diagnostics.json, plus a same-day harness bundle,
+   *  scripts/rehearse/reports/2026-09-18T10-54-17-barge-in-interrupt.diagnostics.json):
+   *  `maybeSendReplyCreateForTick`'s busy guard (`this.speaking || this.replyCreateAwaitingStart`)
+   *  only catches a reply we already know about -- one whose own `reply.started` has already
+   *  arrived. It does nothing for AssemblyAI's own undocumented, unstoppable automatic reply
+   *  for the SAME caller turn (re-verified live 2026-09-18 against
+   *  https://www.assemblyai.com/docs/voice-agents/voice-agent-api/api-spec/voice-agent-websocket
+   *  and the events-reference page: no documented way to disable, suppress, or cancel it, no
+   *  documented ordering guarantee against a client `reply.create`, docs silent on whether two
+   *  replies can be in flight at once -- UNKNOWN, not merely unverified), because that
+   *  automatic reply's own `reply.started` had NOT been received yet at the exact instant this
+   *  tick's own `reply.create` used to go out synchronously -- both are triggered by the
+   *  identical `transcript.user` processing pass, 0-1ms apart in all three records. Sending
+   *  synchronously there raced AssemblyAI's own automatic reply so tightly that AssemblyAI
+   *  returned ONE reply whose own transcript was a word-interleaved merge of our instructed
+   *  sentence and an unrequested, STANDING_RULES-violating question -- e.g. "Just toOne
+   *  confirm, moment this transfer goes to Northgate Partners. Who is calling and what is. Is
+   *  that your authorization correct? code?" -- reproduced with the same shape in all three
+   *  records (a merge of "Just to confirm, this transfer goes to Northgate Partners. Is that
+   *  correct?" -- ours -- with "One moment. Who is calling and what is your authorization
+   *  code?" / "...department?" / "...primary purpose for this transfer?" -- AssemblyAI's own,
+   *  never anything any goal in this codebase ever asks for).
+   *
+   *  This defers a fresh-question, caller-turn-triggered send by `AUTOMATIC_REPLY_SETTLE_MS`
+   *  so that, if AssemblyAI's own automatic reply for this same turn is coming, its own
+   *  `reply.started` has time to arrive and flip `this.speaking` FIRST -- at which point the
+   *  EXISTING busy-guard + catch-up path (`owedQuestionGoalKey` / `maybeSendReplyCreateAfter
+   *  ReplyDone`, already built for exactly this "busy, ask once it clears" case -- see test
+   *  (a-2) in design-e-turn-order.test.ts) takes over, and the timer below no-ops when it
+   *  fires (checked via the same `this.speaking || this.replyCreateAwaitingStart` guard).
+   *  Bounded: if nothing starts within the window, the timer fires and sends exactly as
+   *  before -- a caller turn that never gets an automatic reply (not every one does) can never
+   *  stall the call waiting for one. Only one timer is ever armed at a time (a fresh call
+   *  supersedes a stale one, matching how `lastAskedQuestionKey`/`owedQuestionGoalKey` already
+   *  track only the most recent rendering).
+   *
+   *  `AUTOMATIC_REPLY_SETTLE_MS = 150` is an ESTIMATE: the PROVEN live gap between a caller's
+   *  turn ending (`transcript.user`) and AssemblyAI's own next `reply.started` arriving was
+   *  0-1ms in all three corrupted records (both are AssemblyAI's own back-to-back server-side
+   *  events, not round-trip-bound from our side) -- 150ms gives roughly 150x margin over that
+   *  measured gap while adding only one small, bounded delay per caller turn that lands on a
+   *  fresh question (never for CLOSE/ANNOUNCE_* `forceSpeak`-only transitions, which keep
+   *  sending immediately, unchanged -- see the `freshQuestion`-only branch above -- and never
+   *  for a non-caller-turn tick, which carries none of this race). The added latency itself is
+   *  measured, not just asserted: design-e-turn-order.test.ts's (a-1) now asserts it takes
+   *  exactly `AUTOMATIC_REPLY_SETTLE_MS` of (fake) elapsed time for the fallback send to go
+   *  out when nothing preempts it. */
+  private static readonly AUTOMATIC_REPLY_SETTLE_MS = 150;
+  private tickEndSendTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private armTickEndSendTimer(goalCode: GoalCode, instructions: string | undefined): void {
+    this.clearTickEndSendTimer();
+    this.tickEndSendTimer = setTimeout(() => {
+      this.tickEndSendTimer = null;
+      if (this.ended) return;
+      // An automatic reply (or anything else) started in the settle window -- the busy-guard
+      // catch-up path (`maybeSendReplyCreateAfterReplyDone`, reading `owedQuestionGoalKey`,
+      // still set) owns sending this once whatever is speaking now finishes.
+      if (this.speaking || this.replyCreateAwaitingStart) return;
+      this.owedQuestionGoalKey = null;
+      this.sendReplyCreate(goalCode, 'tick_end', instructions);
+    }, CallSession.AUTOMATIC_REPLY_SETTLE_MS);
+  }
+
+  /** Bug fix (2026-09-18, caught by design-e-turn-order.test.ts's own (b) while writing the
+   *  P0 fix above): a settle timer armed by `armTickEndSendTimer` that is still pending when
+   *  the send it exists for is ALREADY satisfied some other way (the busy-guard catch-up path
+   *  in `maybeSendReplyCreateAfterReplyDone`, called below) must be cancelled -- otherwise it
+   *  fires later, unconditionally re-checking only `this.speaking`/`replyCreateAwaitingStart`
+   *  (which may both be false again by then, for something completely unrelated), and sends a
+   *  second, STALE `reply.create` for a question that was already asked and answered. Cheap
+   *  to call defensively (a no-op if nothing is pending), same pattern every other timer in
+   *  this class already follows. */
+  private clearTickEndSendTimer(): void {
+    if (this.tickEndSendTimer) {
+      clearTimeout(this.tickEndSendTimer);
+      this.tickEndSendTimer = null;
+    }
   }
 
   /** Sends the actual `reply.create` (never here without going through this one method --
@@ -3744,6 +3836,11 @@ export class CallSession {
       // question, unconditionally, once reached.
       this.pendingQuestionAnswerAttemptSeen = false;
       this.owedQuestionGoalKey = null;
+      // P0 fix (2026-09-18): this catch-up send satisfies whatever `armTickEndSendTimer`
+      // (`maybeSendReplyCreateForTick`) may still have pending for this SAME owed question --
+      // cancel it, or it fires later and re-sends a stale, already-answered `reply.create`
+      // (see `clearTickEndSendTimer`'s own doc comment for the PROVEN test failure this closes).
+      this.clearTickEndSendTimer();
     }
     this.sendReplyCreate(current, 'reply_done_goal_diverged', this.instructedSentenceFor(goal));
   }

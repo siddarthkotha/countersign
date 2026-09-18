@@ -9,6 +9,22 @@ import scenarioB from '../../engine/corpus/scenario-b-miller-fraud.json' with { 
 
 const CALL_B = scenarioB.call as CallContext;
 
+// P0 fix (2026-09-18, call/session.ts's own AUTOMATIC_REPLY_SETTLE_MS doc comment has the
+// full PROVEN incident): a caller-turn-triggered fresh QUESTION_GOALS send is no longer
+// synchronous -- it is deferred by this many ms so AssemblyAI's own automatic reply for the
+// same turn, if one is coming, has time to start first. `driveScenarioBThroughA4` below (and
+// any test driving a caller turn straight through to its own instructed ask) needs fake
+// timers active to advance past that window deterministically. This top-level `afterEach`
+// resets to real timers unconditionally after every test in this file, regardless of which
+// describe block's own (pre-existing) `afterEach` already does the same -- redundant but
+// harmless, and it's what makes it safe for `driveScenarioBThroughA4` to call
+// `vi.useFakeTimers()` unconditionally without leaking fake timers into a later, unrelated
+// test that never opted in itself.
+afterEach(() => {
+  vi.useRealTimers();
+});
+const AUTOMATIC_REPLY_SETTLE_MS = 150; // CallSession.AUTOMATIC_REPLY_SETTLE_MS
+
 function newSession(clockRef: { now: number }, call: CallContext, aai: FakeAaiSocket, sent: ServerEvent[]) {
   return new CallSession({
     session_id: call.session_id,
@@ -53,8 +69,15 @@ function newSession(clockRef: { now: number }, call: CallContext, aai: FakeAaiSo
  *  landed means FREEZE fires with the exact same comprehensive reason set
  *  `scenarioB.expected.reasons` already documents, PROVEN by running this drive end to end. */
 function driveScenarioBThroughA4(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
+  // P0 fix (2026-09-18): c1 lands on the call's first (caller-turn-triggered) fresh
+  // QUESTION_GOALS rendering -- the send is now deferred by AUTOMATIC_REPLY_SETTLE_MS (see
+  // this file's own top-level doc comment). `vi.useFakeTimers()` is safe to call
+  // unconditionally here (idempotent if already active) because of this file's top-level
+  // `afterEach(() => vi.useRealTimers())`.
+  vi.useFakeTimers();
   clock.now = 1000;
   aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+  vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
 
   clock.now = 4000;
   aai.emit({ type: 'reply.started', reply_id: 'a1' });
@@ -284,6 +307,11 @@ describe('CallSession — export race (RT-8-export-race)', () => {
 // ---------------------------------------------------------------------------------------
 describe('CallSession — Scenario A (Dana, legitimate, fully cooperative) replayed as live AAI events', () => {
   it('passes the opening trap-fact challenge, reads back each critical field, the caller affirms each, and the call reaches STAGE/SEALED', () => {
+    // P0 fix (2026-09-18, call/session.ts's own AUTOMATIC_REPLY_SETTLE_MS doc comment): every
+    // caller turn below (c1-c4) lands on a fresh, caller-turn-triggered QUESTION_GOALS
+    // rendering, so each proactive send is deferred by that many ms now instead of
+    // synchronous -- fake timers let the test advance past the settle window deterministically.
+    vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -300,6 +328,7 @@ describe('CallSession — Scenario A (Dana, legitimate, fully cooperative) repla
       item_id: 'c1',
       text: 'This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday\'s close meeting.',
     });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
 
     // Identity + request are both now claimed. Unlike `evaluate.test.ts`'s hand-authored
     // Scenario A (a ONE-SHOT evaluate() over the whole finished conversation, where the
@@ -337,6 +366,7 @@ describe('CallSession — Scenario A (Dana, legitimate, fully cooperative) repla
     // the true claim's value, "meridian supply").
     clock.now = 2500;
     aai.emit({ type: 'transcript.user', item_id: 'c2', text: "No, that's wrong. It's Meridian Supply." });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
 
     // The challenge PASSED (passedChallenges 1 >= need 1), so row 4 no longer blocks; no
     // critical field is confirmed yet, so row 5 fires: CONSISTENCY_CHECK, READBACK on the
@@ -370,6 +400,7 @@ describe('CallSession — Scenario A (Dana, legitimate, fully cooperative) repla
     // c3: the caller affirms the amount.
     clock.now = 4000;
     aai.emit({ type: 'transcript.user', item_id: 'c3', text: "Yes, that's right." });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
 
     // amount_usd is now CONFIRMED; account_last4 becomes the new oldest unconfirmed critical
     // field (this is the exact transition the pre-fix code could never make for this field).
@@ -385,6 +416,7 @@ describe('CallSession — Scenario A (Dana, legitimate, fully cooperative) repla
     aai.emit({ type: 'reply.done', reply_id: 'a3', status: 'completed' });
     clock.now = 5500;
     aai.emit({ type: 'transcript.user', item_id: 'c4', text: 'Yes, correct.' });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
 
     expect(session.last?.state).toBe('CONSISTENCY_CHECK');
     expect(session.last?.goal.readback?.field).toBe('beneficiary');
@@ -1130,12 +1162,19 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
    *  to. Kept local to this describe block (not shared with the Scenario A test above, which
    *  asserts on its own ledger/challenge detail) since here only the terminal shape matters. */
   function driveToSealedStage(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
+    // P0 fix (2026-09-18): c1-c4 each land on a fresh, caller-turn-triggered QUESTION_GOALS
+    // rendering (ASK_CHALLENGE then READBACK per field) -- each send is deferred by
+    // AUTOMATIC_REPLY_SETTLE_MS now instead of synchronous (see this file's own top-level doc
+    // comment). `vi.useFakeTimers()` is safe unconditionally here given the describe block's
+    // own `afterEach(() => vi.useRealTimers())` below.
+    vi.useFakeTimers();
     clock.now = 1000;
     aai.emit({
       type: 'transcript.user',
       item_id: 'c1',
       text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
     });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 1500;
     aai.emit({ type: 'reply.started', reply_id: 'a1' });
     aai.emit({
@@ -1150,6 +1189,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
 
     clock.now = 2500;
     aai.emit({ type: 'transcript.user', item_id: 'c2', text: "No, that's wrong. It's Meridian Supply." });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 3000;
     aai.emit({ type: 'reply.started', reply_id: 'a2' });
     aai.emit({ type: 'transcript.agent', item_id: 'a2', text: session.last!.goal.hint, reply_id: 'a2', interrupted: false });
@@ -1158,6 +1198,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
 
     clock.now = 4000;
     aai.emit({ type: 'transcript.user', item_id: 'c3', text: "Yes, that's right." });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 4500;
     aai.emit({ type: 'reply.started', reply_id: 'a3' });
     aai.emit({ type: 'transcript.agent', item_id: 'a3', text: session.last!.goal.hint, reply_id: 'a3', interrupted: false });
@@ -1166,6 +1207,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
 
     clock.now = 5500;
     aai.emit({ type: 'transcript.user', item_id: 'c4', text: 'Yes, correct.' });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 6000;
     aai.emit({ type: 'reply.started', reply_id: 'a4' });
     aai.emit({ type: 'transcript.agent', item_id: 'a4', text: session.last!.goal.hint, reply_id: 'a4', interrupted: false });
@@ -1174,6 +1216,8 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
 
     clock.now = 7000;
     aai.emit({ type: 'transcript.user', item_id: 'c5', text: "Yes, that's right." });
+    // c5's own tick reaches SEALED/CLOSE -- CLOSE is a `forceSpeak`-only transition (not a
+    // QUESTION_GOALS code), so it is UNAFFECTED by the P0 fix and still sends synchronously.
   }
 
   afterEach(() => {
@@ -1375,12 +1419,17 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
   // the unfinished in-flight reply. 'a4' then reports reply.done: this must NOT arm the
   // hang-up. Only once a genuinely NEW reply ('a5') starts and completes does it arm.
   function driveThroughC4AndStartA4(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
+    // P0 fix (2026-09-18): same reasoning as `driveToSealedStage`'s own identical drive above
+    // -- c1-c4 each land on a fresh QUESTION_GOALS rendering, deferred by
+    // AUTOMATIC_REPLY_SETTLE_MS now instead of synchronous.
+    vi.useFakeTimers();
     clock.now = 1000;
     aai.emit({
       type: 'transcript.user',
       item_id: 'c1',
       text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
     });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 1500;
     aai.emit({ type: 'reply.started', reply_id: 'a1' });
     aai.emit({
@@ -1395,6 +1444,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
 
     clock.now = 2500;
     aai.emit({ type: 'transcript.user', item_id: 'c2', text: "No, that's wrong. It's Meridian Supply." });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 3000;
     aai.emit({ type: 'reply.started', reply_id: 'a2' });
     aai.emit({ type: 'transcript.agent', item_id: 'a2', text: session.last!.goal.hint, reply_id: 'a2', interrupted: false });
@@ -1403,6 +1453,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
 
     clock.now = 4000;
     aai.emit({ type: 'transcript.user', item_id: 'c3', text: "Yes, that's right." });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 4500;
     aai.emit({ type: 'reply.started', reply_id: 'a3' });
     aai.emit({ type: 'transcript.agent', item_id: 'a3', text: session.last!.goal.hint, reply_id: 'a3', interrupted: false });
@@ -1411,6 +1462,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
 
     clock.now = 5500;
     aai.emit({ type: 'transcript.user', item_id: 'c4', text: 'Yes, correct.' });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 6000;
     aai.emit({ type: 'reply.started', reply_id: 'a4' });
     aai.emit({ type: 'transcript.agent', item_id: 'a4', text: session.last!.goal.hint, reply_id: 'a4', interrupted: false });
@@ -1896,8 +1948,15 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
    *  whole point is CLOSE mechanics, not the reask fix -- that has its own dedicated describe
    *  block further down), so every count below is unchanged from before that fix existed. */
   function driveToFreezeCloseWithFirstSend(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
+    // P0 fix (2026-09-18, call/session.ts's own AUTOMATIC_REPLY_SETTLE_MS doc comment): c1
+    // and c2 each land on a fresh, caller-turn-triggered QUESTION_GOALS rendering, so each
+    // send is now deferred by this many ms (nothing else preempts it here) instead of firing
+    // synchronously -- see this file's own top-level doc comment. `vi.useFakeTimers()` is
+    // safe unconditionally (idempotent) given the top-level `afterEach(vi.useRealTimers)`.
+    vi.useFakeTimers();
     clock.now = 1000;
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 1500;
     aai.emit({ type: 'reply.started', reply_id: 'a1' });
     aai.emit({ type: 'transcript.agent', item_id: 'a1', text: scenarioB.conversation[1]!.text, reply_id: 'a1', interrupted: false });
@@ -1906,6 +1965,7 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
 
     clock.now = 2500;
     aai.emit({ type: 'transcript.user', item_id: 'c2', text: scenarioB.conversation[2]!.text });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 3000;
     aai.emit({ type: 'reply.started', reply_id: 'a2' });
     aai.emit({ type: 'transcript.agent', item_id: 'a2', text: `${scenarioB.conversation[3]!.text} Which institution holds it?`, reply_id: 'a2', interrupted: false });
@@ -1916,7 +1976,9 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     aai.emit({ type: 'transcript.user', item_id: 'c3', text: scenarioB.conversation[4]!.text });
     // c3's own tick reaches FREEZE/SEALED/CLOSE entirely from server-driven lookups -- nothing
     // is speaking (a2 already completed), so THIS is where the first reply.create for CLOSE
-    // (reason tick_end) goes out for real.
+    // (reason tick_end) goes out for real. CLOSE itself is a `forceSpeak`-only transition
+    // (not a QUESTION_GOALS code), so it is UNAFFECTED by the P0 fix and still sends
+    // synchronously here, unchanged.
   }
 
   // Round 4 (2026-09-14, time-budget fix): the retry no longer fires synchronously off
@@ -2394,8 +2456,13 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
    *  point is post-goodbye suppression mechanics, not the reask/bookkeeping fixes, which each
    *  have their own dedicated describe blocks elsewhere). */
   function driveToFreezeCloseWithFirstSend(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
+    // P0 fix (2026-09-18): same reasoning as the round-3 describe block's own identical
+    // helper above -- c1/c2 each land on a fresh, caller-turn-triggered QUESTION_GOALS
+    // rendering, deferred by AUTOMATIC_REPLY_SETTLE_MS now instead of sent synchronously.
+    vi.useFakeTimers();
     clock.now = 1000;
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 1500;
     aai.emit({ type: 'reply.started', reply_id: 'a1' });
     aai.emit({ type: 'transcript.agent', item_id: 'a1', text: scenarioB.conversation[1]!.text, reply_id: 'a1', interrupted: false });
@@ -2404,6 +2471,7 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
 
     clock.now = 2500;
     aai.emit({ type: 'transcript.user', item_id: 'c2', text: scenarioB.conversation[2]!.text });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     clock.now = 3000;
     aai.emit({ type: 'reply.started', reply_id: 'a2' });
     aai.emit({ type: 'transcript.agent', item_id: 'a2', text: `${scenarioB.conversation[3]!.text} Which institution holds it?`, reply_id: 'a2', interrupted: false });
@@ -3225,13 +3293,15 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
     const sessB1Sentence = session.last!.goal.challenge!.speak!;
 
     // Design E (2026-09-15): c1 itself is a caller turn landing on a fresh ASK_CHALLENGE
-    // rendering, so it already sent ONE proactive, instructed reply.create synchronously
-    // (`isFreshQuestionGoal`, gated to caller-turn ticks -- see `tickTriggeredByCallerTurn`'s
-    // own doc comment) -- carrying sess-b-1's own sentence, same wording the reask below
-    // checks. This is new, correct behaviour (not something this test's own subject, the
-    // reask fix, needs to re-prove), so it is captured as a baseline here rather than
-    // re-asserted; everything below is still about what happens once a1's reply (prompted by
-    // that send, and labelled with it) turns out not to have asked the question.
+    // rendering, so it sends ONE proactive, instructed reply.create -- carrying sess-b-1's own
+    // sentence, same wording the reask below checks. P0 fix (2026-09-18,
+    // AUTOMATIC_REPLY_SETTLE_MS): that send is now deferred, not synchronous -- advance past
+    // the settle window (nothing else preempts it here) before reading it as the baseline.
+    // This is new, correct behaviour (not something this test's own subject, the reask fix,
+    // needs to re-prove), so it is captured as a baseline here rather than re-asserted;
+    // everything below is still about what happens once a1's reply (prompted by that send,
+    // and labelled with it) turns out not to have asked the question.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     const replyCreates = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
     const replyCreateCount = () => replyCreates().length;
     expect(replyCreateCount()).toBe(1);
@@ -3300,9 +3370,11 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
     expect(session.last?.state).toBe('CHALLENGE');
 
     // Design E (2026-09-15): c1 is itself a caller turn landing on a fresh ASK_CHALLENGE
-    // rendering, so it already sent one proactive reply.create synchronously (same mechanism
-    // test (a) above proves directly) -- irrelevant to THIS test's own subject (READBACK), so
-    // it is folded into the baseline below rather than re-asserted.
+    // rendering, so it sends one proactive reply.create (same mechanism test (a) above proves
+    // directly) -- irrelevant to THIS test's own subject (READBACK), so it is folded into the
+    // baseline below rather than re-asserted. P0 fix (2026-09-18): that send is deferred by
+    // AUTOMATIC_REPLY_SETTLE_MS now, not synchronous.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     const replyCreateCount = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
 
     clock.now = 1500;
@@ -3317,9 +3389,10 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
     expect(session.last?.goal.code).toBe('READBACK');
     const readbackSentence = session.last!.goal.hint;
     // c2 is ALSO a caller turn landing on a fresh (READBACK) rendering -- one more proactive
-    // send, carrying this same readback sentence, already went out synchronously here. This
-    // is the baseline the rest of the test (about the NEXT reply, a2, not asking it) is
-    // scoped against.
+    // send, carrying this same readback sentence, goes out here (deferred by
+    // AUTOMATIC_REPLY_SETTLE_MS, P0 fix 2026-09-18). This is the baseline the rest of the
+    // test (about the NEXT reply, a2, not asking it) is scoped against.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     const baseline = replyCreateCount();
     expect((aai.sent.at(-1) as { instructions?: string }).instructions).toBe(`Say exactly this and nothing else: "${readbackSentence}"`);
 
@@ -3367,9 +3440,11 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
     expect(session.last?.goal.code).toBe('ASK_CHALLENGE');
     const sentence = session.last!.goal.challenge!.speak!;
-    // Design E (2026-09-15): c1 itself already sent one proactive reply.create synchronously
-    // (same mechanism test (a) above proves directly) -- irrelevant to this test's own
-    // subject (no reask needed when the first try already asks it), so it is the baseline.
+    // Design E (2026-09-15): c1 itself sends one proactive reply.create (same mechanism test
+    // (a) above proves directly) -- irrelevant to this test's own subject (no reask needed
+    // when the first try already asks it), so it is the baseline. P0 fix (2026-09-18): that
+    // send is deferred by AUTOMATIC_REPLY_SETTLE_MS now, not synchronous.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
     const baseline = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
 
     clock.now = 1500;
@@ -3388,9 +3463,12 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
   it('(d) the engine\'s own challenge counters/caps still count only real asks: three real asks exhaust the requirement as before; three non-asks do not', () => {
     // (d1) three REAL asks -- each reads the engine's own CURRENT challenge sentence and
     // speaks it verbatim, exactly what a fully-fixed live agent (via the reask fix, given
-    // enough turns) actually produces. No fake timers needed -- each turn is a NATURAL
-    // caller-turn-driven reply (never a reask), so nothing here depends on the 400ms gap.
+    // enough turns) actually produces. Each turn is a NATURAL caller-turn-driven reply
+    // (never a reask), so nothing here depends on the 400ms reask gap -- but P0 fix
+    // (2026-09-18) still defers c1's own proactive send by AUTOMATIC_REPLY_SETTLE_MS, so fake
+    // timers are needed now to let that settle and bind 'real-ask-1' as the instructed reply.
     {
+      vi.useFakeTimers();
       const clock = { now: 0 };
       const aai = new FakeAaiSocket();
       const sent: ServerEvent[] = [];
@@ -3398,6 +3476,7 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
 
       clock.now = 1000;
       aai.emit({ type: 'transcript.user', item_id: 'c1', text: scenarioB.conversation[0]!.text });
+      vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
       expect(session.last?.state).toBe('CHALLENGE');
 
       // FIX (2026-09-15/16, Dana regression): each challenge only stops being genuinely
