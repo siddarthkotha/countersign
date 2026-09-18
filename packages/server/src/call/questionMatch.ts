@@ -136,6 +136,37 @@ export function transcriptAsksQuestion(accumulatedTranscript: string, verbatimSe
   return QUESTION_IMPERATIVE_STARTS.some((start) => normalized.startsWith(start));
 }
 
+/** Double-ask catch-up fix (2026-09-18 continued, P1 -- PROVEN live from
+ *  scripts/rehearse/reports/2026-09-18T14-50-21-dana-patient.diagnostics.json): the small,
+ *  strict sibling `call/session.ts`'s `maybeSendReplyCreateAfterReplyDone` catch-up path
+ *  needs, and `transcriptAsksQuestion` itself deliberately is not -- see that function's own
+ *  bare-"?" branch. `maybeReaskQuestion` gets away with reusing `transcriptAsksQuestion`
+ *  because it only ever runs against a reply LABELLED with the current goal (`replyGoalAtStart`
+ *  match): whatever it said, it was said FOR this rendering, so any question mark in it is
+ *  reasonably read as that rendering being asked. The catch-up path runs against a reply that
+ *  is typically UNLABELLED (an AssemblyAI AMBIENT reply we never instructed, racing ahead of
+ *  our own deferred send while the standing system_prompt for the SAME rendering is already in
+ *  force) -- a bare "?" there could just as easily be a completely different, unrelated
+ *  question (the PROVEN shape design-e-turn-order.test.ts's own (F3) exercises: "One moment.
+ *  Who is calling and what is your authorization code?"), and treating that as "the current
+ *  question was asked" would wrongly suppress our own instructed ask. This function only ever
+ *  matches the goal's own exact composed sentence (leniently normalized, same tolerance
+ *  `transcriptAsksQuestion`'s own sentence branch already gives TTS/STT punctuation/casing
+ *  drift) -- never a bare "?", never the imperative-opener heuristic. Returns false whenever
+ *  `verbatimSentence` is null (ELICIT_IDENTITY/ELICIT_REQUEST/PROBE_CONSISTENCY -- a goal whose
+ *  `hint` is a paraphrase instruction to the model, with no single correct wording to hold a
+ *  transcript to) or the transcript is empty (the degraded-transcripts shape: audio may have
+ *  landed with no transcribed chunk) -- in both cases the catch-up path falls back to sending,
+ *  unchanged from before this fix; this function never suppresses without a positive, exact
+ *  match to prove the caller already heard these words. */
+export function transcriptAsksExactSentence(accumulatedTranscript: string, verbatimSentence: string | null): boolean {
+  if (!verbatimSentence) return false;
+  if (accumulatedTranscript.trim().length === 0) return false;
+  const sentence = normalizeForCloseMatch(verbatimSentence);
+  if (sentence.length === 0) return false;
+  return normalizeForCloseMatch(accumulatedTranscript).includes(sentence);
+}
+
 /** Fragment-brake fix (2026-09-15, PROVEN live from a fresh sample against deploy 39 --
  *  scratchpad/fragment-analysis.md sections A/C/D(3)): a mid-sentence pause splits one
  *  caller line into two separate AssemblyAI `transcript.user` turns (PROVEN 2.1-2.3s apart on

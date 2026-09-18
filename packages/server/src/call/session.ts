@@ -35,7 +35,13 @@ import { validateToolArgs } from './validate.js';
 import { stallKindFor, stallLineFor, type StallKind } from './stalls.js';
 import { argsForTerminalTool } from './terminalActions.js';
 import { transcriptMatchesCloseSentence, normalizeForCloseMatch } from './closeMatch.js';
-import { QUESTION_GOALS, verbatimQuestionSentence, transcriptAsksQuestion, looksLikeAnswerAttempt } from './questionMatch.js';
+import {
+  QUESTION_GOALS,
+  verbatimQuestionSentence,
+  transcriptAsksQuestion,
+  transcriptAsksExactSentence,
+  looksLikeAnswerAttempt,
+} from './questionMatch.js';
 
 export interface CallSessionOpts {
   session_id: string;
@@ -3886,7 +3892,13 @@ export class CallSession {
    *  STALE relative to that just-logged action (evaluate() has not rerun for this event yet),
    *  asking a question the caller was never actually owed yet -- and setting
    *  `replyCreateAwaitingStart` right before this SAME event's own trailing `tick()` might
-   *  discover CLOSE, silently blocking the real CLOSE `reply.create` behind the busy guard. */
+   *  discover CLOSE, silently blocking the real CLOSE `reply.create` behind the busy guard.
+   *
+   *  Double-ask fix (2026-09-18 continued, P1 -- see the `owedQuestion` branch's own inline
+   *  comment below for the full PROVEN incident and reasoning): the `owedQuestion` branch no
+   *  longer sends unconditionally -- it first checks whether the reply that JUST completed
+   *  (often UNLABELLED -- an AssemblyAI ambient reply we never instructed) already spoke this
+   *  exact rendering's own words (`transcriptAsksExactSentence`), and skips the send if so. */
   private maybeSendReplyCreateAfterReplyDone(replyId: string): void {
     if (this.ended || !this.last) return;
     if (this.speaking || this.replyCreateAwaitingStart) return;
@@ -3896,6 +3908,39 @@ export class CallSession {
     const owedQuestion = this.owedQuestionGoalKey !== null && this.owedQuestionGoalKey === JSON.stringify(goal);
     if (!this.mustForceSpeak(label, current) && !owedQuestion) return;
     if (owedQuestion) {
+      // Double-ask fix (2026-09-18 continued, P1 -- PROVEN live from
+      // scripts/rehearse/reports/2026-09-18T14-50-21-dana-patient.diagnostics.json): before
+      // instructing our OWN reply.create for the owed question, check whether the reply that
+      // JUST completed already said this exact rendering's words -- typically an AssemblyAI
+      // AMBIENT reply (`label` above is not this goal's code -- we never sent it) that ran
+      // ahead of this catch-up path while the standing system_prompt for the SAME fresh
+      // rendering was already in force (the 150ms `AUTOMATIC_REPLY_SETTLE_MS` defer correctly
+      // lets it go first). PROVEN record: the ambient reply's own transcript at its reply.done
+      // was "One moment. Just to confirm, the account ends in 4 4 7 1. Is that correct?" --
+      // the engine's exact `readbackSentence` with a holding prefix -- and this branch sent
+      // our own instructed copy anyway, so the caller heard the identical question twice, on
+      // every one of three readback/challenge cycles in that one call.
+      // `maybeReaskQuestion` already has this exact guard for a LABELLED reply
+      // (`transcriptAsksQuestion(transcript, sentence)`, above in this file) -- this is the
+      // same check, applied here for the first time to an UNLABELLED one. Deliberately
+      // `transcriptAsksExactSentence` (questionMatch.ts), not the more lenient
+      // `transcriptAsksQuestion`: the latter's bare-"?" branch would wrongly suppress our own
+      // ask whenever the ambient reply asked ANY question at all, including a completely
+      // unrelated one -- the PROVEN shape design-e-turn-order.test.ts's own (F3) exercises
+      // ("One moment. Who is calling and what is your authorization code?"), which must still
+      // get our own instructed ask right after it, unregressed. A goal with no single verbatim
+      // sentence (ELICIT_IDENTITY/ELICIT_REQUEST/PROBE_CONSISTENCY) can never match here
+      // (`verbatimQuestionSentence` returns null for those), and neither can an empty
+      // transcript (the degraded-transcripts shape: audio landed, no chunk) -- both fall
+      // through to the unconditional send below, unchanged from before this fix.
+      const replyTranscript = this.replyTranscripts.get(replyId) ?? '';
+      if (transcriptAsksExactSentence(replyTranscript, verbatimQuestionSentence(goal))) {
+        this.lastAskedQuestionKey = JSON.stringify(goal);
+        this.pendingQuestionAnswerAttemptSeen = false;
+        this.owedQuestionGoalKey = null;
+        this.clearTickEndSendTimer();
+        return;
+      }
       this.lastAskedQuestionKey = JSON.stringify(goal);
       // BRAKE (2026-09-15): deliberately NOT re-checked here -- see
       // `shouldBrakeFreshQuestion`'s own doc comment for why re-applying the timing brake in
