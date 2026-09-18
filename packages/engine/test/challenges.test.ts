@@ -1710,6 +1710,115 @@ describe('LIVE_COMMITMENT — a denial that still names the committed value is g
     });
   });
 
+  // REVIEW FINDING (2026-09-19, PROVEN by the reviewer running gradeChallenges against the
+  // real code against MERIDIAN's own seeded identities): the original `deniesCommitted`
+  // reused `negateNearTrapValue`'s PROXIMITY check -- any negate-lexicon word within 4 tokens
+  // of the committed value, either direction -- which is correct for TRAP_FACT (the trap
+  // value is something the AGENT asserted) but wrong for a LIVE_COMMITMENT restatement: a
+  // negation word can legitimately occur NEAR the committed value while the caller still
+  // asserts that value as the answer. Reproduced for all four seed identities on the
+  // approver field (Marcus Obi, Robert Miller tested directly below; Dana Whitfield/Elena
+  // Park share the exact same `negationAttachedToCommittedValue` code path, not
+  // identity-specific). Fixed by replacing the proximity check with
+  // `negationAttachedToCommittedValue` (attachment, not mere proximity) plus tightening
+  // `hasAltPhrase` to exclude the committed value's OWN seed alias phrases (`seedNameTokens`
+  // adds "marcus" as its own whole phrase, distinct from the full "marcus obi" phrase, so the
+  // previous `phrase !== committedNorm` guard let a two-word committed value's own alias
+  // count as a false "alternate"). TRAP_FACT/`gradeTrapFact` are completely unchanged.
+  describe('DEFECT A regression (2026-09-19 review finding): negation NEAR the committed value is not automatically a denial of it', () => {
+    const marcusClaim = claim('c-marcus', 'approver', 'STATED', 'Marcus Obi', 1000, 'Marcus Obi approved it');
+    const marcusSpec: ChallengeSpec = {
+      challenge_id: 'p2-marcus-1',
+      kind: 'LIVE_COMMITMENT',
+      field: 'approver',
+      ask: 'Ask the caller to restate the approver they gave earlier. Do not say the value yourself.',
+      speak: 'Can you restate the approver you gave me earlier?',
+      expect: { commitment_claim_id: 'c-marcus' },
+    };
+    const marcusActions: AgentAction[] = [issuedAction('am', 'p2-marcus-1', 2000)];
+
+    const robertClaim = claim('c-robert', 'approver', 'STATED', 'Robert Miller', 1000, 'Robert Miller approved it');
+    const robertSpec: ChallengeSpec = {
+      challenge_id: 'p2-robert-1',
+      kind: 'LIVE_COMMITMENT',
+      field: 'approver',
+      ask: 'Ask the caller to restate the approver they gave earlier. Do not say the value yourself.',
+      speak: 'Can you restate the approver you gave me earlier?',
+      expect: { commitment_claim_id: 'c-robert' },
+    };
+    const robertActions: AgentAction[] = [issuedAction('ar', 'p2-robert-1', 2000)];
+
+    it('P1: "No, it was Marcus Obi, like I said." -- a bare "No," interjection is not attached to the value -- PASSes', () => {
+      const conversation = [utt('u1', 3000, 'No, it was Marcus Obi, like I said.')];
+      const result = gradeChallenges(conversation, marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      expect(result['p2-marcus-1']?.result).toBe('PASS');
+    });
+
+    it('P2: "Not Elena, Marcus Obi." -- the negation attaches to the OTHER name, correcting TO the committed value -- PASSes', () => {
+      const conversation = [utt('u1', 3000, 'Not Elena, Marcus Obi.')];
+      const result = gradeChallenges(conversation, marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      expect(result['p2-marcus-1']?.result).toBe('PASS');
+    });
+
+    it('P3: "That is not something I\'d get wrong -- Robert Miller." -- negation attaches to a generic aside, not the name -- PASSes', () => {
+      const conversation = [utt('u1', 3000, "That is not something I'd get wrong -- Robert Miller.")];
+      const result = gradeChallenges(conversation, robertActions, [robertSpec], SEED, [robertClaim]);
+      expect(result['p2-robert-1']?.result).toBe('PASS');
+    });
+
+    it('P4: "No, Marcus Obi." -- bare "No," directly before the value is still not attachment -- PASSes', () => {
+      const conversation = [utt('u1', 3000, 'No, Marcus Obi.')];
+      const result = gradeChallenges(conversation, marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      expect(result['p2-marcus-1']?.result).toBe('PASS');
+    });
+
+    it('regression guard: a bare denial of a TWO-WORD committed value with no alternative still grades AMBIGUOUS (the alias-phrase fix does not turn it into a false FAIL)', () => {
+      const conversation = [utt('u1', 3000, 'I never said Marcus Obi.')];
+      const result = gradeChallenges(conversation, marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      expect(result['p2-marcus-1']?.result).toBe('AMBIGUOUS');
+    });
+
+    it('regression guard: a denial of a two-word committed value that DOES offer a real alternate name still FAILs', () => {
+      const conversation = [utt('u1', 3000, 'I never said Marcus Obi, it was Elena Park.')];
+      const result = gradeChallenges(conversation, marcusActions, [marcusSpec], SEED, [marcusClaim]);
+      expect(result['p2-marcus-1']?.result).toBe('FAIL');
+    });
+
+    it('regression guard: A1 (single-word committed, denial-plus-alt-value) is unaffected by this change', () => {
+      const singleClaim = claim('c-approver-2r', 'approver', 'STATED', 'Marcus', 1000, 'Marcus approved it');
+      const singleSpec: ChallengeSpec = { ...marcusSpec, challenge_id: 'p2-single-1', expect: { commitment_claim_id: 'c-approver-2r' } };
+      const singleActions: AgentAction[] = [issuedAction('as', 'p2-single-1', 2000)];
+      const conversation = [utt('u1', 3000, 'I never said Marcus, it was Elena.')];
+      const result = gradeChallenges(conversation, singleActions, [singleSpec], SEED, [singleClaim]);
+      expect(result['p2-single-1']?.result).toBe('FAIL');
+    });
+
+    it('regression guard: A2 (single-word committed, bare denial) is unaffected by this change', () => {
+      const singleClaim = claim('c-approver-2s', 'approver', 'STATED', 'Marcus', 1000, 'Marcus approved it');
+      const singleSpec: ChallengeSpec = { ...marcusSpec, challenge_id: 'p2-single-2', expect: { commitment_claim_id: 'c-approver-2s' } };
+      const singleActions: AgentAction[] = [issuedAction('as2', 'p2-single-2', 2000)];
+      const conversation = [utt('u1', 3000, 'I never said Marcus.')];
+      const result = gradeChallenges(conversation, singleActions, [singleSpec], SEED, [singleClaim]);
+      expect(result['p2-single-2']?.result).toBe('AMBIGUOUS');
+    });
+
+    it('regression guard: TRAP_FACT (gradeTrapFact) negation-proximity behavior is completely unchanged', () => {
+      const counselClaim = claim('c-counsel-r', 'counsel', 'STATED', 'Calder & Finch', 1000, 'Calder & Finch');
+      const trapSpec: ChallengeSpec = {
+        challenge_id: 'p2-trap-1',
+        kind: 'TRAP_FACT',
+        field: 'counsel',
+        ask: 'x',
+        speak: 'x',
+        expect: { trap_value: 'Whitmore & Bass', true_claim_id: 'c-counsel-r' },
+      };
+      const trapActions: AgentAction[] = [issuedAction('at', 'p2-trap-1', 2000)];
+      const conversation = [utt('u1', 3000, "No, that's not Whitmore and Bass, it's Calder and Finch.")];
+      const result = gradeChallenges(conversation, trapActions, [trapSpec], SEED, [counselClaim]);
+      expect(result['p2-trap-1']?.result).toBe('PASS');
+    });
+  });
+
   describe('DEFECT A4: regression guard -- TRAP_FACT grading of a negated true value is unchanged by this fix', () => {
     // gradeTrapFact is untouched by this fix; this only proves it still behaves as
     // documented: mentioning the TRUE value is always PASS for a TRAP_FACT challenge,

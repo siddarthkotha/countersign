@@ -927,13 +927,23 @@ function gradeLiveCommitment(
     // branch did, with no negation awareness -- so a reply that DENIES having given the
     // committed value while still naming it ("I never said Marcus, it was Elena.") matched
     // `normText.includes(committedNorm)` and graded PASS, exactly like an honest restatement.
-    // `deniesCommitted` reuses `negateNearTrapValue` -- the SAME negation-proximity check
-    // `gradeTrapFact`'s own rule (b) already uses to recognize "the caller rejected the
-    // planted value directly" -- against the COMMITTED value instead of a trap value, rather
-    // than inventing a second negation system. When it fires, the PASS below is skipped and
-    // this reply is graded on what it ACTUALLY says (see the two blocks below), not
-    // rubber-stamped as a correct restatement merely for containing the value being denied.
-    const deniesCommitted = normText.includes(committedNorm) && negateNearTrapValue(normText, committedNorm, seed);
+    //
+    // FIX (2026-09-19, review finding, PROVEN false-positive by running this grader for real:
+    // "No, it was Marcus Obi, like I said." / "Not Elena, Marcus Obi." / "That is not
+    // something I'd get wrong -- Robert Miller." all wrongly FAILed an honest restatement):
+    // `deniesCommitted` originally reused `negateNearTrapValue`'s PROXIMITY check (any
+    // negate-lexicon word within 4 tokens of the committed value, either direction) --
+    // correct for TRAP_FACT (`gradeTrapFact`, UNCHANGED here), where a trap value is
+    // something the AGENT asserted and ANY nearby negation legitimately signals the caller
+    // rejecting it, but wrong here: a LIVE_COMMITMENT reply can legitimately carry a
+    // negation word NEAR the committed value while still asserting that value as the answer
+    // -- "No," as a bare discourse interjection, a negation attached to a DIFFERENT name
+    // ("Not Elena, Marcus Obi" -- "not" attaches to Elena, correcting TO Marcus Obi), or a
+    // negation attached to an unrelated aside ("...I'd get wrong -- Robert Miller"). Replaced
+    // with `negationAttachedToCommittedValue` (below), which checks ATTACHMENT, not mere
+    // proximity: only when a negation phrase's own tokens end IMMEDIATELY (zero gap) before
+    // the committed value's own token span. Local to this branch only.
+    const deniesCommitted = normText.includes(committedNorm) && negationAttachedToCommittedValue(normText, committedNorm);
     if (!deniesCommitted && normText.includes(committedNorm)) return 'PASS';
 
     const cued = extractCuedNames(rawText).filter((h) => h.field === field);
@@ -949,14 +959,28 @@ function gradeLiveCommitment(
       // own doc comment already names as a known gap for a bare seed-known single word with no
       // cue verb to anchor an `extractCuedNames` hit. Recognized here the same way
       // `hasNameSignal` recognizes it elsewhere (seed-known person/org whole phrases, or a
-      // seed-known PERSON name word), EXCLUDING any word that is itself part of the committed
-      // value being denied -- so a bare "I never said Marcus." (no alternative at all) does
-      // NOT count "marcus" against itself and correctly falls through to AMBIGUOUS, once,
-      // below; only a genuinely DIFFERENT seed-known name in the same reply makes this FAIL,
-      // the same direction as an explicit wrong-name restatement.
+      // seed-known PERSON name word), EXCLUDING any seed phrase whose words are ALL contained
+      // in the committed value's own words -- so a bare "I never said Marcus." (no alternative
+      // at all) does NOT count "marcus" against itself and correctly falls through to
+      // AMBIGUOUS, once, below; only a genuinely DIFFERENT seed-known name in the same reply
+      // makes this FAIL, the same direction as an explicit wrong-name restatement.
+      //
+      // FIX (2026-09-19, review finding): the original guard excluded only the exact full
+      // `committedNorm` phrase (`phrase !== committedNorm`), not the seed's own single-word
+      // ALIAS phrases that are part of the committed name -- `seedNameTokens`/`addPersonName`
+      // adds an identity's alias ("marcus") as its own whole phrase, distinct from the full
+      // name phrase ("marcus obi") -- so for a two-word committed value, a bare denial with NO
+      // alternative at all ("I never said Marcus Obi.") would see its own alias "marcus"
+      // survive the `!== committedNorm` filter and wrongly count as an "alternate" name.
+      // Fixed by excluding any phrase whose words are entirely a subset of the committed
+      // value's own words, not just the one phrase that happens to equal it exactly.
       const known = seedNameTokens(seed);
       const committedWords = new Set(committedNorm.split(' ').filter(Boolean));
-      const hasAltPhrase = known.phrases.some((phrase) => phrase !== committedNorm && hasNamePhrase(normText, [phrase]));
+      const hasAltPhrase = known.phrases.some((phrase) => {
+        const phraseWords = phrase.split(' ').filter(Boolean);
+        if (phraseWords.length > 0 && phraseWords.every((w) => committedWords.has(w))) return false;
+        return hasNamePhrase(normText, [phrase]);
+      });
       const hasAltWord = normText
         .split(' ')
         .filter(Boolean)
@@ -1036,6 +1060,48 @@ function negateNearTrapValue(normText: string, trapValueNorm: string, seed: Seed
         if (gap <= 4) return true;
       }
     }
+  }
+  return false;
+}
+
+/** FIX (2026-09-19, LIVE_COMMITMENT-denial lane, review finding): is a negation ATTACHED to
+ *  `committedNorm` -- i.e. is the caller denying THIS value specifically -- as opposed to a
+ *  negation word merely occurring somewhere nearby in the reply? Used only by
+ *  `gradeLiveCommitment`'s name-field branch (see its own doc comment for the full false-
+ *  positive this replaces: `negateNearTrapValue`'s proximity check read "No, it was Marcus
+ *  Obi, like I said." / "Not Elena, Marcus Obi." / "...I'd get wrong -- Robert Miller." as
+ *  denials of the committed value purely because a negate-lexicon word landed within 4 tokens
+ *  of it, in either direction, with no regard for what the negation actually modifies).
+ *
+ *  Deliberately narrow, by design: only fires when a negation phrase's own tokens end
+ *  IMMEDIATELY (zero-token gap) before the committed value's own token span starts --
+ *   - bare "not" directly preceding the value ("not Marcus Obi") -- "not" grammatically
+ *     negates whatever follows it directly, unlike bare "no" (a free-standing discourse
+ *     interjection in natural speech, e.g. "No, it was X" / "No, X" -- never treated as
+ *     attached here, which is exactly what keeps "No, Marcus Obi." and "No, it was Marcus
+ *     Obi, like I said." both PASSing);
+ *   - the two-word phrase "never said" directly preceding the value ("never said Marcus
+ *     Obi") -- this codebase's own fixed way (b89f933, DENIAL_OF_COMMITMENT_RE) of saying
+ *     "I did not state X", regardless of what comes after.
+ *  Any OTHER negate-lexicon word ("wrong", "incorrect", "that's not") landing next to the
+ *  value is deliberately NOT treated as attachment -- PROVEN too loose by "That is not
+ *  something I'd get wrong -- Robert Miller.": "wrong" sits immediately before "Robert
+ *  Miller" there purely as a self-deprecating aside ("I would not get this wrong"), not as a
+ *  rejection of the name that follows, and a token-adjacency rule for that word alone cannot
+ *  tell the two apart. Only checks the value immediately AFTER a negation (not negation
+ *  immediately after the value) -- every probe this fixes, and both regression guards (A1's
+ *  "I never said Marcus Obi, it was Elena Park." and A2's "I never said Marcus."), are this
+ *  shape; widening further is left for a future, separately-tested case rather than guessed
+ *  at here. */
+function negationAttachedToCommittedValue(normText: string, committedNorm: string): boolean {
+  if (committedNorm.length === 0) return false;
+  const tokens = normText.split(' ').filter(Boolean);
+  const committedTokens = committedNorm.split(' ').filter(Boolean);
+  if (committedTokens.length === 0) return false;
+  for (let i = 0; i + committedTokens.length <= tokens.length; i++) {
+    if (!committedTokens.every((t, j) => tokens[i + j] === t)) continue;
+    if (i >= 1 && tokens[i - 1] === 'not') return true;
+    if (i >= 2 && tokens[i - 2] === 'never' && tokens[i - 1] === 'said') return true;
   }
   return false;
 }
