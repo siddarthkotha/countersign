@@ -536,3 +536,160 @@ describe('CallSession -- double-ask catch-up fix, content-match extension (P1, 2
     expect(challengeIssuedActions()).toHaveLength(0); // not yet -- the instructed reply hasn't completed yet
   });
 });
+
+// Push-52 review fix (2026-09-18 continued, P0 -- BLOCKING, live-reproduced against main
+// 65622b9): the label-only branch above ((e)'s own LIVE_COMMITMENT "deadline" shape) was too
+// loose -- "One moment, I am checking the deadline for you?" and "Is the deadline today?" both
+// mention "deadline" and end in "?" but ask the caller nothing, and the old check (label
+// anywhere in the transcript + a "?" anywhere in the transcript, no same-sentence requirement,
+// no cue) suppressed our real question for both. CHALLENGE is reached in the first turn or two
+// of nearly every real call, so this was live-reproducible on a clean PASS call, riding the
+// rendering to UNANSWERED and an idle escalation instead of asking it for real even once.
+//
+// Fix (questionMatch.ts): `LoadBearingKind` discriminates 'specific' (READBACK's own value, or
+// an ASK_CHALLENGE TRAP_FACT's own trap value -- reviewer-confirmed specific enough,
+// UNTOUCHED) from 'label' (LIVE_COMMITMENT/SEED_FACT/RELATIONAL's own spoken field-label
+// subject -- a common noun, TIGHTENED). A 'label' match now requires, in the SAME
+// sentence-like chunk (`questionSentencesOf`): a "?", the label, AND one of `LABEL_RESTATE_CUES`
+// ("can you" / "restate" / "give me" -- the only cues actually present in LIVE_COMMITMENT's
+// and RELATIONAL's own composed sentences, challenges.ts lines 110/406; SEED_FACT's own
+// composed sentences, line 351, contain none of them, so a SEED_FACT rendering is never
+// suppressed through this branch -- see `LABEL_RESTATE_CUES`'s own doc comment for the full
+// list the review offered and why this file did not add the rest unjustified).
+//
+// The three probes below are the exact ones from the review: two must STOP suppressing, one
+// (test (e) above, "Could you please restate the deadline you provided earlier?") must KEEP
+// suppressing -- reconfirmed here as (i) alongside its two siblings so all three read as one
+// table.
+describe('CallSession -- push-52 review fix: the LIVE_COMMITMENT/SEED_FACT/RELATIONAL "label" branch requires a same-sentence restate/supply cue, not just the label + a "?" anywhere', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const OUR_SENTENCE = 'Can you restate the deadline you gave me earlier?';
+
+  /** Builds the same hand-authored LIVE_COMMITMENT "deadline" challenge (e) uses above, drives
+   *  an ambient reply with `ambientText` through the real `recordGoalCompletionAction` +
+   *  `maybeSendReplyCreateAfterReplyDone` catch-up path (direct invocation, not `aai.emit` --
+   *  see (e)'s own doc comment for why: `session.last = ...` survives only until the next real
+   *  event re-runs the engine's own `tick()`/`evaluate()`), and returns what a caller of this
+   *  helper needs to assert against. */
+  function probeDeadlineLabel(ambientText: string): { replyCreates: { type?: string; instructions?: string }[]; challengeIssuedCount: number } {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_B, aai, sent, diagEvents);
+
+    const challenge: ChallengeSpec = {
+      challenge_id: 'sess-catchup-deadline-label-probe',
+      kind: 'LIVE_COMMITMENT',
+      field: 'deadline',
+      ask: 'Ask the caller to restate the deadline they gave earlier. Do not say the value yourself.',
+      speak: OUR_SENTENCE,
+      expect: { commitment_claim_id: 'claim-deadline-label-probe' },
+    };
+    session.last = {
+      ...session.last!,
+      state: 'CHALLENGE',
+      goal: { code: 'ASK_CHALLENGE', hint: OUR_SENTENCE, keyterms: [], turn_detection_hint: 'patient', challenge },
+    };
+
+    const internals = session as unknown as {
+      owedQuestionGoalKey: string | null;
+      replyTranscripts: Map<string, string>;
+      recordGoalCompletionAction: (replyId: string, status: string) => void;
+      maybeSendReplyCreateAfterReplyDone: (replyId: string) => void;
+    };
+    internals.owedQuestionGoalKey = JSON.stringify(session.last.goal);
+    internals.replyTranscripts.set('auto-1', ambientText);
+
+    internals.recordGoalCompletionAction('auto-1', 'completed');
+    internals.maybeSendReplyCreateAfterReplyDone('auto-1');
+
+    const challengeIssuedCount = session.logs.actions.filter(
+      (a) => a.kind === 'challenge_issued' && (a as { challenge_id?: string }).challenge_id === challenge.challenge_id
+    ).length;
+    return { replyCreates: replyCreatesOf(aai), challengeIssuedCount };
+  }
+
+  it('(i) MUST KEEP suppressing: "Could you please restate the deadline you provided earlier?" (the PROVEN live paraphrase, reconfirmed) -- one sentence, one "?", the label, and "restate"', () => {
+    const { replyCreates, challengeIssuedCount } = probeDeadlineLabel('Could you please restate the deadline you provided earlier?');
+    expect(replyCreates).toHaveLength(0); // no catch-up send
+    expect(challengeIssuedCount).toBeGreaterThanOrEqual(1); // never zero issuances -- see file header above
+    expect(challengeIssuedCount).toBe(1);
+  });
+
+  it('(j) MUST STOP suppressing: "One moment, I am checking the deadline for you?" -- mentions the label and ends in "?", but is not a restate-or-supply request at all', () => {
+    const { replyCreates } = probeDeadlineLabel('One moment, I am checking the deadline for you?');
+    // THE FIX: our own real question now goes out -- pre-fix, this wrongly suppressed it
+    // (label "deadline" + a "?" somewhere in the transcript was enough), which would have
+    // ridden this rendering to UNANSWERED and an idle escalation on a clean call.
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${OUR_SENTENCE}"`);
+  });
+
+  it('(k) MUST STOP suppressing: "Is the deadline today?" -- a yes/no question ABOUT the value, never a request for the caller to COMMIT one', () => {
+    // Why this must not suppress: this sentence asks the caller to confirm or deny a fact
+    // ("is it today"), the same shape a READBACK confirmation asks -- it never asks the caller
+    // to RESTATE or SUPPLY anything, which is the entire point of a LIVE_COMMITMENT challenge.
+    // A caller who says "yes" to this has confirmed nothing the engine can grade against
+    // (gradeChallenges' own LIVE_COMMITMENT path needs the caller's OWN restated value, never
+    // a bare yes/no) -- suppressing our real ask here would leave the challenge unresolved
+    // with no path forward except an idle timeout.
+    const { replyCreates } = probeDeadlineLabel('Is the deadline today?');
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${OUR_SENTENCE}"`);
+  });
+
+  it('(l) SEED_FACT is never suppressed through the label branch at all: an ambient reply that verbatim-matches a real SEED_FACT-shaped question still gets our own instructed ask sent, because none of the engine\'s SEED_FACT wording carries a restate/supply cue', () => {
+    // Deliberately NOT built from a hand-authored ChallengeSpec this time -- this proves the
+    // real engine-composed SEED_FACT sentence shape (askToQuestion(entry.ask), challenges.ts
+    // line 351) against the real spoken-field label match this file's own (e)/(i)-(k) probes
+    // exercise by hand, using the exact wording the engine would actually produce for a
+    // "counsel of record" fact (seed/meridian.ts's own `ask`: "Ask which law firm is our
+    // counsel of record on the Hartwell deal.").
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_B, aai, sent, diagEvents);
+
+    const OUR_SEED_FACT_SENTENCE = 'Which law firm is our counsel of record on the Hartwell deal?';
+    const challenge: ChallengeSpec = {
+      challenge_id: 'sess-catchup-seedfact-label-probe',
+      kind: 'SEED_FACT',
+      field: 'counsel',
+      ask: 'Ask which law firm is our counsel of record on the Hartwell deal.',
+      speak: OUR_SEED_FACT_SENTENCE,
+      expect: { accept_tokens: ['calder', 'finch'] },
+      fact_id: 'counsel_of_record',
+    };
+    session.last = {
+      ...session.last!,
+      state: 'CHALLENGE',
+      goal: { code: 'ASK_CHALLENGE', hint: OUR_SEED_FACT_SENTENCE, keyterms: [], turn_detection_hint: 'patient', challenge },
+    };
+
+    const internals = session as unknown as {
+      owedQuestionGoalKey: string | null;
+      replyTranscripts: Map<string, string>;
+      recordGoalCompletionAction: (replyId: string, status: string) => void;
+      maybeSendReplyCreateAfterReplyDone: (replyId: string) => void;
+    };
+    internals.owedQuestionGoalKey = JSON.stringify(session.last.goal);
+    // An ambient reply that says almost the SAME words, one small paraphrase ("firm" ->
+    // "practice") -- close enough that a human would call this the same question asked twice,
+    // and it names the spoken field label ("counsel") with a "?" in the same sentence -- but
+    // "which law practice represents us as counsel of record" carries none of
+    // `LABEL_RESTATE_CUES`, so it is NOT suppressed: our own instructed ask still goes out.
+    internals.replyTranscripts.set('auto-1', 'One moment. Which law practice represents us as counsel of record?');
+
+    internals.recordGoalCompletionAction('auto-1', 'completed');
+    internals.maybeSendReplyCreateAfterReplyDone('auto-1');
+
+    const replyCreates = replyCreatesOf(aai);
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${OUR_SEED_FACT_SENTENCE}"`);
+  });
+});

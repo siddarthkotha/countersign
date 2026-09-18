@@ -198,9 +198,13 @@ export function transcriptAsksExactSentence(accumulatedTranscript: string, verba
  *  goal with no `challenge` at all) returns null from `loadBearingValueFor` and this function is
  *  never even reached for it -- `replyCoversCurrentRendering` below falls through to
  *  `transcriptAsksExactSentence` alone in that case, unchanged from before this fix. */
-export function transcriptContainsLoadBearingValue(accumulatedTranscript: string, field: ClaimField, value: string): boolean {
+export function transcriptContainsLoadBearingValue(
+  accumulatedTranscript: string,
+  field: ClaimField,
+  value: string,
+  kind: LoadBearingKind = 'specific',
+): boolean {
   if (accumulatedTranscript.trim().length === 0) return false;
-  if (!accumulatedTranscript.includes('?')) return false;
   const normalizedValue = normalizeText(value);
   if (normalizedValue.length === 0) return false;
   // Digit-shaped fields (account_last4, amount_usd): match a contiguous digit run in the
@@ -210,7 +214,10 @@ export function transcriptContainsLoadBearingValue(accumulatedTranscript: string
   // (a no-op here whenever the transcript already contains digit characters, exactly like this
   // record's own "4 4 7 1" -- see normalizeSpokenDigits' own doc comment for why -- but still
   // catches a hypothetical fully spelled-out account number, e.g. "four four seven one").
+  // UNCHANGED by the push-52 tightening below (reviewer confirmed this branch specific enough
+  // as-is): whole-transcript "?" gate, whole-transcript digit-run search.
   if (field === 'account_last4' || field === 'amount_usd') {
+    if (!accumulatedTranscript.includes('?')) return false;
     if (digitRuns(normalizeSpokenDigits(accumulatedTranscript)).includes(normalizedValue)) return true;
     if (field === 'amount_usd') {
       const expectedUsd = Number(value);
@@ -220,10 +227,70 @@ export function transcriptContainsLoadBearingValue(accumulatedTranscript: string
     }
     return false;
   }
-  // Every other field (beneficiary, and the ASK_CHALLENGE "subject" label
-  // `loadBearingValueFor` hands this function) is prose -- whole-phrase containment, same
-  // normalization the close matcher and `transcriptAsksExactSentence` above already use.
+  if (kind === 'label') {
+    // Tightened (2026-09-18 continued, P0 -- PROVEN live-reproduced over-suppression, push 52
+    // review against main 65622b9): see `LoadBearingKind`'s own doc comment for the two
+    // failing probes and why a bare whole-transcript containment check (what this branch used
+    // to do, identical to the 'specific' branch below) was wrong for a common noun label.
+    return questionSentencesOf(accumulatedTranscript).some((sentence) => sentenceNamesLabelWithRestateCue(sentence, normalizedValue));
+  }
+  // 'specific' non-digit value (READBACK's own beneficiary field, or an ASK_CHALLENGE
+  // TRAP_FACT's own non-digit trap value -- counsel/escrow_institution/approver/beneficiary):
+  // reviewer-confirmed specific enough for whole-phrase containment alone, unchanged from
+  // before the push-52 tightening -- same normalization the close matcher and
+  // `transcriptAsksExactSentence` above already use.
+  if (!accumulatedTranscript.includes('?')) return false;
   return normalizeText(accumulatedTranscript).includes(normalizedValue);
+}
+
+/** Splits `text` into sentence-like chunks on a sentence-ending punctuation mark (./!/?),
+ *  each chunk keeping its own terminator -- the "same sentence" unit `sentenceNamesLabelWithRestateCue`
+ *  tests against. Not real NLP sentence splitting (a TTS/STT transcript's own punctuation,
+ *  however imperfect, is the only signal available); a trailing chunk with no terminator at
+ *  all (a cut-off clause) is still kept as its own final chunk, so nothing is silently
+ *  dropped from consideration -- it will simply never satisfy the "?" requirement below. */
+function questionSentencesOf(text: string): string[] {
+  return text
+    .split(/(?<=[.?!])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/** The restate-or-supply cues actually present in LIVE_COMMITMENT and RELATIONAL's own
+ *  composed sentences (packages/engine/src/challenges.ts, grepped 2026-09-18): LIVE_COMMITMENT's
+ *  `speak` is always `Can you restate the ${spokenField(field)} you gave me earlier?` (line
+ *  110); RELATIONAL's is always `Can you give me the last four digits of the account attached
+ *  to the ${humanField} you named?` (line 406) -- both contain "can you", and each also has its
+ *  own distinctive verb ("restate" / "give me"). SEED_FACT's own `speak`
+ *  (`askToQuestion(entry.ask)`, line 351) is a bare WH-question mechanically built from
+ *  seed/meridian.ts's own `ask` strings ("Which law firm is our counsel of record...", "Who the
+ *  target company's CEO is...", "What this payment ... is for") -- NONE of them contain any of
+ *  these three cues, so a SEED_FACT rendering is NEVER suppressed through this label branch --
+ *  see `LoadBearingKind`'s own doc comment for why that is a disclosed trade-off, not a bug.
+ *  Deliberately NOT the fuller list ("repeat"/"confirm"/"tell me"/"say again"/"what is"/"could
+ *  you") the review suggested as options: none of those appear in any engine-composed sentence
+ *  TODAY either, and adding them would be an unjustified guess at wording the engine has never
+ *  actually produced, not a fix for a PROVEN shape -- "restate the deadline you provided
+ *  earlier" (the PROVEN paraphrase) already matches on "restate" alone. */
+const LABEL_RESTATE_CUES: readonly string[] = ['can you', 'restate', 'give me'];
+
+/** True when ONE sentence-like chunk (`questionSentencesOf`) satisfies all three of: contains
+ *  a literal "?"; names `normalizedLabel` (the field's spoken label, e.g. "deadline"); AND
+ *  carries one of `LABEL_RESTATE_CUES` -- all three in the SAME chunk, never merely somewhere
+ *  in the whole transcript. PROVEN over-suppression this closes (push 52 review, live-
+ *  reproduced against main 65622b9, field "deadline"): "One moment, I am checking the deadline
+ *  for you?" and "Is the deadline today?" each mention the label and end in "?" but ask the
+ *  caller nothing -- neither is a restate-or-supply request, and the old bare containment
+ *  check (label + "?" ANYWHERE in the transcript, no cue, no same-sentence requirement)
+ *  suppressed our own real question for both, riding the rendering to UNANSWERED and an idle
+ *  escalation on what should have been a clean PASS. "Could you please restate the deadline
+ *  you provided earlier?" (the PROVEN live paraphrase this whole label branch exists for)
+ *  still matches: one sentence, one "?", the label, and "restate". */
+function sentenceNamesLabelWithRestateCue(sentence: string, normalizedLabel: string): boolean {
+  if (!sentence.includes('?')) return false;
+  const normalized = normalizeText(sentence);
+  if (!normalized.includes(normalizedLabel)) return false;
+  return LABEL_RESTATE_CUES.some((cue) => normalized.includes(cue));
 }
 
 /** Joins each maximal run of consecutive digit-shaped tokens in `normalizeText(text)` into one
@@ -253,16 +320,39 @@ function digitRuns(text: string): string[] {
   return runs;
 }
 
+/** Discriminates the TWO shapes `loadBearingValueFor` can return -- see that function's own
+ *  doc comment for which goal/challenge shape produces which:
+ *   - 'specific': a READBACK field's own value, or an ASK_CHALLENGE TRAP_FACT's own wrong
+ *     value -- a concrete, unambiguous piece of content (a number, an account digit run, a
+ *     named vendor/firm) that a reply could only plausibly contain if it actually delivered
+ *     (or closely paraphrased) THIS rendering. Reviewer-confirmed (push 52 review, live
+ *     record scripts/rehearse/reports/2026-09-18T14-44-58-barge-in-interrupt.diagnostics.json,
+ *     25031/30761) specific enough for whole-phrase containment alone -- `transcriptContainsLoadBearingValue`
+ *     leaves this branch untouched.
+ *   - 'label': a LIVE_COMMITMENT/SEED_FACT/RELATIONAL challenge's own spoken FIELD LABEL
+ *     (`spokenField`, e.g. "deadline", "amount in dollars") -- a common NOUN, not a value:
+ *     any sentence that happens to mention the same topic satisfies whole-phrase containment,
+ *     whether or not it asks the caller to do anything. PROVEN over-suppression (push 52
+ *     review, live-reproduced against main 65622b9, field "deadline"): "One moment, I am
+ *     checking the deadline for you?" and "Is the deadline today?" both mention "deadline" and
+ *     end in "?" but ask the caller nothing -- our real question never went out, and the
+ *     rendering rode to UNANSWERED and an idle escalation on what should have been a clean
+ *     PASS. `transcriptContainsLoadBearingValue` requires this kind to ALSO satisfy
+ *     `sentenceNamesLabelWithRestateCue` (same sentence as the "?", plus a restate/supply cue
+ *     aimed at the caller) -- see that function's own doc comment. */
+export type LoadBearingKind = 'specific' | 'label';
+
 /** The single load-bearing value `goal`'s own composed sentence puts into words, when one
  *  exists -- the piece of CONTENT that proves a reply actually delivered THIS rendering, as
  *  opposed to merely asking a question shaped like it (see `transcriptContainsLoadBearingValue`
  *  above for the full PROVEN incident this exists for). READBACK always has one: `goal.readback`
  *  itself IS a `{ field, value }` pair, straight from the engine (fsm.ts's `readbackSentence`
- *  composes the sentence from the exact same claim value). ASK_CHALLENGE has one for every kind
- *  its own `speak` sentence actually names something specific:
+ *  composes the sentence from the exact same claim value) -- `kind: 'specific'`. ASK_CHALLENGE
+ *  has one for every kind its own `speak` sentence actually names something:
  *   - TRAP_FACT: the wrong value `trapSentence` (challenges.ts) states back --
  *     `goal.challenge.expect.trap_value` -- the PROVEN live shape (this function's own doc
- *     comment incident) that first showed the exact-sentence-only fix wasn't enough.
+ *     comment incident) that first showed the exact-sentence-only fix wasn't enough --
+ *     `kind: 'specific'`.
  *   - LIVE_COMMITMENT / SEED_FACT / RELATIONAL: none of these embed a CALLER-supplied value in
  *     their own `speak` sentence (they're asking the caller to SUPPLY one) -- but every one of
  *     them does name its own `field`'s spoken label somewhere in that sentence (`spokenField`,
@@ -270,18 +360,21 @@ function digitRuns(text: string): string[] {
  *     "deadline", ...) -- the "subject" the caller can hear it's asking about, PROVEN live
  *     (prompt-injection-midcall's own 123150/126392 "deadline" pair: "Could you please restate
  *     the deadline you provided earlier?" vs "Can you restate the deadline you gave me
- *     earlier?" -- different wording, same subject). Null for every other goal code (no
- *     `challenge`, or `challenge.expect` is missing altogether). */
-export function loadBearingValueFor(goal: PhrasingGoal): { field: ClaimField; value: string } | null {
+ *     earlier?" -- different wording, same subject) -- `kind: 'label'` (see `LoadBearingKind`'s
+ *     own doc comment for why this kind needs the EXTRA same-sentence + cue requirement, and
+ *     why that requirement leaves SEED_FACT never suppressible through this branch at all).
+ *  Null for every other goal code (no `challenge`, or `challenge.expect` is missing
+ *  altogether). */
+export function loadBearingValueFor(goal: PhrasingGoal): { field: ClaimField; value: string; kind: LoadBearingKind } | null {
   if (goal.code === 'READBACK' && goal.readback) {
-    return { field: goal.readback.field, value: goal.readback.value };
+    return { field: goal.readback.field, value: goal.readback.value, kind: 'specific' };
   }
   if (goal.code === 'ASK_CHALLENGE' && goal.challenge) {
     const { challenge } = goal;
     if (challenge.kind === 'TRAP_FACT' && 'trap_value' in challenge.expect) {
-      return { field: challenge.field, value: challenge.expect.trap_value };
+      return { field: challenge.field, value: challenge.expect.trap_value, kind: 'specific' };
     }
-    return { field: challenge.field, value: spokenField(challenge.field) };
+    return { field: challenge.field, value: spokenField(challenge.field), kind: 'label' };
   }
   return null;
 }
@@ -290,13 +383,15 @@ export function loadBearingValueFor(goal: PhrasingGoal): { field: ClaimField; va
  *  actually calls: true when the completed reply either spoke the rendering's own exact
  *  composed sentence (`transcriptAsksExactSentence`) or asked SOME question that names the
  *  rendering's own load-bearing content (`transcriptContainsLoadBearingValue`, only reached
- *  when `loadBearingValueFor` finds one). See each function's own doc comment for the two
- *  separate PROVEN live incidents this closes. */
+ *  when `loadBearingValueFor` finds one, and applying the extra same-sentence + cue test for a
+ *  'label' kind). See each function's own doc comment for the PROVEN live incidents this
+ *  closes, and `LoadBearingKind`'s own doc comment for the PROVEN over-suppression the 'label'
+ *  branch's own extra requirement fixes. */
 export function replyCoversCurrentRendering(accumulatedTranscript: string, goal: PhrasingGoal): boolean {
   if (transcriptAsksExactSentence(accumulatedTranscript, verbatimQuestionSentence(goal))) return true;
   const loadBearing = loadBearingValueFor(goal);
   if (!loadBearing) return false;
-  return transcriptContainsLoadBearingValue(accumulatedTranscript, loadBearing.field, loadBearing.value);
+  return transcriptContainsLoadBearingValue(accumulatedTranscript, loadBearing.field, loadBearing.value, loadBearing.kind);
 }
 
 /** Fragment-brake fix (2026-09-15, PROVEN live from a fresh sample against deploy 39 --
