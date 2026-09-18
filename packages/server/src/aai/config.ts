@@ -158,17 +158,22 @@ export interface TurnDetectionConfig {
   interrupt_response?: boolean;
 }
 
-/** The 'patient' floor `call/session.ts`'s own per-goal `session.update` sends explicitly
- *  for CHALLENGE and CONSISTENCY_CHECK rule_hit 5 (READBACK) goals -- named/exported here
- *  for documentation only; `session.ts` still hardcodes its own literal (single-line fix,
- *  2026-09-18, see this lane's report) rather than importing it, to keep that file's
- *  touched surface to one self-contained expression. PROVEN insufficient on its own
- *  (391e2a37: the founder's real pause in a rule_hit-5 READBACK totalled roughly
- *  1155ms + 1200ms =~ 2355ms, over this floor) -- left unchanged by this pass; a bigger
- *  call (dropping the explicit patient floor too, in favor of adaptive pacing everywhere)
- *  is for the founder to make once a live batch has data on the 'default'-branch change
- *  below. */
-export const PATIENT_MIN_SILENCE_MS = 1200;
+// REVERSAL (2026-09-18, coordinator ruling, same day as the ANALYSIS above): the first pass
+// of this fix left `call/session.ts`'s 'patient'-hint goals (CHALLENGE, CONSISTENCY_CHECK
+// rule_hit 5) sending an explicit `min_silence: 1200`, reasoning that value was PROVEN
+// insufficient but "left for a follow-up." That reasoning was wrong on its own terms: per
+// the docs quote above, sending an explicit min_silence/max_silence even ONCE disables
+// adaptive pacing/entity-aware waiting "for the rest of the session" -- and a CHALLENGE goal
+// is reached within the first turn or two of essentially every real call, so the 'default'-
+// branch fix above bought nothing live; adaptive pacing was still off for the rest of every
+// call. The 1200ms floor existed to satisfy docs/BRIEF.md's engineering law (f) ("Eager
+// turn-detection can cut off spoken amounts/account numbers -- tune to wait for complete
+// numeric answers or the FSM freezes rails on ASR fragments") -- written before AssemblyAI's
+// documented entity-aware waiting ("the agent waits for the whole value before ending your
+// turn") was known to satisfy that exact concern natively. `call/session.ts` now sends `{}`
+// (no min_silence/max_silence) for EVERY goal, patient or default -- no constant is exported
+// here for that floor any more since none is sent. Live effect of this second change is also
+// UNKNOWN until the next rehearsal batch measures it.
 
 export interface AaiSessionConfig {
   assemblyai_api_key: string;

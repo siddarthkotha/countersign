@@ -782,12 +782,16 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
       goal_code: string;
       keyterms_count: number;
       tools_count: number;
-      has_turn_detection: boolean;
+      turn_detection_sent: Record<string, unknown>;
     };
     expect(initialDiag.goal_code).toBe('GREET');
     expect(initialDiag.keyterms_count).toBeGreaterThanOrEqual(0);
     expect(typeof initialDiag.tools_count).toBe('number');
-    expect(typeof initialDiag.has_turn_detection).toBe('boolean');
+    // 2026-09-18 reversal (coordinator ruling): never send min_silence/max_silence for any
+    // goal, so AssemblyAI's own adaptive pacing/entity-aware waiting stays on for the whole
+    // call -- the diag now logs the LITERAL object placed on the wire (LAW 4), which is
+    // always empty.
+    expect(initialDiag.turn_detection_sent).toEqual({});
 
     // input.speech.stopped changes nothing about the goal, so no new diag event.
     clock.now = 50;
@@ -806,15 +810,59 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
         goal_code: string;
         keyterms_count: number;
         tools_count: number;
-        has_turn_detection: boolean;
+        turn_detection_sent: Record<string, unknown>;
       };
       expect(typeof detail.goal_code).toBe('string');
       expect(typeof detail.keyterms_count).toBe('number');
       expect(typeof detail.tools_count).toBe('number');
-      expect(typeof detail.has_turn_detection).toBe('boolean');
+      expect(detail.turn_detection_sent).toEqual({});
       expect(detail.keyterms_count).toBeGreaterThanOrEqual(0);
       expect(detail.tools_count).toBeGreaterThanOrEqual(0);
     });
+  });
+
+  // 2026-09-18 reversal (coordinator ruling): asserts the LITERAL wire payload (aai.sent),
+  // not only the diag, for both a 'default'-hint goal (GREET, the very first session.update)
+  // and a 'patient'-hint goal (ASK_CHALLENGE, reached within the first turn or two of every
+  // real call) -- proving neither ever puts min_silence/max_silence on the wire, so
+  // AssemblyAI's adaptive pacing/entity-aware waiting stays on for the whole session. The
+  // config.ts-level "explicit override still passes through" case is covered directly in
+  // aai-config.test.ts (buildInitialSessionUpdate is the pure function under test there);
+  // this test covers call/session.ts's own per-goal sender, which never passes an override.
+  it('never sends min_silence/max_silence on the wire for any goal, default or patient (CHALLENGE)', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-turn-detection-wire', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = new CallSession({
+      session_id: call.session_id,
+      seed: MERIDIAN,
+      call,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onDiagnostic: () => {},
+    });
+
+    session.start();
+    const updatesAfterStart = aai.sent.filter((m) => (m as { type?: string }).type === 'session.update');
+    expect(updatesAfterStart).toHaveLength(1);
+    const initialInput = (updatesAfterStart[0] as { session: { input: { turn_detection: Record<string, unknown> } } }).session
+      .input;
+    expect(initialInput.turn_detection).toEqual({});
+
+    driveScenarioBThroughA4(session, aai, clock);
+    const allUpdates = aai.sent.filter((m) => (m as { type?: string }).type === 'session.update') as {
+      session: { input: { turn_detection: Record<string, unknown> } };
+    }[];
+    expect(allUpdates.length).toBeGreaterThan(1);
+    // Scenario B reaches ASK_CHALLENGE (a 'patient'-hint goal) along the way -- confirmed by
+    // the session having issued at least one challenge (never a silent assumption).
+    expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(true);
+    for (const update of allUpdates) {
+      expect(update.session.input.turn_detection).toEqual({});
+    }
   });
 
   it('ends on session.error and on session.ended, closing the AAI socket', () => {

@@ -3465,6 +3465,26 @@ export class CallSession {
     const goalKey = JSON.stringify(output.goal);
     if (goalKey !== this.previousGoalKey) {
       this.previousGoalKey = goalKey;
+      // REVERSAL (2026-09-18, coordinator ruling, SONNET-JUSTIFIED build lane): commit
+      // 8362d46/ef2181c stopped the 'default' branch from sending an explicit min_silence,
+      // but left this 'patient' branch (CHALLENGE, CONSISTENCY_CHECK rule_hit 5) sending an
+      // explicit 1200ms floor -- and a CHALLENGE goal is reached within the first turn or
+      // two of essentially every real call, so AssemblyAI's docs ("Setting min_silence or
+      // max_silence turns off the adaptive pacing and entity-aware waiting ... for the rest
+      // of the session") meant adaptive pacing was STILL disabled for the rest of every real
+      // call -- the earlier fix bought nothing live. The 1200ms floor was originally added
+      // to satisfy brief engineering law (f) ("Eager turn-detection can cut off spoken
+      // amounts/account numbers -- tune to wait for complete numeric answers or the FSM
+      // freezes rails on ASR fragments", docs/BRIEF.md line 563-564) -- a law written before
+      // AssemblyAI's documented entity-aware waiting ("the agent waits for the whole value
+      // before ending your turn") was known to satisfy that exact concern natively, and for
+      // free. Keeping our own 1200ms floor bought a fixed number PROVEN insufficient anyway
+      // (the founder's own real pause, 391e2a37, totalled roughly 2355ms against this same
+      // floor) at the cost of disabling AssemblyAI's adaptive system for the whole call. So:
+      // turn_detection is now ALWAYS {} -- no min_silence/max_silence ever, for any goal --
+      // and adaptive pacing/entity-aware waiting stay on for the entire session. Live effect
+      // UNKNOWN until the next rehearsal batch measures it; see docs/ASSEMBLYAI_INTEGRATION.md.
+      const turnDetection: Record<string, never> = {};
       this.opts.aai.send({
         type: 'session.update',
         session: {
@@ -3472,16 +3492,7 @@ export class CallSession {
           tools: toolSchemasFor(output.allowed_tools),
           input: {
             keyterms: output.goal.keyterms.slice(0, 100),
-            // 2026-09-18 single-line fix (SONNET-JUSTIFIED build lane; see
-            // packages/server/src/aai/config.ts's TurnDetectionConfig doc comment for the
-            // full docs quote + measured trade-off): AssemblyAI's docs say explicitly
-            // setting min_silence/max_silence "turns off the adaptive pacing and
-            // entity-aware waiting ... for the rest of the session. Prefer leaving them
-            // unset." -- 'default' goals now omit the key entirely instead of hardcoding
-            // 600ms; 'patient' goals (CHALLENGE, CONSISTENCY_CHECK rule_hit 5) keep their
-            // existing explicit 1200ms floor unchanged (PROVEN insufficient on its own in
-            // one real case -- left for a separate follow-up, not touched here).
-            turn_detection: output.goal.turn_detection_hint === 'patient' ? { min_silence: 1200 } : {},
+            turn_detection: turnDetection,
           },
         },
       });
@@ -3491,11 +3502,17 @@ export class CallSession {
         t_ms: this.nowT(),
         detail: `goal=${output.goal.code}`,
       });
+      // Observability fix (2026-09-18, same lane): `has_turn_detection: !!hint` was always
+      // true (`turn_detection_hint` is never empty) so it never actually said what we sent.
+      // LAW 4 (exact-transcript evidence -- facts stored separately from interpretation, no
+      // paraphrase): log the literal object placed on the wire above, not a derived flag, so
+      // a bundle read later can PROVE what was sent rather than needing to be reconstructed
+      // from goal_code + engine source, as this lane had to do for the analysis above.
       this.diag('session_config_updated', {
         goal_code: output.goal.code,
         keyterms_count: output.goal.keyterms.length,
         tools_count: output.allowed_tools.length,
-        has_turn_detection: !!output.goal.turn_detection_hint,
+        turn_detection_sent: turnDetection,
       });
       // The hard cap starts the moment CLOSE is first rendered (session.update just sent
       // it) -- not from `this.last = output` below, which would fire on every tick, and not
