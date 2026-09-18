@@ -1633,3 +1633,147 @@ describe('LIVE_COMMITMENT — a challenge on a caller-unstated value never traps
     });
   });
 });
+
+// P1 ROOT-CAUSE FIX (2026-09-18, LIVE_COMMITMENT-denial lane, PROVEN by executing the real
+// grader before this fix): two related defects in the same neighborhood as b89f933's
+// "truthful denial never loops" fix, above.
+//
+// DEFECT A: a LIVE_COMMITMENT reply that DENIES having given the committed value, while
+// still naming it (e.g. "I never said Marcus, it was Elena."), used to grade PASS -- because
+// `gradeLiveCommitment`'s name-field branch opened with a bare `normText.includes
+// (committedNorm)` check with no negation awareness at all, so a caller who repeats the true
+// value while denying it (rather than confirming it) was graded as a correct restatement.
+// Fixed by gating that PASS on `negateNearTrapValue(normText, committedNorm, seed)` finding
+// no negation anchored on the committed value nearby -- reusing the SAME negation-proximity
+// logic `gradeTrapFact` already uses for its own "caller rejected the planted value" rule
+// (rule (b) there), rather than inventing a second negation system. Once a denial is
+// detected, the existing cued-name/bare-two-capitalized-word alternate-value checks (already
+// present, unchanged) still catch an explicit alternate restatement inside the SAME reply
+// ("it was approved by Elena Chen") as FAIL; a NEW check (seed-known-name-word/phrase,
+// excluding words that are themselves part of the committed value) catches a same-breath
+// swap that has no cue verb at all ("it was Elena") the same way -- both FAIL, the same
+// direction as an explicit wrong-name restatement. A bare denial with no alternative at all
+// ("I never said Marcus.") has no such alt-value signal and still grades AMBIGUOUS, exactly
+// once (no loop -- `isAnswerShapedFor`'s existing committedNorm-substring check already
+// routes any reply containing the committed value straight to grading; that part was never
+// broken, only the grade itself was wrong).
+//
+// DEFECT B: `DENIAL_OF_COMMITMENT_RE` (b89f933) only ever fires inside
+// `isAnswerShapedFor`'s `isNameField(spec.field)` branch, but `LIVE_COMMITMENT_FIELDS` also
+// includes `amount_usd` and `deadline` -- neither is a name field. A truthful denial on
+// either ("I never gave an amount.", "I never gave a deadline.") carries no digit/date
+// signal (`hasFieldSignal` returns false) and was therefore NOT answer-shaped, leaving the
+// challenge AWAITING and the server re-asking the same question forever -- the exact loop
+// shape b89f933 fixed for name fields, unfixed for the other two LIVE_COMMITMENT fields.
+// Fixed by checking `DENIAL_OF_COMMITMENT_RE` once, for EVERY LIVE_COMMITMENT field, before
+// branching on `isNameField` -- a wrong amount/date restatement still carries its own digit/
+// date signal independent of this check and still FAILs exactly as before (B3, regression
+// guard).
+describe('LIVE_COMMITMENT — a denial that still names the committed value is graded on its OWN content, not rubber-stamped PASS (2026-09-18, P1)', () => {
+  describe('DEFECT A: gradeLiveCommitment (name fields)', () => {
+    const committedClaim = claim('c-approver-2', 'approver', 'STATED', 'Marcus', 1000, 'Marcus approved it');
+    const spec: ChallengeSpec = {
+      challenge_id: 'p1-a-1',
+      kind: 'LIVE_COMMITMENT',
+      field: 'approver',
+      ask: 'Ask the caller to restate the approver they gave earlier. Do not say the value yourself.',
+      speak: 'Can you restate the approver you gave me earlier?',
+      expect: { commitment_claim_id: 'c-approver-2' },
+    };
+    const actions: AgentAction[] = [issuedAction('a1', 'p1-a-1', 2000)];
+
+    it('A1: a denial that also offers a genuinely different value grades FAIL, not PASS', () => {
+      const conversation = [utt('u1', 3000, 'I never said Marcus, it was Elena.')];
+      const result = gradeChallenges(conversation, actions, [spec], SEED, [committedClaim]);
+      expect(result['p1-a-1']?.result).toBe('FAIL');
+    });
+
+    it('A2: a bare denial naming the committed value with no alternative grades AMBIGUOUS once, never PASS, never left AWAITING', () => {
+      const conversation = [utt('u1', 3000, 'I never said Marcus.')];
+      const result = gradeChallenges(conversation, actions, [spec], SEED, [committedClaim]);
+      expect(result['p1-a-1']?.result).toBe('AMBIGUOUS');
+    });
+
+    it('A3: regression guard -- a plain, non-denying correct restatement still PASSes', () => {
+      const conversation = [utt('u1', 3000, 'Marcus, as I said.')];
+      const result = gradeChallenges(conversation, actions, [spec], SEED, [committedClaim]);
+      expect(result['p1-a-1']?.result).toBe('PASS');
+    });
+
+    it('A1b: an explicit alternate restatement inside the same denial (cued "approved by") also FAILs', () => {
+      const twoWordClaim = claim('c-approver-3', 'approver', 'STATED', 'Marcus Reyes', 1000, 'Marcus Reyes approved it');
+      const twoWordSpec: ChallengeSpec = { ...spec, challenge_id: 'p1-a-1b', expect: { commitment_claim_id: 'c-approver-3' } };
+      const twoWordActions: AgentAction[] = [issuedAction('a1b', 'p1-a-1b', 2000)];
+      const conversation = [utt('u1', 3000, 'I never said Marcus Reyes, it was approved by Elena Chen.')];
+      const result = gradeChallenges(conversation, twoWordActions, [twoWordSpec], SEED, [twoWordClaim]);
+      expect(result['p1-a-1b']?.result).toBe('FAIL');
+    });
+  });
+
+  describe('DEFECT A4: regression guard -- TRAP_FACT grading of a negated true value is unchanged by this fix', () => {
+    // gradeTrapFact is untouched by this fix; this only proves it still behaves as
+    // documented: mentioning the TRUE value is always PASS for a TRAP_FACT challenge,
+    // negated or not (rule (a), `containsTrue`, fires before any negation check there --
+    // that is existing, correct, unchanged behavior, not the bug this lane fixes).
+    const counselClaim = claim('c-counsel', 'counsel', 'STATED', 'Calder & Finch', 1000, 'Calder & Finch');
+    const spec: ChallengeSpec = {
+      challenge_id: 'p1-a4-1',
+      kind: 'TRAP_FACT',
+      field: 'counsel',
+      ask: 'x',
+      speak: 'x',
+      expect: { trap_value: 'Whitmore & Bass', true_claim_id: 'c-counsel' },
+    };
+    const actions: AgentAction[] = [issuedAction('a1', 'p1-a4-1', 2000)];
+
+    it('a reply that negates the trap value while stating the true value still PASSes', () => {
+      const conversation = [utt('u1', 3000, "No, that's not right, it's Calder & Finch.")];
+      const result = gradeChallenges(conversation, actions, [spec], SEED, [counselClaim]);
+      expect(result['p1-a4-1']?.result).toBe('PASS');
+    });
+  });
+
+  describe('DEFECT B: isAnswerShapedFor recognizes a denial as answer-shaped for EVERY LIVE_COMMITMENT field, not just name fields', () => {
+    const amountClaim = claim('c-amt-2', 'amount_usd', 'STATED', 84_500, 1000, '$84,500');
+    const amountSpec: ChallengeSpec = {
+      challenge_id: 'p1-b-amt',
+      kind: 'LIVE_COMMITMENT',
+      field: 'amount_usd',
+      ask: 'Ask the caller to restate the amount_usd they gave earlier. Do not say the value yourself.',
+      speak: 'Can you restate the amount you gave me earlier?',
+      expect: { commitment_claim_id: 'c-amt-2' },
+    };
+    const amountActions: AgentAction[] = [issuedAction('a1', 'p1-b-amt', 2000)];
+
+    it('B1: an amount denial is answer-shaped and grades AMBIGUOUS once, never left AWAITING', () => {
+      expect(isAnswerShapedFor(amountSpec, 'I never gave an amount.', SEED, [amountClaim])).toBe(true);
+      const conversation = [utt('u1', 3000, 'I never gave an amount.')];
+      const result = gradeChallenges(conversation, amountActions, [amountSpec], SEED, [amountClaim]);
+      expect(result['p1-b-amt']?.result).toBe('AMBIGUOUS');
+    });
+
+    it('B3: regression guard -- a genuinely wrong amount still FAILs (no denial phrasing involved)', () => {
+      const conversation = [utt('u1', 3000, "it's $50,000"), ];
+      const result = gradeChallenges(conversation, amountActions, [amountSpec], SEED, [amountClaim]);
+      expect(result['p1-b-amt']?.result).toBe('FAIL');
+    });
+
+    const deadlineClaim = claim('c-dl-2', 'deadline', 'STATED', 'today', 1000, 'today');
+    const deadlineSpec: ChallengeSpec = {
+      challenge_id: 'p1-b-dl',
+      kind: 'LIVE_COMMITMENT',
+      field: 'deadline',
+      ask: 'Ask the caller to restate the deadline they gave earlier. Do not say the value yourself.',
+      speak: 'Can you restate the deadline you gave me earlier?',
+      expect: { commitment_claim_id: 'c-dl-2' },
+    };
+    const deadlineActions: AgentAction[] = [issuedAction('a1', 'p1-b-dl', 2000)];
+
+    it('B2: a deadline denial is answer-shaped and grades AMBIGUOUS once, never left AWAITING (same as B1, for the deadline field)', () => {
+      expect(isAnswerShapedFor(deadlineSpec, 'I never gave a deadline.', SEED, [deadlineClaim])).toBe(true);
+      const conversation = [utt('u1', 3000, 'I never gave a deadline.')];
+      const result = gradeChallenges(conversation, deadlineActions, [deadlineSpec], SEED, [deadlineClaim]);
+      expect(result['p1-b-dl']?.result).toBe('AMBIGUOUS');
+    });
+  });
+});

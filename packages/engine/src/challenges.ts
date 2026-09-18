@@ -713,17 +713,29 @@ export function isAnswerShapedFor(spec: ChallengeSpec, rawText: string, seed: Se
   }
 
   if ('commitment_claim_id' in expect) {
+    // FIX (2026-09-18, LIVE_COMMITMENT-denial lane, DEFECT B): `DENIAL_OF_COMMITMENT_RE`
+    // used to be checked only inside the `isNameField` branch below, but
+    // `LIVE_COMMITMENT_FIELDS` also includes `amount_usd` and `deadline`, neither of which is
+    // a name field -- a truthful "I never gave an amount."/"I never gave a deadline." carries
+    // no digit/date signal (`hasFieldSignal` returns false for it) and was therefore NOT
+    // answer-shaped, leaving the challenge AWAITING and re-asked forever: the same loop shape
+    // b89f933 fixed for name fields, unfixed for these two. Checking it once, up front, for
+    // EVERY LIVE_COMMITMENT field closes that gap; a genuinely wrong amount/date still carries
+    // its own digit/date signal independent of this check and still reaches grading to FAIL,
+    // same as before (this only ever ADDS answer-shaped replies, never removes one).
+    //
+    // FIX (2026-09-18, founder live defect, P0, b89f933): a truthful "I never said that"
+    // denial carries none of the name/field signals checked below by design -- checked ONCE,
+    // here, for every LIVE_COMMITMENT field, not just name fields, so it grades (AMBIGUOUS,
+    // via gradeLiveCommitment's existing fallback) instead of being left AWAITING and
+    // re-asked forever. See DENIAL_OF_COMMITMENT_RE's own doc comment for the exact founder
+    // live record this reproduces.
+    if (DENIAL_OF_COMMITMENT_RE.test(rawText)) return true;
     if (isNameField(spec.field)) {
       const claim = claims.find((c) => c.id === expect.commitment_claim_id);
       const committedNorm = claim ? normalizeText(String(claim.value)) : '';
       if (committedNorm.length > 0 && normText.includes(committedNorm)) return true;
-      if (hasNameSignal(spec.field, rawText, seed)) return true;
-      // FIX (2026-09-18, founder live defect, P0): a truthful "I never said that" denial
-      // carries none of the above name signals by design -- recognize it as answer-shaped
-      // too, so it grades (AMBIGUOUS, via gradeLiveCommitment's existing fallback) instead
-      // of being left AWAITING and re-asked forever. See DENIAL_OF_COMMITMENT_RE's own doc
-      // comment for the exact founder live record this reproduces.
-      return DENIAL_OF_COMMITMENT_RE.test(rawText);
+      return hasNameSignal(spec.field, rawText, seed);
     }
     return hasFieldSignal(spec.field, rawText);
   }
@@ -882,7 +894,13 @@ function challengeReplyWindowStatus(
   return lastEventT - issuedAction.t_ms < windowMs ? 'OPEN' : 'CLOSED';
 }
 
-function gradeLiveCommitment(field: ClaimField, claim: Claim | undefined, rawText: string, normText: string): ChallengeResult {
+function gradeLiveCommitment(
+  field: ClaimField,
+  claim: Claim | undefined,
+  rawText: string,
+  normText: string,
+  seed: SeedConfig,
+): ChallengeResult {
   if (!claim) return 'AMBIGUOUS';
   const committedNorm = normalizeText(String(claim.value));
 
@@ -904,13 +922,48 @@ function gradeLiveCommitment(field: ClaimField, claim: Claim | undefined, rawTex
     return normalizeText(hit.value) === committedNorm ? 'PASS' : 'FAIL';
   }
   if (isNameField(field)) {
-    if (normText.includes(committedNorm)) return 'PASS';
+    // FIX (2026-09-18, LIVE_COMMITMENT-denial lane, DEFECT A, PROVEN by executing this
+    // grader on the real code): this bare substring check used to be the FIRST thing this
+    // branch did, with no negation awareness -- so a reply that DENIES having given the
+    // committed value while still naming it ("I never said Marcus, it was Elena.") matched
+    // `normText.includes(committedNorm)` and graded PASS, exactly like an honest restatement.
+    // `deniesCommitted` reuses `negateNearTrapValue` -- the SAME negation-proximity check
+    // `gradeTrapFact`'s own rule (b) already uses to recognize "the caller rejected the
+    // planted value directly" -- against the COMMITTED value instead of a trap value, rather
+    // than inventing a second negation system. When it fires, the PASS below is skipped and
+    // this reply is graded on what it ACTUALLY says (see the two blocks below), not
+    // rubber-stamped as a correct restatement merely for containing the value being denied.
+    const deniesCommitted = normText.includes(committedNorm) && negateNearTrapValue(normText, committedNorm, seed);
+    if (!deniesCommitted && normText.includes(committedNorm)) return 'PASS';
+
     const cued = extractCuedNames(rawText).filter((h) => h.field === field);
     for (const hit of cued) {
       if (normalizeText(hit.value) !== committedNorm) return 'FAIL';
     }
     const capMatch = rawText.match(/\b[A-Z][A-Za-z.']*\s+[A-Z][A-Za-z.']*\b/);
     if (capMatch && normalizeText(capMatch[0]) !== committedNorm) return 'FAIL';
+
+    if (deniesCommitted) {
+      // A denial that offers no cue-verb-anchored alternate name (caught above) can still
+      // carry a cue-less same-breath swap ("it was Elena") -- the exact shape `hasNameSignal`'s
+      // own doc comment already names as a known gap for a bare seed-known single word with no
+      // cue verb to anchor an `extractCuedNames` hit. Recognized here the same way
+      // `hasNameSignal` recognizes it elsewhere (seed-known person/org whole phrases, or a
+      // seed-known PERSON name word), EXCLUDING any word that is itself part of the committed
+      // value being denied -- so a bare "I never said Marcus." (no alternative at all) does
+      // NOT count "marcus" against itself and correctly falls through to AMBIGUOUS, once,
+      // below; only a genuinely DIFFERENT seed-known name in the same reply makes this FAIL,
+      // the same direction as an explicit wrong-name restatement.
+      const known = seedNameTokens(seed);
+      const committedWords = new Set(committedNorm.split(' ').filter(Boolean));
+      const hasAltPhrase = known.phrases.some((phrase) => phrase !== committedNorm && hasNamePhrase(normText, [phrase]));
+      const hasAltWord = normText
+        .split(' ')
+        .filter(Boolean)
+        .some((w) => known.words.has(w) && !committedWords.has(w));
+      if (hasAltPhrase || hasAltWord) return 'FAIL';
+    }
+
     return 'AMBIGUOUS';
   }
   return normText.includes(committedNorm) ? 'PASS' : 'AMBIGUOUS';
@@ -1247,7 +1300,7 @@ export function gradeChallenges(
     } else if ('commitment_claim_id' in expect) {
       const commitmentClaimId = expect.commitment_claim_id;
       const claim = claims.find((c) => c.id === commitmentClaimId);
-      result = gradeLiveCommitment(spec.field, claim, rawText, normText);
+      result = gradeLiveCommitment(spec.field, claim, rawText, normText, seed);
     } else {
       const trueClaimId = expect.true_claim_id;
       const trueClaim = claims.find((c) => c.id === trueClaimId);
