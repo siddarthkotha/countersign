@@ -2772,10 +2772,11 @@
       "files": [
         "packages/server/src/**"
       ],
-      "status": "held",
+      "status": "done",
       "held_because": "after the founder play-through 2026-09-18; needs the automatic-reply vs instructed-reply collision traced in the bundle before a fix (same family as SESSION-UPDATE-MID-REPLY)",
       "agent_id": "",
-      "started_at": ""
+      "started_at": "",
+      "lane_note": "superseded by MERGED-FIRST-REPLY 2026-09-18"
     },
     {
       "id": "CLOSE-ATTEMPT-ANSWERS-OWN-QUESTION",
@@ -2864,6 +2865,229 @@
       ],
       "status": "held",
       "held_because": "needs a live record showing it; candidate: grade from the earliest issuance but bound by the latest re-issue plus window",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "REASK-AFTER-HOLDING-LINE",
+      "title": "P0 (founder quit 2026-09-18 11:11 AM): every readback asked twice. Shape PROVEN in records 32cbb410 (57.8 s asked, readback_issued logged; 59.4 s automatic 'One moment.'; 60.1 s question_not_asked re-ask; 65.5 s asked again) and 95b9ad42 (36.9/45.8, 52.2/60.8): when AssemblyAI's automatic holding reply lands AFTER our instructed question, the re-ask logic reads the holding line as 'question not asked' and re-asks; when it lands before (391e2a37 53.2 then 58.7) it does not",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T16:20:00Z",
+      "lane_note": "landed on main 2026-09-18 before push 51"
+    },
+    {
+      "id": "MERGED-FIRST-REPLY",
+      "title": "P0 (founder quit): the first reply after the opener is two replies interleaved and unintelligible ('Just toOne confirm, moment this transfer goes to Northgate Partners. Who is calling and what is. Is that your authorization correct? code?', 95b9ad42 19.1 s; 32cbb410 19.7 s; harness 10-54-17): AssemblyAI's automatic reply and our tick_end reply.create stream at once; supersedes MERGED-REPLY-AFTER-BARGE-IN",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "docs/ASSEMBLYAI_INTEGRATION.md"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T16:20:00Z",
+      "lane_note": "landed on main 2026-09-18 before push 51"
+    },
+    {
+      "id": "COMMITMENT-ON-UNSTATED-FIELD",
+      "title": "P0 (founder quit): case 8 record 95b9ad42: 'Can you restate the approver you gave me earlier?' when the caller never named one ('it's approved'), asked four times (78.4, 83.5, 97.6, 110.4 s) through 'I did not mention anyone' twice, then 'Marcus OB' -> ESCALATE; LIVE_COMMITMENT selected on a field with no stated value, and a decline never ends the challenge",
+      "files": [
+        "packages/engine/src/challenges.ts",
+        "packages/engine/src/extract/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T16:20:00Z",
+      "lane_note": "landed on main 2026-09-18 before push 51"
+    },
+    {
+      "id": "HARNESS-EXPERIENCE-GRADER",
+      "title": "P0 process (memory feedback-founder-clean-not-verdict-clean): the harness passed 4 of 4 on deploy 50 while the founder quit; grader must FAIL a call on a question spoken twice for one rendering, an agent transcript with interleaved sentences, an agent reply starting while caller speech is open, more than one 'One moment.' per caller turn; report the counts",
+      "files": [
+        "scripts/rehearse/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T16:20:00Z",
+      "lane_note": "landed on main 2026-09-18 before push 51"
+    },
+    {
+      "id": "TURN-END-TOO-EAGER",
+      "title": "P1 (founder: 'does not let me complete my sentence'): 391e2a37 35.8 s 'No.' then 37.5 s 'Meridian Supply.' with the agent starting 'Just to' at 36.9 s between them; AssemblyAI end-of-turn fired on a 1 s pause after a one-word utterance; docs allow input.turn_detection.{min_silence,max_silence}; decide the silence floor for short utterances vs latency",
+      "files": [
+        "packages/server/src/aai/config.ts"
+      ],
+      "status": "held",
+      "held_because": "product tuning with a latency cost; measure on the harness after the four P0 lanes land; recommendation: min_silence about 900 ms after an utterance under three words",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "NAME-STT-NORMALIZATION",
+      "title": "engine: STT variants of seed names ('Marcus OB', 'Marcus OBE', 'Dana with Field') become literal claim values, so a later restate/commitment check can fail an honest exact answer and the beneficiary/identity extraction misses; needs a bounded fuzzy match to seed people and vendors (no false merges of genuinely different names); P2",
+      "files": [
+        "packages/engine/src/extract/**",
+        "packages/engine/src/seed/meridian.ts"
+      ],
+      "status": "held",
+      "held_because": "after push 51; design the match against the seed alias lists first (keyterms already boost STT); Sonnet test-first",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "DENIAL-WITH-TRUE-NAME-PASSES",
+      "title": "engine (review finding on b89f933, pre-existing): gradeLiveCommitment's name branch is a bare substring match, so 'I never said Marcus, it was Elena' grades PASS on a committed 'Marcus'; LAW 2-relevant self-contradiction graded as a correct restatement; P1",
+      "files": [
+        "packages/engine/src/challenges.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T16:42:00Z",
+      "lane_note": "3d5ae70 + e181f90 + 89a2576 on main; review PASS after two repairs"
+    },
+    {
+      "id": "DENIAL-NON-NAME-COMMITMENT",
+      "title": "engine (review finding on b89f933): DENIAL_OF_COMMITMENT_RE fires only in the name-field branch; 'I never gave an amount' against an amount_usd or deadline LIVE_COMMITMENT is not answer-shaped and would loop exactly like the founder's approver case; P1",
+      "files": [
+        "packages/engine/src/challenges.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T16:42:00Z",
+      "lane_note": "3d5ae70 + e181f90 + 89a2576 on main; review PASS after two repairs"
+    },
+    {
+      "id": "CAPPED-SPEAK-WINDOW-LAG",
+      "title": "server+engine (review finding on 80b04ce): the server caps logged asks at 2 but AssemblyAI's ambient audio may still speak a 3rd time; the grading window (anchored on the latest LOGGED issuance) can close before a caller who waited for that 3rd speak answers; fails toward ESCALATE; P2",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "held",
+      "held_because": "needs the MERGED-FIRST-REPLY lane's finding on controlling ambient replies; if ambient repeats stop, this is moot",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "REPLY-ID-IN-DIAG",
+      "title": "observability: diag('reply.started'/'reply.done') drops the reply_id the AssemblyAI event carries, so a record cannot tell whether a garbled first reply was one reply object or two, and transcripts cannot be matched to the goal that instructed them (question_lag grader check skipped for the same reason); P2, LAW 4 (verbatim ids)",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "done",
+      "held_because": "after push 51; Haiku lane, one-line diag change plus the grader's question_lag check",
+      "agent_id": "",
+      "started_at": "",
+      "lane_note": "ef38029 on main: fire-time re-validation, clear on every end() path, turn_to_reply_gap diag with reply_id"
+    },
+    {
+      "id": "TICK-END-TIMER-REVALIDATE",
+      "title": "server (review finding on e99e17f): the 150 ms tick-end send timer closes over the goal at arm time and never re-validates at fire time; a goal change or an idle end() path can leave it armed and speak a stale question; fix: re-check owedQuestionGoalKey against the live goal and clear on every end/forceSpeak path",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T17:01:00Z",
+      "lane_note": "ef38029 on main: fire-time re-validation, clear on every end() path, turn_to_reply_gap diag with reply_id"
+    },
+    {
+      "id": "SETTLE-WINDOW-MEASURED",
+      "title": "server: AUTOMATIC_REPLY_SETTLE_MS 150 ms is an ESTIMATE margined against our own trigger gap; measured today from 14 records the automatic reply starts 5 ms to 4 s after a caller turn (p50 2.4 s ambient-only); add the turn_to_reply_gap diag and revisit the value from a batch on deploy 51",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T17:01:00Z",
+      "lane_note": "ef38029 on main: fire-time re-validation, clear on every end() path, turn_to_reply_gap diag with reply_id"
+    },
+    {
+      "id": "AMBIENT-QUESTION-RESIDUAL",
+      "title": "residual after e99e17f (review): when AssemblyAI's automatic reply asks its own unrequested question despite STANDING_RULES, the caller now hears that question and then ours back to back (no mash); the content of the automatic reply is a prompt.ts matter; measure on deploy 51 with the grader (repeated_question stays 0, but an off-goal question is judge-visible)",
+      "files": [
+        "packages/server/src/call/prompt.ts"
+      ],
+      "status": "held",
+      "held_because": "measure first on the deploy-51 batch; if the automatic reply asks off-goal questions more than rarely, a prompt lane tightens STANDING_RULES",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "NEGATE-LEXICON-CONTRACTIONS",
+      "title": "engine: negate_lexicon (seed/meridian.ts) has no contraction forms and normalizeText turns wasn't into wasnt, so \"It wasn't Marcus Obi.\" PASSes a commitment on Marcus Obi (bare denial should be AMBIGUOUS); pre-existing; P2",
+      "files": [
+        "packages/engine/src/seed/meridian.ts",
+        "packages/engine/src/text.ts"
+      ],
+      "status": "held",
+      "held_because": "after push 51; add wasn't/isn't/didn't/wasnt forms with a test; check TRAP_FACT negation benefits the same way",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "CAPMATCH-SENTENCE-INITIAL-NOT",
+      "title": "engine: the two-capitalized-words name regex reads sentence-initial 'Not Marcus' as a name, so \"Not Marcus Obi\" alone FAILs a commitment instead of AMBIGUOUS; pre-existing, dormant until the attachment check made it reachable; P2",
+      "files": [
+        "packages/engine/src/challenges.ts"
+      ],
+      "status": "held",
+      "held_because": "after push 51; exclude the negate lexicon and other function words from the first capitalized token; test-first",
+      "agent_id": "",
+      "started_at": "",
+      "lane_note": "incidentally resolved by 89a2576 (capMatch spans starting with not/no excluded); confirm in the next review"
+    },
+    {
+      "id": "SELF-CORRECTION-INTO-COMMITTED",
+      "title": "engine (review finding at ef38029): 'Elena Park? No, Marcus Obi.' grades FAIL on a commitment committed to Marcus Obi; the attachment check never looks AFTER a value, so the rejected first name counts as asserted; the founder's own correction style; P1",
+      "files": [
+        "packages/engine/src/challenges.ts"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T19:42:00Z"
+    },
+    {
+      "id": "SECOND-SEED-NAME-IS-CONTAMINATION",
+      "title": "engine: 'It was Marcus Obi. Elena Park is the backup.' FAILs because any asserted second seed name counts as an alternate regardless of role; conservative by design, judge-visible if a caller mentions a second real person; P2 founder decision",
+      "files": [
+        "packages/engine/src/challenges.ts"
+      ],
+      "status": "held",
+      "held_because": "founder decision: keep the conservative reading (recommended) or parse the role; revisit only if a live record shows an honest caller failed this way",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "OWED-QUESTION-EARLY-RETURN-CLEAR",
+      "title": "server (review finding at ef38029): maybeSendReplyCreateForTick's third branch (neither forceSpeak nor a fresh question) leaves owedQuestionGoalKey and the settle timer uncleared; a READBACK rendering has no per-issuance id, so a later JSON-identical rendering could satisfy the fire-time check; bounded, the reply.done catch-up re-checks independently; P2",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "held",
+      "held_because": "unproven and bounded; fix with a test after the deploy-51 batch",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "QUESTION-ASKED-ON-ANY-QUESTION-MARK",
+      "title": "server: questionMatch.ts transcriptAsksQuestion returns true for any '?' in a reply transcript, so an ambient AssemblyAI reply satisfies the current goal's asked-bookkeeping; PROVEN pre-existing and confirmed not to silence our real question (the send is driven by owedQuestionGoalKey, not by this flag); only the challenge_issued timestamp/attribution is pulled to the ambient exchange; P2, LAW 4 adjacent",
+      "files": [
+        "packages/server/src/call/questionMatch.ts"
+      ],
+      "status": "held",
+      "held_because": "after the deploy-51 batch; match on the goal's own sentence rather than any question mark, with the degraded-mode fallback preserved",
       "agent_id": "",
       "started_at": ""
     }
