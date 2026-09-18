@@ -158,29 +158,28 @@ describe('CallSession -- challenge_issued binds to the challenge actually SPOKEN
     // actually logged; a re-ask that (correctly, post-fix) logs the SAME challenge_id again
     // leaves challenge 1's own window open-ended, so a caller utterance arriving much later can
     // still land inside it and RE-GRADE an already-timed-out UNANSWERED card.
+    //
+    // Engine follow-up landed the same day (d88a536, CHALLENGE-WINDOW-REASK-REGRADE):
+    // `gradeChallenges` now anchors a challenge's answer window on its LATEST `challenge_issued`
+    // action, so the same-id re-ask logged just above REOPENS challenge 1's window from the
+    // re-ask time. The expectations below assert that fixed behaviour (the earlier version of
+    // this test locked the pre-fix shape: an UNANSWERED card the instant the re-ask landed, then
+    // re-graded by the caller's later reply -- the founder's live 2026-09-18 case-11 shape).
     const knowledgeCardsBeforeAnswer = (session.last?.evidence ?? []).filter((e) => e.kind === 'knowledge_check_result');
-    expect(knowledgeCardsBeforeAnswer.map((e) => e.id)).toContain('ev-knowledge-sess-b-1');
     const challenge1CardBeforeAnswer = knowledgeCardsBeforeAnswer.find((e) => e.id === 'ev-knowledge-sess-b-1');
-    // Challenge 1 has already timed out (UNANSWERED) BEFORE the caller ever says a word here --
-    // purely because real elapsed time (per the recorded timestamps) already exceeded
-    // CHALLENGE_ANSWER_WINDOW_MS the instant the re-ask's own transcript landed.
-    expect(challenge1CardBeforeAnswer?.facts?.result).toBe('UNANSWERED');
+    // Right after the re-ask, challenge 1 is awaiting its answer again -- never UNANSWERED
+    // before the caller has had the reopened window to reply.
+    expect(challenge1CardBeforeAnswer?.facts?.result).not.toBe('UNANSWERED');
 
-    // The caller's one real reply, arriving well after challenge 1 was already timed out.
+    // The caller's one real reply to the re-asked question, inside the reopened window.
     clock.now = clock.now + 2500;
     aai.emit({ type: 'transcript.user', item_id: 'caller-answer', text: 'Yes.' });
 
-    // KNOWN GAP (found, NOT fixed -- out of this server-only lane's scope, flagged for the
-    // engine lane): challenge 1's card is RE-GRADED from its earlier UNANSWERED verdict by this
-    // later, unrelated caller utterance, because no genuinely-different challenge was ever
-    // actually asked (and therefore actually LOGGED) after it to close its own eligible window.
-    // This is exactly the shape of the founder's live observation -- one caller utterance
-    // affecting more than one challenge's grading -- and it survives this fix intact. A real
-    // fix belongs in `engine/challenges.ts`'s own `eligibleUtterances`/`challengeReplyWindowStatus`
-    // (e.g. a window, once CLOSED by timeout, should stay closed, never reopen for a later
-    // utterance) -- deliberately NOT attempted here per this task's LANE-FILES boundary.
+    // It grades challenge 1 (the question actually re-spoken), quoting this utterance verbatim
+    // (LAW 4), and the card is a real grade, not UNANSWERED.
     const knowledgeCardsAfterAnswer = (session.last?.evidence ?? []).filter((e) => e.kind === 'knowledge_check_result');
     const challenge1CardAfterAnswer = knowledgeCardsAfterAnswer.find((e) => e.id === 'ev-knowledge-sess-b-1');
+    expect(challenge1CardAfterAnswer).toBeTruthy();
     expect(challenge1CardAfterAnswer?.facts?.result).not.toBe('UNANSWERED');
     expect(challenge1CardAfterAnswer?.quotes.some((q) => q.utterance_id === 'caller-answer')).toBe(true);
   });
