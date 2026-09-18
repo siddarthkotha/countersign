@@ -360,7 +360,7 @@ describe('report rendering', () => {
         repeated_question: { count: 0, timestamps_s: [] },
         merged_reply: { count: 0, timestamps_s: [] },
         talk_over: { count: 0, timestamps_s: [] },
-        holding_spam: { count: 0, timestamps_s: [] },
+        holding_spam: { count: 0, timestamps_s: [], hold_gap_max_s: null, hold_gap_p50_s: null },
         question_lag: { count: 0, timestamps_s: [], skipped: true, skip_reason: 'no reply_id on transcript events' },
         goodbye_delay: { seconds: 4.2, close_retry_needed: false, note: '4.2s from terminal_action to the close line' },
         ok: true,

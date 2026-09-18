@@ -261,6 +261,7 @@ function printResult(path: string, r: RegradeResult): void {
       if (g.talk_over.count > 0) console.log(`    talk_over at: ${g.talk_over.timestamps_s.join(', ')}s`);
       if (g.holding_spam.count > 0) console.log(`    holding_spam at: ${g.holding_spam.timestamps_s.join(', ')}s`);
     }
+    console.log(`    hold_gap_max_s=${g.holding_spam.hold_gap_max_s ?? 'n/a'} hold_gap_p50_s=${g.holding_spam.hold_gap_p50_s ?? 'n/a'} (informational)`);
   } else {
     console.log(`  experience (regraded): SKIPPED -- ${r.experience_skipped_reason ?? 'unknown reason'}`);
   }

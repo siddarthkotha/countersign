@@ -224,6 +224,9 @@ function renderExperience(grade: ExperienceGrade): string {
   }
   lines.push('');
   lines.push(
+    `- hold_gap_max_s: ${grade.holding_spam.hold_gap_max_s === null ? 'n/a' : `${grade.holding_spam.hold_gap_max_s}s`}, hold_gap_p50_s: ${grade.holding_spam.hold_gap_p50_s === null ? 'n/a' : `${grade.holding_spam.hold_gap_p50_s}s`} (informational -- the holding-line-to-next-transcript-event latency distribution; only a gap over 8s counts toward holding_spam above)`,
+  );
+  lines.push(
     `- question_lag: ${grade.question_lag.skipped ? `SKIPPED -- ${grade.question_lag.skip_reason}` : `${grade.question_lag.count} (${grade.question_lag.timestamps_s.join(', ') || 'none'})`} (informational -- never gates PASS/FAIL)`,
   );
   lines.push(

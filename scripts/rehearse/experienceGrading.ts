@@ -21,8 +21,12 @@
 //  3. talk_over          -- the AGENT starts talking over (or immediately after a very short)
 //                            caller utterance. Never the reverse (a caller barge-in on the
 //                            agent is fine and expected -- see barge-in-interrupt.json).
-//  4. holding_spam       -- more than one bare "One moment." per caller turn, or one that
-//                            isn't followed by a substantive line within 4s.
+//  4. holding_spam       -- more than one bare "One moment." per caller turn (always gates),
+//                            or one whose gap to the next transcript event exceeds 8s (gates;
+//                            a shorter gap is ordinary AssemblyAI latency, not a defect -- see
+//                            `holdingSpam`'s own doc comment, founder correction 2026-09-18).
+//                            The full gap distribution (`hold_gap_max_s`/`hold_gap_p50_s`) is
+//                            reported informationally regardless of whether it gates.
 //  5. question_lag       -- SKIPPED (see `questionLag`'s own doc comment): the bundle shape
 //                            gives a `transcript` event no `reply_id`, so a spoken line can
 //                            only be matched to the goal that most recently logged an
@@ -35,8 +39,11 @@
 // `experienceOk` (repeated_question = 0 AND merged_reply = 0 AND talk_over = 0 AND
 // holding_spam = 0) is the new PASS gate every scenario's grading adds on top of (never
 // instead of) the base verdict/max_wall_ms/expectations.ts/close-line checks run.ts already
-// had -- see run.ts's own `pass` computation and types.ts's `ScenarioExpected.experience`
-// override (barge-in-interrupt's own intended caller interruption only).
+// had -- see run.ts's own `pass` computation. No scenario-level override field exists: tested
+// directly against barge-in-interrupt.json's own real bundle and confirmed unnecessary --
+// `talk_over` only ever measures the AGENT cutting off the CALLER, never the reverse, so the
+// scenario's own designed caller-interrupts-agent mechanic was never at risk of a false
+// positive in the first place.
 import type { RehearseDiagnosticBundle, RehearseDiagnosticEvent } from './types.js';
 
 export interface TimestampedCount {
@@ -57,16 +64,29 @@ export interface GoodbyeDelayResult {
   note: string;
 }
 
+/** Founder correction (2026-09-18, coordinator relay): `count`/`timestamps_s` are now ONLY
+ *  the gating violations (a repeated bare holding line within one caller turn, or a
+ *  holding-to-substantive gap over `HOLDING_GAP_FAIL_THRESHOLD_MS`) -- `hold_gap_max_s`/
+ *  `hold_gap_p50_s` are the full latency distribution across every bare holding line that had
+ *  a measurable follow-up, reported for visibility but never gating on their own. `null` when
+ *  no bare holding line with a measurable follow-up ever occurred. */
+export interface HoldingSpamResult extends TimestampedCount {
+  hold_gap_max_s: number | null;
+  hold_gap_p50_s: number | null;
+}
+
 export interface ExperienceGrade {
   repeated_question: TimestampedCount;
   merged_reply: TimestampedCount;
   talk_over: TimestampedCount;
-  holding_spam: TimestampedCount;
+  holding_spam: HoldingSpamResult;
   question_lag: QuestionLagResult;
   goodbye_delay: GoodbyeDelayResult;
   /** repeated_question.count === 0 && merged_reply.count === 0 && talk_over.count === 0 &&
    *  holding_spam.count === 0 -- the four checks the spec names as PASS-gating. `question_lag`
-   *  (skipped, see above) and `goodbye_delay` (informational) never affect this. */
+   *  (skipped, see above) and `goodbye_delay` (informational) never affect this. `holding_spam`
+   *  itself is now a NARROWER count (see `HoldingSpamResult`'s own doc comment) -- its own
+   *  `hold_gap_max_s`/`hold_gap_p50_s` fields never affect `ok`. */
   ok: boolean;
 }
 
@@ -216,9 +236,18 @@ function wordCount(text: string): number {
  *      `reply.started`) -- the agent started composing/speaking a NEW reply while the caller
  *      was still mid-utterance; OR
  *   b) it falls within 300ms after the end of a caller utterance whose spoken text was under
- *      three words -- PROVEN (391e2a37: caller "No." (1 word) stops at 35.793s, the agent's
- *      very next `reply.started` fires at 35.800s, 7ms later; the caller had more to say
- *      ("Meridian Supply.") and got cut off mid-sentence when the agent's reply landed).
+ *      three words, AND the caller resumes speaking (a fresh `input.speech.started`) within
+ *      2000ms of the agent's `reply.started` -- proof the short utterance was not actually the
+ *      caller's whole thought.
+ *
+ *  Founder correction (2026-09-18, coordinator relay): the original form of (b) -- "any
+ *  reply.started within 300ms of a short caller utterance" -- fired on every healthy fast
+ *  turnaround too. PROVEN (391e2a37): 49.299s/60.997s/73.702s are all the agent correctly
+ *  answering a FINISHED "Yes." with no caller speech following (the call simply moves on) --
+ *  not cutoffs. Only 35.8s is a real one: the caller resumes ("Meridian Supply.") at 36.948s,
+ *  1148ms after the agent's 35.800s `reply.started` -- well inside the 2000ms window -- proof
+ *  the caller had more to say and got cut off. Requiring that resumption signal is what tells
+ *  the two apart; word count and gap alone cannot.
  *  Deliberately one-directional: the CALLER interrupting the AGENT (a real barge-in,
  *  `reply.done: "interrupted"`) is the intended, expected mechanic in scenarios like
  *  barge-in-interrupt.json and is never flagged here. */
@@ -232,6 +261,11 @@ function wordCount(text: string): number {
  *  caller's utterance) clears this easily; a same-instant race between two independent event
  *  sources does not. */
 const TALK_OVER_WINDOW_TOLERANCE_MS = 50;
+
+/** How soon after the agent's `reply.started` a fresh caller `input.speech.started` must land
+ *  to count as "the caller resumed" for case (b) -- see `talkOver`'s own doc comment for the
+ *  PROVEN 391e2a37 timing this was tuned against (1148ms). */
+const TALK_OVER_RESUME_WINDOW_MS = 2000;
 
 export function talkOver(bundle: RehearseDiagnosticBundle): TimestampedCount {
   const windows = extractSpeechWindows(bundle);
@@ -256,23 +290,48 @@ export function talkOver(bundle: RehearseDiagnosticBundle): TimestampedCount {
       if (u.t_ms <= t && (nearest === null || u.t_ms > nearest.t_ms)) nearest = u;
     }
     if (nearest && t - nearest.t_ms <= 300 && wordCount(nearest.text) < 3) {
-      timestamps.push(toSec(t));
+      // Only a real cutoff if the caller actually had more to say -- proven by a fresh speech
+      // window starting soon after the agent began talking.
+      const callerResumed = windows.some((w) => w.started_ms > t && w.started_ms <= t + TALK_OVER_RESUME_WINDOW_MS);
+      if (callerResumed) {
+        timestamps.push(toSec(t));
+      }
     }
   }
 
   return { count: timestamps.length, timestamps_s: timestamps };
 }
 
+/** Threshold (ms) above which a bare holding line's gap to the next transcript event gates
+ *  FAIL (see `holdingSpam`'s doc comment for why this is 8s, not the original 4s). */
+const HOLDING_GAP_FAIL_THRESHOLD_MS = 8000;
+
+function median(values: readonly number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
+}
+
 /** Check 4: `holding_spam`. A bare holding line is an agent transcript line whose trimmed
- *  text, case-insensitively, is exactly "one moment." (nothing else). Flags:
- *   a) any bare holding line not followed by ANY further transcript event (agent or caller)
- *      within 4000ms -- PROVEN (391e2a37 53.228s: next transcript at 58.697s, a 5.469s gap;
- *      77.629s: next transcript at 84.119s, a 6.49s gap) -- the founder's own "does not let
- *      me complete my sentence" / dead-air complaints line up with exactly this: a holding
- *      line said, then nothing substantive for several seconds.
+ *  text, case-insensitively, is exactly "one moment." (nothing else). Two things are
+ *  measured:
+ *   a) the gap from every bare holding line to the next transcript event of any kind --
+ *      reported as `hold_gap_max_s`/`hold_gap_p50_s` (informational, the full distribution),
+ *      and counted as a GATING violation only when that gap exceeds
+ *      `HOLDING_GAP_FAIL_THRESHOLD_MS` (8s), or the holding line is never followed by
+ *      anything at all before the call ends.
+ *
+ *      Founder correction (2026-09-18, coordinator relay): the original 4s threshold measured
+ *      AssemblyAI's own ordinary latency between the holding beat and our instructed reply,
+ *      not a defect -- PROVEN (391e2a37 53.228s to 58.697s, a 5.469s gap) is a HEALTHY call
+ *      shape, not the founder's "does not let me complete my sentence" complaint (that's
+ *      `talk_over`'s job). 8s is chosen as a generous ceiling above every gap this module was
+ *      built and tested against, so ordinary AssemblyAI latency never gates FAIL on its own.
  *   b) a SECOND (or later) bare holding line spoken before the next caller utterance, when
- *      more than one already occurred for that same caller turn. */
-export function holdingSpam(bundle: RehearseDiagnosticBundle): TimestampedCount {
+ *      more than one already occurred for that same caller turn -- unchanged, still always
+ *      gates. */
+export function holdingSpam(bundle: RehearseDiagnosticBundle): HoldingSpamResult {
   const agentLines = extractAgentTranscript(bundle);
   const isBareHolding = (text: string) => text.trim().toLowerCase() === 'one moment.';
   const allTranscriptTimes = bundle.server_events
@@ -297,17 +356,33 @@ export function holdingSpam(bundle: RehearseDiagnosticBundle): TimestampedCount 
     lastPriorUserCountForHolding = priorUserCount;
   }
 
-  // (a) a bare holding line not followed by anything substantive within 4s.
+  // (a) gap to the next transcript event -- gates only past HOLDING_GAP_FAIL_THRESHOLD_MS (or
+  // no follow-up at all); every MEASURABLE gap (a next event actually arrived) also feeds the
+  // informational max/p50 stats below.
+  const gapsMs: number[] = [];
   for (const line of agentLines) {
     if (!isBareHolding(line.text)) continue;
     const next = allTranscriptTimes.find((t) => t > line.t_ms);
-    if (next === undefined || next - line.t_ms > 4000) {
+    if (next === undefined) {
+      flagged.add(line.t_ms);
+      continue;
+    }
+    const gapMs = next - line.t_ms;
+    gapsMs.push(gapMs);
+    if (gapMs > HOLDING_GAP_FAIL_THRESHOLD_MS) {
       flagged.add(line.t_ms);
     }
   }
 
   const timestamps = Array.from(flagged).sort((a, b) => a - b).map(toSec);
-  return { count: timestamps.length, timestamps_s: timestamps };
+  const maxGapMs = gapsMs.length > 0 ? Math.max(...gapsMs) : null;
+  const medianGapMs = median(gapsMs);
+  return {
+    count: timestamps.length,
+    timestamps_s: timestamps,
+    hold_gap_max_s: maxGapMs === null ? null : toSec(maxGapMs),
+    hold_gap_p50_s: medianGapMs === null ? null : toSec(medianGapMs),
+  };
 }
 
 /** Check 5: `question_lag` -- SKIPPED. A `transcript` event (the only place spoken words

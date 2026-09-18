@@ -32,6 +32,9 @@ export function printGrade(path: string, bundle: RehearseDiagnosticBundle): bool
   if (grade.talk_over.count > 0) console.log(`    talk_over at: ${grade.talk_over.timestamps_s.join(', ')}s`);
   if (grade.holding_spam.count > 0) console.log(`    holding_spam at: ${grade.holding_spam.timestamps_s.join(', ')}s`);
   console.log(
+    `  hold_gap_max_s=${grade.holding_spam.hold_gap_max_s ?? 'n/a'} hold_gap_p50_s=${grade.holding_spam.hold_gap_p50_s ?? 'n/a'} (informational -- only a gap over 8s gates holding_spam above)`,
+  );
+  console.log(
     `  question_lag: ${grade.question_lag.skipped ? `SKIPPED -- ${grade.question_lag.skip_reason}` : `${grade.question_lag.count}`} (informational)`,
   );
   console.log(

@@ -144,16 +144,38 @@ describe('mergedReply', () => {
 });
 
 describe('talkOver', () => {
-  it('PROVEN 391e2a37 35.8s: caller says "No." (1 word), reply.started fires 7ms later -- the caller was cut off before continuing with "Meridian Supply."', () => {
+  // Founder correction (2026-09-18, coordinator relay): a short caller utterance alone is not
+  // enough -- the caller must actually resume speaking soon after, proving they had more to
+  // say. PROVEN 391e2a37: "No." stops at 35.793s, reply.started fires at 35.800s (7ms later),
+  // and the caller resumes with "Meridian Supply." -- input.speech.started at 36.948s, 1148ms
+  // after the agent's reply.started -- well inside the 2000ms resume window.
+  it('PROVEN 391e2a37 35.8s: caller says "No." (1 word), reply.started fires 7ms later, and the caller resumes 1148ms later ("Meridian Supply.") -- a real cutoff', () => {
     const b = bundle([
       speechStarted(35392),
       speechStopped(35793),
       userTranscript(35793, 'No.'),
       replyStarted(35800),
+      speechStarted(36948), // the caller resuming, cut off mid-sentence
+      speechStopped(37493),
+      userTranscript(37493, 'Meridian Supply.'),
     ]);
     const result = talkOver(b);
     expect(result.count).toBe(1);
     expect(result.timestamps_s).toEqual([35.8]);
+  });
+
+  // PROVEN 391e2a37 49.299s/60.997s/73.702s: each is the agent correctly answering a
+  // FINISHED "Yes." with no caller speech following -- the call simply moves on to the next
+  // readback. Locks that a short-but-complete answer, with no resumption, is never flagged.
+  it('does NOT flag a fast reply to a complete "Yes." when the caller never resumes speaking (the 391e2a37 49.3/61.0/73.7s shape)', () => {
+    const b = bundle([
+      speechStarted(60490),
+      userTranscript(60990, 'Yes.'),
+      replyStarted(60997),
+      speechStopped(61003),
+      // No further input.speech.started anywhere near this reply -- the caller was done.
+    ]);
+    expect(talkOver(b).count).toBe(0);
   });
 
   it('does not flag reply.started after a normal-length caller utterance, even with near-zero gap', () => {
@@ -162,6 +184,18 @@ describe('talkOver', () => {
       speechStopped(2000),
       userTranscript(2000, 'Yes, that is right.'),
       replyStarted(2005),
+    ]);
+    expect(talkOver(b).count).toBe(0);
+  });
+
+  it('does NOT flag a short utterance followed by a reply.started when the caller resumes only AFTER the 2000ms resume window', () => {
+    const b = bundle([
+      speechStarted(1000),
+      speechStopped(1200),
+      userTranscript(1200, 'No.'),
+      replyStarted(1210),
+      speechStarted(3500), // 2290ms after reply.started -- outside the 2000ms window
+      userTranscript(4000, 'Something later, unrelated.'),
     ]);
     expect(talkOver(b).count).toBe(0);
   });
@@ -198,14 +232,19 @@ describe('talkOver', () => {
 });
 
 describe('holdingSpam', () => {
-  it('PROVEN 391e2a37 53.228s: a bare "One moment." not followed by anything for 5.469s', () => {
+  // Founder correction (2026-09-18, coordinator relay): PROVEN 391e2a37 53.228s -> 58.697s
+  // (a 5.469s gap) is AssemblyAI's own ordinary latency between the holding beat and our
+  // instructed reply -- a HEALTHY call shape, not a defect. It must no longer gate FAIL on
+  // its own; it shows up only in the informational hold_gap_max_s/hold_gap_p50_s stats.
+  it('PROVEN 391e2a37 53.228s: a bare "One moment." followed 5.469s later by the next line -- informational only, does not gate (below the 8s threshold)', () => {
     const b = bundle([
       agentTranscript(53228, 'One moment.'),
       agentTranscript(58697, 'Just to confirm, the account ends in 4 4 7 1. Is that correct?'),
     ]);
     const result = holdingSpam(b);
-    expect(result.count).toBe(1);
-    expect(result.timestamps_s).toEqual([53.228]);
+    expect(result.count).toBe(0);
+    expect(result.hold_gap_max_s).toBe(5.469);
+    expect(result.hold_gap_p50_s).toBe(5.469);
   });
 
   it('does not flag a bare "One moment." immediately followed by a substantive line', () => {
@@ -213,10 +252,12 @@ describe('holdingSpam', () => {
       agentTranscript(1000, 'One moment.'),
       agentTranscript(1500, 'Just to confirm, the amount is $84,500. Is that correct?'),
     ]);
-    expect(holdingSpam(b).count).toBe(0);
+    const result = holdingSpam(b);
+    expect(result.count).toBe(0);
+    expect(result.hold_gap_max_s).toBe(0.5);
   });
 
-  it('flags a second bare "One moment." with no caller line between the two', () => {
+  it('flags a second bare "One moment." with no caller line between the two (still gates -- unchanged by the founder correction)', () => {
     const b = bundle([
       agentTranscript(1000, 'One moment.'),
       agentTranscript(1200, 'One moment.'),
@@ -234,6 +275,47 @@ describe('holdingSpam', () => {
       agentTranscript(3400, 'Just to confirm, the account ends in 4471. Is that correct?'),
     ]);
     expect(holdingSpam(b).count).toBe(0);
+  });
+
+  it('DOES flag (gates) a bare "One moment." whose gap to the next transcript event exceeds 8s', () => {
+    const b = bundle([
+      agentTranscript(1000, 'One moment.'),
+      agentTranscript(9500, 'Just to confirm, the amount is $84,500. Is that correct?'), // 8.5s gap
+    ]);
+    const result = holdingSpam(b);
+    expect(result.count).toBe(1);
+    expect(result.timestamps_s).toEqual([1]);
+    expect(result.hold_gap_max_s).toBe(8.5);
+  });
+
+  it('DOES flag a bare "One moment." never followed by anything at all before the call ends', () => {
+    const b = bundle([agentTranscript(1000, 'One moment.')]);
+    const result = holdingSpam(b);
+    expect(result.count).toBe(1);
+    // No measurable gap -- never counted into the informational stats.
+    expect(result.hold_gap_max_s).toBeNull();
+    expect(result.hold_gap_p50_s).toBeNull();
+  });
+
+  it('hold_gap_max_s/hold_gap_p50_s reflect the full distribution across every measurable bare holding line', () => {
+    const b = bundle([
+      agentTranscript(1000, 'One moment.'),
+      agentTranscript(2000, 'Just to confirm, the amount is $84,500. Is that correct?'), // 1s gap
+      userTranscript(3000, 'Yes.'),
+      agentTranscript(3200, 'One moment.'),
+      agentTranscript(8200, 'Just to confirm, the account ends in 4471. Is that correct?'), // 5s gap
+    ]);
+    const result = holdingSpam(b);
+    expect(result.count).toBe(0);
+    expect(result.hold_gap_max_s).toBe(5);
+    expect(result.hold_gap_p50_s).toBe(3); // median of [1, 5]
+  });
+
+  it('returns null for hold_gap_max_s/hold_gap_p50_s when there is no bare holding line at all', () => {
+    const b = bundle([agentTranscript(1000, 'Just to confirm the amount. Is that correct?')]);
+    const result = holdingSpam(b);
+    expect(result.hold_gap_max_s).toBeNull();
+    expect(result.hold_gap_p50_s).toBeNull();
   });
 });
 
