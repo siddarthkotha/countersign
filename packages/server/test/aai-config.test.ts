@@ -52,21 +52,42 @@ describe('buildInitialSessionUpdate', () => {
     expect(keyterms[0]).toBe('term-0');
   });
 
-  it('includes turn_detection fields with sane defaults', () => {
+  it('includes vad_threshold/interrupt_response with sane defaults', () => {
     const msg = buildInitialSessionUpdate(cfg());
     expect(msg.session.input).toMatchObject({
       turn_detection: {
         vad_threshold: expect.any(Number),
-        min_silence: expect.any(Number),
-        max_silence: expect.any(Number),
         interrupt_response: expect.any(Boolean),
       },
     });
   });
 
-  it('lets a caller override turn_detection fields', () => {
+  // 2026-09-18 fix (SONNET-JUSTIFIED lane, founder's "does not let me complete my
+  // sentence" complaint): AssemblyAI's docs (turn-detection-and-interruptions, fetched
+  // 2026-09-18) -- "Setting min_silence or max_silence turns off the adaptive pacing and
+  // entity-aware waiting described above for the rest of the session. Prefer leaving them
+  // unset." -- so by default neither key is sent at all, letting AssemblyAI's own adaptive
+  // system decide (see config.ts's own doc comment for the measured trade-off that ruled
+  // out just raising the old fixed 600ms value instead).
+  it('omits min_silence and max_silence entirely by default (AssemblyAI adaptive pacing/entity-aware waiting stays on)', () => {
+    const msg = buildInitialSessionUpdate(cfg());
+    const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+    expect(turnDetection).not.toHaveProperty('min_silence');
+    expect(turnDetection).not.toHaveProperty('max_silence');
+  });
+
+  it('lets a caller override turn_detection fields -- min_silence sent exactly as given when explicitly set', () => {
     const msg = buildInitialSessionUpdate(cfg({ turn_detection: { min_silence: 1200 } }));
-    expect((msg.session.input as { turn_detection: { min_silence: number } }).turn_detection.min_silence).toBe(1200);
+    const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+    expect(turnDetection.min_silence).toBe(1200);
+    expect(turnDetection).not.toHaveProperty('max_silence');
+  });
+
+  it('lets a caller override max_silence independently of min_silence', () => {
+    const msg = buildInitialSessionUpdate(cfg({ turn_detection: { max_silence: 5000 } }));
+    const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+    expect(turnDetection.max_silence).toBe(5000);
+    expect(turnDetection).not.toHaveProperty('min_silence');
   });
 
   it('sends flat tool schemas -- {type, name, description, parameters, execution_mode, timeout_seconds}, never a nested "function" key', () => {

@@ -3472,7 +3472,16 @@ export class CallSession {
           tools: toolSchemasFor(output.allowed_tools),
           input: {
             keyterms: output.goal.keyterms.slice(0, 100),
-            turn_detection: { min_silence: output.goal.turn_detection_hint === 'patient' ? 1200 : 600 },
+            // 2026-09-18 single-line fix (SONNET-JUSTIFIED build lane; see
+            // packages/server/src/aai/config.ts's TurnDetectionConfig doc comment for the
+            // full docs quote + measured trade-off): AssemblyAI's docs say explicitly
+            // setting min_silence/max_silence "turns off the adaptive pacing and
+            // entity-aware waiting ... for the rest of the session. Prefer leaving them
+            // unset." -- 'default' goals now omit the key entirely instead of hardcoding
+            // 600ms; 'patient' goals (CHALLENGE, CONSISTENCY_CHECK rule_hit 5) keep their
+            // existing explicit 1200ms floor unchanged (PROVEN insufficient on its own in
+            // one real case -- left for a separate follow-up, not touched here).
+            turn_detection: output.goal.turn_detection_hint === 'patient' ? { min_silence: 1200 } : {},
           },
         },
       });

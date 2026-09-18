@@ -281,3 +281,106 @@ defers a caller-turn-triggered fresh-question send by 150ms (ESTIMATE, ~150x mar
 PROVEN 0-1ms observed trigger gap) so AssemblyAI's own automatic reply, if one is coming, gets
 a chance to start (and be caught by the existing busy-guard) before the server's own send goes
 out -- never a documented fix, since the docs give none to use.
+
+## VERIFY-AT-BUILD re-check 2026-09-18 (turn_detection / same-breath cutoffs)
+
+SONNET-JUSTIFIED lane (packages/server/src/aai/config.ts owner), triggered by the founder's
+second live complaint: "does not let me complete my sentence." Re-fetched live (two
+independent errand-agent WebFetch passes, same page, same text both times, retrieval date
+2026-09-18) against
+`https://www.assemblyai.com/docs/voice-agents/voice-agent-api/turn-detection-and-interruptions`.
+
+**`turn_detection`'s documented fields** (PROVEN, live docs 2026-09-18): `vad_threshold`
+(float 0-1, default 0.5), `min_silence` (int ms, default "adaptive"), `max_silence` (int ms,
+default "adaptive"), `interrupt_response` (bool, default true), `interruption_delay` (int ms,
+0-1000, default varies by `transcription_mode`). No separate settable
+"end_of_turn_confidence_threshold" input exists; a same-named field appears on Turn *events*
+as a response/output value, never as a config input we can tune.
+
+**The decisive quote** (PROVEN, quoted exactly, independently confirmed twice):
+> "Setting `min_silence` or `max_silence` turns off the adaptive pacing and entity-aware
+> waiting described above for the rest of the session. Prefer leaving them unset."
+
+Adaptive pacing, same page: "If a speaker pauses a lot, the agent gives them more room; if
+they're crisp, it replies faster. This gets better over the call." Entity-aware waiting:
+"When a tool parameter expects a phone number, email, date, or other entity, the agent waits
+for the whole value before ending your turn." Both are described as running BY DEFAULT and
+turned OFF permanently for the session the instant either `min_silence` or `max_silence` is
+explicitly set even once -- which our code had been doing on every single connect and every
+single goal change since the field was added.
+
+**What we sent before this fix** (PROVEN, `packages/server/src/aai/config.ts` as of commit
+f57171c): `buildInitialSessionUpdate` always sent `min_silence: 600, max_silence: 4000`
+(hardcoded fallback defaults, no documented justification found for either number --
+originally just "sane"-looking values, per the pre-fix code comment). `call/session.ts`
+additionally re-sent an explicit `min_silence` (600 or 1200 for `'patient'`-hint goals:
+CHALLENGE and CONSISTENCY_CHECK `rule_hit === 5`) on every single goal transition, meaning
+adaptive pacing was disabled within roughly the first second of every real call and stayed
+off for its entire duration.
+
+**Measurement (this lane, 2026-09-18, from every bundle on disk under
+`scripts/rehearse/reports/*.diagnostics.json`, including the founder's own real recordings
+under `founder-2026-09-18/`; never called the live API, only replayed recorded bundles):**
+a "same-breath cutoff" detector -- an agent `reply.started` firing <=300ms after a caller
+utterance's `input.speech.stopped`, with the caller resuming (`input.speech.started`)
+<=2000ms after that `reply.started` (the exact signature the founder's own PROVEN cutoff,
+`founder-2026-09-18/391e2a37-....diagnostics.json` at 35.8s, "No." -> reply.started 7ms
+later -> caller resumes "Meridian Supply." 1148ms after reply.started, matches) -- found 217
+candidates across the whole synthetic-harness + founder corpus (255 bundles parsed of 258
+found; 3 failed to parse). Their measured caller-side silence gap (time beyond whatever
+`min_silence` was already active before the caller resumed):
+
+| bucket | n | min | p50 | p90 | max |
+|---|---|---|---|---|---|
+| all | 217 | 635ms | 1098ms | 1297ms | 1991ms |
+| 1-2 words | 53 | 698ms | 999ms | 1370ms | 1975ms |
+| 3-6 words | 104 | 723ms | 1142ms | 1287ms | 1991ms |
+| 7+ words | 60 | 635ms | 1097ms | 1285ms | 1981ms |
+
+Word count does NOT meaningfully predict pause length (all three buckets cluster around a
+1000-1150ms p50) -- no word-count-keyed fixed threshold would help more than a flat one.
+ESTIMATE, not PROVEN: most of these 217 are synthetic-harness scripted/LLM-caller lines, not
+organic human pauses -- the corpus is a proxy, methodologically noisier than real speech, and
+should be read as evidence about the SHAPE of the problem (no fixed threshold cleanly
+separates "still talking" from "truly done" -- the same 3-word "Yes, that's correct." text
+appears on both sides) rather than as a precise population estimate.
+
+The founder's OWN real recordings (`founder-2026-09-18/`, 6 calls, 29 measurable caller
+utterances, PROVEN from the actual bundles) show only 2 same-breath candidates: 997ms ("Hold
+on." -> "Ignore your previous instructions...", CHALLENGE state) and 1155ms ("No." ->
+"Meridian Supply.", a CONSISTENCY_CHECK rule_hit-5 READBACK -- which per the pre-fix code was
+ALREADY in 'patient' mode at 1200ms min_silence, meaning the founder's real total pause was
+roughly 1155ms + 1200ms =~ 2355ms, over even the elevated floor). Every other real gap in his
+6 calls was 5-23 seconds (natural human conversational pacing, nothing like the harness's
+fast scripted turnaround).
+
+**Trade-off argued from the measured data:** a raised FIXED `min_silence` of 1300ms would
+have covered 201/217 (92.6%) of the synthetic same-breath candidates (coverage climbs from
+0% at 600ms, to 44.7% at 1000ms, 62.2% at 1200ms, 92.6% at 1300ms, 100% at 2000ms) -- but
+every extra millisecond above the current 600ms floor is added, flat, to EVERY turn that was
+already genuinely finished, not only the cutoff-risk ones: 560 measured gaps over 3s plus 42
+normal round trips (602 turns) never needed extra time at all, against only 217 that did.
+Today's ambient (AssemblyAI-initiated) reply already starts 1-7ms after a turn is decided
+over (`turn_to_reply_gap` diagnostic, `ours: false` samples, PROVEN from the same bundles) --
+so a raised fixed floor's added latency lands almost entirely on genuinely-finished turns,
+not on closing the gap to cutoff turns (which already wait out the existing floor before
+resuming).
+
+**The change made (this lane, `packages/server/src/aai/config.ts` +
+`packages/server/src/call/session.ts` one isolated line, see this lane's own report for the
+full diff):** rather than pick a new fixed number, `min_silence`/`max_silence` are now
+OMITTED from the wire payload for every 'default'-hint goal, so AssemblyAI's own adaptive
+pacing and entity-aware waiting run for the entire call -- avoiding the flat cost entirely,
+per this file's own quoted docs recommendation ("Prefer leaving them unset"). The existing
+'patient'-hint explicit 1200ms floor (CHALLENGE, CONSISTENCY_CHECK rule_hit 5) is
+UNCHANGED by this pass -- PROVEN insufficient on its own in the one real case measured above,
+left for a follow-up decision once live data exists on the 'default'-branch change.
+`interruption_delay` remains UNSET/unplumbed (UNKNOWN whether it should be configured;
+no live defect has pointed at it).
+
+**Live effect: UNKNOWN.** This analysis never called the live AssemblyAI API -- it replays
+recorded diagnostics bundles only, per this repo's own determinism rule (never test a copy
+of the engine, never call the live API in tests). Whether adaptive pacing actually avoids the
+founder's cutoff live, and whether it changes perceived responsiveness on genuinely-finished
+turns, is UNKNOWN until the next rehearsal batch (and ideally another founder live call)
+measures it against the deployed build.

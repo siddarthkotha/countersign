@@ -100,12 +100,75 @@ export function resolveVoice(voice: string): string {
 export const LLM_GATEWAY_BASE_URL = 'https://llm-gateway.assemblyai.com/v1';
 const AUDIO_ENCODING = 'audio/pcm';
 
+// SONNET-JUSTIFIED lane fix (2026-09-18, founder's second live complaint: "does not let me
+// complete my sentence"). PROVEN from the founder's own recorded call
+// (scripts/rehearse/reports/founder-2026-09-18/391e2a37-....diagnostics.json, 35.8s): he
+// says "No." then, 1.7s later (1155ms after his OWN speech-stop event, itself already
+// min_silence past his true last word), "Meridian Supply." -- the agent's reply.started
+// fired 7ms after "stopped", i.e. essentially the instant AssemblyAI's own silence timer
+// (whatever value was active) elapsed. `turn_to_reply_gap` diagnostics (added
+// packages/server/src/call/session.ts, commit ef38029) confirm AssemblyAI's own ambient
+// reply starts 1-7ms after it decides a turn ended -- our server reaction time is not the
+// lever; AssemblyAI's own end-of-turn DECISION is.
+//
+// Live docs re-check, fetched 2026-09-18 (two independent agent fetches, same page, same
+// text both times):
+//   https://www.assemblyai.com/docs/voice-agents/voice-agent-api/turn-detection-and-interruptions
+//   "Setting `min_silence` or `max_silence` turns off the adaptive pacing and entity-aware
+//   waiting described above for the rest of the session. Prefer leaving them unset."
+//   Adaptive pacing, same page: "If a speaker pauses a lot, the agent gives them more
+//   room; if they're crisp, it replies faster. This gets better over the call." /
+//   entity-aware waiting: "When a tool parameter expects a phone number, email, date, or
+//   other entity, the agent waits for the whole value before ending your turn." -- this is
+//   a direct, built-in description of the exact problem the founder hit, with NO flat
+//   latency cost added to every turn (unlike a raised fixed min_silence, which taxes every
+//   genuinely-finished caller turn too -- see the ANALYSIS note below).
+//   `turn_detection`'s five documented fields: vad_threshold (float 0-1, default 0.5),
+//   min_silence (int ms, default adaptive), max_silence (int ms, default adaptive),
+//   interrupt_response (bool, default true), interruption_delay (int ms, 0-1000, default
+//   varies by transcription_mode -- not yet plumbed through this config, kept UNKNOWN/unset
+//   here). No separate settable "end_of_turn_confidence_threshold" exists; a same-named
+//   response field appears on Turn events but is not a tunable input.
+//
+// ANALYSIS (this lane, 2026-09-18, from every scripts/rehearse/reports/*.diagnostics.json
+// bundle on disk including the founder's own founder-2026-09-18/ recordings): a
+// same-breath detector (an agent reply.started firing <=300ms after a caller utterance
+// ends, with the caller resuming <=2000ms later -- the same signature the founder's
+// PROVEN 391e2a37 cutoff matches) found 217 such candidates across the harness corpus.
+// Their caller-side silence gap (the extra pause beyond whatever min_silence was already
+// active) has min=635ms, p50=1098ms, p90=1297ms, max=1991ms (bucketed by the utterance's
+// own word count -- 1-2 words n=53 p50=999ms, 3-6 words n=104 p50=1142ms, 7+ words n=60
+// p50=1097ms -- word count does NOT meaningfully predict pause length, so no word-count-
+// keyed fixed threshold would help either). A raised FIXED min_silence of 1300ms would
+// have covered 201/217 (92.6%) of these -- but would also add ~700ms of pure added
+// latency (1300ms - the current 600ms default) to every one of the far larger set of
+// turns that were already genuinely finished (560 measured gaps over 3s, plus 42 normal
+// round trips) -- no single fixed number separates "still talking" from "truly done";
+// the same "Yes, that's correct." text appears in both populations. Leaving min_silence/
+// max_silence UNSET instead asks AssemblyAI's own adaptive system to make that
+// per-utterance judgment call, at zero added floor for turns that need none. The live
+// effect of this change is UNKNOWN until the next rehearsal batch measures it (this
+// analysis never called the live API -- it replays recorded bundles only). Full
+// methodology and quotes: docs/ASSEMBLYAI_INTEGRATION.md, "VERIFY-AT-BUILD re-check
+// 2026-09-18 (turn_detection / same-breath cutoffs)".
 export interface TurnDetectionConfig {
   vad_threshold?: number;
   min_silence?: number;
   max_silence?: number;
   interrupt_response?: boolean;
 }
+
+/** The 'patient' floor `call/session.ts`'s own per-goal `session.update` sends explicitly
+ *  for CHALLENGE and CONSISTENCY_CHECK rule_hit 5 (READBACK) goals -- named/exported here
+ *  for documentation only; `session.ts` still hardcodes its own literal (single-line fix,
+ *  2026-09-18, see this lane's report) rather than importing it, to keep that file's
+ *  touched surface to one self-contained expression. PROVEN insufficient on its own
+ *  (391e2a37: the founder's real pause in a rule_hit-5 READBACK totalled roughly
+ *  1155ms + 1200ms =~ 2355ms, over this floor) -- left unchanged by this pass; a bigger
+ *  call (dropping the explicit patient floor too, in favor of adaptive pacing everywhere)
+ *  is for the founder to make once a live batch has data on the 'default'-branch change
+ *  below. */
+export const PATIENT_MIN_SILENCE_MS = 1200;
 
 export interface AaiSessionConfig {
   assemblyai_api_key: string;
@@ -153,20 +216,30 @@ export interface SessionUpdateMessage {
 /** Builds the FIRST session.update sent right after the socket opens (before
  *  session.ready). Every later session.update on this connection (call/session.ts, per
  *  goal change) must never touch voice, output.format.encoding, or greeting -- see the
- *  module doc comment. */
+ *  module doc comment.
+ *
+ *  `min_silence`/`max_silence` (2026-09-18 fix, see the `TurnDetectionConfig` doc comment
+ *  above for the full docs quote + measured trade-off): OMITTED from the wire payload
+ *  unless `cfg.turn_detection` explicitly sets one, so AssemblyAI's own adaptive pacing /
+ *  entity-aware waiting runs by default instead of the old flat 600ms/4000ms floor. An
+ *  explicit override (a caller-supplied `cfg.turn_detection.min_silence`/`max_silence`)
+ *  is still sent exactly as given -- `call/session.ts`'s own 'patient'-goal branch relies
+ *  on this to keep sending its own explicit 1200ms floor unchanged. */
 export function buildInitialSessionUpdate(cfg: AaiSessionConfig): SessionUpdateMessage {
   const keyterms = cfg.keyterms.slice(0, 100);
+  const turnDetection: Record<string, unknown> = {
+    vad_threshold: cfg.turn_detection?.vad_threshold ?? 0.5,
+    interrupt_response: cfg.turn_detection?.interrupt_response ?? true,
+  };
+  if (cfg.turn_detection?.min_silence !== undefined) turnDetection.min_silence = cfg.turn_detection.min_silence;
+  if (cfg.turn_detection?.max_silence !== undefined) turnDetection.max_silence = cfg.turn_detection.max_silence;
+
   const session: Record<string, unknown> = {
     system_prompt: cfg.system_prompt,
     input: {
       format: { encoding: AUDIO_ENCODING },
       keyterms,
-      turn_detection: {
-        vad_threshold: cfg.turn_detection?.vad_threshold ?? 0.5,
-        min_silence: cfg.turn_detection?.min_silence ?? 600,
-        max_silence: cfg.turn_detection?.max_silence ?? 4000,
-        interrupt_response: cfg.turn_detection?.interrupt_response ?? true,
-      },
+      turn_detection: turnDetection,
     },
     output: {
       voice: cfg.voice,
