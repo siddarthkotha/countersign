@@ -373,9 +373,19 @@ function sentenceNamesLabelWithRestateCue(sentence: string, normalizedLabel: str
  *  an unanswered challenge count as resolved -- the engine's own reask window
  *  (`max_challenge_reasks`, challenges.ts) still holds the caller to answering the REAL question
  *  it renders next regardless. */
+/*  Tightened 2026-09-18 (push-53 review, PROVEN false suppressions): the bare single-word
+ *  synonyms 'amount' and 'account' were dropped. With them in the list, the reviewer showed
+ *  two unrelated ambient sentences suppressing our real ask -- "give me the account holder's
+ *  name?" (cue "give me" attaches to "account") and "restate the amount you charged us last
+ *  month?" (cue "restate" attaches to "amount"). Neither matches once only the multi-word
+ *  forms remain, and neither of the two PROVEN live paraphrases needed the bare word: the
+ *  miller-patient record's ambient line was "restate the dollar amount you requested earlier"
+ *  (two words). Every remaining entry is a string the engine itself speaks, except
+ *  'dollar amount', whose basis is that live ambient paraphrase plus extract/claims.ts's own
+ *  comment -- stated plainly here rather than claimed as engine-spoken. */
 const LABEL_SYNONYMS: Partial<Record<ClaimField, readonly string[]>> = {
-  amount_usd: ['amount in dollars', 'dollar amount', 'amount'],
-  account_last4: ['last four digits of the account', 'last four digits', 'account'],
+  amount_usd: ['amount in dollars', 'dollar amount'],
+  account_last4: ['last four digits of the account', 'last four digits'],
 };
 
 /** The candidate spoken-label strings the 'label' branch of `transcriptContainsLoadBearingValue`

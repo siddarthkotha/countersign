@@ -179,8 +179,19 @@ describe('transcriptContainsLoadBearingValue / loadBearingValueFor -- field-CONC
       expect(replyCoversCurrentRendering('Can you restate the amount in dollars you requested earlier?', goal)).toBe(true);
     });
 
-    it('suppresses the bare-word synonym ("amount") when the cue attaches to it directly (fsm.ts readbackSentence\'s own short form)', () => {
-      expect(replyCoversCurrentRendering('One moment. Can you restate the amount you gave me earlier?', goal)).toBe(true);
+    // Tightened after the push-53 review (PROVEN false suppression): the bare word "amount" is
+    // no longer a synonym, because with it any ambient sentence attaching a cue to that one
+    // common word ate our real ask -- the reviewer's own probe "restate the amount you charged
+    // us last month?" suppressed. Neither PROVEN live paraphrase needed it (the miller-patient
+    // record's ambient line said "dollar amount"), so the cost of dropping it is that an ambient
+    // reply saying only "the amount" is answered by our ask going out again: an extra question,
+    // never a silenced one.
+    it('MUST NOT suppress the bare word "amount" alone, even with the cue attached', () => {
+      expect(replyCoversCurrentRendering('One moment. Can you restate the amount you gave me earlier?', goal)).toBe(false);
+    });
+
+    it("guard rail (reviewer probe): MUST NOT suppress \"restate the amount you charged us last month?\" -- unrelated content", () => {
+      expect(replyCoversCurrentRendering('Can you restate the amount you charged us last month?', goal)).toBe(false);
     });
 
     it('guard rail: MUST NOT suppress "Can you hold while I check the amount?" -- "can you" attaches to "hold", never to a restate of the amount', () => {
@@ -208,8 +219,15 @@ describe('transcriptContainsLoadBearingValue / loadBearingValueFor -- field-CONC
     };
     const goal: PhrasingGoal = { code: 'ASK_CHALLENGE', hint: OUR_SENTENCE, keyterms: [], turn_detection_hint: 'patient', challenge };
 
-    it('RED (pre-fix, latent -- digit-branch interception): a shorter paraphrase naming "account" alone with the cue attached MUST suppress', () => {
-      expect(replyCoversCurrentRendering('Can you give me the account number attached to the beneficiary you named?', goal)).toBe(true);
+    // Tightened after the push-53 review, same reason as amount_usd above: the reviewer's probe
+    // "give me the account holder's name?" suppressed while the bare word "account" was a
+    // synonym. Dropping it costs one extra ask when an ambient reply says only "the account".
+    it('MUST NOT suppress the bare word "account" alone, even with the cue attached', () => {
+      expect(replyCoversCurrentRendering('Can you give me the account number attached to the beneficiary you named?', goal)).toBe(false);
+    });
+
+    it("guard rail (reviewer probe): MUST NOT suppress \"give me the account holder's name?\" -- unrelated content", () => {
+      expect(replyCoversCurrentRendering("Can you give me the account holder's name?", goal)).toBe(false);
     });
 
     it('RED (pre-fix, latent): a paraphrase naming "last four digits" alone (no "of the account") MUST suppress', () => {
