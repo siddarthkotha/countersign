@@ -30,7 +30,8 @@
     "credits:ledger": "tsx scripts/rehearse/creditsLedger.ts",
     "sim:friday": "tsx scripts/rehearse/simFriday.ts",
     "sim:freeplay": "tsx scripts/rehearse/simFreeplay.ts",
-    "rehearse:regrade": "tsx scripts/rehearse/regrade.ts"
+    "rehearse:regrade": "tsx scripts/rehearse/regrade.ts",
+    "grade:record": "tsx scripts/rehearse/gradeRecord.ts"
   },
   "dependencies": {},
   "devDependencies": {
