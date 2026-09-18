@@ -2765,6 +2765,39 @@
       "held_because": "engine extraction; after the founder play-through; reuse normalizeSpokenDigits",
       "priority": "P2",
       "note": "2026-09-17 10:41 AM CDT"
+    },
+    {
+      "id": "MERGED-REPLY-AFTER-BARGE-IN",
+      "title": "first reply after an interrupted greeting arrives as two interleaved sentences ('this transfer goes to NorthOne moment. Who is calling?gate Partners'); seen in all three barge-in records 2026-09-18 (09-01-07, 09-10-59) and the injection record 09-13-28 ('What is your authorization code?Just to confirm...'); judge-visible; P1",
+      "files": [
+        "packages/server/src/**"
+      ],
+      "status": "held",
+      "held_because": "after the founder play-through 2026-09-18; needs the automatic-reply vs instructed-reply collision traced in the bundle before a fix (same family as SESSION-UPDATE-MID-REPLY)",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "CLOSE-ATTEMPT-ANSWERS-OWN-QUESTION",
+      "title": "after the verdict, the first CLOSE attempt came out as the agent answering its own open challenge ('Eighty four thousand five hundred dollars.') and the close retry spoke the goodbye 8 s later (injection record 2026-09-18T09-04-22, t=99.3 s); judge-visible; P1",
+      "files": [
+        "packages/server/src/**"
+      ],
+      "status": "held",
+      "held_because": "after the founder play-through 2026-09-18; one live record; candidate: clear the pending challenge goal before the CLOSE instruction or make the close matcher reject a non-close first attempt faster",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "READBACK-EMBEDDED-RESTATEMENT",
+      "title": "a readback answered with the right value inside a sentence ('The account ends 4471.') is neither affirm, negate, nor bare restatement (ledger.ts isExactRestatement), so it exhausts the 2-utterance cap, gets re-asked, and hits the row-13 re-ask limit (barge-in record 2026-09-18T09-10-59: ESCALATE row 13 at 84.9 s); a human listener would take it as a yes; P2 engine",
+      "files": [
+        "packages/engine/src/ledger.ts"
+      ],
+      "status": "held",
+      "held_because": "engine; after the founder play-through; Haiku first, test-first: a restatement containing the exact normalized value (and no negation) resolves the readback as CONFIRMED",
+      "agent_id": "",
+      "started_at": ""
     }
   ]
 }
