@@ -2924,10 +2924,11 @@
       "files": [
         "packages/server/src/aai/config.ts"
       ],
-      "status": "held",
+      "status": "done",
       "held_because": "product tuning with a latency cost; measure on the harness after the four P0 lanes land; recommendation: min_silence about 900 ms after an utterance under three words",
       "agent_id": "",
-      "started_at": ""
+      "started_at": "",
+      "lane_note": "ef2181c + d4a0aee on main: no min_silence/max_silence is sent for any goal, adaptive pacing and entity-aware waiting stay on; live effect UNKNOWN until the next batch"
     },
     {
       "id": "NAME-STT-NORMALIZATION",
@@ -3053,10 +3054,11 @@
       "files": [
         "packages/engine/src/challenges.ts"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
       "agent_id": "",
-      "started_at": "2026-09-18T19:42:00Z"
+      "started_at": "2026-09-18T19:42:00Z",
+      "lane_note": "f57171c on main: liveCommitmentFinalValueOverride reuses the correction-cue split and grades the final asserted value; 42 fixtures / 223 cases"
     },
     {
       "id": "SECOND-SEED-NAME-IS-CONTAMINATION",
@@ -3088,6 +3090,100 @@
       ],
       "status": "held",
       "held_because": "after the deploy-51 batch; match on the goal's own sentence rather than any question mark, with the degraded-mode fallback preserved",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "CATCHUP-REASKS-SPOKEN-QUESTION",
+      "title": "P0 (the founder's 'keeps asking the same questions', STILL LIVE on deploy 51): AssemblyAI's ambient reply speaks the goal's own sentence (the standing prompt is in force), the server logs it as asked, and the catch-up path (reply_done_goal_diverged) then sends our instructed question anyway, so every readback is spoken twice; PROVEN in 2026-09-18T14-50-21-dana-patient (three cycles: 70.4/76.2 s account, 51.5/57.7 s amount, 89.9/95.6 s beneficiary)",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T19:55:00Z",
+      "lane_note": "89f262f (exact sentence) + 65622b9 (paraphrase via the rendering load-bearing value) on main; gate and review running"
+    },
+    {
+      "id": "TURN-DETECTION-DIAG",
+      "title": "server: session_config_updated logs has_turn_detection (always true, the hint string is never empty) instead of the turn_detection payload actually sent, so a record cannot tell what min_silence was live for a turn; being fixed with the adaptive-pacing follow-up",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T20:12:00Z",
+      "lane_note": "d4a0aee: session_config_updated now carries turn_detection_sent, the literal object put on the wire"
+    },
+    {
+      "id": "READBACK-AUDIO-TEN-SECONDS",
+      "title": "a one-sentence readback takes 9.4 to 10.6 s of audio (reply.audio.first fires 2 to 6 ms after reply.started, so it is delivery length, not a stall); ESTIMATE: the digit-by-digit spelling ('4 4 7 1') and the holding prefix; the single biggest remaining contributor to call length; P1 after the repeats and talk-overs",
+      "files": [
+        "packages/server/src/call/prompt.ts",
+        "packages/engine/src/fsm.ts"
+      ],
+      "status": "done",
+      "held_because": "measure first from the bundles (audio_seconds per reply vs sentence length), then decide: shorter readback sentences, no 'One moment.' prefix when a real reply follows immediately, or a faster voice",
+      "agent_id": "",
+      "started_at": "2026-09-18T20:18:00Z",
+      "lane_note": "measured across 258 bundles, no code change: duration is fixed per-reply overhead, not characters (readback regression R2 0.099 with a NEGATIVE slope; the fixed 68-char greeting still spans 4.94 to 6.58 s; the 11-char holding line spans 1.12 to 10.93 s). Lever is FEWER replies, which 89f262f and 65622b9 deliver. Ambient replies run about 1.7 s slower than server-instructed ones for the same field: re-measure after deploy 52."
+    },
+    {
+      "id": "LABEL-BRANCH-OVERSUPPRESSES",
+      "title": "P0 blocking push 52 (review, live-reproduced at 65622b9): the catch-up guard's label branch suppresses our real question whenever an ambient reply merely mentions the field label plus any '?' ('I am checking the deadline for you?', 'Is the deadline today?'), so a CHALLENGE can ride to UNANSWERED and an idle escalation; tighten to same-sentence plus a restate-or-supply cue",
+      "files": [
+        "packages/server/src/call/questionMatch.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T20:27:00Z",
+      "lane_note": "0b2e0d2 on main: label matches need the question mark, the label and a restate/supply cue in the SAME sentence; re-gate and re-review running"
+    },
+    {
+      "id": "STALE-ENGINE-DIST-FOOTGUN",
+      "title": "local only: packages/engine/dist is stale and lacks the new exports, so plain node (npm run start:server) throws spokenField is not a function; render.yaml rebuilds on every deploy and dist is gitignored, so production is unaffected; add a line to the deploy/dev docs",
+      "files": [
+        "docs/**"
+      ],
+      "status": "held",
+      "held_because": "documentation only; fold into the next docs pass",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "SEED-FACT-PARAPHRASE-DOUBLE-ASK",
+      "title": "server: SEED_FACT composed sentences are bare WH-questions containing none of the label cues, so a SEED_FACT paraphrase by an ambient reply is never suppressed and the caller can still hear that one question twice; deliberate trade against re-introducing the over-suppression; P2",
+      "files": [
+        "packages/server/src/call/questionMatch.ts"
+      ],
+      "status": "held",
+      "held_because": "measure on the deploy-52 batch: if repeated_question is non-zero and the record shows a SEED_FACT pair, match on the fact subject (the ask string's key nouns) rather than a cue list",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "CUE-MUST-ATTACH-TO-LABEL",
+      "title": "P0 last blocker for push 52 (re-review, live-reproduced at 0b2e0d2): 'Can you hold while I check the deadline?' and 'Give me a moment, I am looking at the deadline?' still suppress our real question because the cue rides with a different verb; our own STALL lines are that family and are paraphrased, not locked, so it is reachable live",
+      "files": [
+        "packages/server/src/call/questionMatch.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-18T20:37:00Z",
+      "lane_note": "bcdf37a on main: three literal adjacency patterns (restate the LABEL / give me the LABEL / can you restate|give me the LABEL) replace the shared-sentence cue test; catchup file 17/17 on main"
+    },
+    {
+      "id": "RUNON-SENTENCE-CHUNK",
+      "title": "server: questionSentencesOf splits on . ! ? only, so a run-on with one trailing question mark is a single chunk and an unrelated trailing question can ride along with a cue and label; STT often drops mid-utterance punctuation; a transcript with no terminal punctuation at all does not suppress, which is the safe direction",
+      "files": [
+        "packages/server/src/call/questionMatch.ts"
+      ],
+      "status": "held",
+      "held_because": "lower priority than the cue attachment; revisit if a deploy-52 record shows it",
       "agent_id": "",
       "started_at": ""
     }
