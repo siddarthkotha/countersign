@@ -207,11 +207,31 @@ export function transcriptContainsLoadBearingValue(
   if (accumulatedTranscript.trim().length === 0) return false;
   const normalizedValue = normalizeText(value);
   if (normalizedValue.length === 0) return false;
-  // Digit-shaped fields (account_last4, amount_usd): match a contiguous digit run in the
-  // transcript -- handles both an already-numeral STT rendering ("4471", "$84,500" -> "84500"
-  // once normalizeText strips the "$"/",") and a spaced-out spoken-digit rendering ("4 4 7 1")
-  // via `digitRuns`, which folds `normalizeSpokenDigits`' own spelled-word conversion in first
-  // (a no-op here whenever the transcript already contains digit characters, exactly like this
+  if (kind === 'label') {
+    // Field-CONCEPT widening (2026-09-18 continued, P0 -- PROVEN live from
+    // scripts/rehearse/reports/2026-09-18T15-52-39-miller-patient.diagnostics.json, 39398/
+    // 43240): checked FIRST, before the digit-shaped-field branch below -- see
+    // `LABEL_SYNONYMS`'s own doc comment for why. Two of `loadBearingValueFor`'s 'label' fields
+    // (amount_usd, from LIVE_COMMITMENT; account_last4, from RELATIONAL) are the SAME two field
+    // names the digit-shaped branch below matches on by name alone -- before this reorder, that
+    // branch always intercepted first and tried to find a digit run equal to a non-numeric
+    // LABEL string (`value` here is "amount in dollars"/"last four digits of the account", never
+    // an actual digit), which can never match, so this whole 'label' branch was unreachable for
+    // those two fields. Every other 'label' field (beneficiary/approver/counsel/
+    // escrow_institution/deadline/purpose) never hit the digit branch anyway (its own `field ===`
+    // check is name-specific) -- unaffected by this reorder.
+    return labelCandidatesFor(field).some((candidate) => {
+      const normalizedCandidate = normalizeText(candidate);
+      if (normalizedCandidate.length === 0) return false;
+      return questionSentencesOf(accumulatedTranscript).some((sentence) => sentenceNamesLabelWithRestateCue(sentence, normalizedCandidate));
+    });
+  }
+  // Digit-shaped fields (account_last4, amount_usd), kind: 'specific' only (READBACK's own real
+  // digit/amount claim value) from here down -- match a contiguous digit run in the transcript:
+  // handles both an already-numeral STT rendering ("4471", "$84,500" -> "84500" once
+  // normalizeText strips the "$"/",") and a spaced-out spoken-digit rendering ("4 4 7 1") via
+  // `digitRuns`, which folds `normalizeSpokenDigits`' own spelled-word conversion in first (a
+  // no-op here whenever the transcript already contains digit characters, exactly like this
   // record's own "4 4 7 1" -- see normalizeSpokenDigits' own doc comment for why -- but still
   // catches a hypothetical fully spelled-out account number, e.g. "four four seven one").
   // UNCHANGED by the push-52 tightening below (reviewer confirmed this branch specific enough
@@ -226,13 +246,6 @@ export function transcriptContainsLoadBearingValue(
       }
     }
     return false;
-  }
-  if (kind === 'label') {
-    // Tightened (2026-09-18 continued, P0 -- PROVEN live-reproduced over-suppression, push 52
-    // review against main 65622b9): see `LoadBearingKind`'s own doc comment for the two
-    // failing probes and why a bare whole-transcript containment check (what this branch used
-    // to do, identical to the 'specific' branch below) was wrong for a common noun label.
-    return questionSentencesOf(accumulatedTranscript).some((sentence) => sentenceNamesLabelWithRestateCue(sentence, normalizedValue));
   }
   // 'specific' non-digit value (READBACK's own beneficiary field, or an ASK_CHALLENGE
   // TRAP_FACT's own non-digit trap value -- counsel/escrow_institution/approver/beneficiary):
@@ -315,6 +328,62 @@ function sentenceNamesLabelWithRestateCue(sentence: string, normalizedLabel: str
   const normalized = normalizeText(sentence);
   const escapedLabel = normalizedLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return LABEL_ATTACHMENT_PATTERNS.some((build) => build(escapedLabel).test(normalized));
+}
+
+/** Field-CONCEPT synonym sets for the 'label' branch (2026-09-18 continued, P0 -- PROVEN live
+ *  from scripts/rehearse/reports/2026-09-18T15-52-39-miller-patient.diagnostics.json, 39398/
+ *  43240): the ambient reply said "Can you please restate the dollar amount you requested
+ *  earlier?"; our own instructed reply, four seconds later, said "Can you restate the amount in
+ *  dollars you gave me earlier?" -- the cue ("restate") attaches to the label in BOTH, and both
+ *  name the same field (amount_usd), but `spokenField('amount_usd')` is exactly one string,
+ *  "amount in dollars", so the push-52 label-attachment fix (which only ever compared against
+ *  that one canonical string) still missed it: the LABEL ITSELF was paraphrased, not just the
+ *  words around it.
+ *
+ *  Each entry below is a string the engine ALREADY speaks somewhere for that field -- never
+ *  invented, per the same discipline `LABEL_ATTACHMENT_PATTERNS` above already documents for its
+ *  three cue shapes:
+ *   - amount_usd: "amount in dollars" (challenges.ts's own `spokenField`, unchanged canonical
+ *     form, kept first); "dollar amount" (packages/engine/src/extract/claims.ts's own comment
+ *     describing this exact field, "a literal dollar amount immediately followed by...", AND the
+ *     PROVEN live paraphrase above); "amount" (fsm.ts's `readbackSentence`, `Just to confirm, the
+ *     amount is ${money(...)}...` -- the engine's own shorter form for this same field, spoken in
+ *     the sibling READBACK goal).
+ *   - account_last4: "last four digits of the account" (spokenField, unchanged canonical form,
+ *     kept first); "last four digits" (fsm.ts's `elicitMissingSentence`, `...Please give me the
+ *     last four digits.` -- the engine's own shorter form); "account" (fsm.ts's
+ *     `readbackSentence`, `Just to confirm, the account ends in ${claim.value}...` -- the
+ *     engine's own even-shorter form).
+ *  Every other LIVE_COMMITMENT/SEED_FACT/RELATIONAL field (beneficiary/approver/counsel/
+ *  escrow_institution/deadline/purpose) has no PROVEN paraphrase incident and no alternate
+ *  wording anywhere else in the engine's own vocabulary (checked fsm.ts/challenges.ts/
+ *  prompt.ts) -- deliberately left with their single canonical `spokenField` form only
+ *  (`labelCandidatesFor`'s fallback below), rather than inventing synonyms nothing justifies.
+ *
+ *  RISK (stated plainly, not just tested): "amount" and "account" are common enough words that
+ *  the cue-attachment adjacency rule (`LABEL_ATTACHMENT_PATTERNS`, unchanged) is the ONLY thing
+ *  standing between this widening and a false suppression -- e.g. a hypothetical ambient line
+ *  "give me the account holder's name" would still match `\bgive me the account\b`. The worst
+ *  case for a caller is the SAME shape every false suppression in this file already risks: our
+ *  own instructed ask for this one rendering is skipped because the guard believed (wrongly)
+ *  that the ambient reply already delivered it. This is a UX/pacing risk, never a security one --
+ *  LAW 2 is untouched: a suppressed ask here only means the caller was not asked to repeat
+ *  something a HUMAN would also have heard as already covered; it never marks a challenge
+ *  answered, passed, or graded (that is exclusively `gradeChallenges`, never this file) or lets
+ *  an unanswered challenge count as resolved -- the engine's own reask window
+ *  (`max_challenge_reasks`, challenges.ts) still holds the caller to answering the REAL question
+ *  it renders next regardless. */
+const LABEL_SYNONYMS: Partial<Record<ClaimField, readonly string[]>> = {
+  amount_usd: ['amount in dollars', 'dollar amount', 'amount'],
+  account_last4: ['last four digits of the account', 'last four digits', 'account'],
+};
+
+/** The candidate spoken-label strings the 'label' branch of `transcriptContainsLoadBearingValue`
+ *  may match against for `field` -- `LABEL_SYNONYMS`'s own entry when one exists, else the
+ *  single canonical `spokenField(field)` form alone, exactly as every field behaved before this
+ *  fix. */
+function labelCandidatesFor(field: ClaimField): readonly string[] {
+  return LABEL_SYNONYMS[field] ?? [spokenField(field)];
 }
 
 /** Joins each maximal run of consecutive digit-shaped tokens in `normalizeText(text)` into one
