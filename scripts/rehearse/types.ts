@@ -5,6 +5,12 @@
 // browser and server do (packages/engine/src/types.ts), instead of a hand-rolled copy that
 // could silently drift from the real protocol.
 import type { Verdict } from '@countersign/engine';
+// Founder-experience grading (2026-09-18, SONNET-JUSTIFIED build lane): a type-only import,
+// erased at compile time -- experienceGrading.ts itself imports RehearseDiagnosticBundle/
+// RehearseDiagnosticEvent FROM this file, so this is a circular reference on paper but never
+// at runtime (TypeScript `import type` never emits JS). See experienceGrading.ts's own
+// top-of-file doc comment for why this check exists at all.
+import type { ExperienceGrade } from './experienceGrading.js';
 
 /** One rule a reactive turn can carry: if the agent's LAST transcript line contains any of
  *  `if_agent_says_any` (case-insensitive substring match), the caller says `say` instead of
@@ -365,9 +371,6 @@ export interface RunResult {
    *  agent spoke again (`unanswered_agent_question`). Either way: a distinct, greppable fail
    *  reason surfaced in the report's one-line result and its Result section, separate from
    *  the generic warnings list. Absent for every ordinary pass or fail. */
-   *  verdict -- `close_line_not_spoken`. Either way: a distinct, greppable fail reason
-   *  surfaced in the report's one-line result and its Result section, separate from the
-   *  generic warnings list. Absent for every ordinary pass or fail. */
   /** PROVEN gap (2026-09-14): the harness waited for the server's own `ended` event after the
    *  last scripted turn (or a patient-mode `stop`) -- see `ScenarioTurn.hang_up`'s doc
    *  comment -- and it never arrived within the wait budget (turnController.ts's
@@ -375,13 +378,33 @@ export interface RunResult {
    *  run could still be reported, but this is always a bug worth surfacing: the server never
    *  hangs up on its own is either a hung CLOSE state or a genuinely broken close path,
    *  neither of which a judge should ever hit live. */
-  fail_reason?: 'agent_silent_after_hold' | 'close_line_not_spoken' | 'server_never_hung_up' | 'agent_silence_exceeded' | 'unanswered_agent_question';
+  /** Founder-experience grading (2026-09-18): set only when every OTHER fail condition is
+   *  clear but `experience.ok` is false (experienceGrading.ts's `computeExperienceGrade`) --
+   *  i.e. the run reached the right verdict, said its close line, and hit no other structural
+   *  failure, but the founder would still have heard a repeated question, a merged/garbled
+   *  reply, the agent talking over him, or holding-line spam. Same precedence convention as
+   *  every other `fail_reason`: the first structural problem found wins the ONE slot shown in
+   *  the report's Result section and the one-line summary; `r.experience`'s own table always
+   *  shows every check's count regardless of which fail_reason (if any) is reported. */
+  fail_reason?:
+    | 'agent_silent_after_hold'
+    | 'close_line_not_spoken'
+    | 'server_never_hung_up'
+    | 'agent_silence_exceeded'
+    | 'unanswered_agent_question'
+    | 'experience_defect';
   /** expectations.ts's `checkCloseLineExpectation` result -- `'n/a'` when the check didn't
    *  apply (the caller/harness ended the call first, or no verdict was ever reached),
    *  `'spoken'`/`'not_spoken'` when it did. Rendered near "Call ended reason" in the report
    *  regardless of pass/fail, so every report says plainly whether a judge would have heard
    *  the agent's own goodbye. */
   close_line_status: 'spoken' | 'not_spoken' | 'n/a';
+  /** Founder-experience grading (2026-09-18): `experienceGrading.ts`'s `computeExperienceGrade`
+   *  run against `raw_diagnostics` -- `undefined` only when `raw_diagnostics` itself is `null`
+   *  (the diagnostics fetch failed or the call never connected far enough to have a session,
+   *  same condition `diagnostics: DiagnosticsFailure` already covers). Present on every other
+   *  run, pass or fail, so the report's Experience table always shows the counts. */
+  experience?: ExperienceGrade;
   /** Free-play addition (2026-09-14) -- present only when `caller_mode === 'freeplay'`.
    *  Everything a report needs to show "Mode: free-play (model X, seed N)", the pause
    *  sequence actually drawn, and the question-answer ratio (freePlayGrading.ts's

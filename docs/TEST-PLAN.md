@@ -80,6 +80,25 @@ npm run sim:freeplay -- --url https://countersign-bf8q.onrender.com --model open
 
 Reports and diagnostics land in `scripts/rehearse/reports/` (git-ignored). Re-grade tool: `npm run rehearse:regrade -- scripts/rehearse/reports/<report>.md` re-grades one stored report under the current rules and prints the result; it never spends credit. OpenRouter key required for the improvising caller: export `OPENROUTER_API_KEY`.
 
+## Experience grades (2026-09-18, PROVEN process defect)
+
+The founder replayed deploy 50 live (Sep 18, 11:04-11:10 AM) right after the harness reported PASS on all four of that morning's calls, and quit, saying: "keeps asking the same questions", "does not let me complete my sentence", "repeated questions, lame quality". The grader used to check only verdict, wall time, and the close line -- none of it could ever fail what he actually heard. It now also computes an EXPERIENCE GRADE (`scripts/rehearse/experienceGrading.ts`) straight from a call's raw diagnostics bundle, with four checks that gate PASS/FAIL on every scenario (a scenario file can never opt out) and two that are informational only:
+
+- **repeated_question** -- the same readback field or challenge id spoken more than once for one rendering.
+- **merged_reply** -- two sentences interleaved/run together in one agent line (e.g. "Just toOne confirm, moment this transfer...").
+- **talk_over** -- the agent starts talking over the caller, or right after a very short (under 3 words) caller line. Never the reverse -- a caller barge-in on the agent (barge-in-interrupt.json's own intended mechanic) is fine and is never flagged.
+- **holding_spam** -- more than one bare "One moment." per caller turn, or one left with no substantive follow-up within 4s.
+- **question_lag** (informational, currently always SKIPPED) -- would detect a spoken question whose goal the engine had already moved past; the bundle carries no `reply_id` on a transcript event, so this cannot be computed from the data available. Documented rather than guessed at.
+- **goodbye_delay** (informational) -- seconds from the terminal verdict being committed to the close line actually being spoken, and whether a close_retry fired.
+
+Every report's `.md` now has an "Experience" table with each check's count and offending timestamps, whether the run passed or failed. Three ways to grade:
+
+1. **A fresh harness run** grades itself automatically -- no flag needed.
+2. **Re-grade an old report:** `npm run rehearse:regrade -- scripts/rehearse/reports/<report>.md` now also reads the sibling `<report>.diagnostics.json` (same basename) and factors the experience checks in; if that sibling bundle isn't found, it says so and skips (PASS/FAIL for the older checks alone).
+3. **Grade any raw bundle directly** (no scenario, no report, no live call): `npx tsx scripts/rehearse/gradeRecord.ts <path-to-diagnostics.json>` -- this is what proved the founder's own three recorded calls under `scripts/rehearse/reports/founder-2026-09-18/*.diagnostics.json` all FAIL the new grade (repeated_question and talk_over on all three, merged_reply on two, holding_spam on all three). It was also run against the four 2026-09-18T10-52..10-57 harness reports that originally graded PASS: all four now FAIL (repeated_question on all four, merged_reply on all four -- including the barge-in-interrupt report, whose OWN intended caller interruption is unaffected since talk_over only ever measures the agent cutting off the caller, never the reverse).
+
+Tests: `scripts/rehearse/test/experienceGrading.test.ts` (26 cases, each PROVEN heuristic reproduced from a real founder/harness bundle slice), plus new cases in `report.test.ts`, `regrade.test.ts`, and `gradeRecord.test.ts`. Run with `npm run rehearse:test`.
+
 ## Budget discipline
 
 - Never run a batch on a server known to be behind main

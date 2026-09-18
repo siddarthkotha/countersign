@@ -28,6 +28,7 @@ import { loadScenario, loadAllScenarios, ScenarioValidationError } from './scena
 import { runTurns, runLlmTurns, computeTurnGaps, waitForVerdict, waitForCountersignSettle, waitForServerHangup, CLOSE_WAIT_MS } from './turnController.js';
 import { summarizeDiagnostics } from './diagnosticsSummary.js';
 import { checkScenarioExpectations, checkCloseLineExpectation } from './expectations.js';
+import { computeExperienceGrade, experienceFailureMessages } from './experienceGrading.js';
 import { renderRollup, oneLineSummary, rollupFileName } from './report.js';
 import { writeRunArtifacts } from './artifacts.js';
 import { resolveLlmConfig, getApiKey, apiKeyEnvVarFor, nodeFetchHttpClient } from './llmCaller.js';
@@ -353,17 +354,32 @@ async function runOne(
   // enough if a judge would hear a hang-up with no goodbye.
   const closeLineCheck = checkCloseLineExpectation(endedReason, actualVerdict, transcript);
   if (closeLineCheck.failure) warnings.push(closeLineCheck.failure);
+  // Founder-experience grading (2026-09-18, PROVEN process defect: the harness passed all
+  // four of that morning's calls while the founder, replaying the same build live, heard
+  // "keeps asking the same questions", "does not let me complete my sentence", "repeated
+  // questions, lame quality", and quit -- see experienceGrading.ts's own top-of-file doc
+  // comment). Computed straight from the same raw flight-recorder bundle `diagnostics` was
+  // already summarized from above -- `undefined` only when that bundle itself is `null`
+  // (fetch failed / call never connected), same condition `diagnostics: DiagnosticsFailure`
+  // already covers, so a run this harness can't even fetch diagnostics for is never failed
+  // on an experience check it had no evidence for either way.
+  const experience = bundle ? computeExperienceGrade(bundle) : undefined;
+  if (experience) warnings.push(...experienceFailureMessages(experience));
+  const experienceOk = experience === undefined || experience.ok;
   // PROVEN gap (2026-09-13): a patient-mode "agent went silent after a holding line" fail, and
   // a "close line never spoken" fail, are both unconditional -- either overrides whatever
   // verdict the call separately reached (or didn't), same as any other structural fail
-  // condition above.
+  // condition above. The experience gate (2026-09-18) joins them: reaching the right verdict
+  // and saying the close line is not enough if a judge would have heard a repeated question,
+  // a merged/garbled reply, the agent talking over them, or holding-line spam along the way.
   const pass =
     turnsFailReason === undefined &&
     hangupFailReason === undefined &&
     endOutcome.verdictReached &&
     actualVerdict === scenario.expected.verdict &&
     expectationCheck.ok &&
-    closeLineCheck.status !== 'not_spoken';
+    closeLineCheck.status !== 'not_spoken' &&
+    experienceOk;
 
   const minutesEstimate = totalWallMs / 60000;
 
@@ -392,13 +408,16 @@ async function runOne(
     resolved_lines: resolvedLines,
     caller_mode: callerMode,
     close_line_status: closeLineCheck.status,
+    ...(experience !== undefined ? { experience } : {}),
     ...(turnsFailReason !== undefined
       ? { fail_reason: turnsFailReason }
       : hangupFailReason !== undefined
         ? { fail_reason: hangupFailReason }
         : closeLineCheck.status === 'not_spoken'
           ? { fail_reason: 'close_line_not_spoken' as const }
-          : {}),
+          : !experienceOk
+            ? { fail_reason: 'experience_defect' as const }
+            : {}),
   };
 }
 

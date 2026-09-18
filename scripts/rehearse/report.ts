@@ -3,6 +3,7 @@
 // a one-line stdout summary. Plain English, no em-dashes (CLAUDE.md style rule), every number
 // labeled where it isn't simply "what the wire carried".
 import { lastAgentLineDisplay } from './expectations.js';
+import type { ExperienceGrade } from './experienceGrading.js';
 import type { RollupResult, RunResult } from './types.js';
 
 /** Point 1 (run.ts's own PASS/FAIL grading) and point 2 (this report's "Close line" line)
@@ -20,6 +21,8 @@ function failReasonDescription(reason: NonNullable<RunResult['fail_reason']>): s
       return 'free-play: the agent went silent longer than the allowed gap while the caller was waiting on it -- see Warnings';
     case 'unanswered_agent_question':
       return 'free-play: the agent asked at least one question the caller never got a chance to answer -- see Warnings';
+    case 'experience_defect':
+      return 'the call reached its verdict and said its close line, but a founder-experience check (repeated question, merged reply, talk-over, or holding-line spam) still failed -- see Experience';
   }
 }
 
@@ -196,6 +199,40 @@ function renderDiagnostics(r: RunResult): string {
   ].join('\n');
 }
 
+/** Founder-experience grading (2026-09-18): always rendered when `r.experience` is present
+ *  (i.e. whenever a diagnostics bundle was fetched at all -- pass or fail), so a report never
+ *  hides a defect behind an otherwise-green Result line the way the four 10-52..10-57
+ *  reports did on the morning the founder quit the call. `question_lag` is shown as SKIPPED
+ *  with its reason (experienceGrading.ts's `questionLag` doc comment); `goodbye_delay` is
+ *  informational only and never affects PASS/FAIL. */
+function renderExperience(grade: ExperienceGrade): string {
+  const rows = [
+    ['repeated_question', grade.repeated_question.count, grade.repeated_question.timestamps_s],
+    ['merged_reply', grade.merged_reply.count, grade.merged_reply.timestamps_s],
+    ['talk_over', grade.talk_over.count, grade.talk_over.timestamps_s],
+    ['holding_spam', grade.holding_spam.count, grade.holding_spam.timestamps_s],
+  ] as const;
+  const lines: string[] = [];
+  lines.push('## Experience');
+  lines.push('');
+  lines.push(`Gate: ${grade.ok ? 'OK (every check below is 0)' : 'FAILED -- at least one check below is non-zero'}`);
+  lines.push('');
+  lines.push('| check | count | timestamps (s) |');
+  lines.push('| --- | --- | --- |');
+  for (const [name, count, timestamps] of rows) {
+    lines.push(`| ${name} | ${count} | ${timestamps.length ? timestamps.join(', ') : '_none_'} |`);
+  }
+  lines.push('');
+  lines.push(
+    `- question_lag: ${grade.question_lag.skipped ? `SKIPPED -- ${grade.question_lag.skip_reason}` : `${grade.question_lag.count} (${grade.question_lag.timestamps_s.join(', ') || 'none'})`} (informational -- never gates PASS/FAIL)`,
+  );
+  lines.push(
+    `- goodbye_delay: ${grade.goodbye_delay.seconds === null ? 'n/a' : `${grade.goodbye_delay.seconds}s`}${grade.goodbye_delay.close_retry_needed ? ' (a close_retry was needed)' : ''} -- ${grade.goodbye_delay.note} (informational -- never gates PASS/FAIL)`,
+  );
+  lines.push('');
+  return lines.join('\n');
+}
+
 export function rollupFileName(at: Date = new Date()): string {
   return `${timestampForFilename(at)}-rollup.md`;
 }
@@ -297,6 +334,9 @@ export function renderReport(r: RunResult): string {
     lines.push('## Warnings');
     for (const w of r.warnings) lines.push(`- ${w}`);
     lines.push('');
+  }
+  if (r.experience) {
+    lines.push(renderExperience(r.experience));
   }
   lines.push('## Timings (measured at the harness)');
   lines.push('');

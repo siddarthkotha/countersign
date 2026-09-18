@@ -349,6 +349,61 @@ describe('report rendering', () => {
     const md = renderReport(baseResult());
     expect(md).toContain('Greeting configured: unknown');
   });
+
+  // Founder-experience grading (2026-09-18): the report must always show the Experience
+  // table when a diagnostics bundle was available -- pass or fail -- so a defect the
+  // founder would hear can never hide behind an otherwise-green report the way the
+  // 2026-09-18T10-5* reports did before this check existed.
+  describe('Experience reporting', () => {
+    function experienceGrade(overrides: Partial<import('../experienceGrading.js').ExperienceGrade> = {}) {
+      return {
+        repeated_question: { count: 0, timestamps_s: [] },
+        merged_reply: { count: 0, timestamps_s: [] },
+        talk_over: { count: 0, timestamps_s: [] },
+        holding_spam: { count: 0, timestamps_s: [] },
+        question_lag: { count: 0, timestamps_s: [], skipped: true, skip_reason: 'no reply_id on transcript events' },
+        goodbye_delay: { seconds: 4.2, close_retry_needed: false, note: '4.2s from terminal_action to the close line' },
+        ok: true,
+        ...overrides,
+      };
+    }
+
+    it('renders an "OK" Experience table when every gating check is 0', () => {
+      const md = renderReport(baseResult({ experience: experienceGrade() }));
+      expect(md).toContain('## Experience');
+      expect(md).toContain('Gate: OK (every check below is 0)');
+      expect(md).toContain('| repeated_question | 0 |');
+    });
+
+    it('renders counts and timestamps for a FAILED Experience gate', () => {
+      const md = renderReport(
+        baseResult({
+          pass: false,
+          exit_code: 1,
+          fail_reason: 'experience_defect',
+          experience: experienceGrade({
+            repeated_question: { count: 2, timestamps_s: [57.8, 65.5] },
+            merged_reply: { count: 1, timestamps_s: [19.7] },
+            ok: false,
+          }),
+        }),
+      );
+      expect(md).toContain('Gate: FAILED -- at least one check below is non-zero');
+      expect(md).toContain('| repeated_question | 2 | 57.8, 65.5 |');
+      expect(md).toContain('| merged_reply | 1 | 19.7 |');
+      expect(md).toContain('- Fail reason: experience_defect');
+    });
+
+    it('renders nothing under Experience when no diagnostics bundle was ever available', () => {
+      const md = renderReport(baseResult());
+      expect(md).not.toContain('## Experience');
+    });
+
+    it('shows question_lag as SKIPPED with its reason, and never lets it affect the gate', () => {
+      const md = renderReport(baseResult({ experience: experienceGrade() }));
+      expect(md).toContain('question_lag: SKIPPED -- no reply_id on transcript events');
+    });
+  });
 });
 
 describe('report file naming', () => {

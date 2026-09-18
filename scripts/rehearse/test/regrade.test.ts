@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderReport } from '../report.js';
 import { parseReportMarkdown, parseTranscriptTable, regrade } from '../regrade.js';
-import type { RunResult, Scenario } from '../types.js';
+import type { RehearseDiagnosticBundle, RunResult, Scenario } from '../types.js';
 
 const scenario: Scenario = {
   name: 'test-scenario',
@@ -194,5 +194,77 @@ describe('regrade', () => {
     const result = regrade(md);
     expect(result.close_line_status).toBe('n/a');
     expect(result.regraded_result).toBe('FAIL');
+  });
+
+  // Founder-experience grading (2026-09-18): regrade() accepts an optional sibling
+  // diagnostics bundle and factors experienceGrading.ts's checks into the regraded result --
+  // this is exactly what flipped the four 2026-09-18T10-5* reports from PASS to FAIL.
+  describe('experience regrading (with a sibling diagnostics bundle)', () => {
+    function bundleWithRepeatedReadback(): RehearseDiagnosticBundle {
+      return {
+        session_id: 'sess-1',
+        started_at: 0,
+        ended_at: 90000,
+        end_reason: 'agent_closed',
+        deployed_commit: null,
+        server_events: [
+          { t_ms: 57841, kind: 'action_logged', detail: { kind: 'readback_issued', t_ms: 57841, field: 'account_last4', spec_kind: 'READBACK', reply_id: 'r1' } },
+          { t_ms: 65765, kind: 'action_logged', detail: { kind: 'readback_issued', t_ms: 65765, field: 'account_last4', spec_kind: 'READBACK', reply_id: 'r2' } },
+        ],
+        client_events: [],
+      };
+    }
+
+    it('flips a recorded PASS to FAIL when the sibling bundle shows a repeated question (the 2026-09-18T10-52-56 shape)', () => {
+      const md = renderReport(baseResult({ transcript: [{ speaker: 'agent', text: FREEZE_SENTENCE, t_ms: 47566 }] }));
+      const result = regrade(md, bundleWithRepeatedReadback());
+      expect(result.experience).toBeDefined();
+      expect(result.experience!.ok).toBe(false);
+      expect(result.experience!.repeated_question.count).toBe(1);
+      expect(result.regraded_result).toBe('FAIL');
+      expect(result.changed).toBe(true);
+    });
+
+    it('keeps a recorded PASS as PASS when the sibling bundle shows no experience defects', () => {
+      const md = renderReport(baseResult({ transcript: [{ speaker: 'agent', text: FREEZE_SENTENCE, t_ms: 47566 }] }));
+      const cleanBundle: RehearseDiagnosticBundle = {
+        session_id: 'sess-1',
+        started_at: 0,
+        ended_at: 90000,
+        end_reason: 'agent_closed',
+        deployed_commit: null,
+        server_events: [],
+        client_events: [],
+      };
+      const result = regrade(md, cleanBundle);
+      expect(result.experience!.ok).toBe(true);
+      expect(result.regraded_result).toBe('PASS');
+      expect(result.changed).toBe(false);
+    });
+
+    it('marks experience as skipped (with a reason) when no bundle is supplied at all', () => {
+      const md = renderReport(baseResult({ transcript: [{ speaker: 'agent', text: FREEZE_SENTENCE, t_ms: 47566 }] }));
+      const result = regrade(md);
+      expect(result.experience).toBeUndefined();
+      expect(result.experience_skipped_reason).toBeTruthy();
+      expect(result.regraded_result).toBe('PASS');
+    });
+
+    it('never resurrects an already-FAIL report just because the bundle happens to be clean', () => {
+      const md = renderReport(
+        baseResult({ pass: false, exit_code: 1, actual_verdict: 'ESCALATE', transcript: [{ speaker: 'agent', text: 'Please provide the', t_ms: 100, interrupted: true }] }),
+      );
+      const cleanBundle: RehearseDiagnosticBundle = {
+        session_id: 'sess-1',
+        started_at: 0,
+        ended_at: 90000,
+        end_reason: 'agent_closed',
+        deployed_commit: null,
+        server_events: [],
+        client_events: [],
+      };
+      const result = regrade(md, cleanBundle);
+      expect(result.regraded_result).toBe('FAIL');
+    });
   });
 });

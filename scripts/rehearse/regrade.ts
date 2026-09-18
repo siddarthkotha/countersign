@@ -35,8 +35,10 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { checkCloseLineExpectation } from './expectations.js';
+import { computeExperienceGrade } from './experienceGrading.js';
+import type { ExperienceGrade } from './experienceGrading.js';
 import { computeQuestionAnswerRatio, questionAnswerRatioDisplay, detectQuestionsWithNoChance } from './freePlayGrading.js';
-import type { TranscriptRecord } from './types.js';
+import type { RehearseDiagnosticBundle, TranscriptRecord } from './types.js';
 
 export interface ParsedReport {
   scenario_name: string | null;
@@ -140,6 +142,16 @@ export interface RegradeResult {
   changed: boolean;
   /** Free-play specific regrading: the new question-answer ratio with the refined rules. */
   free_play_question_answer?: { answered: number; total: number; unanswered: string[]; unanswered_no_chance: string[] };
+  /** Founder-experience grading (2026-09-18): only computed when the sibling
+   *  `.diagnostics.json` bundle was readable -- the `.md` report's own transcript table alone
+   *  cannot support `repeated_question` (needs each `action_logged` event's field/challenge
+   *  id), `talk_over` (needs `input.speech.started`/`stopped`), or `holding_spam`'s "no
+   *  substantive follow-up" timing (needs every transcript timestamp, which the table does
+   *  carry, so this one COULD be done from `.md` alone -- but is computed from the bundle here
+   *  for one consistent code path). `undefined` when no sibling bundle was found or it failed
+   *  to parse; `experience_skipped_reason` explains why in that case. */
+  experience?: ExperienceGrade;
+  experience_skipped_reason?: string;
 }
 
 const TERMINAL_VERDICT_STRINGS = new Set(['PENDING', 'ESCALATE', 'STAGE', 'FREEZE', 'NO_ACTION']);
@@ -156,7 +168,12 @@ function toVerdictOrNull(actualVerdict: string | null): Parameters<typeof checkC
   return null;
 }
 
-export function regrade(md: string): RegradeResult {
+/** `bundle`: the sibling `.diagnostics.json` (report.ts's `diagnosticsFileName` convention),
+ *  already read and JSON.parsed by the caller -- `undefined` when it wasn't found/parseable,
+ *  in which case experience regrading is skipped (`experience_skipped_reason` explains why)
+ *  rather than silently treated as a pass. Optional so every existing caller/test that only
+ *  ever passed `md` keeps working unchanged. */
+export function regrade(md: string, bundle?: RehearseDiagnosticBundle, bundleSkipReason?: string): RegradeResult {
   const parsed = parseReportMarkdown(md);
   const closeLineCheck = checkCloseLineExpectation(parsed.ended_reason, toVerdictOrNull(parsed.actual_verdict), parsed.transcript);
 
@@ -179,12 +196,22 @@ export function regrade(md: string): RegradeResult {
     regradedResult = 'FAIL';
   }
 
+  // Founder-experience grading (2026-09-18): only when a raw bundle is available. Can only
+  // ever turn a PASS into a FAIL, same convention as the close-line check above -- it never
+  // resurrects a run that failed for an unrelated reason.
+  const experience = bundle ? computeExperienceGrade(bundle) : undefined;
+  if (experience && regradedResult === 'PASS' && !experience.ok) {
+    regradedResult = 'FAIL';
+  }
+
   const result: RegradeResult = {
     parsed,
     close_line_status: closeLineCheck.status,
     close_line_failure: closeLineCheck.failure,
     regraded_result: regradedResult,
     changed: regradedResult !== null && parsed.original_result !== null && regradedResult !== parsed.original_result,
+    ...(experience !== undefined ? { experience } : {}),
+    ...(experience === undefined ? { experience_skipped_reason: bundleSkipReason ?? 'no sibling .diagnostics.json bundle was supplied' } : {}),
   };
 
   // For free-play runs, also include the question-answer details
@@ -221,6 +248,23 @@ function printResult(path: string, r: RegradeResult): void {
     }
   }
 
+  // Founder-experience grading (2026-09-18).
+  if (r.experience) {
+    const g = r.experience;
+    console.log(`  experience (regraded): ${g.ok ? 'OK' : 'FAILED'}`);
+    console.log(
+      `    repeated_question=${g.repeated_question.count} merged_reply=${g.merged_reply.count} talk_over=${g.talk_over.count} holding_spam=${g.holding_spam.count}`,
+    );
+    if (!g.ok) {
+      if (g.repeated_question.count > 0) console.log(`    repeated_question at: ${g.repeated_question.timestamps_s.join(', ')}s`);
+      if (g.merged_reply.count > 0) console.log(`    merged_reply at: ${g.merged_reply.timestamps_s.join(', ')}s`);
+      if (g.talk_over.count > 0) console.log(`    talk_over at: ${g.talk_over.timestamps_s.join(', ')}s`);
+      if (g.holding_spam.count > 0) console.log(`    holding_spam at: ${g.holding_spam.timestamps_s.join(', ')}s`);
+    }
+  } else {
+    console.log(`  experience (regraded): SKIPPED -- ${r.experience_skipped_reason ?? 'unknown reason'}`);
+  }
+
   if (r.changed) {
     console.log(`  REGRADE CHANGED: ${p.original_result} -> ${r.regraded_result}`);
   } else {
@@ -244,7 +288,19 @@ async function main(): Promise<void> {
     process.exitCode = 2;
     return;
   }
-  const result = regrade(md);
+  // Founder-experience grading (2026-09-18): the sibling `.diagnostics.json` (same basename,
+  // report.ts's `diagnosticsFileName` convention) -- read it too, best-effort, so old reports
+  // regrade with the full experience check whenever their raw bundle still exists on disk.
+  const diagnosticsPath = mdPath.replace(/\.md$/, '.diagnostics.json');
+  let bundle: import('./types.js').RehearseDiagnosticBundle | undefined;
+  let bundleSkipReason: string | undefined;
+  try {
+    const raw = await readFile(diagnosticsPath, 'utf-8');
+    bundle = JSON.parse(raw);
+  } catch (err) {
+    bundleSkipReason = `could not read/parse ${diagnosticsPath}: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  const result = regrade(md, bundle, bundleSkipReason);
   printResult(mdPath, result);
   process.exitCode = result.regraded_result === 'FAIL' ? 1 : 0;
 }
