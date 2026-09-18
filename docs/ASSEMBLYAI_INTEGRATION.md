@@ -384,3 +384,119 @@ of the engine, never call the live API in tests). Whether adaptive pacing actual
 founder's cutoff live, and whether it changes perceived responsiveness on genuinely-finished
 turns, is UNKNOWN until the next rehearsal batch (and ideally another founder live call)
 measures it against the deployed build.
+
+## VERIFY-AT-BUILD re-check 2026-09-18 (turn_detection key presence)
+
+SONNET-JUSTIFIED lane, same founder complaint ("does not let me complete my sentence"),
+re-opened because the fix above shipped (deploy 2be1d3e) and the complaint was still
+measured on that exact build: PROVEN from
+`scripts/rehearse/reports/2026-09-18T15-46-44-barge-in-interrupt.diagnostics.json` -- the
+caller says "No." (`input.speech.stopped` at 33.5s); an ambient reply starts 6ms later
+(`turn_to_reply_gap` gap_ms 6, `ours: false`); the caller resumes at 34.6s with "That's
+wrong. It's Meridian Supply."; that reply ends interrupted. Eight-call batch: 4 such
+cut-offs. This is the same immediate-VAD-boundary signature as before the min_silence/
+max_silence fix, with no extra waiting visible.
+
+**Root cause found:** the min_silence/max_silence fix left the `turn_detection` KEY itself
+present on every session.update -- `aai/config.ts`'s initial connect sent
+`{ vad_threshold: 0.5, interrupt_response: true }` unconditionally, and `call/session.ts`'s
+per-goal sender sent `{}` on every goal change (several times a minute on a real call, since
+`session.ts`'s `previousGoalKey` guard fires on every distinct goal, and CHALLENGE/
+CONSISTENCY_CHECK/READBACK goals cycle quickly in a real conversation).
+
+**Re-fetched live** (errand agent, WebFetch, retrieval date 2026-09-18) against
+`https://www.assemblyai.com/docs/voice-agents/voice-agent-api/turn-detection-and-interruptions`.
+Answers to the four questions this lane was asked to resolve, quoted exactly:
+
+1. **Does sending `turn_detection` as an empty object differ from omitting the key
+   entirely?** UNKNOWN -- the page never states this directly. The closest statement is the
+   page's own framing of the default: "With no turn_detection config, the agent adapts to
+   each speaker's pace and automatically slows down to capture values your tools need." This
+   ties the documented adaptive behavior to **no turn_detection config being sent**, not
+   specifically to min_silence/max_silence being absent from a config that IS sent. It does
+   not say whether a present-but-empty object, or a present object with only
+   vad_threshold/interrupt_response set, counts as "no turn_detection config" for this
+   purpose. Given the ambiguity and that the founder's complaint persisted on the
+   key-present build, this lane treats "no config" literally: omit the key.
+
+2. **Any statement about sending turn_detection with no fields, or sent repeatedly on every
+   session.update (several times a minute)?** UNKNOWN -- the page is SILENT on repeated
+   session.update calls entirely. No statement found about whether resending the key (even
+   unchanged, even empty) resets, re-triggers, or otherwise affects the adaptive system's
+   state. This remains genuinely unverified; the change below is the conservative reading
+   (never resend the key at all), not a confirmed mechanism.
+
+3. **Does the doc define when adaptive pacing engages, what signals it uses, and whether
+   repeated session.update calls reset it?** Partially. Adaptive pacing: "If a speaker
+   pauses a lot, the agent gives them more room; if they're crisp, it replies faster. This
+   gets better over the call" -- described as running by default, improving with more data
+   over the session, but the *signal* it uses and *whether/how session-level state persists
+   across a session.update* are not documented (UNKNOWN). Entity-aware waiting is
+   documented as scoped specifically to **tool parameters**: "When a tool parameter expects
+   a phone number, email, date, or other entity, the agent waits for the whole value before
+   ending your turn." **This is a load-bearing finding for Countersign specifically:**
+   `aai/config.ts`'s `LIVE_SESSION_TOOLS` is the empty array, and `fsm.ts`'s
+   `allowedTools()` returns `[]` for every engine state (LAW 2/3 -- the voice model is never
+   offered a single tool schema, by design, so it can never emit a verdict). Since
+   entity-aware waiting is described as tied to *tool parameters* the agent is waiting to
+   fill, and Countersign's session never advertises any tool to AssemblyAI at all,
+   entity-aware waiting has no tool parameter to key off and cannot be the mechanism that
+   helps a Countersign caller mid-sentence, regardless of what `turn_detection` carries.
+   Only the general adaptive-pacing behavior (not entity-specific) is even a candidate lever
+   here.
+
+4. **Is `interruption_delay` or `vad_threshold` relevant to a caller who pauses ~1s
+   mid-thought?** No, per the documented purpose of each. `vad_threshold` (float 0-1,
+   default 0.5): "Speech detection sensitivity (0.0 to 1.0). Lower is more sensitive" --
+   this tunes how easily quiet/faint audio counts as speech at all, not how long a silence
+   must last before a turn is considered over. `interruption_delay` (int ms, 0-1000,
+   default "Follows the transcription mode (0 for min_latency, 500 for balanced and
+   max_accuracy). Raise it so brief back-channels like 'mm-hmm' don't cut the agent off")
+   governs whether the CALLER can interrupt the AGENT's own speech, not how long the
+   caller's own turn-ending silence window is. Neither field is the documented lever for
+   "caller pauses mid-sentence before finishing a thought" -- that lever is min_silence/
+   max_silence (now left unset so adaptive pacing decides) plus, where applicable,
+   entity-aware waiting (inapplicable here per finding 3 above).
+
+**The change made (this lane, `packages/server/src/aai/config.ts` +
+`packages/server/src/call/session.ts`):** the smallest change the docs support --
+`turn_detection` is now OMITTED from the wire entirely, in both places, unless a caller
+explicitly configures at least one field:
+
+- `aai/config.ts`'s `buildInitialSessionUpdate`: previously always sent
+  `{ vad_threshold: 0.5, interrupt_response: true }` (plus min_silence/max_silence only on
+  explicit override). Now sends no `turn_detection` key at all when `cfg.turn_detection` is
+  unset; when the caller sets any field, only the fields actually given are sent (no
+  defaults for the others are backfilled any more -- restating a documented default is
+  itself an undocumented case the page never rules out as equivalent to omission).
+- `call/session.ts`'s per-goal sender (fires on every goal change, several times a minute):
+  previously sent `turn_detection: {}` unconditionally. Now omits the key entirely from
+  every per-goal session.update -- this sender has never had an explicit-override path (no
+  caller-supplied config reaches it), so there was nothing to preserve.
+- Tests assert the key's ABSENCE (`not.toHaveProperty('turn_detection')`), not merely an
+  empty value, in both `packages/server/test/aai-config.test.ts` (initial connect, plus new
+  explicit-override tests for vad_threshold/interrupt_response individually) and
+  `packages/server/test/session.test.ts` (per-goal sender, both the diag detail and the
+  literal wire payload across a full Scenario-B drive through ASK_CHALLENGE).
+
+**What the next rehearsal batch should measure:** re-run the same same-breath-cutoff
+detector used in the prior re-check against a fresh batch on this build, specifically
+watching whether the "No." -> immediate-ambient-reply -> caller-resumes-mid-sentence shape
+(the founder's own PROVEN 391e2a37/barge-in-interrupt signature) still shows a ~0-10ms
+`turn_to_reply_gap`, or whether it now shows a materially longer gap consistent with
+adaptive pacing actually engaging. If the cut-off persists with the key now fully absent,
+that would be strong evidence the remaining levers are not turn_detection-shaped at all,
+and the options become: (a) accept the cut-off as intrinsic to this API today and rely on
+the client-side barge-in/flush-and-resume path that already works (trade-off: caller still
+sounds "cut off" mid-word even though no information is lost, since the client resumes and
+the transcript catches the whole sentence); (b) raise `vad_threshold` toward 0 for higher
+speech-detection sensitivity, which is a different mechanism than a silence-duration floor
+and UNMEASURED for this failure mode; (c) reopen an explicit fixed min_silence/max_silence
+despite disabling adaptive pacing, accepting the flat added latency on every already-finished
+turn that the prior ANALYSIS measured (p50 ~1098ms extra needed, ~700ms added cost to every
+genuinely-finished turn at a raised 1300ms floor) -- not recommended without a materially
+stronger signal that adaptive pacing itself is the thing not working.
+
+**Live effect: UNKNOWN**, same discipline as the section above -- this analysis never called
+the live API; it is a code change grounded in a live docs re-fetch and the founder's own
+PROVEN recorded diagnostics, awaiting the next rehearsal batch's measurement.

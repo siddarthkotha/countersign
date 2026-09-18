@@ -782,16 +782,18 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
       goal_code: string;
       keyterms_count: number;
       tools_count: number;
-      turn_detection_sent: Record<string, unknown>;
+      turn_detection_omitted: boolean;
     };
     expect(initialDiag.goal_code).toBe('GREET');
     expect(initialDiag.keyterms_count).toBeGreaterThanOrEqual(0);
     expect(typeof initialDiag.tools_count).toBe('number');
-    // 2026-09-18 reversal (coordinator ruling): never send min_silence/max_silence for any
-    // goal, so AssemblyAI's own adaptive pacing/entity-aware waiting stays on for the whole
-    // call -- the diag now logs the LITERAL object placed on the wire (LAW 4), which is
-    // always empty.
-    expect(initialDiag.turn_detection_sent).toEqual({});
+    // 2026-09-18 follow-up (same day, SONNET-JUSTIFIED lane): the previous pass sent
+    // `turn_detection: {}` -- the key present, empty -- on every goal change. The founder's
+    // "does not let me complete my sentence" complaint still measured on that build (PROVEN,
+    // deploy 2be1d3e), and the live docs describe full adaptive behavior as following from
+    // "no turn_detection config", not merely an empty one. The key is now OMITTED from the
+    // wire entirely, so the diag logs that literal fact (LAW 4) instead of a stale object.
+    expect(initialDiag.turn_detection_omitted).toBe(true);
 
     // input.speech.stopped changes nothing about the goal, so no new diag event.
     clock.now = 50;
@@ -810,26 +812,28 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
         goal_code: string;
         keyterms_count: number;
         tools_count: number;
-        turn_detection_sent: Record<string, unknown>;
+        turn_detection_omitted: boolean;
       };
       expect(typeof detail.goal_code).toBe('string');
       expect(typeof detail.keyterms_count).toBe('number');
       expect(typeof detail.tools_count).toBe('number');
-      expect(detail.turn_detection_sent).toEqual({});
+      expect(detail.turn_detection_omitted).toBe(true);
       expect(detail.keyterms_count).toBeGreaterThanOrEqual(0);
       expect(detail.tools_count).toBeGreaterThanOrEqual(0);
     });
   });
 
-  // 2026-09-18 reversal (coordinator ruling): asserts the LITERAL wire payload (aai.sent),
-  // not only the diag, for both a 'default'-hint goal (GREET, the very first session.update)
-  // and a 'patient'-hint goal (ASK_CHALLENGE, reached within the first turn or two of every
-  // real call) -- proving neither ever puts min_silence/max_silence on the wire, so
-  // AssemblyAI's adaptive pacing/entity-aware waiting stays on for the whole session. The
-  // config.ts-level "explicit override still passes through" case is covered directly in
+  // 2026-09-18 follow-up (same day, SONNET-JUSTIFIED lane): asserts the LITERAL wire payload
+  // (aai.sent), not only the diag, for both a 'default'-hint goal (GREET, the very first
+  // session.update) and a 'patient'-hint goal (ASK_CHALLENGE, reached within the first turn
+  // or two of every real call) -- proving the `turn_detection` KEY ITSELF is absent from the
+  // wire (not merely empty) for neither goal ever puts min_silence/max_silence, vad_threshold
+  // or interrupt_response on the wire from this per-goal sender, so nothing here can disable
+  // or re-assert AssemblyAI's adaptive pacing/entity-aware waiting mid-call. The config.ts-
+  // level "explicit override still passes through" case is covered directly in
   // aai-config.test.ts (buildInitialSessionUpdate is the pure function under test there);
   // this test covers call/session.ts's own per-goal sender, which never passes an override.
-  it('never sends min_silence/max_silence on the wire for any goal, default or patient (CHALLENGE)', () => {
+  it('never sends the turn_detection key at all on the wire for any goal, default or patient (CHALLENGE)', () => {
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -848,20 +852,19 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
     session.start();
     const updatesAfterStart = aai.sent.filter((m) => (m as { type?: string }).type === 'session.update');
     expect(updatesAfterStart).toHaveLength(1);
-    const initialInput = (updatesAfterStart[0] as { session: { input: { turn_detection: Record<string, unknown> } } }).session
-      .input;
-    expect(initialInput.turn_detection).toEqual({});
+    const initialInput = (updatesAfterStart[0] as { session: { input: Record<string, unknown> } }).session.input;
+    expect(initialInput).not.toHaveProperty('turn_detection');
 
     driveScenarioBThroughA4(session, aai, clock);
     const allUpdates = aai.sent.filter((m) => (m as { type?: string }).type === 'session.update') as {
-      session: { input: { turn_detection: Record<string, unknown> } };
+      session: { input: Record<string, unknown> };
     }[];
     expect(allUpdates.length).toBeGreaterThan(1);
     // Scenario B reaches ASK_CHALLENGE (a 'patient'-hint goal) along the way -- confirmed by
     // the session having issued at least one challenge (never a silent assumption).
     expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(true);
     for (const update of allUpdates) {
-      expect(update.session.input.turn_detection).toEqual({});
+      expect(update.session.input).not.toHaveProperty('turn_detection');
     }
   });
 

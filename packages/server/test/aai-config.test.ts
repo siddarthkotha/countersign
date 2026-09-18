@@ -52,14 +52,21 @@ describe('buildInitialSessionUpdate', () => {
     expect(keyterms[0]).toBe('term-0');
   });
 
-  it('includes vad_threshold/interrupt_response with sane defaults', () => {
+  // 2026-09-18 follow-up fix (SONNET-JUSTIFIED lane, founder's SECOND live complaint,
+  // "does not let me complete my sentence" still measured on the deploy that shipped the
+  // first fix -- PROVEN, scripts/rehearse/reports/2026-09-18T15-46-44-barge-in-interrupt
+  // .diagnostics.json, ~6ms reply-start after speech-stop). The first fix (below) stopped
+  // sending min_silence/max_silence but still sent `turn_detection: { vad_threshold: 0.5,
+  // interrupt_response: true }` unconditionally -- the KEY was always present. Live docs
+  // (turn-detection-and-interruptions, re-fetched 2026-09-18) describe full adaptive
+  // behavior as following from "no turn_detection config" being sent at all, not merely an
+  // empty min_silence/max_silence within one -- whether a present-but-partial object is
+  // equivalent to omission is UNDOCUMENTED. So by default the `turn_detection` key is now
+  // OMITTED FROM THE WIRE ENTIRELY -- not sent as `{}`, not sent with default
+  // vad_threshold/interrupt_response restated.
+  it('omits the turn_detection key entirely from the wire when no override is configured', () => {
     const msg = buildInitialSessionUpdate(cfg());
-    expect(msg.session.input).toMatchObject({
-      turn_detection: {
-        vad_threshold: expect.any(Number),
-        interrupt_response: expect.any(Boolean),
-      },
-    });
+    expect(msg.session.input).not.toHaveProperty('turn_detection');
   });
 
   // 2026-09-18 fix (SONNET-JUSTIFIED lane, founder's "does not let me complete my
@@ -71,23 +78,25 @@ describe('buildInitialSessionUpdate', () => {
   // out just raising the old fixed 600ms value instead).
   it('omits min_silence and max_silence entirely by default (AssemblyAI adaptive pacing/entity-aware waiting stays on)', () => {
     const msg = buildInitialSessionUpdate(cfg());
-    const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
-    expect(turnDetection).not.toHaveProperty('min_silence');
-    expect(turnDetection).not.toHaveProperty('max_silence');
+    expect(msg.session.input).not.toHaveProperty('turn_detection');
   });
 
-  it('lets a caller override turn_detection fields -- min_silence sent exactly as given when explicitly set', () => {
+  it('lets a caller override turn_detection fields -- min_silence sent exactly as given when explicitly set, and no other field is backfilled', () => {
     const msg = buildInitialSessionUpdate(cfg({ turn_detection: { min_silence: 1200 } }));
     const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
-    expect(turnDetection.min_silence).toBe(1200);
-    expect(turnDetection).not.toHaveProperty('max_silence');
+    expect(turnDetection).toEqual({ min_silence: 1200 });
   });
 
-  it('lets a caller override max_silence independently of min_silence', () => {
+  it('lets a caller override max_silence independently of min_silence, with no other field backfilled', () => {
     const msg = buildInitialSessionUpdate(cfg({ turn_detection: { max_silence: 5000 } }));
     const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
-    expect(turnDetection.max_silence).toBe(5000);
-    expect(turnDetection).not.toHaveProperty('min_silence');
+    expect(turnDetection).toEqual({ max_silence: 5000 });
+  });
+
+  it('lets a caller override vad_threshold or interrupt_response explicitly, sent exactly as given', () => {
+    const msg = buildInitialSessionUpdate(cfg({ turn_detection: { vad_threshold: 0.7, interrupt_response: false } }));
+    const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+    expect(turnDetection).toEqual({ vad_threshold: 0.7, interrupt_response: false });
   });
 
   it('sends flat tool schemas -- {type, name, description, parameters, execution_mode, timeout_seconds}, never a nested "function" key', () => {

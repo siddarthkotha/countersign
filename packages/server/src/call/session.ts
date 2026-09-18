@@ -3481,10 +3481,26 @@ export class CallSession {
       // free. Keeping our own 1200ms floor bought a fixed number PROVEN insufficient anyway
       // (the founder's own real pause, 391e2a37, totalled roughly 2355ms against this same
       // floor) at the cost of disabling AssemblyAI's adaptive system for the whole call. So:
-      // turn_detection is now ALWAYS {} -- no min_silence/max_silence ever, for any goal --
-      // and adaptive pacing/entity-aware waiting stay on for the entire session. Live effect
-      // UNKNOWN until the next rehearsal batch measures it; see docs/ASSEMBLYAI_INTEGRATION.md.
-      const turnDetection: Record<string, never> = {};
+      // turn_detection was made ALWAYS {} here -- no min_silence/max_silence ever, for any
+      // goal. FOLLOW-UP (2026-09-18, same day, SONNET-JUSTIFIED lane, founder's second live
+      // complaint after this shipped: "does not let me complete my sentence" still measured
+      // on deploy 2be1d3e, PROVEN,
+      // scripts/rehearse/reports/2026-09-18T15-46-44-barge-in-interrupt.diagnostics.json --
+      // ~6ms reply-start after speech-stop, no extra waiting): sending `turn_detection: {}`
+      // still puts the KEY on the wire, several times a minute (once per goal change), and
+      // the live docs' own description of full adaptive behavior is "With no turn_detection
+      // config..." -- no turn_detection config, not merely no min_silence/max_silence within
+      // one. Whether a present empty object is equivalent to omission is UNDOCUMENTED
+      // (UNKNOWN) and the docs say nothing about the effect of repeatedly resending the key
+      // (also UNKNOWN) -- but per-goal changes happen several times a minute on a real call,
+      // so if repetition or bare presence matters at all, this is where it would show up.
+      // The per-goal update has never had an explicit-override path (no caller-supplied
+      // turn_detection reaches this branch), so there is nothing to preserve here: the key
+      // is now OMITTED from this send entirely -- never re-asserted mid-call, for any goal.
+      // See config.ts's buildInitialSessionUpdate for the matching initial-connect change
+      // and docs/ASSEMBLYAI_INTEGRATION.md, "VERIFY-AT-BUILD re-check 2026-09-18
+      // (turn_detection key presence)" for the full quotes. Live effect UNKNOWN until the
+      // next rehearsal batch measures it.
       this.opts.aai.send({
         type: 'session.update',
         session: {
@@ -3492,7 +3508,6 @@ export class CallSession {
           tools: toolSchemasFor(output.allowed_tools),
           input: {
             keyterms: output.goal.keyterms.slice(0, 100),
-            turn_detection: turnDetection,
           },
         },
       });
@@ -3505,14 +3520,18 @@ export class CallSession {
       // Observability fix (2026-09-18, same lane): `has_turn_detection: !!hint` was always
       // true (`turn_detection_hint` is never empty) so it never actually said what we sent.
       // LAW 4 (exact-transcript evidence -- facts stored separately from interpretation, no
-      // paraphrase): log the literal object placed on the wire above, not a derived flag, so
-      // a bundle read later can PROVE what was sent rather than needing to be reconstructed
-      // from goal_code + engine source, as this lane had to do for the analysis above.
+      // paraphrase): log the literal fact of what was placed on the wire, not a derived
+      // flag, so a bundle read later can PROVE what was sent rather than needing to be
+      // reconstructed from goal_code + engine source, as this lane had to do for the
+      // analysis above. FOLLOW-UP (2026-09-18, same day): the field previously logged the
+      // literal `{}` object sent as `turn_detection`; now that the key is omitted from the
+      // wire entirely (see the send above), `turn_detection_sent` would always be a lie if
+      // left as an object -- `turn_detection_omitted: true` states the actual fact instead.
       this.diag('session_config_updated', {
         goal_code: output.goal.code,
         keyterms_count: output.goal.keyterms.length,
         tools_count: output.allowed_tools.length,
-        turn_detection_sent: turnDetection,
+        turn_detection_omitted: true,
       });
       // The hard cap starts the moment CLOSE is first rendered (session.update just sent
       // it) -- not from `this.last = output` below, which would fire on every tick, and not

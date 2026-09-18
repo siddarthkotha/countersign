@@ -232,20 +232,39 @@ export interface SessionUpdateMessage {
  *  on this to keep sending its own explicit 1200ms floor unchanged. */
 export function buildInitialSessionUpdate(cfg: AaiSessionConfig): SessionUpdateMessage {
   const keyterms = cfg.keyterms.slice(0, 100);
-  const turnDetection: Record<string, unknown> = {
-    vad_threshold: cfg.turn_detection?.vad_threshold ?? 0.5,
-    interrupt_response: cfg.turn_detection?.interrupt_response ?? true,
-  };
+  // 2026-09-18 re-check (this lane, same day, follow-up to the ANALYSIS/REVERSAL comments
+  // above): the previous pass omitted min_silence/max_silence but still sent
+  // `turn_detection: { vad_threshold: 0.5, interrupt_response: true }` unconditionally --
+  // the key was always PRESENT on the wire, just without the two fields the docs name.
+  // Re-fetched live docs today (docs/ASSEMBLYAI_INTEGRATION.md, "VERIFY-AT-BUILD re-check
+  // 2026-09-18 (turn_detection key presence)") found: "With no turn_detection config, the
+  // agent adapts to each speaker's pace..." -- the documented description of full adaptive
+  // behavior is tied to NO turn_detection config being sent, not merely to min_silence/
+  // max_silence being absent from a config that IS sent. The docs never say whether a
+  // present-but-partial object (vad_threshold/interrupt_response only) is equivalent to
+  // omission -- UNKNOWN, undocumented. Since the founder's own live recording still showed
+  // an ~immediate (6ms) reply after this first fix shipped (deploy 2be1d3e, PROVEN,
+  // scripts/rehearse/reports/2026-09-18T15-46-44-barge-in-interrupt.diagnostics.json), this
+  // pass closes that gap: `turn_detection` is now OMITTED from the wire entirely unless the
+  // caller explicitly sets at least one field, in which case only the fields actually given
+  // are sent -- no default vad_threshold/interrupt_response backfilled any more, since
+  // restating documented defaults is itself an undocumented case the docs never rule out.
+  const turnDetection: Record<string, unknown> = {};
+  if (cfg.turn_detection?.vad_threshold !== undefined) turnDetection.vad_threshold = cfg.turn_detection.vad_threshold;
   if (cfg.turn_detection?.min_silence !== undefined) turnDetection.min_silence = cfg.turn_detection.min_silence;
   if (cfg.turn_detection?.max_silence !== undefined) turnDetection.max_silence = cfg.turn_detection.max_silence;
+  if (cfg.turn_detection?.interrupt_response !== undefined)
+    turnDetection.interrupt_response = cfg.turn_detection.interrupt_response;
+
+  const input: Record<string, unknown> = {
+    format: { encoding: AUDIO_ENCODING },
+    keyterms,
+  };
+  if (Object.keys(turnDetection).length > 0) input.turn_detection = turnDetection;
 
   const session: Record<string, unknown> = {
     system_prompt: cfg.system_prompt,
-    input: {
-      format: { encoding: AUDIO_ENCODING },
-      keyterms,
-      turn_detection: turnDetection,
-    },
+    input,
     output: {
       voice: cfg.voice,
       format: { encoding: AUDIO_ENCODING },
