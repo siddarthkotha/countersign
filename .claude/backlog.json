@@ -3247,6 +3247,26 @@
       "held_because": "after the deploy-53 batch; diagnostics-only change, but it is what makes the grader trustworthy for shapes the founder has not hit yet",
       "agent_id": "",
       "started_at": ""
+    },
+    {
+      "id": "OUTAGE-2026-09-18-EVENING",
+      "title": "live service accepted TCP and returned zero bytes from about 4:42 PM Friday until the forced redeploy 95d4948 restored it Saturday 12:04 PM; cause UNKNOWN; the regex-backtracking hypothesis is REFUTED by measurement (matcher is 20 ms on a 300 KB transcript, linear)",
+      "files": [],
+      "status": "held",
+      "held_because": "no further evidence available locally; Render logs are the only unread source and the founder has the dashboard; if it recurs, capture before redeploying",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "DEPLOY-53-BATCH-REDO",
+      "title": "the deploy-53 eight-case graded batch is incomplete and unusable (outage mid-batch, 7 of 8, two runs corrupted by machine sleep); re-run on 95d4948 with the laptop awake; this is the first clean read on the last repeat fix and the turn_detection removal",
+      "files": [
+        "scripts/rehearse/**"
+      ],
+      "status": "held",
+      "held_because": "needs the founder's machine awake for about 25 minutes",
+      "agent_id": "",
+      "started_at": ""
     }
   ]
 }
