@@ -3305,7 +3305,7 @@
         "packages/server/src/call/session.ts"
       ],
       "status": "held",
-      "held_because": "diag landed on main 243c01a (push 56): reply.audio.summary per reply plus a Timings line in the report; the lane read from existing bundles is that reply.audio frames carry no reply_id, so a new reply.started 12 ms after the goodbye reply.done takes the goodbye trailing audio and drops it under suppression (barge-in 12-28-00: 1.26 s span for an 86-char line vs 7.5 s clean). Settle with the next batch numbers, then fix",
+      "held_because": "EXPLAINED 2026-09-19 2:29 PM by reply.audio.summary on deploy 58: folded replies (automatic reply + our goodbye in one reply_id) complete with full text but stream only the first segment audio (81,120 bytes for 97 chars, 37,920 for 86); the byte arithmetic itself is sound (339,840 for a clean 86-char goodbye). Fix is mechanism (B) in GOODBYE-CUT-BY-CALLER-PRESSURE: confirm the goodbye on a byte floor, retry otherwise",
       "agent_id": "",
       "started_at": "2026-09-19T18:28:01.911Z",
       "note": "diagnostics-only lane (Sonnet, SONNET-JUSTIFIED: reply.audio/reply.done timing): per-reply audio summary event so the next batch answers whether frames arrive after reply.done; no behaviour change"
@@ -3392,11 +3392,11 @@
       "files": [
         "scripts/rehearse/**"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
-      "agent_id": "ab4511cf29c109cd8",
+      "agent_id": "",
       "started_at": "2026-09-19T19:01:49.162Z",
-      "note": "worktree lane (Sonnet); harness only, no packages/server"
+      "note": "landed on main fa1352f (cherry-pick), push held until the deploy-58 batch ends: <run>.agent.wav + frame-index sidecar per run, RMS-per-250ms speech/silence timeline, per-reply speech/silence/overlap-with-caller seconds, Audio section in the report, npm run audio:timeline for offline re-analysis; 32 tests on synthetic PCM; live decode path is proven the first time a batch on main writes a wav"
     },
     {
       "id": "FORCE-SPEAK-SETTLE-ZERO",
@@ -3410,6 +3410,32 @@
       "agent_id": "",
       "started_at": "2026-09-19T19:03:26.506Z",
       "note": "landed on main 4e80c41 (cherry-pick), push 58: FORCE_SPEAK_SETTLE_MS default 0 (synchronous CLOSE on the caller-turn tick, as before 76969ee), injectable via CallSessionOpts.forceSpeakSettleMs, question settle 150 kept, owed-key and callerSpeaking machinery kept; test (e-0) proven RED first. Live proof owed: deploy-58 batch goodbye_delay and merged_reply"
+    },
+    {
+      "id": "DEPLOY-58-BATCH",
+      "title": "10-run graded batch on deploy 58 (552f0b4: synchronous goodbye, barge-in guard, config sent), same order as the deploy-55 and deploy-57 batches; the read that decides the founder voice session and frames the min_silence decision",
+      "files": [
+        "scripts/rehearse/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-19T19:15:52.937Z",
+      "note": "done 2026-09-19 2:30 PM CDT, 10/10 executed 2:16 to 2:30 PM: 4 PASS 6 FAIL; repeated 0, merged 2 (both folds with under 1 s of audio, hang-up on an unheard goodbye), talk_over 4 (all comma-pause cutoffs by the automatic reply), holding 1; our synchronous goodbye won the slot on every close it was sent (ours:true at 7 to 31 ms); goodbye_delay 0.9 to 3.0 s on clean closes, 8 to 26 s when the caller barged in and the retry lost to the automatic reply. Rollup 2026-09-19T14-30-31-batch-rollup.md"
+    },
+    {
+      "id": "GOODBYE-CUT-BY-CALLER-PRESSURE",
+      "title": "deploy 58 (2026-09-19T14-17-22-miller-patient): our CLOSE went out 19 ms after the verdict (ours:true, no automatic reply), but the caller barged in three times; attempts 1 and 2 were cut after This / This transfer is frozen (audio 1.2 s and 2.2 s), attempt 3 produced the full 86-char transcript at 50001 then reply.done interrupted at 50006 with 37,920 bytes (0.79 s) of audio, close_tail_wait accepted the transcript as spoken and the call ended 1.5 s later: the caller never heard the goodbye. Two mechanisms: (a) session.update turn_detection interrupt_response false at CLOSE (documented: Set false to disable barge-in entirely), (b) confirm the goodbye from relayed audio bytes or a completed reply.done, never from transcript text alone",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/src/aai/config.ts",
+        "packages/server/test/**"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "a7481999f30252b78",
+      "started_at": "2026-09-19T19:18:18.481Z",
+      "note": "worktree lane (Sonnet, SONNET-JUSTIFIED: close-path timing); (A) interrupt_response false at CLOSE if mutable mid-session per verbatim docs, (B) audio-bytes or completed reply.done confirmation; lands after the deploy-58 batch"
     }
   ]
 }
