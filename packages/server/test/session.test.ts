@@ -1515,6 +1515,222 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
   });
 
+  // ---------------------------------------------------------------------------------------
+  // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19, PROVEN live deploy 55: scripts/
+  // rehearse/reports/2026-09-19T13-28-41-miller-patient.diagnostics.json): the MERGED-FREEZE-
+  // GOODBYE fix above (commit 76969ee) correctly defers a callerTurnTick forceSpeak send
+  // (CLOSE/ANNOUNCE_*) so it never merges with AssemblyAI's own automatic reply for the same
+  // turn -- but once that automatic reply is later INTERRUPTED by the caller barging in,
+  // `maybeSendReplyCreateAfterReplyDone`'s catch-up used to send the owed CLOSE unconditionally,
+  // ONE MILLISECOND after the caller started talking (`reply_create_sent` at 46246ms,
+  // `input.speech.started` at 46245ms) -- the goodbye then played over the whole of the
+  // caller's own next sentence (46245-49837ms: "I don't care about your process. Release the
+  // wire or you're fired."). Fixed with a minimal `callerSpeaking` boolean (set/cleared by
+  // `input.speech.started`/`input.speech.stopped`): an owed forceSpeak/question send is never
+  // dispatched while the caller is talking (`status === 'interrupted'` or `callerSpeaking`),
+  // stays owed, and is caught up once the caller's turn actually ends
+  // (`maybeSendOwedAfterCallerTurnEnds`, called from `input.speech.stopped` and from the tail
+  // of every `tick()`), through the SAME `AUTOMATIC_REPLY_SETTLE_MS` deferral so it does not
+  // just turn around and race a fresh automatic reply for THAT turn either. `armCloseRetryTimer`
+  // now also respects `callerSpeaking` -- see that method's own doc comment for why the
+  // existing close-retry chain would otherwise independently reintroduce the identical
+  // talk-over a couple of seconds later.
+  describe('CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19)', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** c1-c4 exactly as `driveToSealedStage` above, but stops right before c5's own
+     *  reply.create would go out -- letting each test race an ambient (AssemblyAI automatic)
+     *  reply against it, and then a caller barge-in against THAT ambient reply, exactly as
+     *  PROVEN live. */
+    function driveThroughC4(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
+      vi.useFakeTimers();
+      clock.now = 1000;
+      aai.emit({
+        type: 'transcript.user',
+        item_id: 'c1',
+        text: "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday's close meeting.",
+      });
+      vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+      clock.now = 1500;
+      aai.emit({ type: 'reply.started', reply_id: 'a1' });
+      aai.emit({
+        type: 'transcript.agent',
+        item_id: 'a1',
+        text: 'You are requesting a wire transfer of $84,500 to Northgate Partners. Is that correct?',
+        reply_id: 'a1',
+        interrupted: false,
+      });
+      clock.now = 2000;
+      aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+      clock.now = 2500;
+      aai.emit({ type: 'transcript.user', item_id: 'c2', text: "No, that's wrong. It's Meridian Supply." });
+      vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+      clock.now = 3000;
+      aai.emit({ type: 'reply.started', reply_id: 'a2' });
+      aai.emit({ type: 'transcript.agent', item_id: 'a2', text: session.last!.goal.hint, reply_id: 'a2', interrupted: false });
+      clock.now = 3500;
+      aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
+
+      clock.now = 4000;
+      aai.emit({ type: 'transcript.user', item_id: 'c3', text: "Yes, that's right." });
+      vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+      clock.now = 4500;
+      aai.emit({ type: 'reply.started', reply_id: 'a3' });
+      aai.emit({ type: 'transcript.agent', item_id: 'a3', text: session.last!.goal.hint, reply_id: 'a3', interrupted: false });
+      clock.now = 5000;
+      aai.emit({ type: 'reply.done', reply_id: 'a3', status: 'completed' });
+
+      clock.now = 5500;
+      aai.emit({ type: 'transcript.user', item_id: 'c4', text: 'Yes, correct.' });
+      vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+      clock.now = 6000;
+      aai.emit({ type: 'reply.started', reply_id: 'a4' });
+      aai.emit({ type: 'transcript.agent', item_id: 'a4', text: session.last!.goal.hint, reply_id: 'a4', interrupted: false });
+      clock.now = 6500;
+      aai.emit({ type: 'reply.done', reply_id: 'a4', status: 'completed' });
+    }
+
+    function newDiagSession(
+      sessionId: string,
+      clock: { now: number },
+      aai: FakeAaiSocket,
+      sent: ServerEvent[],
+      diagEvents: { kind: string; detail: unknown }[]
+    ): CallSession {
+      const call: CallContext = { session_id: sessionId, origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+      return new CallSession({
+        session_id: call.session_id,
+        seed: MERIDIAN,
+        call,
+        aai,
+        now: () => clock.now,
+        onServerEvent: (e) => sent.push(e),
+        mock: mockToolResult,
+        onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
+      });
+    }
+
+    function closeReplyCreates(diagEvents: { kind: string; detail: unknown }[]) {
+      return diagEvents.filter(
+        (e) => e.kind === 'reply_create_sent' && (e.detail as { goal_code: string }).goal_code === 'CLOSE'
+      );
+    }
+
+    it('an ambient reply carrying the deferred CLOSE catch-up is interrupted by the caller barging in: the goodbye stays owed, is never sent while the caller keeps talking (not even by the existing close-retry chain), and goes out cleanly, exactly once, the instant their turn ends', () => {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const diagEvents: { kind: string; detail: unknown }[] = [];
+      const session = newDiagSession('sess-close-catchup-barge-in', clock, aai, sent, diagEvents);
+      session.start();
+      driveThroughC4(session, aai, clock);
+
+      // c5 reaches SEALED/CLOSE directly off this caller turn (callerTurnTick) -- the CLOSE
+      // send is armed but deferred (AUTOMATIC_REPLY_SETTLE_MS), exactly as (e-1)/(e-1b) in
+      // design-e-turn-order.test.ts prove for the synthetic case.
+      clock.now = 7000;
+      aai.emit({ type: 'transcript.user', item_id: 'c5', text: "Yes, that's right." });
+      expect(session.last?.goal.code).toBe('CLOSE');
+      expect(closeReplyCreates(diagEvents)).toHaveLength(0);
+
+      // AssemblyAI's own automatic reply for THIS turn starts within the settle window (PROVEN
+      // live gap: 18ms) -- our own CLOSE send correctly defers to it (the MERGED-FREEZE-GOODBYE
+      // fix, unaffected by this one).
+      clock.now = 7018;
+      aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
+      vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+      expect(closeReplyCreates(diagEvents)).toHaveLength(0);
+      expect(session.last?.goal.code).toBe('CLOSE'); // the settle timer's own no-op never touched the goal
+
+      // The caller barges in on 'auto-1' -- PROVEN live shape: input.speech.started, then
+      // 'auto-1's own reply.done arrives interrupted, both within the same millisecond.
+      clock.now = 11245;
+      aai.emit({ type: 'input.speech.started' });
+      aai.emit({
+        type: 'transcript.agent',
+        item_id: 'x-auto-1',
+        text: 'One moment. Which institution',
+        reply_id: 'auto-1',
+        interrupted: true,
+      });
+      aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'interrupted' });
+
+      // THE FIX: no CLOSE reply.create goes out here -- pre-fix, this is exactly where
+      // `reply_create_sent`/CLOSE fired, one ms after `input.speech.started`.
+      expect(closeReplyCreates(diagEvents)).toHaveLength(0);
+
+      // The caller keeps talking for well over a full close-retry cycle (1500ms transcript
+      // wait + 400ms spacing gap, armed by `scheduleCloseIfNeeded`'s own non-match branch for
+      // 'auto-1's interrupted reply.done) -- the existing retry chain must not fire a competing
+      // send while the caller is still mid-utterance either.
+      vi.advanceTimersByTime(1500 + 400);
+      expect(closeReplyCreates(diagEvents)).toHaveLength(0);
+      vi.advanceTimersByTime(1500); // well clear of any further internal timer in that chain
+      expect(closeReplyCreates(diagEvents)).toHaveLength(0);
+
+      // The caller finishes their sentence.
+      clock.now = 14837;
+      aai.emit({ type: 'input.speech.stopped' });
+      expect(closeReplyCreates(diagEvents)).toHaveLength(0); // still deferred -- the settle window
+
+      // Nothing else starts speaking for this now-finished turn -- the fallback fires and sends
+      // the goodbye, exactly once, cleanly.
+      vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+      const closeSends = closeReplyCreates(diagEvents);
+      expect(closeSends).toHaveLength(1);
+      expect((closeSends[0]!.detail as { reason: string }).reason).toBe('tick_end');
+
+      // The real close reply, once it starts and completes, carries the engine's own sentence,
+      // confirmed heard -- the call ends normally.
+      clock.now = 15100;
+      aai.emit({ type: 'reply.started', reply_id: 'close-1' });
+      aai.emit({ type: 'transcript.agent', item_id: 'x-close-1', text: session.last!.goal.hint, reply_id: 'close-1', interrupted: false });
+      clock.now = 15600;
+      aai.emit({ type: 'reply.done', reply_id: 'close-1', status: 'completed' });
+      vi.advanceTimersByTime(1500);
+      expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+      expect(closeReplyCreates(diagEvents)).toHaveLength(1); // still exactly one, for the whole call
+    });
+
+    it("the never-stopped case: if the caller's speech window never closes (no input.speech.stopped), the goodbye is never spoken, but the existing CLOSE_TOTAL_MS (45s) hard cap still ends the call -- it can never hang forever", () => {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const diagEvents: { kind: string; detail: unknown }[] = [];
+      const session = newDiagSession('sess-close-catchup-never-stopped', clock, aai, sent, diagEvents);
+      session.start();
+      driveThroughC4(session, aai, clock);
+
+      clock.now = 7000;
+      aai.emit({ type: 'transcript.user', item_id: 'c5', text: "Yes, that's right." });
+      clock.now = 7018;
+      aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
+      vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+
+      clock.now = 11245;
+      aai.emit({ type: 'input.speech.started' });
+      aai.emit({
+        type: 'transcript.agent',
+        item_id: 'x-auto-1',
+        text: 'One moment. Which institution',
+        reply_id: 'auto-1',
+        interrupted: true,
+      });
+      aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'interrupted' });
+      expect(closeReplyCreates(diagEvents)).toHaveLength(0);
+
+      // input.speech.stopped never arrives -- the caller talks (or the line just stays open
+      // with no further VAD event) all the way past the 45s CLOSE_TOTAL_MS budget, timed from
+      // CLOSE first rendering at c5.
+      vi.advanceTimersByTime(45_000);
+      expect(closeReplyCreates(diagEvents)).toHaveLength(0); // the goodbye was never spoken
+      expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' }); // but the call still ends
+    });
+  });
+
   // Round 4 (2026-09-14, time-budget fix): the hard cap moved from CLOSE_TIMEOUT_MS (15s,
   // paired with a 3-attempt cap) to CLOSE_TOTAL_MS (45s, no attempt cap at all -- retries are
   // spaced by CLOSE_RETRY_MIN_GAP_MS instead of counted).
@@ -2199,6 +2415,13 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     aai.emit({ type: 'input.speech.started' });
     clock.now = 6002;
     aai.emit({ type: 'reply.done', reply_id: 'aai-turn-1', status: 'interrupted' });
+    // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19): the caller's own brief interjection
+    // ends here -- `armCloseRetryTimer`'s send now also waits for the caller to stop talking
+    // (`callerSpeaking`), same as a real call's VAD eventually reports; without this, the retry
+    // below would be silently and correctly dropped, never wrongly sent over a still-talking
+    // caller.
+    clock.now = 6100;
+    aai.emit({ type: 'input.speech.stopped' });
 
     // NOT ended: the close line was never heard.
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
@@ -2419,6 +2642,9 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       aai.emit({ type: 'transcript.agent', item_id: 'x3', text: 'This transfer is frozen', reply_id: 'r3', interrupted: true });
       aai.emit({ type: 'input.speech.started' });
       aai.emit({ type: 'reply.done', reply_id: 'r3', status: 'interrupted' });
+      // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19): the caller's own brief
+      // interjection ends here -- see the identical note in test (a) above.
+      aai.emit({ type: 'input.speech.stopped' });
       vi.advanceTimersByTime(1500);
       vi.advanceTimersByTime(400);
       // A 4th CLOSE send goes out -- proof there is no attempt cap anymore.

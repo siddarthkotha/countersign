@@ -148,6 +148,21 @@ export class CallSession {
   private started = false;
   private ended = false;
   private speaking = false;
+  /** CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19, PROVEN live deploy 55: scripts/
+   *  rehearse/reports/2026-09-19T13-28-41-miller-patient.diagnostics.json): true from
+   *  `input.speech.started` until the matching `input.speech.stopped` -- tracks whether the
+   *  CALLER (never the agent -- that is `this.speaking`) is currently mid-utterance. Read by
+   *  `maybeSendReplyCreateAfterReplyDone` (never dispatch an owed forceSpeak/question catch-up
+   *  while the caller is talking) and `armCloseRetryTimer`'s own send (the existing close-retry
+   *  chain would otherwise independently re-introduce the same talk-over a second or two later
+   *  -- see that timer's own doc comment). PROVEN incident: AssemblyAI's automatic reply for a
+   *  caller turn that reached FREEZE/CLOSE was interrupted by the caller barging in
+   *  (`input.speech.started` at 46245ms, that reply's own `reply.done` status `interrupted` at
+   *  the same ms) -- the owed CLOSE catch-up fired ONE millisecond later, talking over the
+   *  whole of the caller's next sentence (46245-49837ms). Never set for the AGENT's own speech
+   *  (`this.speaking` already covers that) -- this is caller-side only, and default false is
+   *  correct until the first `input.speech.started` a call ever sees. */
+  private callerSpeaking = false;
   private previousGoalKey: string | null = null;
   /** Flight recorder flood fix (2026-09-03, founder-observed live): the last `evaluate`
    *  signature actually RECORDED to diagnostics (verdict + state + goal code + which rules
@@ -1730,7 +1745,19 @@ export class CallSession {
    *  flight" -- neither speaking nor another `reply.create` already outstanding. If any of
    *  those fail, this attempt is simply dropped (never rescheduled): whatever reply is
    *  in flight will produce its own `reply.done`/transcript-match check when it finishes,
-   *  which re-triggers this same mechanism if still needed. */
+   *  which re-triggers this same mechanism if still needed.
+   *
+   *  CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19): `this.callerSpeaking` added to the
+   *  drop conditions above -- without it, this chain (armed by `scheduleCloseIfNeeded`'s own
+   *  non-match branch for an INTERRUPTED reply, which is exactly what an ambient reply cut off
+   *  by a caller barge-in produces) would independently re-introduce the identical talk-over
+   *  `maybeSendReplyCreateAfterReplyDone`'s own new guard exists to close, just ~1.9s later
+   *  (CLOSE_TRANSCRIPT_WAIT_MS + this timer's own gap) instead of one ms later -- PROVEN by a
+   *  fake-clock replay of the exact deploy-55 sequence (session.test.ts's own
+   *  "CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix" describe block). A drop here is never a dropped
+   *  goodbye: `owedForceSpeakGoalKey` stays owed the whole time (nothing in this file's CLOSE-
+   *  retry chain ever touches it), so `maybeSendOwedAfterCallerTurnEnds` still delivers it, once,
+   *  cleanly, the instant the caller's turn actually ends. */
   private armCloseRetryTimer(): void {
     if (this.closeRetryTimer) return;
     this.closeRetryTimer = setTimeout(() => {
@@ -1738,7 +1765,7 @@ export class CallSession {
       if (this.ended) return;
       const sentence = this.currentCloseSentence();
       if (!sentence) return;
-      if (this.speaking || this.replyCreateAwaitingStart) return;
+      if (this.speaking || this.replyCreateAwaitingStart || this.callerSpeaking) return;
       const wrapper = `Say exactly this and nothing else: "${sentence}"`;
       this.sendReplyCreate('CLOSE', 'close_retry', wrapper, { countAttempt: !this.closeLastReplyWasEmpty });
     }, CallSession.CLOSE_RETRY_MIN_GAP_MS);
@@ -2783,7 +2810,7 @@ export class CallSession {
         }
         // reply.create fix, round 2 -- requirement 3 unchanged: the tool.result flush rule
         // stays first (immediately above); this only ever sends AFTER that.
-        this.maybeSendReplyCreateAfterReplyDone(evt.reply_id);
+        this.maybeSendReplyCreateAfterReplyDone(evt.reply_id, evt.status);
         // Question-reask fix (2026-09-14): only when NOTHING was just sent above does this
         // get a chance to fire -- see `maybeReaskQuestion`'s own doc comment for the guard
         // it makes of `replyCreateAwaitingStart` itself; QUESTION_GOALS and
@@ -2817,11 +2844,25 @@ export class CallSession {
         // touching here (not just at `transcript.user`) matters for a caller mid-utterance
         // when the idle reaper's own tick lands.
         this.opts.onActivity?.();
+        // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19): see `callerSpeaking`'s own
+        // class-field doc comment. Set BEFORE this event's own `reply.done` (if any -- a
+        // barge-in typically interrupts a reply landing in the very same event, per the PROVEN
+        // bundle) is dispatched, so `maybeSendReplyCreateAfterReplyDone`'s guard sees the
+        // caller as already talking.
+        this.callerSpeaking = true;
         return;
 
       case 'input.speech.stopped':
-        // No-op today; touches nothing evaluate reads.
         this.diag('input.speech.stopped', {});
+        // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19): the caller's turn has ended --
+        // see `callerSpeaking`'s own class-field doc comment. This event never reaches the
+        // shared `tick()` below (it returns here, same as before this fix, touching nothing
+        // `evaluate` reads), so it is the one caller-turn-end signal that needs its own
+        // explicit catch-up call rather than relying on `tick()`'s own tail call (see
+        // `maybeSendOwedAfterCallerTurnEnds`'s own doc comment for why `tick()` ALSO calls it,
+        // covering the `transcript.user`-triggered case this event alone would miss).
+        this.callerSpeaking = false;
+        this.maybeSendOwedAfterCallerTurnEnds();
         return;
 
       case 'tool.call':
@@ -3443,6 +3484,13 @@ export class CallSession {
     this.runLookupsIfNeeded();
     this.runTerminalActionsIfNeeded();
     this.maybeSendReplyCreateForTick(goalAtTickStart, callerTurnTick);
+    // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19): covers the `transcript.user`-
+    // triggered tick (a caller turn can end with a final transcript arriving instead of, or in
+    // addition to, its own `input.speech.stopped`) and is a safe no-op the rest of the time --
+    // see `maybeSendOwedAfterCallerTurnEnds`'s own doc comment for why this is the second of
+    // its two call sites (`input.speech.stopped`'s own case is the other, since that event
+    // never reaches this shared `tick()`).
+    this.maybeSendOwedAfterCallerTurnEnds();
     this.emitState();
   }
 
@@ -4090,6 +4138,37 @@ export class CallSession {
     }
   }
 
+  /** CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19): the counterpart to the guard
+   *  `maybeSendReplyCreateAfterReplyDone` now applies -- a forceSpeak/question send deferred
+   *  there because the caller was mid-utterance (or the reply that would have caught it up was
+   *  itself interrupted by one) stays owed (`owedForceSpeakGoalKey`/`owedQuestionGoalKey`,
+   *  deliberately left untouched by that method whenever it defers) until the caller's own turn
+   *  actually ends. Called from two places: `input.speech.stopped`'s own case (which never
+   *  reaches the shared `tick()`, so needs this explicit call) and the tail of every `tick()`
+   *  (covers a caller turn that ends via a `transcript.user` event instead of, or in addition
+   *  to, its own `input.speech.stopped` -- and is a harmless no-op the rest of the time, since
+   *  the `!owed` check below makes it free whenever nothing is actually pending).
+   *
+   *  Re-arms the SAME `armTickEndSendTimer`/`AUTOMATIC_REPLY_SETTLE_MS` deferral the original
+   *  fresh-question/forceSpeak send paths already use, so a catch-up here still yields to
+   *  AssemblyAI's own automatic reply for the turn that just ended, rather than immediately
+   *  racing it the same way the P0/MERGED-FREEZE-GOODBYE fixes already guard against -- this is
+   *  deliberately not a direct `sendReplyCreate` call. `armTickEndSendTimer`'s own callback
+   *  re-reads `this.last.goal`/the owed keys at fire time, so this is safe to call speculatively
+   *  on every tick without its own busy/goal-match check duplicated here beyond the cheap early
+   *  outs below (a no-op call costs nothing but a `JSON.stringify` and two comparisons). */
+  private maybeSendOwedAfterCallerTurnEnds(): void {
+    if (this.ended || !this.last) return;
+    if (this.callerSpeaking) return; // still mid-utterance -- nothing owed can be sent yet
+    if (this.speaking || this.replyCreateAwaitingStart) return; // something else already in flight
+    const goalKey = JSON.stringify(this.last.goal);
+    const owed =
+      (this.owedForceSpeakGoalKey !== null && this.owedForceSpeakGoalKey === goalKey) ||
+      (this.owedQuestionGoalKey !== null && this.owedQuestionGoalKey === goalKey);
+    if (!owed) return;
+    this.armTickEndSendTimer();
+  }
+
   /** Fired from `reply.done`, after the tool.result flush/discard rule has already run
    *  (requirement 3) -- catches up on whatever `maybeSendReplyCreateForTick` could not send
    *  while this reply was busy speaking. `replyId`'s own recorded label (`replyGoalAtStart`,
@@ -4140,8 +4219,29 @@ export class CallSession {
    *  would otherwise silently drop the deferred CLOSE forever, the exact opposite failure from
    *  the one this whole fix exists to close. `owedForceSpeakGoalKey` is authoritative regardless
    *  of that same-code coincidence: it is set only when a REAL send was deferred and not yet
-   *  satisfied, so its presence alone is proof a send is still owed. */
-  private maybeSendReplyCreateAfterReplyDone(replyId: string): void {
+   *  satisfied, so its presence alone is proof a send is still owed.
+   *
+   *  CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19, PROVEN live deploy 55: scripts/
+   *  rehearse/reports/2026-09-19T13-28-41-miller-patient.diagnostics.json): everything above
+   *  decides WHETHER a send is owed; `status` (this reply's own `reply.done.status`, now
+   *  threaded through from the call site same as `scheduleCloseIfNeeded` already receives it)
+   *  and `this.callerSpeaking` decide WHEN it is safe to actually dispatch it. An `interrupted`
+   *  reply was -- by definition -- cut short by the caller starting to talk, and PROVEN live
+   *  event ordering has `input.speech.started` reaching this class before that same turn's own
+   *  `reply.done` (both bundle bundle bundle timestamps identical to the ms, but the fake-clock
+   *  tests below pin the ORDER, which is what actually matters), so `this.callerSpeaking` is
+   *  already true by the time this runs for that shape -- `status === 'interrupted'` is kept as
+   *  its own, independent OR'd condition regardless (defensive against any event-ordering
+   *  AssemblyAI never documents either way, same "belt and braces" reasoning
+   *  `owedForceSpeakGoalKey`'s own doc comment already applies elsewhere in this file). Deferring here means doing NOTHING
+   *  more than returning: the owed key computed above (`owedQuestionGoalKey`/
+   *  `owedForceSpeakGoalKey`) is deliberately left exactly as it already reads -- still equal to
+   *  `goalKey` if it was the reason this branch fired, or freshly set to it if this was a bare
+   *  `mustForceSpeak` catch-up that had no owed key yet -- so `maybeSendOwedAfterCallerTurnEnds`
+   *  (called once the caller's turn actually ends) can find and finish the job. None of the
+   *  question-covered bookkeeping just above (`lastAskedQuestionKey`/`clearTickEndSendTimer`)
+   *  runs on this path: nothing has been asked yet, so nothing should be recorded as asked. */
+  private maybeSendReplyCreateAfterReplyDone(replyId: string, status: string): void {
     if (this.ended || !this.last) return;
     if (this.speaking || this.replyCreateAwaitingStart) return;
     const goal = this.last.goal;
@@ -4201,6 +4301,14 @@ export class CallSession {
         this.clearTickEndSendTimer();
         return;
       }
+      // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19): the founder's own Day-10
+      // complaint -- a re-ask talking over a caller who is already barging back in -- is
+      // exactly this shape: the reply that just finished did NOT cover the rendering, but the
+      // caller is (or was, per `status`) already talking again. `owedQuestionGoalKey` is
+      // deliberately left exactly as it reads (already `goalKey`, the reason this branch fired
+      // at all) -- see this method's own doc comment for why nothing here is safe to mutate as
+      // if the question had actually been asked.
+      if (status === 'interrupted' || this.callerSpeaking) return;
       this.lastAskedQuestionKey = JSON.stringify(goal);
       // BRAKE (2026-09-15): deliberately NOT re-checked here -- see
       // `shouldBrakeFreshQuestion`'s own doc comment for why re-applying the timing brake in
@@ -4227,6 +4335,18 @@ export class CallSession {
     // false again by then) and firing a second, stale `reply.create` for the SAME already-sent
     // rendering. A no-op whenever `owedForceSpeakGoalKey` was never set (every QUESTION_GOALS
     // catch-up, and every forceSpeak catch-up NOT preceded by a deferred send at all).
+    //
+    // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19, THE PROVEN LIVE DEFECT this whole
+    // method-level fix closes): reached here for a bare `mustForceSpeak` catch-up or an
+    // `owedForceSpeak` one -- same guard as the `owedQuestion` branch above, for the identical
+    // reason. `owedForceSpeakGoalKey` is set to `goalKey` (whether it already was, or this is
+    // the FIRST time this exact rendering was found owed) so `maybeSendOwedAfterCallerTurnEnds`
+    // has something to find once the caller's turn actually ends -- never cleared, never sent,
+    // while the caller is still talking.
+    if (status === 'interrupted' || this.callerSpeaking) {
+      this.owedForceSpeakGoalKey = goalKey;
+      return;
+    }
     this.owedForceSpeakGoalKey = null;
     this.clearTickEndSendTimer();
     this.sendReplyCreate(current, 'reply_done_goal_diverged', this.instructedSentenceFor(goal));
