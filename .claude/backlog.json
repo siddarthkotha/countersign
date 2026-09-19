@@ -3368,11 +3368,11 @@
         "packages/server/test/**",
         "docs/ASSEMBLYAI_INTEGRATION.md"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
-      "agent_id": "a03b8762720f5a398",
+      "agent_id": "",
       "started_at": "2026-09-19T18:40:40.769Z",
-      "note": "worktree lane (Sonnet); single reversible change; batch after it to compare goodbye_delay and the four counts against deploy 55"
+      "note": "landed on main dd88270 + 7ee197b (cherry-picks; the first is the lane checkpoint, rewriting is rail-blocked), push 57; connect-time turn_detection {vad_threshold 0.5, interrupt_response true}, no min/max_silence, goal updates still omit the key; aai_ready diag now records turn_detection_sent. Correction: deploy-55 miller goodbye_delay was 7.98 s, not 4.3 s. Lane flagged: deploy-52 identity-switch also lost one close to an ambient reply, so this reduces the odds, the deferral stays as the net; live effect UNKNOWN until the deploy-57 batch"
     }
   ]
 }
