@@ -34,6 +34,7 @@ function newSession(clockRef: { now: number }, call: CallContext, aai: FakeAaiSo
     now: () => clockRef.now,
     onServerEvent: (e) => sent.push(e),
     mock: mockToolResult,
+    forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
   });
 }
 
@@ -268,6 +269,7 @@ describe('CallSession — export race (RT-8-export-race)', () => {
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
     });
 
@@ -480,6 +482,7 @@ describe('CallSession — Scenario A (Dana, legitimate, fully cooperative) repla
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onDiagnostic: (kind, detail) => diagnostics.push({ kind, detail }),
     });
 
@@ -756,6 +759,7 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockSpy,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
     });
     session.start();
 
@@ -881,6 +885,7 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
     });
 
@@ -955,6 +960,7 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onDiagnostic: () => {},
     });
 
@@ -1096,6 +1102,7 @@ describe('CallSession — end() reaches the engine\'s call-ended row (RT-4)', ()
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
     });
 
@@ -1609,6 +1616,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
         now: () => clock.now,
         onServerEvent: (e) => sent.push(e),
         mock: mockToolResult,
+        forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
         onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
       });
     }
@@ -1835,6 +1843,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
     });
     session.start();
@@ -1995,6 +2004,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
     });
     session.start();
@@ -2334,6 +2344,7 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
         now: () => clock.now,
         onServerEvent: (e) => sent.push(e),
         mock: mockToolResult,
+        forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
         onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
       });
       session.start();
@@ -2462,6 +2473,7 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
     });
     session.start();
@@ -2669,6 +2681,7 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
         now: () => clock.now,
         onServerEvent: (e) => sent.push(e),
         mock: mockToolResult,
+        forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
         onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
       });
       session.start();
@@ -2762,6 +2775,7 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
         now: () => clock.now,
         onServerEvent: (e) => sent.push(e),
         mock: mockToolResult,
+        forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
         onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
       });
       session.start();
@@ -2797,6 +2811,7 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
         now: () => clock.now,
         onServerEvent: (e) => sent.push(e),
         mock: mockToolResult,
+        forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
         onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
       });
       session.start();
@@ -2976,6 +2991,7 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
     });
     session.start();
@@ -3098,6 +3114,7 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
     });
     session.start();
@@ -3149,6 +3166,7 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
     });
     session.start();
@@ -3342,6 +3360,7 @@ describe('CallSession — question-reask: a completed reply that never asked the
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
     });
     session.start();
@@ -3751,6 +3770,7 @@ describe('CallSession — recordGoalCompletionAction only logs an issued action 
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
     });
     session.start();
@@ -4370,6 +4390,7 @@ describe('CallSession — idle-activity touch points (Defect 1 fix, timing-analy
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onActivity: () => activityTouches.push(clock.now),
     });
     session.start();
@@ -4428,6 +4449,7 @@ describe('CallSession — idle-activity touch points (Defect 1 fix, timing-analy
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onActivity: () => {
         lastActivityAt = clock.now;
       },
@@ -4492,6 +4514,7 @@ describe('CallSession — idle-activity touch points (Defect 1 fix, timing-analy
       now: () => clock.now,
       onServerEvent: (e) => sent.push(e),
       mock: mockToolResult,
+      forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS,
       onActivity: () => {
         lastActivityAt = clock.now;
       },

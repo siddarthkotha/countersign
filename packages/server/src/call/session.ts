@@ -64,6 +64,15 @@ export interface CallSessionOpts {
    *  wire diagnostics (most existing tests) sees no behavior change at all; `kind`/`detail`
    *  are diagnostics vocabulary only, never Evidence (LAW 4) and never a verdict (LAW 3). */
   onDiagnostic?: (kind: string, detail: unknown) => void;
+  /** FORCE-SPEAK-SETTLE-ZERO (2026-09-19): overrides `CallSession.FORCE_SPEAK_SETTLE_MS`
+   *  (class default 0, synchronous) for how long a callerTurnTick CLOSE/ANNOUNCE_* send waits
+   *  before going out, letting AssemblyAI's own automatic reply for that same turn start first.
+   *  See that class constant's own doc comment for the PROVEN live reasoning behind the 0
+   *  default. Test-only in practice today (every test in session.test.ts/design-e-turn-
+   *  order.test.ts that was written against the 150ms deferral passes
+   *  `AUTOMATIC_REPLY_SETTLE_MS` here explicitly); index.ts's live wiring leaves this unset,
+   *  taking the production default. */
+  forceSpeakSettleMs?: number;
 }
 
 interface PendingToolResult {
@@ -148,6 +157,18 @@ export class CallSession {
   private started = false;
   private ended = false;
   private speaking = false;
+  /** FORCE-SPEAK-SETTLE-ZERO (2026-09-19, PROVEN live from deploy 57's restored turn_detection
+   *  config -- scripts/rehearse/reports/2026-09-19T14-00-06-miller-patient.diagnostics.json and
+   *  .../2026-09-19T14-02-11-identity-switch.diagnostics.json): how long, in ms, a callerTurnTick
+   *  forceSpeak send (CLOSE/ANNOUNCE_*, `maybeSendReplyCreateForTick`'s own `callerTurnTick`
+   *  branch ONLY -- never the `freshQuestion` branch, which always uses the class constant
+   *  `AUTOMATIC_REPLY_SETTLE_MS`) waits before sending, to give AssemblyAI's own automatic reply
+   *  for that SAME turn a chance to start first. Read from `opts.forceSpeakSettleMs` at
+   *  construction, defaulting to `FORCE_SPEAK_SETTLE_MS` (0, synchronous) when not supplied --
+   *  see that class constant's own doc comment for why 0 is now the correct production default,
+   *  and `CallSessionOpts.forceSpeakSettleMs`'s own doc comment for how a caller opts into the
+   *  deferral instead. Set once, never reassigned. */
+  private readonly forceSpeakSettleMs: number;
   /** CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19, PROVEN live deploy 55: scripts/
    *  rehearse/reports/2026-09-19T13-28-41-miller-patient.diagnostics.json): true from
    *  `input.speech.started` until the caller's turn is known to have ended -- tracks whether the
@@ -2058,6 +2079,7 @@ export class CallSession {
     this.opts = opts;
     this.startMs = opts.now();
     this.agentName = resolveAgentName(opts.agent_name);
+    this.forceSpeakSettleMs = opts.forceSpeakSettleMs ?? CallSession.FORCE_SPEAK_SETTLE_MS;
     opts.aai.on((evt) => this.handleAaiEvent(evt));
     // aai-observability lane (2026-09-16, items 1 and 3): registers this session's own
     // `aai_unhandled_message` / delta-accounting handlers on whatever `AaiSocket` this call
@@ -3880,8 +3902,11 @@ export class CallSession {
       // incident): `owedQuestionGoalKey` is deliberately NOT cleared here any more -- it stays
       // set until the deferred send below actually goes out (or the busy-guard catch-up path
       // sends in its place), so a reply that starts before then is still recognized as "this
-      // exact question is still owed" at its own `reply.done`.
-      this.armTickEndSendTimer();
+      // exact question is still owed" at its own `reply.done`. FORCE-SPEAK-SETTLE-ZERO
+      // (2026-09-19): this branch is UNAFFECTED by `forceSpeakSettleMs` -- always the class
+      // constant, unconditionally, same as before that fix (only the sibling `callerTurnTick`
+      // forceSpeak branch below was ever proven to need a configurable settle).
+      this.armTickEndSendTimer(CallSession.AUTOMATIC_REPLY_SETTLE_MS);
       return;
     }
     // Bug fix (2026-09-18 review, finding F1): reached only when `forceSpeak` is true and
@@ -3895,23 +3920,37 @@ export class CallSession {
     this.owedForceSpeakGoalKey = null;
     // MERGED-FREEZE-GOODBYE fix (2026-09-19, see `owedForceSpeakGoalKey`'s own class-field doc
     // comment for the full PROVEN incident): a forceSpeak goal (CLOSE/ANNOUNCE_*) reached on a
-    // CALLER-TURN-TRIGGERED tick races AssemblyAI's own automatic reply for that SAME turn
+    // CALLER-TURN-TRIGGERED tick can race AssemblyAI's own automatic reply for that SAME turn
     // exactly as tightly as a fresh question does -- sending synchronously here is what let the
-    // two collide into one merged, word-salad reply live. Deferred the identical
-    // `AUTOMATIC_REPLY_SETTLE_MS` way the freshQuestion branch above already is: if nothing
-    // starts speaking within the window, the fallback below still sends -- a callerTurnTick with
-    // no automatic reply coming (the common case) never stalls the goodbye. If AssemblyAI's own
-    // automatic reply DOES start within the window, this send is skipped here and
-    // `maybeSendReplyCreateAfterReplyDone`'s own `owedForceSpeak` check (see that method's own
-    // doc comment for why the bare `mustForceSpeak` re-check alone is NOT enough here) sends it
-    // once that ambient reply's own `reply.done` arrives, never overlapping it.
-    // A NON-callerTurnTick forceSpeak (a STAGE/ESCALATE/FREEZE decision settled after an async
-    // server-lookup/terminal-action cascade, with no caller utterance immediately preceding it)
-    // has no fresh caller turn for AssemblyAI to have spawned an automatic reply against -- that
-    // path carries none of this race and keeps sending synchronously, unchanged.
-    if (callerTurnTick) {
+    // two collide into one merged, word-salad reply on deploy 53 (automatic reply at 0-5ms).
+    //
+    // FORCE-SPEAK-SETTLE-ZERO (2026-09-19, PROVEN live from deploy 57's own restored
+    // turn_detection config -- scripts/rehearse/reports/2026-09-19T14-00-06-miller-patient.
+    // diagnostics.json and .../2026-09-19T14-02-11-identity-switch.diagnostics.json): with
+    // turn_detection explicitly restored (TURN-DETECTION-RESTORE-EXPLICIT-CONFIG, 7ee197b),
+    // AssemblyAI's own automatic reply now reliably starts 58-61ms after the caller's turn ends
+    // -- comfortably BEFORE the 150ms `AUTOMATIC_REPLY_SETTLE_MS` window used to elapse, so
+    // EVERY close/announce on a callerTurnTick was handed to that automatic reply, which then
+    // spoke a stale pre-verdict line for 9-15s before our own goodbye ever got a turn
+    // (goodbye_delay 17.1s and 22.0s in the two bundles above). Deploy 52 (same turn_detection
+    // config, CLOSE sent SYNCHRONOUSLY on the caller-turn tick, pre-dating this whole file's own
+    // 76969ee fix) had `merged_reply: 0` across all sixteen calls of the deploy-51/52 batches,
+    // with fast goodbyes throughout -- the merge only ever happened on deploy 53, where
+    // turn_detection was UNINTENTIONALLY omitted from the wire config and AssemblyAI's automatic
+    // reply started 0-5ms after the caller's turn (no margin for ANY settle window to help).
+    // `forceSpeakSettleMs` (see that field's own doc comment) defaults to 0 -- synchronous,
+    // exactly as before 76969ee/deploy-52 -- and this whole deferred-settle mechanism (still
+    // fully intact below, never removed) re-activates the instant it is set positive again, for
+    // whatever future config makes that the right call. The owed-key catch-up machinery
+    // (`owedForceSpeakGoalKey`/`maybeSendReplyCreateAfterReplyDone`/`maybeSendOwedAfterCallerTurnEnds`)
+    // and the `callerSpeaking` guards from this same file's CLOSE-CATCHUP-OVER-CALLER-BARGE-IN
+    // fix are UNCHANGED and still matter regardless of this constant's value: an automatic reply
+    // that starts FIRST for any other reason (the deploy-52 identity-switch anomaly,
+    // 2026-09-18T15-54-39, where one ALREADY starts speaking before this tick even runs) still
+    // needs its own reply.done to catch up the owed send, synchronous-by-default or not.
+    if (callerTurnTick && this.forceSpeakSettleMs > 0) {
       this.owedForceSpeakGoalKey = JSON.stringify(goal);
-      this.armTickEndSendTimer();
+      this.armTickEndSendTimer(this.forceSpeakSettleMs);
       return;
     }
     this.sendReplyCreate(finalGoal, 'tick_end', this.instructedSentenceFor(goal));
@@ -3967,6 +4006,30 @@ export class CallSession {
    *  exactly `AUTOMATIC_REPLY_SETTLE_MS` of (fake) elapsed time for the fallback send to go
    *  out when nothing preempts it. */
   private static readonly AUTOMATIC_REPLY_SETTLE_MS = 150;
+  /** FORCE-SPEAK-SETTLE-ZERO (2026-09-19, PROVEN live: scripts/rehearse/reports/
+   *  2026-09-19T14-00-06-miller-patient.diagnostics.json (reply.started 45909, gap 58ms,
+   *  ours:false) and .../2026-09-19T14-02-11-identity-switch.diagnostics.json (reply.started
+   *  95528, gap 61ms, ours:false)): the class DEFAULT for `forceSpeakSettleMs` (below), used
+   *  only by `maybeSendReplyCreateForTick`'s `callerTurnTick` forceSpeak branch. With
+   *  turn_detection explicitly restored on the wire (7ee197b, deploy 57), AssemblyAI's own
+   *  automatic reply for a caller turn now reliably starts 58-61ms after that turn ends --
+   *  comfortably inside `AUTOMATIC_REPLY_SETTLE_MS` (150ms) -- so deferring the CLOSE/ANNOUNCE_*
+   *  send by that long handed EVERY one to the automatic reply, which then spoke a stale
+   *  pre-verdict holding line for 9-15s before the real goodbye ever got a turn (goodbye_delay
+   *  17.1s/22.0s in the two bundles above). Deploy 52 (same turn_detection config, CLOSE sent
+   *  SYNCHRONOUSLY, pre-76969ee) had `merged_reply: 0` across all sixteen deploy-51/52 calls and
+   *  fast goodbyes throughout -- the merge this whole settle mechanism exists to prevent only
+   *  ever happened on deploy 53, where turn_detection was UNINTENTIONALLY omitted from the wire
+   *  config and the automatic reply started 0-5ms after the caller's turn (no margin any settle
+   *  window could have covered). 0 restores that synchronous, pre-76969ee send exactly --
+   *  `maybeSendReplyCreateForTick`'s own `callerTurnTick && this.forceSpeakSettleMs > 0` guard
+   *  bypasses the deferral entirely at this default, sending in the SAME tick, same as before
+   *  76969ee ever existed. A positive value (e.g. `AUTOMATIC_REPLY_SETTLE_MS`, what every
+   *  existing test in this file still opts into via `CallSessionOpts.forceSpeakSettleMs`)
+   *  re-enables the deferral for whatever future config makes that the right call again --
+   *  the mechanism itself (owed keys, `armTickEndSendTimer`, the CLOSE-CATCHUP-OVER-CALLER-
+   *  BARGE-IN `callerSpeaking` guards) is untouched either way. */
+  private static readonly FORCE_SPEAK_SETTLE_MS = 0;
   private tickEndSendTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Bug fix (2026-09-18 review, finding F1): this used to close over `goalCode`/`instructions`
@@ -3981,9 +4044,16 @@ export class CallSession {
    *  `mustForceSpeak` nor a fresh question) without ever calling `clearTickEndSendTimer` --
    *  see that method's own call sites -- so trusting values captured at arm time let a caller
    *  turn's fresh question go out AFTER the call had already moved on and said something
-   *  else, sometimes after the goodbye itself was already confirmed heard. Takes no arguments
-   *  now: everything it needs is read fresh, at fire time, from `this.last`. */
-  private armTickEndSendTimer(): void {
+   *  else, sometimes after the goodbye itself was already confirmed heard.
+   *
+   *  FORCE-SPEAK-SETTLE-ZERO (2026-09-19): now takes the delay as a parameter instead of
+   *  hardcoding `AUTOMATIC_REPLY_SETTLE_MS` -- the `freshQuestion` branch still always passes
+   *  that constant (untouched), but the `callerTurnTick` forceSpeak branch now passes
+   *  `this.forceSpeakSettleMs` (see that field's own doc comment for why it defaults to 0,
+   *  never this class constant, as of deploy 57). Everything the callback itself reads is still
+   *  read fresh, at fire time, from `this.last`/the owed keys -- only the WAIT is now caller-
+   *  supplied. */
+  private armTickEndSendTimer(delayMs: number): void {
     this.clearTickEndSendTimer();
     this.tickEndSendTimer = setTimeout(() => {
       this.tickEndSendTimer = null;
@@ -4010,7 +4080,7 @@ export class CallSession {
       this.owedQuestionGoalKey = null;
       this.owedForceSpeakGoalKey = null;
       this.sendReplyCreate(goal.code, 'tick_end', this.instructedSentenceFor(goal));
-    }, CallSession.AUTOMATIC_REPLY_SETTLE_MS);
+    }, delayMs);
   }
 
   /** Bug fix (2026-09-18, caught by design-e-turn-order.test.ts's own (b) while writing the
@@ -4171,14 +4241,22 @@ export class CallSession {
    *  to, its own `input.speech.stopped` -- and is a harmless no-op the rest of the time, since
    *  the `!owed` check below makes it free whenever nothing is actually pending).
    *
-   *  Re-arms the SAME `armTickEndSendTimer`/`AUTOMATIC_REPLY_SETTLE_MS` deferral the original
-   *  fresh-question/forceSpeak send paths already use, so a catch-up here still yields to
-   *  AssemblyAI's own automatic reply for the turn that just ended, rather than immediately
-   *  racing it the same way the P0/MERGED-FREEZE-GOODBYE fixes already guard against -- this is
-   *  deliberately not a direct `sendReplyCreate` call. `armTickEndSendTimer`'s own callback
-   *  re-reads `this.last.goal`/the owed keys at fire time, so this is safe to call speculatively
-   *  on every tick without its own busy/goal-match check duplicated here beyond the cheap early
-   *  outs below (a no-op call costs nothing but a `JSON.stringify` and two comparisons). */
+   *  Re-arms the SAME `armTickEndSendTimer`/`AUTOMATIC_REPLY_SETTLE_MS` deferral the
+   *  freshQuestion send path already uses -- ALWAYS that class constant here, deliberately
+   *  never `this.forceSpeakSettleMs` (FORCE-SPEAK-SETTLE-ZERO, 2026-09-19): this is a DIFFERENT
+   *  race than the one that constant governs. `forceSpeakSettleMs` decides whether the
+   *  ORIGINAL forceSpeak send (the instant a callerTurnTick first reaches CLOSE/ANNOUNCE_*)
+   *  waits for THAT turn's own automatic reply; by the time this method ever runs, the send was
+   *  already deferred for an unrelated reason (the caller was speaking, or that reply was
+   *  interrupted -- see `maybeSendReplyCreateAfterReplyDone`'s own new guard) and the caller has
+   *  now finished a LATER turn -- giving AssemblyAI's own automatic reply for THAT turn a
+   *  moment to start first is still the right call regardless of how the very first send was
+   *  configured. So a catch-up here still yields to that fresh automatic reply rather than
+   *  immediately racing it -- this is deliberately not a direct `sendReplyCreate` call.
+   *  `armTickEndSendTimer`'s own callback re-reads `this.last.goal`/the owed keys at fire time,
+   *  so this is safe to call speculatively on every tick without its own busy/goal-match check
+   *  duplicated here beyond the cheap early outs below (a no-op call costs nothing but a
+   *  `JSON.stringify` and two comparisons). */
   private maybeSendOwedAfterCallerTurnEnds(): void {
     if (this.ended || !this.last) return;
     if (this.callerSpeaking) return; // still mid-utterance -- nothing owed can be sent yet
@@ -4188,7 +4266,7 @@ export class CallSession {
       (this.owedForceSpeakGoalKey !== null && this.owedForceSpeakGoalKey === goalKey) ||
       (this.owedQuestionGoalKey !== null && this.owedQuestionGoalKey === goalKey);
     if (!owed) return;
-    this.armTickEndSendTimer();
+    this.armTickEndSendTimer(CallSession.AUTOMATIC_REPLY_SETTLE_MS);
   }
 
   /** Fired from `reply.done`, after the tool.result flush/discard rule has already run

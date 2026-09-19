@@ -43,6 +43,12 @@ import scenarioB from '../../engine/corpus/scenario-b-miller-fraud.json' with { 
 
 const CALL_B = scenarioB.call as CallContext;
 
+// FORCE-SPEAK-SETTLE-ZERO (2026-09-19): module-scope so `newSession` (also module-scope,
+// below) can read it -- the describe block's own local `AUTOMATIC_REPLY_SETTLE_MS` (150ms,
+// same value) exists purely for readability at its own call sites and intentionally shadows
+// this one there; both are `CallSession.AUTOMATIC_REPLY_SETTLE_MS`, never drifted apart.
+const NEW_SESSION_FORCE_SPEAK_SETTLE_MS = 150;
+
 function newSession(
   clockRef: { now: number },
   call: CallContext,
@@ -58,6 +64,12 @@ function newSession(
     now: () => clockRef.now,
     onServerEvent: (e) => sent.push(e),
     mock: mockToolResult,
+    // FORCE-SPEAK-SETTLE-ZERO (2026-09-19): the class default is now 0 (synchronous send,
+    // matching pre-76969ee/deploy-57 behavior) -- every existing test in this file was written
+    // against the 150ms deferral, so `newSession` opts back into it explicitly here rather than
+    // silently changing 20+ tests' own timing assumptions. See `CallSessionOpts.forceSpeakSettleMs`'s
+    // own doc comment in session.ts.
+    forceSpeakSettleMs: NEW_SESSION_FORCE_SPEAK_SETTLE_MS,
     onDiagnostic: (kind, detail) => diagEvents.push({ kind, detail }),
   });
 }
@@ -418,6 +430,56 @@ describe('Design E: the automatic reply is a holding beat only; the server\'s ow
         speaking: boolean;
       };
     }
+
+    // FORCE-SPEAK-SETTLE-ZERO (2026-09-19, PROVEN live from deploy 57's restored turn_detection
+    // config -- see `CallSession.FORCE_SPEAK_SETTLE_MS`'s own doc comment in session.ts for the
+    // full incident): with AssemblyAI's automatic reply now reliably starting 58-61ms after a
+    // caller's turn ends, the 150ms deferral (e-1)/(e-1b) below prove handed EVERY close/
+    // announce to that automatic reply instead, which spoke a stale pre-verdict line for 9-15s
+    // before the real goodbye ever got a turn. `forceSpeakSettleMs` now defaults to 0
+    // (`CallSessionOpts.forceSpeakSettleMs` left unset, unlike every OTHER test in this file's
+    // own `newSession`, which opts back into the 150ms deferral (e-1)/(e-1b) below still need):
+    // a callerTurnTick CLOSE send goes out SYNCHRONOUSLY again, in the same tick, exactly as it
+    // did before 76969ee ever existed -- (e-1)/(e-1b)'s own deferred-and-caught-up mechanism is
+    // otherwise completely unchanged (proven by those two tests still passing unmodified, with
+    // `forceSpeakSettleMs: AUTOMATIC_REPLY_SETTLE_MS` now explicit in `newSession`).
+    it('(e-0) FORCE-SPEAK-SETTLE-ZERO: at the class default (forceSpeakSettleMs unset, 0), a callerTurnTick CLOSE reply.create is sent synchronously, in the same tick, exactly once -- never deferred', () => {
+      vi.useFakeTimers();
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const call: CallContext = { session_id: 'sess-force-speak-settle-zero', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+      // Deliberately NOT `newSession` (which now always passes `forceSpeakSettleMs:
+      // AUTOMATIC_REPLY_SETTLE_MS` for every other test in this file) -- this session takes the
+      // real class default by leaving the option unset entirely.
+      const session = new CallSession({
+        session_id: call.session_id,
+        seed: MERIDIAN,
+        call,
+        aai,
+        now: () => clock.now,
+        onServerEvent: (e) => sent.push(e),
+        mock: mockToolResult,
+      });
+      session.start(); // GREET
+      const internals = internalsOf(session);
+
+      // The identical shape (e-1) below exercises, just with no `forceSpeakSettleMs` supplied.
+      session.last = { ...session.last!, goal: { code: 'CLOSE', hint: ENGINE_CLOSE_SENTENCES.FREEZE, keyterms: [], turn_detection_hint: 'default' } };
+      internals.maybeSendReplyCreateForTick('CONTAIN_NO_DISCLOSURE', true);
+
+      // THE FIX: sent immediately, synchronously, right here -- no timer, no advance needed.
+      const replyCreates = replyCreatesOf(aai);
+      expect(replyCreates).toHaveLength(1);
+      expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${ENGINE_CLOSE_SENTENCES.FREEZE}"`);
+      expect(internals.replyCreateAwaitingStart).toBe(true);
+      expect(internals.speaking).toBe(false);
+
+      // Never a second one, even if a settle-window's worth of (real) time then passes -- there
+      // was never a timer armed to fire.
+      vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+      expect(replyCreatesOf(aai)).toHaveLength(1);
+    });
 
     it('(e-1) fallback: FREEZE reached on a callerTurnTick, with nothing starting to speak, sends exactly one instructed CLOSE reply.create once the settle window elapses -- never synchronously', () => {
       vi.useFakeTimers();
