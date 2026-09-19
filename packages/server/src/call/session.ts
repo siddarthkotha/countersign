@@ -3452,11 +3452,32 @@ export class CallSession {
     // facts, no transcript text -- LAW 4: this stays diagnostics, never evidence), the
     // challenge counters, and per-field readback confirmation. Still not the full
     // EngineOutput (ledger, goal, ChallengeSpec detail, quotes are all left out).
+    //
+    // EVALUATE-DIAG-DEDUP-HIDES-GRADING fix (P1, push-53 review, 2026-09-19): the signature
+    // above (verdict/state/goal.code/reasons only) missed a whole class of real transitions --
+    // a readback confirmation moves the readback goal on to its next critical field while
+    // verdict/state/goal.code/reasons all stay exactly the same (rule row 5's `reasons` are
+    // only ever populated on a freeze/terminal verdict, never on an ordinary PENDING-verdict
+    // CONSISTENCY_CHECK/READBACK tick). Three consecutive readback confirmations in one call
+    // therefore wrote NO intermediate `evaluate` diag between them -- and
+    // scripts/rehearse/experienceGrading.ts's `alreadyGraded` check (its `gradedStatusAt`
+    // reads a card's status off exactly these snapshots) almost never fires for a re-asked,
+    // already-answered readback as a result: a genuine repeated-question defect could go
+    // ungraded. `evidenceSignature` below is a stable {id, status} serialization of the FULL
+    // evidence-card set (order is already deterministic -- the engine always builds this array
+    // from the same fixed field/challenge lists -- so no sort is needed); it never carries a
+    // quote or fact, only the two fields `evaluateDiagDetail` already puts on the wire per
+    // card (LAW 4 unaffected). Folding it into the signature means ANY card's status (or the
+    // set of cards) changing is enough to emit a fresh diag, on top of the original four
+    // fields -- this only widens when a diag is WRITTEN; it changes nothing about what
+    // `evaluate()`/`this.last` itself computes.
+    const evidenceSignature = output.evidence.map((card) => ({ id: card.id, status: card.status }));
     const evaluateSignature = JSON.stringify({
       verdict: output.verdict,
       state: output.state,
       goal: output.goal.code,
       reasons: output.reasons,
+      evidence: evidenceSignature,
     });
     if (evaluateSignature !== this.lastEvaluateSignature) {
       this.lastEvaluateSignature = evaluateSignature;

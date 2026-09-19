@@ -133,6 +133,31 @@ describe('repeatedQuestion', () => {
     expect(result.timestamps_s).toEqual([2]);
   });
 
+  // EVALUATE-DIAG-DEDUP-HIDES-GRADING (P1, push-53 review, 2026-09-19): before the
+  // session.ts-side fix (call/session.ts's `applyEvaluate`), a readback confirmation could
+  // change ONLY an evidence card's status while verdict/state/goal.code/reasons all stayed
+  // the same -- the server's own flood-fix dedup then wrote NO intermediate `evaluate`
+  // snapshot between the caller's genuine answer and a later re-ask of the SAME field, so
+  // `gradedStatusAt` had nothing to read and `alreadyGraded` (condition (a) below) almost
+  // never fired for this exact shape. This test is the grader-side half of that fix: it feeds
+  // the diagnostics shape the server now PRODUCES (an `evaluate` snapshot landing right after
+  // the genuine answer, showing the card flipped to PASS) and confirms the re-ask that
+  // follows is still caught as a repeat -- this is the server-side fix's whole payoff; without
+  // that intermediate snapshot present, this same event order would grade 0 (see the
+  // prompt-injection test above, whose `count` is 0 for exactly the case where no snapshot
+  // ever grades the card).
+  it('flags a re-ask of the SAME readback field right after a genuine answer, once the intermediate evaluate snapshot the session-side fix now emits shows the card graded', () => {
+    const b = bundle([
+      readbackIssued(1000, 'amount_usd', 'r1'),
+      userTranscript(1200, "Yes, that's right."),
+      evaluateSnapshot(1300, [{ id: 'ev-readback-amount_usd', status: 'PASS' }]),
+      readbackIssued(1500, 'amount_usd', 'r2'), // re-ask right after a genuine answer
+    ]);
+    const result = repeatedQuestion(b);
+    expect(result.count).toBe(1);
+    expect(result.timestamps_s).toEqual([1.5]);
+  });
+
   it('does not flag a field asked only once', () => {
     const b = bundle([readbackIssued(1000, 'amount_usd', 'r1')]);
     expect(repeatedQuestion(b).count).toBe(0);

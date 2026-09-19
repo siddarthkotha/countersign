@@ -449,6 +449,115 @@ describe('CallSession — Scenario A (Dana, legitimate, fully cooperative) repla
       { field: 'beneficiary', value: 'meridian supply' },
     ]);
   });
+
+  // EVALUATE-DIAG-DEDUP-HIDES-GRADING (P1, found in the push-53 review): `applyEvaluate`'s
+  // flood-fix signature (verdict/state/goal.code/reasons) misses a whole class of real
+  // transitions -- a readback confirmation that flips ONE evidence card's status
+  // (PENDING -> PASS) while the FSM stays in the SAME state/goal.code with the SAME (empty)
+  // `reasons` (rule row 5's own reasons are only ever populated on a freeze/terminal verdict,
+  // never on the ordinary PENDING-verdict CONSISTENCY_CHECK/READBACK tick this test drives
+  // through -- see rules.ts row 5). Three consecutive readback confirmations in one call
+  // therefore produced NO intermediate `evaluate` diagnostics between them on the old code,
+  // which is exactly what let `scripts/rehearse/experienceGrading.ts`'s `alreadyGraded` check
+  // (its own `gradedStatusAt` reads a card's status off these very snapshots) almost never
+  // fire for a re-asked, already-answered readback -- a genuine repeated-question defect could
+  // go ungraded. This test drives the identical first leg of the Scenario A replay above
+  // (through the amount_usd confirmation only) and asserts a fresh `evaluate` diag IS written
+  // the instant `ev-readback-amount_usd` flips PENDING -> PASS, even though verdict/state/
+  // goal.code/reasons are all unchanged from the immediately preceding recorded snapshot.
+  it('EVALUATE-DIAG-DEDUP-HIDES-GRADING: a readback confirmation that changes only an evidence card status (verdict/state/goal.code/reasons unchanged) still emits a fresh evaluate diag', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagnostics: { kind: string; detail: unknown }[] = [];
+    const call: CallContext = { session_id: 'sess-a-diag', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+    const session = new CallSession({
+      session_id: call.session_id,
+      seed: MERIDIAN,
+      call,
+      aai,
+      now: () => clock.now,
+      onServerEvent: (e) => sent.push(e),
+      mock: mockToolResult,
+      onDiagnostic: (kind, detail) => diagnostics.push({ kind, detail }),
+    });
+
+    session.start(); // INTAKE
+
+    // c1: identity + the full request in one utterance (same line as the replay above).
+    clock.now = 1000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c1',
+      text: 'This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday\'s close meeting.',
+    });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+    expect(session.last?.state).toBe('CHALLENGE');
+
+    // a1: the agent puts the trap to the caller.
+    clock.now = 1500;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'a1',
+      text: 'You are requesting a wire transfer of $84,500 to Northgate Partners. Is that correct?',
+      reply_id: 'a1',
+      interrupted: false,
+    });
+    clock.now = 2000;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    // c2: the caller catches the trap -- the challenge passes and row 5 fires
+    // READBACK(amount_usd), verdict still PENDING, reasons still empty.
+    clock.now = 2500;
+    aai.emit({ type: 'transcript.user', item_id: 'c2', text: "No, that's wrong. It's Meridian Supply." });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+    expect(session.last?.state).toBe('CONSISTENCY_CHECK');
+    expect(session.last?.goal.code).toBe('READBACK');
+    expect(session.last?.goal.readback?.field).toBe('amount_usd');
+    expect(session.last?.reasons).toEqual([]);
+
+    // a2: the agent reads back the amount.
+    clock.now = 3000;
+    aai.emit({ type: 'reply.started', reply_id: 'a2' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a2', text: session.last!.goal.hint, reply_id: 'a2', interrupted: false });
+    clock.now = 3500;
+    aai.emit({ type: 'reply.done', reply_id: 'a2', status: 'completed' });
+
+    // Snapshot right before the confirmation that flips the readback card.
+    const evaluateDiagsBefore = diagnostics.filter((d) => d.kind === 'evaluate');
+    expect(evaluateDiagsBefore.length).toBeGreaterThan(0);
+    const lastBefore = evaluateDiagsBefore.at(-1)!.detail as {
+      verdict: unknown;
+      state: unknown;
+      evidence: { id: string; kind: string; status: string }[];
+    };
+    const cardBefore = lastBefore.evidence.find((c) => c.id === 'ev-readback-amount_usd');
+    expect(cardBefore?.status).toBe('PENDING');
+
+    // c3: the caller confirms the amount. verdict/state/goal.code/reasons are all UNCHANGED
+    // from the snapshot just taken (still PENDING/CONSISTENCY_CHECK/READBACK/[]) -- the FSM
+    // simply moves the readback goal on to the next critical field -- but
+    // ev-readback-amount_usd itself flips PENDING -> PASS. This is the load-bearing case: the
+    // pre-fix signature (verdict/state/goal.code/reasons only) is byte-identical across this
+    // transition, so it wrote no new evaluate diag at all.
+    clock.now = 4000;
+    aai.emit({ type: 'transcript.user', item_id: 'c3', text: "Yes, that's right." });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+
+    expect(session.last?.state).toBe('CONSISTENCY_CHECK');
+    expect(session.last?.goal.code).toBe('READBACK');
+    expect(session.last?.goal.readback?.field).toBe('account_last4');
+    expect(session.last?.reasons).toEqual([]);
+
+    const evaluateDiagsAfter = diagnostics.filter((d) => d.kind === 'evaluate');
+    expect(evaluateDiagsAfter.length).toBeGreaterThan(evaluateDiagsBefore.length);
+
+    const lastAfter = evaluateDiagsAfter.at(-1)!.detail as { evidence: { id: string; kind: string; status: string }[] };
+    const cardAfter = lastAfter.evidence.find((c) => c.id === 'ev-readback-amount_usd');
+    expect(cardAfter?.status).toBe('PASS');
+  });
 });
 
 // ---------------------------------------------------------------------------------------
