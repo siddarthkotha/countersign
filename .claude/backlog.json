@@ -3243,10 +3243,11 @@
         "packages/server/src/call/session.ts",
         "scripts/rehearse/experienceGrading.ts"
       ],
-      "status": "held",
-      "held_because": "after the deploy-53 batch; diagnostics-only change, but it is what makes the grader trustworthy for shapes the founder has not hit yet",
+      "status": "done",
+      "held_because": "",
       "agent_id": "",
-      "started_at": ""
+      "started_at": "2026-09-19T17:27:06.105Z",
+      "note": "landed on main 5a439f2 (cherry-pick from the lane), push 54; evaluate diag now also written on any evidence-card status change; risk 1 (bundle volume) checked: cap 2000 events, largest bundle today 107"
     },
     {
       "id": "OUTAGE-2026-09-18-EVENING",
@@ -3264,10 +3265,38 @@
       "files": [
         "scripts/rehearse/**"
       ],
-      "status": "held",
-      "held_because": "needs the founder's machine awake for about 25 minutes",
+      "status": "done",
+      "held_because": "",
       "agent_id": "",
-      "started_at": ""
+      "started_at": "2026-09-19T17:27:06.105Z",
+      "note": "done 2026-09-19 12:36 PM CDT on 9cea373, 8/8 executed, 9.48 est. minutes: repeated_question 0, holding_spam 0; talk_over 2 (both grader jitter false positives, TALK-OVER-FINAL-TRANSCRIPT-EXEMPTION); merged_reply 2 (miller-patient, identity-switch, both FREEZE goodbyes, REAL, new with deploy 53: MERGED-FREEZE-GOODBYE-MILLER). Rollup scripts/rehearse/reports/2026-09-19T12-35-13-batch-rollup.md"
+    },
+    {
+      "id": "TALK-OVER-FINAL-TRANSCRIPT-EXEMPTION",
+      "title": "grader: talk_over case (a) flagged 68.981 s in 2026-09-19T12-28-00-barge-in-interrupt although the caller final transcript landed 12 ms BEFORE reply.started and speech.stopped 81 ms after (jitter, outside the 50 ms tolerance); exempt case (a) when a user transcript for that window already landed at or before reply.started; keep case (b) and the tolerance",
+      "files": [
+        "scripts/rehearse/experienceGrading.ts",
+        "scripts/rehearse/test/experienceGrading.test.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-19T17:29:36.919Z",
+      "note": "landed on main ac74576, push 54; re-grade of the eight 2026-09-19 12:2x bundles: talk_over 0 everywhere, only miller/identity merged_reply 1 remain"
+    },
+    {
+      "id": "MERGED-FREEZE-GOODBYE-MILLER",
+      "title": "server: on deploy 53 every FREEZE reached in the same tick as a preceding speak-now session.update (CONTAIN_NO_DISCLOSURE in miller-patient, READBACK in identity-switch) produces ONE reply whose transcript is the intermediate line + holding beat + the close line with no space (\"...escrow?This transfer is frozen...\"); deterministic 2/2 miller, 1/1 identity-switch on deploy 53; both read merged_reply 0 on deploy 52 (turn_detection sent); STAGE/ESCALATE closes with ANNOUNCE_* intermediates are clean; prime suspect the turn_detection omission re-enabling the automatic reply race",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/src/call/prompt.ts",
+        "packages/server/test/**"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "ae842a39c6d207b48",
+      "started_at": "2026-09-19T17:37:10.185Z",
+      "note": "worktree lane (Sonnet, SONNET-JUSTIFIED: AAI reply/session.update race); root-cause with evidence, TDD fix; merge order: grader lane first, then this one rebases"
     }
   ]
 }
