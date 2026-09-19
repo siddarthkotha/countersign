@@ -403,12 +403,35 @@ export function talkOver(bundle: RehearseDiagnosticBundle): TimestampedCount {
     if (e.kind !== 'reply.started') continue;
     const t = e.t_ms;
 
-    const withinOpenWindow = windows.some(
+    // TALK-OVER-FINAL-TRANSCRIPT-EXEMPTION (2026-09-19): PROVEN false positive, twice, same
+    // day, same shape -- scripts/rehearse/reports/2026-09-19T12-28-00-barge-in-interrupt
+    // .diagnostics.json (speech.started 67466; final user transcript "Yes, that's right." at
+    // 68969; reply.started 68981, 12ms after the transcript; speech.stopped 69062, 81ms after
+    // reply.started) and .../2026-09-19T12-30-53-prompt-injection-midcall.diagnostics.json
+    // (speech.started 90564; transcript "Yes, that's right." at 91965; reply.started 91976,
+    // 11ms after; speech.stopped 92051, 75ms after reply.started). In both, the caller's own
+    // FINAL transcript had already landed (STT finalized the whole utterance) BEFORE
+    // reply.started -- the window only stayed technically "open" because AssemblyAI's separate
+    // speech.stopped signal arrived tens of ms later, wider than TALK_OVER_WINDOW_TOLERANCE_MS
+    // covers on the stop side. No human hears a cutoff when the words were already fully
+    // transcribed before the agent started speaking. This is the same event-arrival-jitter
+    // family the tolerance comment above documents (the 4ms case, harness 10-54-17T35.334s) --
+    // just with a wider gap on the OTHER end of the window. Fix, evidence-based rather than a
+    // bigger tolerance number: skip case (a) entirely for a window whose own final user
+    // transcript already landed at or before this reply.started -- the transcript is direct
+    // proof the utterance was complete, stronger evidence than any fixed millisecond budget.
+    // Windows with NO final transcript yet still use the tolerance check unchanged (below) --
+    // this narrows FALSE positives only; it never suppresses a genuine mid-utterance overlap,
+    // which by definition has no final transcript for that window yet.
+    const owningWindow = windows.find(
       (w) => t >= w.started_ms && (w.stopped_ms === null || t < w.stopped_ms - TALK_OVER_WINDOW_TOLERANCE_MS),
     );
-    if (withinOpenWindow) {
-      timestamps.push(toSec(t));
-      continue;
+    if (owningWindow) {
+      const finalTranscriptAlreadyLanded = userLines.some((u) => u.t_ms >= owningWindow.started_ms && u.t_ms <= t);
+      if (!finalTranscriptAlreadyLanded) {
+        timestamps.push(toSec(t));
+        continue;
+      }
     }
 
     // Most recent caller utterance that ended at or before this reply.started.

@@ -273,13 +273,19 @@ describe('talkOver', () => {
     expect(talkOver(b).count).toBe(0);
   });
 
-  it('flags reply.started that lands well inside an open caller speech window (genuine overlap, not a same-instant race)', () => {
-    const b = bundle([
-      speechStarted(1000),
-      userTranscript(1000, 'placeholder'),
-      replyStarted(1500),
-      speechStopped(3000),
-    ]);
+  // TALK-OVER-FINAL-TRANSCRIPT-EXEMPTION fix (2026-09-19): this test's own fixture used to
+  // carry a `userTranscript(1000, 'placeholder')` landing at the SAME instant as
+  // `speechStarted(1000)` -- physically impossible for a real STT final transcript (it cannot
+  // finalize any words 0ms into the utterance's own audio) but, taken literally by the new
+  // exemption (`finalTranscriptAlreadyLanded`), that placeholder event WOULD have counted as
+  // "this window's final transcript already landed at or before reply.started" and wrongly
+  // suppressed the flag. The placeholder was never load-bearing for what this test actually
+  // proves (a genuine mid-utterance overlap with NO final transcript yet) -- removed so this
+  // stays exactly the "window with no final transcript yet" case the fix's own doc comment
+  // says must keep using the tolerance check unchanged. The assertion itself (count 1) is
+  // unchanged.
+  it('flags reply.started that lands well inside an open caller speech window (genuine overlap, no final transcript yet for that window)', () => {
+    const b = bundle([speechStarted(1000), replyStarted(1500), speechStopped(3000)]);
     expect(talkOver(b).count).toBe(1);
   });
 
@@ -291,6 +297,38 @@ describe('talkOver', () => {
       speechStopped(35338),
     ]);
     expect(talkOver(b).count).toBe(0);
+  });
+
+  // TALK-OVER-FINAL-TRANSCRIPT-EXEMPTION (P1, PROVEN 2026-09-19 twice, same shape, same day):
+  // scripts/rehearse/reports/2026-09-19T12-28-00-barge-in-interrupt.diagnostics.json --
+  // speech.started 67466; the caller's own FINAL transcript "Yes, that's right." lands at
+  // 68969; reply.started fires at 68981 (12ms after the transcript, i.e. AFTER the words were
+  // already fully transcribed); speech.stopped only arrives at 69062, 81ms after
+  // reply.started -- wider than TALK_OVER_WINDOW_TOLERANCE_MS (50ms) covers, so the old code
+  // flagged this as the agent talking over the caller even though the caller's whole utterance
+  // was already on the wire before the agent started speaking. Must read 0.
+  it('does NOT flag reply.started once the caller\'s own FINAL transcript for that speech window already landed before it (PROVEN 2026-09-19T12-28-00-barge-in-interrupt: 67466/68969/68981/69062)', () => {
+    const b = bundle([
+      speechStarted(67466),
+      userTranscript(68969, "Yes, that's right."),
+      replyStarted(68981),
+      speechStopped(69062),
+    ]);
+    expect(talkOver(b).count).toBe(0);
+  });
+
+  // Sibling case: the SAME window shape (started 67466, stopped 69062) but the final
+  // transcript lands AFTER reply.started instead of before it -- proof the caller's words
+  // were NOT yet fully transcribed when the agent started speaking, a genuine overlap the
+  // exemption must still catch. Only the transcript's own timing differs from the test above.
+  it('still flags a genuine overlap when the final transcript lands AFTER reply.started, even in the same window shape as the exemption above', () => {
+    const b = bundle([
+      speechStarted(67466),
+      replyStarted(68981),
+      userTranscript(69000, "Yes, that's right."),
+      speechStopped(69062),
+    ]);
+    expect(talkOver(b).count).toBe(1);
   });
 
   it('never flags the CALLER interrupting the agent (a legitimate barge-in) -- only reply.started events are ever examined', () => {
