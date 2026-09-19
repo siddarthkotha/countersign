@@ -52,21 +52,19 @@ describe('buildInitialSessionUpdate', () => {
     expect(keyterms[0]).toBe('term-0');
   });
 
-  // 2026-09-18 follow-up fix (SONNET-JUSTIFIED lane, founder's SECOND live complaint,
-  // "does not let me complete my sentence" still measured on the deploy that shipped the
-  // first fix -- PROVEN, scripts/rehearse/reports/2026-09-18T15-46-44-barge-in-interrupt
-  // .diagnostics.json, ~6ms reply-start after speech-stop). The first fix (below) stopped
-  // sending min_silence/max_silence but still sent `turn_detection: { vad_threshold: 0.5,
-  // interrupt_response: true }` unconditionally -- the KEY was always present. Live docs
-  // (turn-detection-and-interruptions, re-fetched 2026-09-18) describe full adaptive
-  // behavior as following from "no turn_detection config" being sent at all, not merely an
-  // empty min_silence/max_silence within one -- whether a present-but-partial object is
-  // equivalent to omission is UNDOCUMENTED. So by default the `turn_detection` key is now
-  // OMITTED FROM THE WIRE ENTIRELY -- not sent as `{}`, not sent with default
-  // vad_threshold/interrupt_response restated.
-  it('omits the turn_detection key entirely from the wire when no override is configured', () => {
+  // RESTORED 2026-09-19 (SONNET-JUSTIFIED lane, TURN-DETECTION-RESTORE-EXPLICIT-CONFIG,
+  // see config.ts's "SECOND REVERSAL" doc comment for the full docs quote + deploy 52/53/55
+  // evidence): push 53 (f880b91) had made this OMIT the key entirely, reasoning the docs
+  // tied full adaptive pacing to "no turn_detection config" being sent at all. Re-verified
+  // live docs (2026-09-19) show the pacing-disabling behavior is tied to min_silence/
+  // max_silence being SET, never to vad_threshold/interrupt_response being present -- so
+  // the key is restored, unconditionally, exactly as deploy 52 sent it, with deploy 55's
+  // measured stale-line-first goodbye race (7.98s/17.95s delay) as the live cost of leaving
+  // it omitted.
+  it('sends turn_detection on connect with the documented defaults (vad_threshold 0.5, interrupt_response true) when no override is configured', () => {
     const msg = buildInitialSessionUpdate(cfg());
-    expect(msg.session.input).not.toHaveProperty('turn_detection');
+    const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+    expect(turnDetection).toEqual({ vad_threshold: 0.5, interrupt_response: true });
   });
 
   // 2026-09-18 fix (SONNET-JUSTIFIED lane, founder's "does not let me complete my
@@ -75,22 +73,27 @@ describe('buildInitialSessionUpdate', () => {
   // entity-aware waiting described above for the rest of the session. Prefer leaving them
   // unset." -- so by default neither key is sent at all, letting AssemblyAI's own adaptive
   // system decide (see config.ts's own doc comment for the measured trade-off that ruled
-  // out just raising the old fixed 600ms value instead).
+  // out just raising the old fixed 600ms value instead). Still true after the 2026-09-19
+  // restore above: only min_silence/max_silence stay omitted -- vad_threshold/
+  // interrupt_response are sent (previous test), because the docs never tie those two to
+  // disabling adaptive pacing.
   it('omits min_silence and max_silence entirely by default (AssemblyAI adaptive pacing/entity-aware waiting stays on)', () => {
     const msg = buildInitialSessionUpdate(cfg());
-    expect(msg.session.input).not.toHaveProperty('turn_detection');
+    const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+    expect(turnDetection).not.toHaveProperty('min_silence');
+    expect(turnDetection).not.toHaveProperty('max_silence');
   });
 
-  it('lets a caller override turn_detection fields -- min_silence sent exactly as given when explicitly set, and no other field is backfilled', () => {
+  it('lets a caller override turn_detection fields -- min_silence sent exactly as given when explicitly set, alongside the defaulted vad_threshold/interrupt_response', () => {
     const msg = buildInitialSessionUpdate(cfg({ turn_detection: { min_silence: 1200 } }));
     const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
-    expect(turnDetection).toEqual({ min_silence: 1200 });
+    expect(turnDetection).toEqual({ vad_threshold: 0.5, interrupt_response: true, min_silence: 1200 });
   });
 
-  it('lets a caller override max_silence independently of min_silence, with no other field backfilled', () => {
+  it('lets a caller override max_silence independently of min_silence, alongside the defaulted vad_threshold/interrupt_response', () => {
     const msg = buildInitialSessionUpdate(cfg({ turn_detection: { max_silence: 5000 } }));
     const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
-    expect(turnDetection).toEqual({ max_silence: 5000 });
+    expect(turnDetection).toEqual({ vad_threshold: 0.5, interrupt_response: true, max_silence: 5000 });
   });
 
   it('lets a caller override vad_threshold or interrupt_response explicitly, sent exactly as given', () => {

@@ -174,6 +174,49 @@ export interface TurnDetectionConfig {
 // (no min_silence/max_silence) for EVERY goal, patient or default -- no constant is exported
 // here for that floor any more since none is sent. Live effect of this second change is also
 // UNKNOWN until the next rehearsal batch measures it.
+//
+// SECOND REVERSAL (2026-09-19, this SONNET-JUSTIFIED lane, TURN-DETECTION-RESTORE-EXPLICIT-
+// CONFIG): push 53 (commit f880b91, 2026-09-18 4:04 PM) went one step further than the
+// REVERSAL above and stopped sending the `turn_detection` KEY AT ALL on connect -- on the
+// reading that the docs tie full adaptive pacing to "no turn_detection config" being sent,
+// not merely to min_silence/max_silence being absent from one that IS sent. Re-verified
+// VERBATIM against the live docs today (2026-09-19 1:39 PM,
+// https://www.assemblyai.com/docs/voice-agents/voice-agent-api/turn-detection-and-interruptions,
+// copied character for character): "Setting `min_silence` or `max_silence` turns off the
+// adaptive pacing and entity-aware waiting described above for the rest of the session." and
+// "With no `turn_detection` config, the agent adapts to each speaker's pace and automatically
+// slows down to capture values your tools need, like a phone number or email." The docs name
+// FIVE `turn_detection` sub-fields: vad_threshold, min_silence, max_silence,
+// interrupt_response, interruption_delay -- and tie the pacing-disabling behavior to
+// min_silence/max_silence specifically, never to vad_threshold or interrupt_response. So the
+// 2026-09-18 reading (this file's own comment on `buildInitialSessionUpdate`, below, until
+// this reversal) was WRONG about which fields disable adaptive pacing: a present-but-partial
+// `turn_detection` object carrying only vad_threshold/interrupt_response was never the
+// documented trigger -- min_silence/max_silence being SET is, and this file already omits
+// both of those by default.
+//
+// Live evidence this reversal is the right call, not just a docs re-reading (full quotes,
+// methodology and the seven-client-event/no-auto-cancel verification: docs/
+// ASSEMBLYAI_INTEGRATION.md, "VERIFY-AT-BUILD re-check 2026-09-19 (turn_detection
+// restored)"): on deploy 52 (2be1d3e, turn_detection SENT with vad_threshold/
+// interrupt_response) the CLOSE goodbye in the miller-patient bundle went out as OUR reply
+// (`ours:true`, `scripts/rehearse/reports/2026-09-18T15-52-39-miller-patient
+// .diagnostics.json`) with no glued/merged text; on deploy 53 (f880b91, key omitted
+// entirely) the automatic reply raced ours and merged text into one reply_id on 3/3 CLOSE
+// turns that day (docs/AUTOPILOT_LOG.md, 2026-09-19 12:37 PM entry, MERGED-FREEZE-GOODBYE-
+// MILLER); on deploy 55 (turn_detection still omitted, plus 76969ee's forceSpeak deferral)
+// the merge is gone but an ambient automatic reply now reliably starts BEFORE our forced
+// CLOSE reply and speaks a stale pre-verdict line first, adding measured goodbye_delay of
+// 7.98s (miller-patient, `2026-09-19T13-28-41-miller-patient.diagnostics.json`) and 17.95s
+// (identity-switch, `2026-09-19T13-30-33-identity-switch.diagnostics.json`) before the real
+// goodbye is ever spoken. Restoring the connect-time `turn_detection: {vad_threshold: 0.5,
+// interrupt_response: true}` (exactly what deploy 52 sent) puts the CLOSE reply back in the
+// position of winning that race outright in the common case, the way it did on deploy 52 --
+// while 76969ee's deferral logic stays in place underneath as the safety net for whenever an
+// automatic reply still starts first. `call/session.ts`'s own per-goal session.update is
+// UNCHANGED by this reversal: it still omits `turn_detection` entirely on every goal change
+// (never resending `{}`), since that omission was never the field this reversal is about --
+// only the CONNECT-time defaults are restored here.
 
 export interface AaiSessionConfig {
   assemblyai_api_key: string;
@@ -223,44 +266,31 @@ export interface SessionUpdateMessage {
  *  goal change) must never touch voice, output.format.encoding, or greeting -- see the
  *  module doc comment.
  *
- *  `min_silence`/`max_silence` (2026-09-18 fix, see the `TurnDetectionConfig` doc comment
- *  above for the full docs quote + measured trade-off): OMITTED from the wire payload
- *  unless `cfg.turn_detection` explicitly sets one, so AssemblyAI's own adaptive pacing /
- *  entity-aware waiting runs by default instead of the old flat 600ms/4000ms floor. An
- *  explicit override (a caller-supplied `cfg.turn_detection.min_silence`/`max_silence`)
- *  is still sent exactly as given -- `call/session.ts`'s own 'patient'-goal branch relies
- *  on this to keep sending its own explicit 1200ms floor unchanged. */
+ *  `turn_detection` (RESTORED 2026-09-19, see the SECOND REVERSAL doc comment on
+ *  `TurnDetectionConfig` above for the full docs quote + deploy 52/53/55 evidence): the key
+ *  is now ALWAYS present on connect, exactly as deploy 52 sent it -- `vad_threshold`
+ *  defaults to 0.5 and `interrupt_response` defaults to true unless `cfg.turn_detection`
+ *  overrides them. `min_silence`/`max_silence` stay OMITTED unless `cfg.turn_detection`
+ *  explicitly sets one, so AssemblyAI's own adaptive pacing / entity-aware waiting still
+ *  runs by default (the docs tie disabling that behavior to min_silence/max_silence being
+ *  SET, never to vad_threshold/interrupt_response being present) -- an explicit override is
+ *  still sent exactly as given alongside the two defaulted fields. `call/session.ts`'s own
+ *  per-goal session.update is UNCHANGED: it still omits `turn_detection` entirely on every
+ *  goal change unless a caller-supplied override sets a field. */
 export function buildInitialSessionUpdate(cfg: AaiSessionConfig): SessionUpdateMessage {
   const keyterms = cfg.keyterms.slice(0, 100);
-  // 2026-09-18 re-check (this lane, same day, follow-up to the ANALYSIS/REVERSAL comments
-  // above): the previous pass omitted min_silence/max_silence but still sent
-  // `turn_detection: { vad_threshold: 0.5, interrupt_response: true }` unconditionally --
-  // the key was always PRESENT on the wire, just without the two fields the docs name.
-  // Re-fetched live docs today (docs/ASSEMBLYAI_INTEGRATION.md, "VERIFY-AT-BUILD re-check
-  // 2026-09-18 (turn_detection key presence)") found: "With no turn_detection config, the
-  // agent adapts to each speaker's pace..." -- the documented description of full adaptive
-  // behavior is tied to NO turn_detection config being sent, not merely to min_silence/
-  // max_silence being absent from a config that IS sent. The docs never say whether a
-  // present-but-partial object (vad_threshold/interrupt_response only) is equivalent to
-  // omission -- UNKNOWN, undocumented. Since the founder's own live recording still showed
-  // an ~immediate (6ms) reply after this first fix shipped (deploy 2be1d3e, PROVEN,
-  // scripts/rehearse/reports/2026-09-18T15-46-44-barge-in-interrupt.diagnostics.json), this
-  // pass closes that gap: `turn_detection` is now OMITTED from the wire entirely unless the
-  // caller explicitly sets at least one field, in which case only the fields actually given
-  // are sent -- no default vad_threshold/interrupt_response backfilled any more, since
-  // restating documented defaults is itself an undocumented case the docs never rule out.
-  const turnDetection: Record<string, unknown> = {};
-  if (cfg.turn_detection?.vad_threshold !== undefined) turnDetection.vad_threshold = cfg.turn_detection.vad_threshold;
+  const turnDetection: Record<string, unknown> = {
+    vad_threshold: cfg.turn_detection?.vad_threshold ?? 0.5,
+    interrupt_response: cfg.turn_detection?.interrupt_response ?? true,
+  };
   if (cfg.turn_detection?.min_silence !== undefined) turnDetection.min_silence = cfg.turn_detection.min_silence;
   if (cfg.turn_detection?.max_silence !== undefined) turnDetection.max_silence = cfg.turn_detection.max_silence;
-  if (cfg.turn_detection?.interrupt_response !== undefined)
-    turnDetection.interrupt_response = cfg.turn_detection.interrupt_response;
 
   const input: Record<string, unknown> = {
     format: { encoding: AUDIO_ENCODING },
     keyterms,
+    turn_detection: turnDetection,
   };
-  if (Object.keys(turnDetection).length > 0) input.turn_detection = turnDetection;
 
   const session: Record<string, unknown> = {
     system_prompt: cfg.system_prompt,
