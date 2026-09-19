@@ -3305,9 +3305,74 @@
         "packages/server/src/call/session.ts"
       ],
       "status": "held",
-      "held_because": "UNKNOWN cause; needs a live-call diagnostic before any fix (lane finding 2026-09-19 1:24 PM)",
+      "held_because": "diag landed on main 243c01a (push 56): reply.audio.summary per reply plus a Timings line in the report; the lane read from existing bundles is that reply.audio frames carry no reply_id, so a new reply.started 12 ms after the goodbye reply.done takes the goodbye trailing audio and drops it under suppression (barge-in 12-28-00: 1.26 s span for an 86-char line vs 7.5 s clean). Settle with the next batch numbers, then fix",
+      "agent_id": "",
+      "started_at": "2026-09-19T18:28:01.911Z",
+      "note": "diagnostics-only lane (Sonnet, SONNET-JUSTIFIED: reply.audio/reply.done timing): per-reply audio summary event so the next batch answers whether frames arrive after reply.done; no behaviour change"
+    },
+    {
+      "id": "DEPLOY-55-BATCH",
+      "title": "10-run graded batch on deploy 55 (b6fcd8f): miller-patient and identity-switch twice each plus the other six; proves MERGED-FREEZE-GOODBYE-MILLER live and measures the 150 ms goodbye deferral via goodbye_delay",
+      "files": [
+        "scripts/rehearse/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-19T18:28:01.911Z",
+      "note": "done 2026-09-19 1:40 PM CDT, 10/10 executed 1:27 to 1:40 PM: merged_reply 0 in all ten (MERGED-FREEZE-GOODBYE-MILLER proven live 4/4 on the reproducing cases); talk_over 3 (miller x2, identity x1, all the CLOSE-CATCHUP-OVER-CALLER-BARGE-IN shape); repeated 1 (AMBIENT-DOUBLE-TURN-END-REPEAT, AssemblyAI-side); holding 0; goodbye_delay 5.3 to 18.0 s versus about 1 s on deploy 53 and 2.9 s on deploy 52, the cost of the automatic reply now winning every close (STALE-AMBIENT-LINE-AFTER-VERDICT). Rollup scripts/rehearse/reports/2026-09-19T13-40-38-batch-rollup.md"
+    },
+    {
+      "id": "CLOSE-CATCHUP-OVER-CALLER-BARGE-IN",
+      "title": "server: on deploy 55 (2026-09-19T13-28-41-miller-patient) the caller barged in on the ambient containment reply (input.speech.started 46245, reply.done interrupted 46245) and maybeSendReplyCreateAfterReplyDone sent the CLOSE 1 ms later, so the goodbye played over the caller for 3.6 s (talk_over 1 at 46.26 s, real). merged_reply 0: the deferral fix holds. Fix: keep the forceSpeak send owed while the caller speech window is open or the reply ended interrupted; send after the turn ends through the settle deferral; never droppable",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/test/**"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "a18bdcbd0737a6f50",
+      "started_at": "2026-09-19T18:30:24.520Z",
+      "note": "worktree lane (Sonnet, SONNET-JUSTIFIED: reply.done interrupted / caller speech state); merge order: diag lane first, then this"
+    },
+    {
+      "id": "STALE-AMBIENT-LINE-AFTER-VERDICT",
+      "title": "live: after a terminal verdict reached on the caller turn, the AssemblyAI automatic reply speaks a stale line generated from pre-verdict instructions before our deferred goodbye can go out (deploy 55, 2026-09-19T13-30-33-identity-switch: 9.1 s improvised Please state the purpose... then the goodbye; goodbye_delay 17.95 s; 13-28-41-miller: 3.7 s stale escrow re-ask). Grader does not flag it (goodbye_delay is informational). Cancel of an in-flight reply is UNKNOWN in the protocol; options: disable automatic replies if the API allows, or a holding-beat instruction the model actually obeys; measure before choosing",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/src/call/prompt.ts",
+        "docs/ASSEMBLYAI_INTEGRATION.md"
+      ],
+      "status": "held",
+      "held_because": "no API switch exists (verified verbatim 2026-09-19 1:39 PM: seven client events, none cancels; no session field disables automatic replies); remedy under test via TURN-DETECTION-RESTORE-EXPLICIT-CONFIG, then re-measure",
       "agent_id": "",
       "started_at": ""
+    },
+    {
+      "id": "AMBIENT-DOUBLE-TURN-END-REPEAT",
+      "title": "live: a phantom 1 ms caller speech window (66035 to 66036) followed by a duplicate STT transcript (That is right, 66335) after the real Yes that is right (65135) gave AssemblyAI two turn-ends, and its automatic reply asked the beneficiary readback twice (resp_25ab at 65145 and resp_8d80 at 67160, both ours:false); we sent nothing. Grader repeated_question 1 at 73.0 s, and a human hears the question twice. Deploy 55, 2026-09-19T13-31-59-corrected-critical-field. Nothing on our side to suppress unless automatic replies can be disabled",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "docs/ASSEMBLYAI_INTEGRATION.md"
+      ],
+      "status": "held",
+      "held_because": "no API switch exists (verified verbatim 2026-09-19 1:39 PM: seven client events, none cancels; no session field disables automatic replies); remedy under test via TURN-DETECTION-RESTORE-EXPLICIT-CONFIG, then re-measure",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "TURN-DETECTION-RESTORE-EXPLICIT-CONFIG",
+      "title": "server/aai: restore connect-time turn_detection {vad_threshold 0.5, interrupt_response true} (deploy-52 shape, no min/max_silence) and keep omitting the key on goal updates. Verified verbatim 2026-09-19: only min_silence/max_silence turn off adaptive pacing, so the push-53 rationale for omitting the key was wrong; deploy 52 closes were ours:true and fast, deploy 55 closes are ours:false with a stale line first (goodbye 4 to 18 s). No API switch disables automatic replies and no client event cancels a reply (seven client events verified)",
+      "files": [
+        "packages/server/src/aai/config.ts",
+        "packages/server/test/**",
+        "docs/ASSEMBLYAI_INTEGRATION.md"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "a03b8762720f5a398",
+      "started_at": "2026-09-19T18:40:40.769Z",
+      "note": "worktree lane (Sonnet); single reversible change; batch after it to compare goodbye_delay and the four counts against deploy 55"
     }
   ]
 }
