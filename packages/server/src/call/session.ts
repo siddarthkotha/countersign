@@ -964,6 +964,41 @@ export class CallSession {
    *  the rest of the call. Null whenever nothing caller-turn-triggered is currently owed. */
   private owedQuestionGoalKey: string | null = null;
 
+  /** MERGED-FREEZE-GOODBYE fix (2026-09-19, PROVEN live/harness: scripts/rehearse/reports/
+   *  2026-09-19T12-33-07-miller-patient.diagnostics.json and .../2026-09-19T12-34-38-identity-
+   *  switch.diagnostics.json): sibling of `owedQuestionGoalKey`, same lifecycle, but for a
+   *  `mustForceSpeak` goal (CLOSE/ANNOUNCE_*) reached on a CALLER-TURN-TRIGGERED tick
+   *  (`callerTurnTick`) instead of a fresh question. The 2026-09-18 P0 fix above
+   *  (`AUTOMATIC_REPLY_SETTLE_MS`) assumed "CLOSE/ANNOUNCE_* forceSpeak-only transitions...
+   *  keep sending immediately... never for CLOSE/ANNOUNCE_*, which carry none of this race" --
+   *  PROVEN wrong by both bundles above: a terminal FREEZE reached in the SAME tick as the
+   *  caller's own utterance ending (`callerTurnTick` true, the identical 0-4ms gap the P0 fix
+   *  measured for fresh questions) raced AssemblyAI's own automatic reply for that same turn
+   *  just as tightly, and AssemblyAI folded both into ONE reply whose transcript concatenated
+   *  the automatic reply's own words directly onto our CLOSE sentence with no separator --
+   *  e.g. "One moment. Which institution holds the Hartwell escrow?This transfer is frozen and
+   *  an incident is open. The payment is not released. Goodbye." A NON-callerTurnTick forceSpeak
+   *  (a STAGE/ESCALATE/FREEZE decision reached after an async server-lookup/terminal-action
+   *  cascade with no caller utterance immediately preceding it) has no fresh caller turn for
+   *  AssemblyAI to have spawned an automatic reply against, so that path is genuinely unaffected
+   *  and stays synchronous, unchanged -- see `maybeSendReplyCreateForTick`'s own `callerTurnTick`
+   *  branch. `maybeSendReplyCreateAfterReplyDone`'s catch-up for this case DOES need this key as
+   *  its own explicit check, same as `owedQuestionGoalKey` -- a bare `mustForceSpeak(label,
+   *  current)` re-check alone is NOT enough (PROVEN with a fake-clock unit test, (e-1b) in
+   *  design-e-turn-order.test.ts): by the time the ambient reply for the SAME turn actually
+   *  starts, `this.last.goal` has usually ALREADY advanced to the terminal goal (computed
+   *  synchronously, well before AssemblyAI's own `reply.started` round-trips back), so an
+   *  UNINSTRUCTED reply's own label (`reply.started`'s `requestedGoal` fallback reads
+   *  `this.last.goal.code` at that instant) ends up recording the SAME code as `current` --
+   *  `mustForceSpeak` sees `fromCode === toCode` and returns false, a false negative that would
+   *  otherwise silently drop the deferred send forever. This key is checked as its own
+   *  independent, OR'd condition there for exactly that reason, never folded into
+   *  `mustForceSpeak` itself. Also read by `armTickEndSendTimer`'s own bounded fallback (nothing
+   *  ever starts speaking in the settle window) to know there is still a forceSpeak send
+   *  outstanding for the EXACT rendering it was armed for. Null whenever no caller-turn-triggered
+   *  forceSpeak send is currently owed. */
+  private owedForceSpeakGoalKey: string | null = null;
+
   /** Design E (2026-09-15): true only for the ONE `tick()` immediately following a
    *  `transcript.user` event -- set by `dispatchAaiEvent`'s own `transcript.user` branch,
    *  consumed and cleared inside `tick()` itself so it can never leak into a LATER, unrelated
@@ -3689,13 +3724,32 @@ export class CallSession {
     // `freshQuestion` is false -- the goal just moved to something that must be spoken NOW
     // (CLOSE, ANNOUNCE_*, or a HOLDING_GOALS exit) and is itself not a fresh question. Any
     // tick-end settle timer armed by an EARLIER caller-turn tick's fresh question is now moot
-    // -- the call has moved on to a different rendering being sent synchronously right below.
-    // `armTickEndSendTimer`'s own fire-time re-validation (comparing `owedQuestionGoalKey`
-    // against the CURRENT goal) would also catch this later, on its own, but clearing here
-    // avoids leaving a dangling timer to no-op for the rest of the settle window and matches
-    // the review's explicit ask ("clear ... on a goal change to a non-question goal").
+    // -- the call has moved on to a different rendering, sent (synchronously or deferred,
+    // per the MERGED-FREEZE-GOODBYE fix immediately below) right here instead.
     this.clearTickEndSendTimer();
     this.owedQuestionGoalKey = null;
+    this.owedForceSpeakGoalKey = null;
+    // MERGED-FREEZE-GOODBYE fix (2026-09-19, see `owedForceSpeakGoalKey`'s own class-field doc
+    // comment for the full PROVEN incident): a forceSpeak goal (CLOSE/ANNOUNCE_*) reached on a
+    // CALLER-TURN-TRIGGERED tick races AssemblyAI's own automatic reply for that SAME turn
+    // exactly as tightly as a fresh question does -- sending synchronously here is what let the
+    // two collide into one merged, word-salad reply live. Deferred the identical
+    // `AUTOMATIC_REPLY_SETTLE_MS` way the freshQuestion branch above already is: if nothing
+    // starts speaking within the window, the fallback below still sends -- a callerTurnTick with
+    // no automatic reply coming (the common case) never stalls the goodbye. If AssemblyAI's own
+    // automatic reply DOES start within the window, this send is skipped here and
+    // `maybeSendReplyCreateAfterReplyDone`'s own `owedForceSpeak` check (see that method's own
+    // doc comment for why the bare `mustForceSpeak` re-check alone is NOT enough here) sends it
+    // once that ambient reply's own `reply.done` arrives, never overlapping it.
+    // A NON-callerTurnTick forceSpeak (a STAGE/ESCALATE/FREEZE decision settled after an async
+    // server-lookup/terminal-action cascade, with no caller utterance immediately preceding it)
+    // has no fresh caller turn for AssemblyAI to have spawned an automatic reply against -- that
+    // path carries none of this race and keeps sending synchronously, unchanged.
+    if (callerTurnTick) {
+      this.owedForceSpeakGoalKey = JSON.stringify(goal);
+      this.armTickEndSendTimer();
+      return;
+    }
     this.sendReplyCreate(finalGoal, 'tick_end', this.instructedSentenceFor(goal));
   }
 
@@ -3775,13 +3829,22 @@ export class CallSession {
       // recorded when it was armed -- if that key is gone (already sent some other way) or
       // no longer matches the CURRENT goal (the call moved on), there is nothing left to
       // send. Same convention `maybeSendReplyCreateAfterReplyDone`'s `owedQuestion` check
-      // already uses.
-      if (this.owedQuestionGoalKey === null || this.owedQuestionGoalKey !== JSON.stringify(goal)) return;
+      // already uses. MERGED-FREEZE-GOODBYE fix (2026-09-19): `owedForceSpeakGoalKey` is the
+      // sibling check for a deferred CLOSE/ANNOUNCE_* forceSpeak send -- see that field's own
+      // class-field doc comment. Exactly one of the two keys is ever set for a given arm (the
+      // `freshQuestion`/`forceSpeak` branches in `maybeSendReplyCreateForTick` are mutually
+      // exclusive), so there is no ordering question between them here.
+      const goalKey = JSON.stringify(goal);
+      const owedQuestion = this.owedQuestionGoalKey !== null && this.owedQuestionGoalKey === goalKey;
+      const owedForceSpeak = this.owedForceSpeakGoalKey !== null && this.owedForceSpeakGoalKey === goalKey;
+      if (!owedQuestion && !owedForceSpeak) return;
       // An automatic reply (or anything else) started in the settle window -- the busy-guard
-      // catch-up path (`maybeSendReplyCreateAfterReplyDone`, reading `owedQuestionGoalKey`,
-      // still set) owns sending this once whatever is speaking now finishes.
+      // catch-up path (`maybeSendReplyCreateAfterReplyDone`, reading `owedQuestionGoalKey` or,
+      // for forceSpeak, its own unconditional `mustForceSpeak` check) owns sending this once
+      // whatever is speaking now finishes.
       if (this.speaking || this.replyCreateAwaitingStart) return;
       this.owedQuestionGoalKey = null;
+      this.owedForceSpeakGoalKey = null;
       this.sendReplyCreate(goal.code, 'tick_end', this.instructedSentenceFor(goal));
     }, CallSession.AUTOMATIC_REPLY_SETTLE_MS);
   }
@@ -3966,15 +4029,34 @@ export class CallSession {
    *  (often UNLABELLED -- an AssemblyAI ambient reply we never instructed) already covered this
    *  rendering (`replyCoversCurrentRendering` -- either the exact composed sentence, or a
    *  paraphrase that still names the rendering's own load-bearing value), and skips the send
-   *  if so. */
+   *  if so.
+   *
+   *  MERGED-FREEZE-GOODBYE fix (2026-09-19): `owedForceSpeak` is the sibling check for a
+   *  deferred CLOSE/ANNOUNCE_* send (`owedForceSpeakGoalKey`, armed by
+   *  `maybeSendReplyCreateForTick`'s `callerTurnTick` branch) -- deliberately CHECKED
+   *  SEPARATELY from, and OR'd with, the bare `mustForceSpeak(label, current)` re-check just
+   *  below, never folded into it. Reason (PROVEN with a fake-clock unit test, (e-1b) in
+   *  design-e-turn-order.test.ts): by the time an ambient reply for the SAME turn actually
+   *  starts, `this.last.goal` has usually ALREADY advanced to the terminal goal (CLOSE is
+   *  computed synchronously, well before AssemblyAI's own `reply.started` round-trips back) --
+   *  `reply.started`'s own handler labels an UNINSTRUCTED reply with whatever `this.last.goal.code`
+   *  reads AT THAT INSTANT (see that case's own `requestedGoal` fallback), so `replyGoalAtStart`
+   *  ends up recording 'CLOSE' for the ambient reply too. `mustForceSpeak(label, current)` then
+   *  sees `fromCode === toCode` ('CLOSE' === 'CLOSE') and returns false -- a false negative that
+   *  would otherwise silently drop the deferred CLOSE forever, the exact opposite failure from
+   *  the one this whole fix exists to close. `owedForceSpeakGoalKey` is authoritative regardless
+   *  of that same-code coincidence: it is set only when a REAL send was deferred and not yet
+   *  satisfied, so its presence alone is proof a send is still owed. */
   private maybeSendReplyCreateAfterReplyDone(replyId: string): void {
     if (this.ended || !this.last) return;
     if (this.speaking || this.replyCreateAwaitingStart) return;
     const goal = this.last.goal;
     const label = this.replyGoalAtStart.get(replyId) ?? null;
     const current = goal.code;
-    const owedQuestion = this.owedQuestionGoalKey !== null && this.owedQuestionGoalKey === JSON.stringify(goal);
-    if (!this.mustForceSpeak(label, current) && !owedQuestion) return;
+    const goalKey = JSON.stringify(goal);
+    const owedQuestion = this.owedQuestionGoalKey !== null && this.owedQuestionGoalKey === goalKey;
+    const owedForceSpeak = this.owedForceSpeakGoalKey !== null && this.owedForceSpeakGoalKey === goalKey;
+    if (!this.mustForceSpeak(label, current) && !owedQuestion && !owedForceSpeak) return;
     if (owedQuestion) {
       // Double-ask fix (2026-09-18 continued, P1 -- PROVEN live from
       // scripts/rehearse/reports/2026-09-18T14-50-21-dana-patient.diagnostics.json): before
@@ -4040,6 +4122,19 @@ export class CallSession {
       // (see `clearTickEndSendTimer`'s own doc comment for the PROVEN test failure this closes).
       this.clearTickEndSendTimer();
     }
+    // MERGED-FREEZE-GOODBYE fix (2026-09-19): reached unconditionally here -- whether this send
+    // was the `owedQuestion` catch-up above, or a plain `mustForceSpeak` catch-up for a
+    // CLOSE/ANNOUNCE_* goal whose own settle timer (`owedForceSpeakGoalKey`, armed by
+    // `maybeSendReplyCreateForTick`'s callerTurnTick branch) is still pending. Clearing here,
+    // not just there, closes the identical stale-timer double-send `clearTickEndSendTimer`'s own
+    // doc comment already documents for `owedQuestion`: without it, this catch-up send (fired
+    // the instant the ambient reply's own `reply.done` arrived) would leave that settle timer
+    // armed to fire later, re-checking only `this.speaking`/`replyCreateAwaitingStart` (both
+    // false again by then) and firing a second, stale `reply.create` for the SAME already-sent
+    // rendering. A no-op whenever `owedForceSpeakGoalKey` was never set (every QUESTION_GOALS
+    // catch-up, and every forceSpeak catch-up NOT preceded by a deferred send at all).
+    this.owedForceSpeakGoalKey = null;
+    this.clearTickEndSendTimer();
     this.sendReplyCreate(current, 'reply_done_goal_diverged', this.instructedSentenceFor(goal));
   }
 

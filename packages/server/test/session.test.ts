@@ -1376,8 +1376,14 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
 
     clock.now = 7000;
     aai.emit({ type: 'transcript.user', item_id: 'c5', text: "Yes, that's right." });
-    // c5's own tick reaches SEALED/CLOSE -- CLOSE is a `forceSpeak`-only transition (not a
-    // QUESTION_GOALS code), so it is UNAFFECTED by the P0 fix and still sends synchronously.
+    // MERGED-FREEZE-GOODBYE fix (2026-09-19, call/session.ts's own `owedForceSpeakGoalKey` doc
+    // comment): c5's own tick reaches SEALED/CLOSE directly off this caller turn
+    // (`callerTurnTick`) -- CLOSE is a `forceSpeak` transition, and a forceSpeak reached on a
+    // callerTurnTick is now ALSO deferred by AUTOMATIC_REPLY_SETTLE_MS, same as a fresh
+    // question (the earlier comment here, "UNAFFECTED... still sends synchronously", was the
+    // exact wrong assumption PROVEN by the MERGED-FREEZE-GOODBYE-MILLER live defect). Nothing
+    // else starts speaking in this drive, so the fallback send fires once the window elapses.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
   }
 
   afterEach(() => {
@@ -2134,11 +2140,16 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
 
     clock.now = 4000;
     aai.emit({ type: 'transcript.user', item_id: 'c3', text: scenarioB.conversation[4]!.text });
-    // c3's own tick reaches FREEZE/SEALED/CLOSE entirely from server-driven lookups -- nothing
-    // is speaking (a2 already completed), so THIS is where the first reply.create for CLOSE
-    // (reason tick_end) goes out for real. CLOSE itself is a `forceSpeak`-only transition
-    // (not a QUESTION_GOALS code), so it is UNAFFECTED by the P0 fix and still sends
-    // synchronously here, unchanged.
+    // c3's own tick reaches FREEZE/SEALED/CLOSE entirely from server-driven lookups, triggered
+    // by THIS caller turn (`callerTurnTick`). MERGED-FREEZE-GOODBYE fix (2026-09-19,
+    // call/session.ts's own `owedForceSpeakGoalKey` doc comment): a forceSpeak transition
+    // (CLOSE) reached on a callerTurnTick is now ALSO deferred by AUTOMATIC_REPLY_SETTLE_MS,
+    // same as a fresh question (the earlier comment here, "UNAFFECTED... still sends
+    // synchronously", was the exact wrong assumption PROVEN by the MERGED-FREEZE-GOODBYE-MILLER
+    // live defect). Nothing is speaking (a2 already completed) and nothing else starts within
+    // the window, so the fallback send fires once it elapses -- still the first reply.create
+    // for CLOSE (reason tick_end), just no longer synchronous with c3 itself.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
   }
 
   // Round 4 (2026-09-14, time-budget fix): the retry no longer fires synchronously off
@@ -2314,10 +2325,14 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
 
     // Nothing ever answers the outstanding (4th) request again -- the "lost" reply.create
     // timeout (1500ms) and the retry gap (400ms) keep re-sending it roughly every 1900ms,
-    // but only the 45s absolute budget (armed the instant CLOSE was first reached) ends the
-    // call. Three (1500+400)ms transcript-wait+retry cycles = 5700ms already elapsed above;
-    // the remaining 39,299ms closes the gap to exactly CLOSE_TOTAL_MS.
-    vi.advanceTimersByTime(39_299);
+    // but only the 45s absolute budget (armed the instant CLOSE was first reached, inside
+    // `driveToFreezeCloseWithFirstSend`'s own c3 tick) ends the call. MERGED-FREEZE-GOODBYE fix
+    // (2026-09-19): that helper's own trailing `vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS)`
+    // (the deferred CLOSE send's settle window) already consumes 150ms of the 45s budget BEFORE
+    // returning here, so the remaining gap to CLOSE_TOTAL_MS is 150ms shorter than it used to be.
+    // Three (1500+400)ms transcript-wait+retry cycles = 5700ms already elapsed above; the
+    // remaining 39,299 - AUTOMATIC_REPLY_SETTLE_MS closes the gap to exactly CLOSE_TOTAL_MS.
+    vi.advanceTimersByTime(39_299 - AUTOMATIC_REPLY_SETTLE_MS);
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
     vi.advanceTimersByTime(1);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
@@ -2640,6 +2655,12 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
 
     clock.now = 4000;
     aai.emit({ type: 'transcript.user', item_id: 'c3', text: scenarioB.conversation[4]!.text });
+    // MERGED-FREEZE-GOODBYE fix (2026-09-19, call/session.ts's own `owedForceSpeakGoalKey` doc
+    // comment): c3's own tick reaches FREEZE/SEALED/CLOSE directly off this caller turn
+    // (`callerTurnTick`) -- the CLOSE `reply.create` is now deferred by
+    // AUTOMATIC_REPLY_SETTLE_MS, same as a fresh question. Nothing else starts speaking, so the
+    // fallback send fires once the window elapses.
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
   }
 
   it('(a) a NEW reply.started after the goodbye is transcript-confirmed has its audio frames dropped, logs post_goodbye_reply_suppressed once, and the call still ends agent_closed on the unchanged schedule', () => {

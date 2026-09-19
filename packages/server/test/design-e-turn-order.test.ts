@@ -38,6 +38,7 @@ import { MERIDIAN, mockToolResult } from '@countersign/engine';
 import type { CallContext, ServerEvent } from '@countersign/engine';
 import { CallSession } from '../src/call/session.js';
 import { FakeAaiSocket } from '../src/aai/fake.js';
+import { ENGINE_CLOSE_SENTENCES } from '../src/call/closeMatch.js';
 import scenarioB from '../../engine/corpus/scenario-b-miller-fraud.json' with { type: 'json' };
 
 const CALL_B = scenarioB.call as CallContext;
@@ -395,6 +396,126 @@ describe('Design E: the automatic reply is a holding beat only; the server\'s ow
     aai.emit({ type: 'tool.call', call_id: 'stray', name: 'check_sso_context', arguments: {} });
     expect(replyCreatesOf(aai)).toHaveLength(1);
     expect(internals.speaking).toBe(true);
+  });
+
+  // (e) MERGED-FREEZE-GOODBYE fix (2026-09-19, PROVEN live/harness: scripts/rehearse/reports/
+  // 2026-09-19T12-33-07-miller-patient.diagnostics.json and .../2026-09-19T12-34-38-identity-
+  // switch.diagnostics.json): a terminal FREEZE verdict reached in the SAME tick as the
+  // caller's own utterance ending (`callerTurnTick`) is a `mustForceSpeak` transition
+  // (CONTAIN_NO_DISCLOSURE -> ... -> CLOSE, coalesced within one tick, exactly
+  // `mustForceSpeak('CONTAIN_NO_DISCLOSURE', 'CLOSE')` === true), not a fresh QUESTION_GOALS
+  // rendering -- (a-1)/(a-1b) above never exercised this shape. Direct-state construction (the
+  // same technique session.test.ts's own "Critical 1" describe block uses, calling
+  // `maybeSendReplyCreateForTick` directly) isolates exactly this race without depending on the
+  // engine corpus's own exact turn-by-turn path to FREEZE -- the two `it`s below are otherwise
+  // the same (a-1)/(a-1b) shape, just for a `forceSpeak`+`callerTurnTick` send instead of a
+  // `freshQuestion` one.
+  describe('(e) a FREEZE reached in the same callerTurnTick as the caller\'s own utterance is deferred the same AUTOMATIC_REPLY_SETTLE_MS way a fresh question is', () => {
+    function internalsOf(session: CallSession) {
+      return session as unknown as {
+        maybeSendReplyCreateForTick: (goalAtTickStart: string | null, callerTurnTick: boolean) => void;
+        replyCreateAwaitingStart: boolean;
+        speaking: boolean;
+      };
+    }
+
+    it('(e-1) fallback: FREEZE reached on a callerTurnTick, with nothing starting to speak, sends exactly one instructed CLOSE reply.create once the settle window elapses -- never synchronously', () => {
+      vi.useFakeTimers();
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const call: CallContext = { session_id: 'sess-merged-freeze-e1', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+      const session = newSession(clock, call, aai, sent);
+      session.start(); // GREET
+      const internals = internalsOf(session);
+
+      // The exact shape PROVEN live: a tick that started in a holding pattern
+      // (CONTAIN_NO_DISCLOSURE) and settled on CLOSE, triggered by a `transcript.user` event
+      // (`callerTurnTick` true) -- `tick()`'s own call site passes both straight through.
+      session.last = { ...session.last!, goal: { code: 'CLOSE', hint: ENGINE_CLOSE_SENTENCES.FREEZE, keyterms: [], turn_detection_hint: 'default' } };
+      internals.maybeSendReplyCreateForTick('CONTAIN_NO_DISCLOSURE', true);
+
+      // Nothing sent yet for CLOSE -- the settle timer is armed, not fired (THE FIX under test:
+      // before it, this went out synchronously, right here).
+      expect(replyCreatesOf(aai)).toHaveLength(0);
+      expect(internals.replyCreateAwaitingStart).toBe(false);
+
+      // Nothing ever starts speaking within the window -- the fallback fires and sends exactly
+      // one reply.create for CLOSE, carrying the engine's own composed close sentence, never a
+      // second, never merged with anything else.
+      vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+      const replyCreates = replyCreatesOf(aai);
+      expect(replyCreates).toHaveLength(1);
+      expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${ENGINE_CLOSE_SENTENCES.FREEZE}"`);
+      expect(internals.replyCreateAwaitingStart).toBe(true);
+      expect(internals.speaking).toBe(false);
+    });
+
+    it('(e-1b) THE PROVEN LIVE DEFECT (MERGED-FREEZE-GOODBYE-MILLER) closed: an automatic reply starting within the settle window defers the CLOSE send to its own reply.done -- the two never merge into one reply', () => {
+      vi.useFakeTimers();
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const call: CallContext = { session_id: 'sess-merged-freeze-e1b', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
+      const session = newSession(clock, call, aai, sent);
+      session.start(); // GREET
+      const internals = internalsOf(session);
+      const closeGoal = { code: 'CLOSE' as const, hint: ENGINE_CLOSE_SENTENCES.FREEZE, keyterms: [], turn_detection_hint: 'default' as const };
+      const pinClose = () => {
+        session.last = { ...session.last!, goal: closeGoal };
+      };
+
+      pinClose();
+      internals.maybeSendReplyCreateForTick('CONTAIN_NO_DISCLOSURE', true);
+      expect(replyCreatesOf(aai)).toHaveLength(0);
+
+      // AssemblyAI's own automatic reply for THIS turn starts almost immediately (PROVEN live,
+      // scripts/rehearse/reports/2026-09-19T12-33-07-miller-patient.diagnostics.json: the
+      // caller's turn ended at 42497ms, AssemblyAI's reply.started for the merged reply arrived
+      // at 42506ms -- well within the settle window), under the standing holding-beat rule,
+      // BEFORE our own CLOSE reply.create has gone out. Direct-state construction means every
+      // real AAI event's own trailing `tick()` recomputes `this.last` from the (empty, in this
+      // synthetic test) real conversation log, resetting the goal back to GREET -- `pinClose()`
+      // re-asserts the CLOSE goal right after each emit, exactly like session.test.ts's own
+      // "Critical 1" test re-sets `session.last` between events for the identical reason. This
+      // only pins the GOAL the send-decision logic reads; it never touches the real engine.
+      clock.now = 9;
+      aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
+      pinClose();
+      expect(internals.speaking).toBe(true);
+
+      // The settle window elapses while 'auto-1' is still speaking -- THE FIX: the CLOSE send
+      // must NOT fire here (that synchronous/early send is exactly what let AssemblyAI fold our
+      // CLOSE instructions into 'auto-1's own still-in-flight generation live, producing one
+      // reply whose transcript concatenated both with no separator -- e.g. "One moment. Which
+      // institution holds the Hartwell escrow?This transfer is frozen and an incident is open.
+      // The payment is not released. Goodbye.", PROVEN from the bundle above).
+      vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+      expect(replyCreatesOf(aai)).toHaveLength(0);
+      expect(internals.speaking).toBe(true); // 'auto-1' still in flight, never interrupted by our own send
+
+      // 'auto-1' finishes (a harmless holding line, per the standing rule -- LAW 3 unaffected,
+      // it never says a verdict word) -- THE instructed CLOSE reply.create goes out now, exactly
+      // once, as its OWN separate reply, never overlapping or merging with 'auto-1'.
+      aai.emit({ type: 'transcript.agent', item_id: 'x-auto-1', text: 'One moment.', reply_id: 'auto-1', interrupted: false });
+      pinClose();
+      aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'completed' });
+      const replyCreates = replyCreatesOf(aai);
+      expect(replyCreates).toHaveLength(1);
+      expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${ENGINE_CLOSE_SENTENCES.FREEZE}"`);
+
+      // The real close reply, once it starts and completes, carries ONLY the engine's own close
+      // sentence -- never a concatenation with 'auto-1's own holding line (LAW 3: only the
+      // engine's own composed CLOSE sentence names the outcome; this proves the two replies stay
+      // two separate reply lifecycles, never one merged transcript).
+      clock.now = 200;
+      aai.emit({ type: 'reply.started', reply_id: 'close-1' });
+      aai.emit({ type: 'transcript.agent', item_id: 'x-close-1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'close-1', interrupted: false });
+      aai.emit({ type: 'reply.done', reply_id: 'close-1', status: 'completed' });
+      const closeTranscript = session.logs.conversation.find((u) => u.id === 'x-close-1');
+      expect(closeTranscript?.text).toBe(ENGINE_CLOSE_SENTENCES.FREEZE); // exact, never concatenated with 'One moment.'
+      expect(replyCreatesOf(aai)).toHaveLength(1); // still exactly one CLOSE reply.create for the whole call
+    });
   });
 });
 

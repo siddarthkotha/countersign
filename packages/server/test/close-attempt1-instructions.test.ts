@@ -110,6 +110,12 @@ function driveToSealedStage(session: CallSession, aai: FakeAaiSocket, clock: { n
 
   clock.now = 7000;
   aai.emit({ type: 'transcript.user', item_id: 'c5', text: "Yes, that's right." });
+  // MERGED-FREEZE-GOODBYE fix (2026-09-19, call/session.ts's own `owedForceSpeakGoalKey` doc
+  // comment): c5's own tick reaches SEALED/CLOSE directly off this caller turn
+  // (`callerTurnTick`), so the CLOSE `reply.create` is now deferred the same
+  // `AUTOMATIC_REPLY_SETTLE_MS` way a fresh question already was -- nothing else starts
+  // speaking in this drive, so the fallback send fires once the window elapses.
+  vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
 }
 
 const CALL: CallContext = { session_id: 'sess-close-attempt1', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
