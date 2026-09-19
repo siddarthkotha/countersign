@@ -25,7 +25,7 @@
 //     config.ts, not here.
 import { mintToken } from '../token.js';
 import type { AaiEvent, AaiSocket } from './types.js';
-import { buildInitialSessionUpdate, resolveVoice, type AaiSessionConfig } from './config.js';
+import { buildInitialSessionUpdate, resolveVoice, type AaiSessionConfig, type TurnDetectionMode } from './config.js';
 
 const WS_URL = 'wss://agents.assemblyai.com/v1/ws';
 const RESUME_WINDOW_MS = 30_000;
@@ -72,6 +72,10 @@ export interface AaiConnectDeps {
   /** Defaults to OPEN_TIMEOUT_MS. Tests shrink this to exercise a never-opening socket
    *  without a slow real wait. */
   openTimeoutMs?: number;
+  /** TURN-DETECTION-ENV-SWITCH (2026-09-19, build lane): controls whether the initial
+   *  session.update includes a turn_detection key. See aai/config.ts's TurnDetectionMode
+   *  and buildInitialSessionUpdate docs. Defaults to 'omit' if not provided. */
+  turn_detection_mode?: TurnDetectionMode;
   /** Flight recorder bug fix (2026-09-03, founder-observed live): a real call's server-side
    *  diagnostics bundle can never answer "when did AssemblyAI become ready" -- `connectAai`
    *  consumes the `session.ready` message itself while resolving (below), before the
@@ -89,11 +93,13 @@ export interface AaiConnectDeps {
    *  -- the exact `input.turn_detection` object this connect's initial session.update
    *  actually put on the wire (read back off the built message itself, never recomputed) --
    *  so a bundle proves what was sent without guessing from the code that built it. See
-   *  aai/config.ts's `buildInitialSessionUpdate` doc comment for what belongs in it. */
+   *  aai/config.ts's `buildInitialSessionUpdate` doc comment for what belongs in it. In
+   *  TURN-DETECTION-ENV-SWITCH (2026-09-19), this is `null` in omit mode when no override
+   *  was set (no turn_detection key was sent). */
   onReady?: (
     ms_since_connect_start: number,
     greeting_configured: boolean,
-    turn_detection_sent: Record<string, unknown>
+    turn_detection_sent: Record<string, unknown> | null
   ) => void;
   /** Defect 2 fix: tests shrink `CLOSE_TERMINATION_TIMEOUT_MS` (2000ms in production) so a
    *  test proving the timeout path doesn't have to actually wait 2 real seconds -- same
@@ -523,15 +529,17 @@ export async function connectAai(cfg: AaiSessionConfig, deps: AaiConnectDeps): P
   const effectiveCfg: AaiSessionConfig = voice === cfg.voice ? cfg : { ...cfg, voice };
   const ws = await openSocket(deps.WebSocketImpl, token, deps.openTimeoutMs ?? OPEN_TIMEOUT_MS);
 
-  const initialUpdate = buildInitialSessionUpdate(effectiveCfg);
+  const turn_detection_mode = deps.turn_detection_mode ?? 'omit';
+  const initialUpdate = buildInitialSessionUpdate(effectiveCfg, turn_detection_mode);
   ws.send(JSON.stringify(initialUpdate));
-  // TURN-DETECTION-RESTORE-EXPLICIT-CONFIG (2026-09-19): read the turn_detection object
-  // back off the message actually sent, rather than recomputing the same defaulting logic
-  // here a second time -- one source of truth for what's on the wire.
+  // TURN-DETECTION-RESTORE-EXPLICIT-CONFIG (2026-09-19) + TURN-DETECTION-ENV-SWITCH (2026-09-19):
+  // read the turn_detection object back off the message actually sent, rather than recomputing
+  // the same defaulting logic here a second time -- one source of truth for what's on the wire.
+  // In omit mode with no override, this is null (the key was not sent).
   const turnDetectionSent =
     ((initialUpdate.session.input as Record<string, unknown> | undefined)?.turn_detection as
       | Record<string, unknown>
-      | undefined) ?? {};
+      | undefined) ?? null;
 
   return new Promise<AaiSocket>((resolve, reject) => {
     const timeout = setTimeout(() => {

@@ -214,10 +214,13 @@ describe('connectAai', () => {
   // wire, read back off the built message rather than recomputed -- so index.ts's
   // `aai_ready` diag can prove what was actually sent (see aai/config.ts's
   // `buildInitialSessionUpdate` for the documented defaults).
-  it('reports the exact turn_detection object sent on connect as onReady\'s third argument', async () => {
+  // TURN-DETECTION-ENV-SWITCH (2026-09-19, build lane): these tests use explicit mode
+  // to test the explicit-mode behavior. See the separate omit-mode tests below.
+  it('reports the exact turn_detection object sent on connect as onReady\'s third argument (explicit mode)', async () => {
     const { deps, sockets } = makeDeps();
-    const readyCalls: Record<string, unknown>[] = [];
+    const readyCalls: (Record<string, unknown> | null)[] = [];
     deps.onReady = (_ms, _greeting_configured, turn_detection_sent) => readyCalls.push(turn_detection_sent);
+    deps.turn_detection_mode = 'explicit';
 
     const connectPromise = connectAai(cfg(), deps);
     await waitFor(() => expect(sockets.length).toBe(1));
@@ -229,10 +232,11 @@ describe('connectAai', () => {
     expect(readyCalls).toEqual([{ vad_threshold: 0.5, interrupt_response: true }]);
   });
 
-  it('reports a caller-supplied turn_detection override to onReady exactly as it was sent', async () => {
+  it('reports a caller-supplied turn_detection override to onReady exactly as it was sent (explicit mode)', async () => {
     const { deps, sockets } = makeDeps();
-    const readyCalls: Record<string, unknown>[] = [];
+    const readyCalls: (Record<string, unknown> | null)[] = [];
     deps.onReady = (_ms, _greeting_configured, turn_detection_sent) => readyCalls.push(turn_detection_sent);
+    deps.turn_detection_mode = 'explicit';
 
     const connectPromise = connectAai(cfg({ turn_detection: { min_silence: 1200 } }), deps);
     await waitFor(() => expect(sockets.length).toBe(1));
@@ -242,6 +246,43 @@ describe('connectAai', () => {
     await connectPromise;
 
     expect(readyCalls).toEqual([{ vad_threshold: 0.5, interrupt_response: true, min_silence: 1200 }]);
+  });
+
+  // TURN-DETECTION-ENV-SWITCH (2026-09-19, build lane): when buildInitialSessionUpdate is
+  // called with turn_detection_mode 'omit', the turn_detection key is absent from the wire
+  // message, so onReady's third argument reports null instead of the object.
+  it('reports null to onReady when turn_detection is omitted from the wire message', async () => {
+    const { deps, sockets } = makeDeps();
+    const readyCalls: (Record<string, unknown> | null)[] = [];
+    deps.onReady = (_ms, _greeting_configured, turn_detection_sent) => readyCalls.push(turn_detection_sent);
+
+    // Pass turn_detection_mode through cfg (this will be wired up when we update connectAai's signature)
+    const connectPromise = connectAai(cfg(), { ...deps, turn_detection_mode: 'omit' });
+    await waitFor(() => expect(sockets.length).toBe(1));
+    sockets[0]!.triggerOpen();
+    await waitFor(() => expect(sockets[0]!.sent.length).toBe(1));
+    sockets[0]!.triggerMessage({ type: 'session.ready', session_id: 'sess-1' });
+    await connectPromise;
+
+    expect(readyCalls).toEqual([null]);
+  });
+
+  it('reports only caller-supplied fields to onReady when omit mode and a caller override is set', async () => {
+    const { deps, sockets } = makeDeps();
+    const readyCalls: (Record<string, unknown> | null)[] = [];
+    deps.onReady = (_ms, _greeting_configured, turn_detection_sent) => readyCalls.push(turn_detection_sent);
+
+    const connectPromise = connectAai(cfg({ turn_detection: { min_silence: 1500 } }), {
+      ...deps,
+      turn_detection_mode: 'omit',
+    });
+    await waitFor(() => expect(sockets.length).toBe(1));
+    sockets[0]!.triggerOpen();
+    await waitFor(() => expect(sockets[0]!.sent.length).toBe(1));
+    sockets[0]!.triggerMessage({ type: 'session.ready', session_id: 'sess-1' });
+    await connectPromise;
+
+    expect(readyCalls).toEqual([{ min_silence: 1500 }]);
   });
 
   // Founder ruling 2026-09-11 (agent speaks first): AssemblyAI treats `greeting` as

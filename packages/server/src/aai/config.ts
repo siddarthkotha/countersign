@@ -242,18 +242,26 @@ export interface AaiSessionConfig {
 export interface AaiEnvDefaults {
   voice: string;
   llm_model?: string;
+  turn_detection_mode: TurnDetectionMode;
 }
 
 function envOrUndefined(v: string | undefined): string | undefined {
   return v && v.length > 0 ? v : undefined;
 }
 
-/** Reads COUNTERSIGN_VOICE (default DEFAULT_VOICE) and COUNTERSIGN_LLM_MODEL (default:
- *  unset, i.e. keep AssemblyAI's managed model) from a process.env-shaped object. */
+/** Reads COUNTERSIGN_VOICE (default DEFAULT_VOICE), COUNTERSIGN_LLM_MODEL (default:
+ *  unset, i.e. keep AssemblyAI's managed model), and COUNTERSIGN_TURN_DETECTION (default:
+ *  'omit') from a process.env-shaped object. */
 export function loadAaiEnvDefaults(env: Record<string, string | undefined>): AaiEnvDefaults {
   const voice = envOrUndefined(env.COUNTERSIGN_VOICE) ?? DEFAULT_VOICE;
   const llm_model = envOrUndefined(env.COUNTERSIGN_LLM_MODEL);
-  return llm_model ? { voice, llm_model } : { voice };
+  // TURN-DETECTION-ENV-SWITCH (2026-09-19, build lane): read COUNTERSIGN_TURN_DETECTION
+  // and validate it's one of 'explicit' or 'omit'. Default to 'omit' if unset or invalid.
+  const rawMode = envOrUndefined(env.COUNTERSIGN_TURN_DETECTION);
+  const turn_detection_mode: TurnDetectionMode = (rawMode === 'explicit' || rawMode === 'omit') ? rawMode : 'omit';
+  const result: AaiEnvDefaults = { voice, turn_detection_mode };
+  if (llm_model) result.llm_model = llm_model;
+  return result;
 }
 
 export interface SessionUpdateMessage {
@@ -277,20 +285,43 @@ export interface SessionUpdateMessage {
  *  still sent exactly as given alongside the two defaulted fields. `call/session.ts`'s own
  *  per-goal session.update is UNCHANGED: it still omits `turn_detection` entirely on every
  *  goal change unless a caller-supplied override sets a field. */
-export function buildInitialSessionUpdate(cfg: AaiSessionConfig): SessionUpdateMessage {
+/** TURN-DETECTION-ENV-SWITCH (2026-09-19, build lane): controls whether the initial
+ *  session.update includes a turn_detection key. 'explicit' sends defaults
+ *  (vad_threshold: 0.5, interrupt_response: true); 'omit' sends NO key unless a
+ *  caller-supplied cfg.turn_detection sets a field, then sends only that field. */
+export type TurnDetectionMode = 'explicit' | 'omit';
+
+export function buildInitialSessionUpdate(cfg: AaiSessionConfig, turn_detection_mode: TurnDetectionMode = 'omit'): SessionUpdateMessage {
   const keyterms = cfg.keyterms.slice(0, 100);
-  const turnDetection: Record<string, unknown> = {
-    vad_threshold: cfg.turn_detection?.vad_threshold ?? 0.5,
-    interrupt_response: cfg.turn_detection?.interrupt_response ?? true,
-  };
-  if (cfg.turn_detection?.min_silence !== undefined) turnDetection.min_silence = cfg.turn_detection.min_silence;
-  if (cfg.turn_detection?.max_silence !== undefined) turnDetection.max_silence = cfg.turn_detection.max_silence;
 
   const input: Record<string, unknown> = {
     format: { encoding: AUDIO_ENCODING },
     keyterms,
-    turn_detection: turnDetection,
   };
+
+  // TURN-DETECTION-ENV-SWITCH: mode 'explicit' always sends the two defaults; mode 'omit'
+  // sends the key only if a caller override sets a field, or omits it entirely if no override.
+  if (turn_detection_mode === 'explicit') {
+    const turnDetection: Record<string, unknown> = {
+      vad_threshold: cfg.turn_detection?.vad_threshold ?? 0.5,
+      interrupt_response: cfg.turn_detection?.interrupt_response ?? true,
+    };
+    if (cfg.turn_detection?.min_silence !== undefined) turnDetection.min_silence = cfg.turn_detection.min_silence;
+    if (cfg.turn_detection?.max_silence !== undefined) turnDetection.max_silence = cfg.turn_detection.max_silence;
+    input.turn_detection = turnDetection;
+  } else if (cfg.turn_detection && (cfg.turn_detection.vad_threshold !== undefined ||
+                                      cfg.turn_detection.interrupt_response !== undefined ||
+                                      cfg.turn_detection.min_silence !== undefined ||
+                                      cfg.turn_detection.max_silence !== undefined)) {
+    // Mode 'omit' with a caller override: send only the fields that are set
+    const turnDetection: Record<string, unknown> = {};
+    if (cfg.turn_detection.vad_threshold !== undefined) turnDetection.vad_threshold = cfg.turn_detection.vad_threshold;
+    if (cfg.turn_detection.interrupt_response !== undefined) turnDetection.interrupt_response = cfg.turn_detection.interrupt_response;
+    if (cfg.turn_detection.min_silence !== undefined) turnDetection.min_silence = cfg.turn_detection.min_silence;
+    if (cfg.turn_detection.max_silence !== undefined) turnDetection.max_silence = cfg.turn_detection.max_silence;
+    input.turn_detection = turnDetection;
+  }
+  // else: mode 'omit' with no override: omit turn_detection key entirely
 
   const session: Record<string, unknown> = {
     system_prompt: cfg.system_prompt,

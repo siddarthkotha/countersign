@@ -251,6 +251,8 @@ function createAai(session_id: string): AaiSocket {
     fetchImpl: fetch,
     WebSocketImpl: WebSocket as unknown as new (url: string) => WsLike,
     now: () => Date.now(),
+    // TURN-DETECTION-ENV-SWITCH (2026-09-19, build lane): pass the mode from env defaults.
+    turn_detection_mode: envDefaults.turn_detection_mode,
     // Flight recorder bug fix (2026-09-03): the one place a real connect is awaited --
     // records "AAI connected/ready" with the elapsed ms since this connect started, the
     // fact the live-call bundle previously had no way to show at all (see aai/session.ts's
@@ -265,8 +267,12 @@ function createAai(session_id: string): AaiSocket {
         // exactly what turn_detection object this connect put on the wire (e.g.
         // {vad_threshold: 0.5, interrupt_response: true}) -- see call/session.ts's
         // `turn_detection_omitted: true` on the per-goal session.update diag for the other
-        // half of the picture (updates never resend this key).
+        // half of the picture (updates never resend this key). TURN-DETECTION-ENV-SWITCH
+        // (2026-09-19): this is null in omit mode when no override was set.
         turn_detection_sent,
+        // TURN-DETECTION-ENV-SWITCH (2026-09-19): records which mode (explicit/omit) was
+        // configured so a bundle proves which deployment path ran.
+        turn_detection_mode: envDefaults.turn_detection_mode,
       }),
     // Defect 2 fix (2026-09-15): when close() times out waiting for AssemblyAI's own
     // session.ended Termination event, record aai_terminate_timeout so a bundle shows

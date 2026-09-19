@@ -61,8 +61,10 @@ describe('buildInitialSessionUpdate', () => {
   // the key is restored, unconditionally, exactly as deploy 52 sent it, with deploy 55's
   // measured stale-line-first goodbye race (7.98s/17.95s delay) as the live cost of leaving
   // it omitted.
-  it('sends turn_detection on connect with the documented defaults (vad_threshold 0.5, interrupt_response true) when no override is configured', () => {
-    const msg = buildInitialSessionUpdate(cfg());
+  // TURN-DETECTION-ENV-SWITCH (2026-09-19, build lane): when mode is "explicit", the key
+  // is sent with documented defaults.
+  it('sends turn_detection on connect with the documented defaults (vad_threshold 0.5, interrupt_response true) when mode is explicit', () => {
+    const msg = buildInitialSessionUpdate(cfg(), 'explicit');
     const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
     expect(turnDetection).toEqual({ vad_threshold: 0.5, interrupt_response: true });
   });
@@ -77,27 +79,28 @@ describe('buildInitialSessionUpdate', () => {
   // restore above: only min_silence/max_silence stay omitted -- vad_threshold/
   // interrupt_response are sent (previous test), because the docs never tie those two to
   // disabling adaptive pacing.
-  it('omits min_silence and max_silence entirely by default (AssemblyAI adaptive pacing/entity-aware waiting stays on)', () => {
-    const msg = buildInitialSessionUpdate(cfg());
+  // TURN-DETECTION-ENV-SWITCH (2026-09-19, build lane): this applies to explicit mode only.
+  it('omits min_silence and max_silence when mode is explicit (AssemblyAI adaptive pacing/entity-aware waiting stays on)', () => {
+    const msg = buildInitialSessionUpdate(cfg(), 'explicit');
     const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
     expect(turnDetection).not.toHaveProperty('min_silence');
     expect(turnDetection).not.toHaveProperty('max_silence');
   });
 
-  it('lets a caller override turn_detection fields -- min_silence sent exactly as given when explicitly set, alongside the defaulted vad_threshold/interrupt_response', () => {
-    const msg = buildInitialSessionUpdate(cfg({ turn_detection: { min_silence: 1200 } }));
+  it('lets a caller override turn_detection fields in explicit mode -- min_silence sent exactly as given when explicitly set, alongside the defaulted vad_threshold/interrupt_response', () => {
+    const msg = buildInitialSessionUpdate(cfg({ turn_detection: { min_silence: 1200 } }), 'explicit');
     const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
     expect(turnDetection).toEqual({ vad_threshold: 0.5, interrupt_response: true, min_silence: 1200 });
   });
 
-  it('lets a caller override max_silence independently of min_silence, alongside the defaulted vad_threshold/interrupt_response', () => {
-    const msg = buildInitialSessionUpdate(cfg({ turn_detection: { max_silence: 5000 } }));
+  it('lets a caller override max_silence independently of min_silence in explicit mode, alongside the defaulted vad_threshold/interrupt_response', () => {
+    const msg = buildInitialSessionUpdate(cfg({ turn_detection: { max_silence: 5000 } }), 'explicit');
     const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
     expect(turnDetection).toEqual({ vad_threshold: 0.5, interrupt_response: true, max_silence: 5000 });
   });
 
-  it('lets a caller override vad_threshold or interrupt_response explicitly, sent exactly as given', () => {
-    const msg = buildInitialSessionUpdate(cfg({ turn_detection: { vad_threshold: 0.7, interrupt_response: false } }));
+  it('lets a caller override vad_threshold or interrupt_response explicitly in explicit mode, sent exactly as given', () => {
+    const msg = buildInitialSessionUpdate(cfg({ turn_detection: { vad_threshold: 0.7, interrupt_response: false } }), 'explicit');
     const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
     expect(turnDetection).toEqual({ vad_threshold: 0.7, interrupt_response: false });
   });
@@ -135,6 +138,41 @@ describe('buildInitialSessionUpdate', () => {
     expect(msg.session.llm).toEqual([
       { base_url: LLM_GATEWAY_BASE_URL, model: 'claude-sonnet-4-6', api_key: 'secret-key' },
     ]);
+  });
+
+  // TURN-DETECTION-ENV-SWITCH (2026-09-19, build lane): buildInitialSessionUpdate accepts a
+  // turn_detection_mode parameter to support measured experiments without code changes. Mode
+  // 'explicit' sends the defaults (current behavior), 'omit' sends NO key (deploy 53 behavior).
+  // Default when unset: 'omit'.
+  describe('turn_detection_mode parameter', () => {
+    it('sends turn_detection with defaults when mode is "explicit"', () => {
+      const msg = buildInitialSessionUpdate(cfg(), 'explicit');
+      const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+      expect(turnDetection).toEqual({ vad_threshold: 0.5, interrupt_response: true });
+    });
+
+    it('omits turn_detection key entirely when mode is "omit"', () => {
+      const msg = buildInitialSessionUpdate(cfg(), 'omit');
+      expect((msg.session.input as Record<string, unknown>)).not.toHaveProperty('turn_detection');
+    });
+
+    it('sends only caller-supplied override fields when mode is "omit" and a caller override is set', () => {
+      const msg = buildInitialSessionUpdate(cfg({ turn_detection: { min_silence: 1500 } }), 'omit');
+      const input = msg.session.input as Record<string, unknown>;
+      const turnDetection = input.turn_detection as Record<string, unknown> | undefined;
+      expect(turnDetection).toEqual({ min_silence: 1500 });
+    });
+
+    it('defaults to "omit" mode when no mode parameter is provided', () => {
+      const msg = buildInitialSessionUpdate(cfg());
+      expect((msg.session.input as Record<string, unknown>)).not.toHaveProperty('turn_detection');
+    });
+
+    it('sends turn_detection with defaults when mode is "explicit" and a caller override is set', () => {
+      const msg = buildInitialSessionUpdate(cfg({ turn_detection: { min_silence: 1200 } }), 'explicit');
+      const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+      expect(turnDetection).toEqual({ vad_threshold: 0.5, interrupt_response: true, min_silence: 1200 });
+    });
   });
 });
 
@@ -224,20 +262,36 @@ describe('KNOWN_VOICES / resolveVoice (static table -- no live endpoint)', () =>
 });
 
 describe('loadAaiEnvDefaults', () => {
-  it('defaults voice to anna and leaves llm_model unset when no env vars are present', () => {
-    expect(loadAaiEnvDefaults({})).toEqual({ voice: DEFAULT_VOICE });
+  it('defaults voice to anna, turn_detection_mode to omit, and leaves llm_model unset when no env vars are present', () => {
+    expect(loadAaiEnvDefaults({})).toEqual({ voice: DEFAULT_VOICE, turn_detection_mode: 'omit' });
   });
 
-  it('reads COUNTERSIGN_VOICE and COUNTERSIGN_LLM_MODEL from env', () => {
-    expect(loadAaiEnvDefaults({ COUNTERSIGN_VOICE: 'eve', COUNTERSIGN_LLM_MODEL: 'claude-x' })).toEqual({
+  it('reads COUNTERSIGN_VOICE, COUNTERSIGN_LLM_MODEL, and COUNTERSIGN_TURN_DETECTION from env', () => {
+    expect(loadAaiEnvDefaults({ COUNTERSIGN_VOICE: 'eve', COUNTERSIGN_LLM_MODEL: 'claude-x', COUNTERSIGN_TURN_DETECTION: 'explicit' })).toEqual({
       voice: 'eve',
       llm_model: 'claude-x',
+      turn_detection_mode: 'explicit',
     });
   });
 
   it('treats an empty-string env var as unset', () => {
-    expect(loadAaiEnvDefaults({ COUNTERSIGN_VOICE: '', COUNTERSIGN_LLM_MODEL: '' })).toEqual({
+    expect(loadAaiEnvDefaults({ COUNTERSIGN_VOICE: '', COUNTERSIGN_LLM_MODEL: '', COUNTERSIGN_TURN_DETECTION: '' })).toEqual({
       voice: DEFAULT_VOICE,
+      turn_detection_mode: 'omit',
+    });
+  });
+
+  it('defaults turn_detection_mode to omit when COUNTERSIGN_TURN_DETECTION is invalid', () => {
+    expect(loadAaiEnvDefaults({ COUNTERSIGN_TURN_DETECTION: 'invalid' })).toEqual({
+      voice: DEFAULT_VOICE,
+      turn_detection_mode: 'omit',
+    });
+  });
+
+  it('reads COUNTERSIGN_TURN_DETECTION as explicit when set', () => {
+    expect(loadAaiEnvDefaults({ COUNTERSIGN_TURN_DETECTION: 'explicit' })).toEqual({
+      voice: DEFAULT_VOICE,
+      turn_detection_mode: 'explicit',
     });
   });
 });
