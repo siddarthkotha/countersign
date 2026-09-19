@@ -25,6 +25,8 @@
 import { WebSocket } from 'ws';
 import type { BrowserEvent, ScreenState, ServerEvent } from '@countersign/engine';
 import type { RehearseDiagnosticBundle } from './types.js';
+import { createAgentAudioCapture } from './agentAudioCapture.js';
+import type { AgentAudioCaptureSnapshot } from './agentAudioCapture.js';
 
 export interface StateSample {
   t_ms: number;
@@ -50,6 +52,11 @@ export interface CallClient {
    *  for "is the agent currently speaking". */
   readonly audioTimestamps: number[];
   readonly linkEvents: LinkSample[];
+  /** GAP: THE HARNESS RECORDS TRANSCRIPTS, NOT AUDIO (board item, 2026-09-19) -- every agent
+   *  audio frame received over this socket, captured into an in-memory PCM buffer plus a frame
+   *  index (t_ms, byte range), so a report can say whether a reply's relayed audio was actually
+   *  spoken or silent, not just what its transcript claims. See agentAudioCapture.ts. */
+  agentAudioSnapshot(): AgentAudioCaptureSnapshot;
   latestState(): ScreenState | null;
   onEnded(cb: (reason: string) => void): void;
   waitForEnded(timeoutMs: number): Promise<string | null>;
@@ -119,6 +126,7 @@ export async function connectCall(baseUrl: string, wsPath: string): Promise<Call
   const stateHistory: StateSample[] = [];
   const audioTimestamps: number[] = [];
   const linkEvents: LinkSample[] = [];
+  const agentAudioCapture = createAgentAudioCapture();
   let latest: ScreenState | null = null;
   let endedCb: ((reason: string) => void) | null = null;
   let endedReason: string | null = null;
@@ -147,6 +155,7 @@ export async function connectCall(baseUrl: string, wsPath: string): Promise<Call
       stateHistory.push({ t_ms, state: evt.state });
     } else if (evt.type === 'audio') {
       audioTimestamps.push(t_ms);
+      agentAudioCapture.push(t_ms, Buffer.from(evt.data, 'base64'));
     } else if (evt.type === 'link') {
       linkEvents.push({ t_ms, state: evt.state, leg: evt.leg });
     } else if (evt.type === 'ended') {
@@ -172,6 +181,9 @@ export async function connectCall(baseUrl: string, wsPath: string): Promise<Call
     stateHistory,
     audioTimestamps,
     linkEvents,
+    agentAudioSnapshot() {
+      return agentAudioCapture.snapshot();
+    },
     latestState() {
       return latest;
     },

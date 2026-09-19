@@ -31,7 +31,8 @@
     "sim:friday": "tsx scripts/rehearse/simFriday.ts",
     "sim:freeplay": "tsx scripts/rehearse/simFreeplay.ts",
     "rehearse:regrade": "tsx scripts/rehearse/regrade.ts",
-    "grade:record": "tsx scripts/rehearse/gradeRecord.ts"
+    "grade:record": "tsx scripts/rehearse/gradeRecord.ts",
+    "audio:timeline": "tsx scripts/rehearse/audioTimeline.ts"
   },
   "dependencies": {},
   "devDependencies": {

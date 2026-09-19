@@ -11,6 +11,9 @@ import type { Verdict } from '@countersign/engine';
 // at runtime (TypeScript `import type` never emits JS). See experienceGrading.ts's own
 // top-of-file doc comment for why this check exists at all.
 import type { ExperienceGrade } from './experienceGrading.js';
+// GAP: THE HARNESS RECORDS TRANSCRIPTS, NOT AUDIO (board item, 2026-09-19) -- a type-only
+// import, same circular-on-paper-never-at-runtime shape as ExperienceGrade above.
+import type { AgentAudioCaptureSnapshot } from './agentAudioCapture.js';
 
 /** One rule a reactive turn can carry: if the agent's LAST transcript line contains any of
  *  `if_agent_says_any` (case-insensitive substring match), the caller says `say` instead of
@@ -415,6 +418,14 @@ export interface RunResult {
     pause_sequence_ms: number[];
     question_answer: { answered: number; total: number; unanswered: string[] };
   };
+  /** GAP: THE HARNESS RECORDS TRANSCRIPTS, NOT AUDIO (board item, 2026-09-19) -- the raw
+   *  captured agent-audio snapshot (agentAudioCapture.ts's `CallClient.agentAudioSnapshot()`,
+   *  taken once the call ends), kept verbatim so artifacts.ts can write the `.agent.wav` +
+   *  frame-index sidecar and compute the report's "Audio (captured at the harness)" section
+   *  (audioReport.ts) from it. `undefined`/`null` for a call that never connected far enough to
+   *  receive any audio at all (same convention `raw_diagnostics` already uses) -- never
+   *  serialized into the raw diagnostics JSON (it is a separate artifact, the WAV file). */
+  raw_agent_audio?: AgentAudioCaptureSnapshot | null;
 }
 
 // ---------- LLM-driven caller (llmCaller.ts) ----------

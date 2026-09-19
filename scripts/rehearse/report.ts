@@ -5,6 +5,7 @@
 import { lastAgentLineDisplay } from './expectations.js';
 import type { ExperienceGrade } from './experienceGrading.js';
 import type { RollupResult, RunResult } from './types.js';
+import { renderAgentAudioMarkdown, type AgentAudioReportSection } from './audioReport.js';
 
 /** Point 1 (run.ts's own PASS/FAIL grading) and point 2 (this report's "Close line" line)
  *  share one plain-English description per `fail_reason` so the two never say something
@@ -63,6 +64,20 @@ export function reportFileName(scenarioName: string, at: Date = new Date()): str
  *  timestamp, per artifacts.ts's `writeRunArtifacts`. */
 export function diagnosticsFileName(scenarioName: string, at: Date = new Date()): string {
   return `${timestampForFilename(at)}-${scenarioName}.diagnostics.json`;
+}
+
+/** Same basename convention as `reportFileName`/`diagnosticsFileName` -- the captured agent
+ *  audio WAV file (GAP: THE HARNESS RECORDS TRANSCRIPTS, NOT AUDIO, 2026-09-19). */
+export function agentAudioFileName(scenarioName: string, at: Date = new Date()): string {
+  return `${timestampForFilename(at)}-${scenarioName}.agent.wav`;
+}
+
+/** The frame-index sidecar next to the WAV file (t_ms -> byte range for every captured frame,
+ *  plus truncation/total-bytes facts) -- a WAV file alone has no per-frame timing, so this is
+ *  what lets `audioTimeline.ts`'s offline re-analysis command map audio bytes back to t_ms
+ *  without a live call. */
+export function agentAudioFramesFileName(scenarioName: string, at: Date = new Date()): string {
+  return `${timestampForFilename(at)}-${scenarioName}.agent-frames.json`;
 }
 
 export function oneLineSummary(r: RunResult, reportPath: string): string {
@@ -374,7 +389,10 @@ function renderCloseTailAudioSummary(r: RunResult): string | null {
   return lines.join('\n');
 }
 
-export function renderReport(r: RunResult): string {
+/** `audioSection` is optional and, when omitted, renders nothing -- every existing caller
+ *  (regrade.ts re-rendering an OLD run that has no captured audio at all) keeps its exact prior
+ *  output. Only `writeRunArtifacts` (a live or free-play run) computes and passes one. */
+export function renderReport(r: RunResult, audioSection?: AgentAudioReportSection | null): string {
   const lines: string[] = [];
   lines.push(`# Rehearsal report: ${r.scenario.title}`);
   lines.push('');
@@ -418,6 +436,9 @@ export function renderReport(r: RunResult): string {
   const closeTailAudio = renderCloseTailAudioSummary(r);
   if (closeTailAudio) lines.push(closeTailAudio);
   lines.push('');
+  if (audioSection) {
+    lines.push(renderAgentAudioMarkdown(audioSection));
+  }
   lines.push('### Per-turn gaps (caller line end -> next agent audio)');
   lines.push('');
   lines.push(renderTurnGaps(r));

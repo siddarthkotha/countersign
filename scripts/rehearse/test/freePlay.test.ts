@@ -99,6 +99,7 @@ function makeFakeClient(): CallClient & {
     stateHistory,
     audioTimestamps: [],
     linkEvents: [],
+    agentAudioSnapshot: () => ({ pcm: Buffer.alloc(0), frames: [], truncated: false, total_bytes_received: 0 }),
     latestState: () => state,
     onEnded(cb) {
       endedCb = cb;

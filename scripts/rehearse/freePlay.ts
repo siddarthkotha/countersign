@@ -462,6 +462,10 @@ export async function runFreePlayOne(scenario: Scenario, url: string, voice: str
   const endOutcome = await waitForFreePlayVerdictAndHangup(client, scenario, ENDED_TIMEOUT_MS);
   warnings.push(...endOutcome.warnings);
   const { transcript, stateHistory, endedReason, hangupFailReason, verdictReached, actualVerdict } = endOutcome;
+  // GAP: THE HARNESS RECORDS TRANSCRIPTS, NOT AUDIO (board item, 2026-09-19) -- same capture
+  // run.ts's `runOne` reads; free-play calls the same `connectCall` (wsClient.ts), so the same
+  // in-memory PCM buffer/frame index is available here for free.
+  const rawAgentAudio = client.agentAudioSnapshot();
   client.close();
 
   const totalWallMs = performance.now() - client.startedAt;
@@ -524,6 +528,7 @@ export async function runFreePlayOne(scenario: Scenario, url: string, voice: str
     state_history: stateHistory,
     diagnostics,
     raw_diagnostics: bundle,
+    raw_agent_audio: rawAgentAudio,
     warnings,
     exit_code: pass ? 0 : 1,
     minutes_estimate: minutesEstimate,

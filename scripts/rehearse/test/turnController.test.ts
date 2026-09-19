@@ -81,6 +81,7 @@ function makeFakeClient(): CallClient & { setState(v: ScreenState['verdict']): v
     stateHistory: [],
     audioTimestamps: [10, 50, 90],
     linkEvents: [],
+    agentAudioSnapshot: () => ({ pcm: Buffer.alloc(0), frames: [], truncated: false, total_bytes_received: 0 }),
     latestState() {
       return state;
     },
@@ -822,6 +823,7 @@ describe('waitForServerHangup', () => {
       stateHistory: [],
       audioTimestamps: [],
       linkEvents: [],
+      agentAudioSnapshot: () => ({ pcm: Buffer.alloc(0), frames: [], truncated: false, total_bytes_received: 0 }),
       latestState: () => null,
       onEnded() {},
       endedReason: () => null,
@@ -852,6 +854,7 @@ describe('waitForServerHangup', () => {
       stateHistory: [],
       audioTimestamps: [],
       linkEvents: [],
+      agentAudioSnapshot: () => ({ pcm: Buffer.alloc(0), frames: [], truncated: false, total_bytes_received: 0 }),
       latestState: () => null,
       onEnded() {},
       endedReason: () => null,

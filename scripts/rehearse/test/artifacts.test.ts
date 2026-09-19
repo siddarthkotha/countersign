@@ -9,7 +9,15 @@ import { mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeRunArtifacts } from '../artifacts.js';
+import { readWavFile } from '../wav.js';
+import type { AgentAudioCaptureSnapshot } from '../agentAudioCapture.js';
 import type { RehearseDiagnosticBundle, RunResult, Scenario } from '../types.js';
+
+function burst(amplitude: number, sampleCount: number): Buffer {
+  const buf = Buffer.alloc(sampleCount * 2);
+  for (let i = 0; i < sampleCount; i++) buf.writeInt16LE(i % 2 === 0 ? amplitude : -amplitude, i * 2);
+  return buf;
+}
 
 const scenario: Scenario = {
   name: 'test-scenario',
@@ -100,4 +108,70 @@ describe('writeRunArtifacts', () => {
     const diagContent = await readFile(diagnosticsPath, 'utf-8');
     expect(diagContent.trim()).toBe('null');
   });
+
+  // GAP: THE HARNESS RECORDS TRANSCRIPTS, NOT AUDIO (board item, 2026-09-19).
+  it('writes the agent audio as a WAV file plus a frame-index sidecar when raw_agent_audio has captured frames, and the report references the wav path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'rehearse-artifacts-'));
+    const loud = burst(2000, 50);
+    const rawAgentAudio: AgentAudioCaptureSnapshot = {
+      pcm: loud,
+      frames: [{ t_ms: 10, byte_offset: 0, byte_length: loud.length }],
+      truncated: false,
+      total_bytes_received: loud.length,
+    };
+    const result = baseResult({
+      raw_diagnostics: bundleWith([{ t_ms: 0, kind: 'reply.started', detail: { reply_id: 'r1' } }]),
+      raw_agent_audio: rawAgentAudio,
+    });
+    const at = new Date('2026-09-19T12:00:00');
+
+    const { reportPath, agentAudioPath, agentAudioFramesPath } = await writeRunArtifacts(result, dir, at);
+
+    expect(agentAudioPath).not.toBeNull();
+    expect(agentAudioFramesPath).not.toBeNull();
+
+    const wavOnDisk = await readFile(agentAudioPath!);
+    const info = readWavFile(wavOnDisk);
+    expect(info.pcm).toEqual(loud);
+    expect(info.sampleRate).toBe(24_000);
+
+    const sidecar = JSON.parse(await readFile(agentAudioFramesPath!, 'utf-8'));
+    expect(sidecar.frames).toEqual(rawAgentAudio.frames);
+    expect(sidecar.truncated).toBe(false);
+    expect(sidecar.sample_rate).toBe(24_000);
+
+    const reportContent = await readFile(reportPath, 'utf-8');
+    expect(reportContent).toContain('## Audio (captured at the harness)');
+    expect(reportContent).toContain('.agent.wav');
+    expect(reportContent).toContain('r1');
+
+    const files = await readdir(dir);
+    expect(files.length).toBe(4); // .md, .diagnostics.json, .agent.wav, .agent-frames.json
+  });
+
+  it('writes only report + diagnostics (no wav/sidecar) when raw_agent_audio has zero frames', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'rehearse-artifacts-'));
+    const result = baseResult({
+      raw_agent_audio: { pcm: Buffer.alloc(0), frames: [], truncated: false, total_bytes_received: 0 },
+    });
+
+    const { agentAudioPath, agentAudioFramesPath } = await writeRunArtifacts(result, dir);
+    expect(agentAudioPath).toBeNull();
+    expect(agentAudioFramesPath).toBeNull();
+
+    const files = await readdir(dir);
+    expect(files.length).toBe(2);
+  });
 });
+
+function bundleWith(events: RehearseDiagnosticBundle['server_events']): RehearseDiagnosticBundle {
+  return {
+    session_id: 'sess-1',
+    started_at: 0,
+    ended_at: 1000,
+    end_reason: 'caller_ended',
+    deployed_commit: null,
+    server_events: events,
+    client_events: [],
+  };
+}

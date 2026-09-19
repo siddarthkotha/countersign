@@ -331,6 +331,10 @@ async function runOne(
   const endOutcome = await waitForVerdictAndHangup(client, scenario, callerHungUp, ENDED_TIMEOUT_MS);
   warnings.push(...endOutcome.warnings);
   const { transcript, stateHistory, endedReason, hangupFailReason } = endOutcome;
+  // GAP: THE HARNESS RECORDS TRANSCRIPTS, NOT AUDIO (board item, 2026-09-19) -- taken before
+  // `client.close()` for clarity, though the capture itself lives in a closure that survives
+  // the socket closing (wsClient.ts never tears it down mid-call).
+  const rawAgentAudio = client.agentAudioSnapshot();
   client.close();
 
   const totalWallMs = performance.now() - client.startedAt;
@@ -402,6 +406,7 @@ async function runOne(
     state_history: stateHistory,
     diagnostics,
     raw_diagnostics: bundle,
+    raw_agent_audio: rawAgentAudio,
     warnings,
     exit_code: pass ? 0 : 1,
     minutes_estimate: minutesEstimate,
