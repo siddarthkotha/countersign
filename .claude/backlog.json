@@ -3431,11 +3431,49 @@
         "packages/server/src/aai/config.ts",
         "packages/server/test/**"
       ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-19T19:18:18.481Z",
+      "note": "landed on main a9dcefd + f651023 + 27e981e (cherry-picks, one config.ts conflict with the env switch resolved by keeping the mode branch and the exported DEFAULT_VAD_THRESHOLD), push 60: (A) CLOSE session.update carries turn_detection {vad_threshold 0.5, interrupt_response false} (docs: mutable after session.ready, quote in ASSEMBLYAI_INTEGRATION.md; live effect UNKNOWN until the batch); (B) goodbye confirmed only when relayed bytes reach 50 percent of about 4,000 bytes per char, regardless of transcript or reply.done status; (C) an owed goodbye dropped for callerSpeaking is sent synchronously at the caller turn end. Three replay tests from the day's bundles proven RED first; gate 2348/2348 on 120 files"
+    },
+    {
+      "id": "TURN-DETECTION-ENV-SWITCH",
+      "title": "server/aai: COUNTERSIGN_TURN_DETECTION=explicit|omit (default omit) selects whether the connect-time turn_detection defaults are sent, so the comma-cutoff versus fold trade can be measured per deploy without a code change; aai_ready diag records the mode",
+      "files": [
+        "packages/server/src/aai/config.ts",
+        "packages/server/src/aai/session.ts",
+        "packages/server/src/index.ts",
+        "packages/server/test/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-19T19:32:43.243Z",
+      "note": "landed on main 7e21f62 (cherry-pick), push held until the goodbye lane lands (omit-mode alone would fold most goodbyes live with no retry); COUNTERSIGN_TURN_DETECTION explicit|omit read in loadAaiEnvDefaults, default omit, aai_ready diag carries turn_detection_mode; 9 tests; gate 2345/2345 on 119 files"
+    },
+    {
+      "id": "DEGRADED-CLOSE-FLOOR-INCONSISTENT",
+      "title": "server: the DEGRADED-TRANSCRIPTS audio-only close confirmation (armCloseTranscriptWait, DEGRADED_CLOSE_CONFIRM_MIN_AUDIO_MS, flat 2,000 ms / 96,000 bytes) still uses a flat floor while the new (B) confirmation scales with the close line length; align them (lane finding 2026-09-19 3:29 PM)",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "held",
+      "held_because": "different failure shape (missing transcript with real audio); align after the deploy-60 read",
+      "agent_id": "",
+      "started_at": ""
+    },
+    {
+      "id": "DEPLOY-60-BATCH",
+      "title": "10-run graded batch on deploy 60 (option C: turn_detection omitted by default, synchronous goodbye, no barge-in at CLOSE, byte-floor goodbye confirmation with synchronous retry, harness audio capture on): the read that decides the founder voice session",
+      "files": [
+        "scripts/rehearse/**"
+      ],
       "status": "running",
       "held_because": "",
-      "agent_id": "a7481999f30252b78",
-      "started_at": "2026-09-19T19:18:18.481Z",
-      "note": "worktree lane (Sonnet, SONNET-JUSTIFIED: close-path timing); (A) interrupt_response false at CLOSE if mutable mid-session per verbatim docs, (B) audio-bytes or completed reply.done confirmation; lands after the deploy-58 batch"
+      "agent_id": "",
+      "started_at": "2026-09-19T20:32:07.564Z",
+      "note": "detached nohup under caffeinate behind the deploy watch; log batch-deploy60.log in the session scratchpad"
     }
   ]
 }

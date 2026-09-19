@@ -4,10 +4,10 @@ Every number below is either PROVEN (a real subtraction between two events a liv
 
 How to regenerate this file: `npm run latency:table` (reads every `*.diagnostics.json` under `scripts/rehearse/reports/`, which is gitignored and lives only on the machine that ran the rehearsals -- see docs/REHEARSAL-HARNESS.md).
 
-Runs with a diagnostics bundle: n=263, date range 2026-09-09 to 2026-09-18.
+Runs with a diagnostics bundle: n=301, date range 2026-09-09 to 2026-09-19.
 16 additional `.md` rehearsal report(s) exist in the same directory with NO matching `.diagnostics.json` bundle (older runs, before the flight-recorder fetch was added 2026-09-09) -- every column here is UNKNOWN for those runs; they are not counted in any `n` above.
 
-**Perceived response latency (headline number -- the gap a judge actually feels, ESTIMATE, harness wall clock, all runs/all targets): p50=637ms, p95=1862ms (n=1373 turns; 150 turn(s) excluded as n/a -- see section 3b for the exact method and the per-target/per-scenario breakdown).**
+**Perceived response latency (headline number -- the gap a judge actually feels, ESTIMATE, harness wall clock, all runs/all targets): p50=629ms, p95=1840ms (n=1532 turns; 178 turn(s) excluded as n/a -- see section 3b for the exact method and the per-target/per-scenario breakdown).**
 
 ## Method, per column
 
@@ -285,6 +285,44 @@ Runs with a diagnostics bundle: n=263, date range 2026-09-09 to 2026-09-18.
 | 2026-09-18T16-38-38-prompt-injection-midcall.diagnostics.json | 2026-09-18 | deployed | prompt-injection-midcall | 425ms | 184ms | greeting | 92886ms | 3360ms | 7 | 6 | 1 |
 | 2026-09-18T16-39-55-dana-patient.diagnostics.json | 2026-09-18 | deployed | dana-patient | 411ms | 35ms | greeting | 71575ms | 3093ms | 5 | 5 | 0 |
 | 2026-09-18T16-40-54-miller-patient.diagnostics.json | 2026-09-18 | deployed | miller-patient | 334ms | 174ms | greeting | 43103ms | 2252ms | 3 | 2 | 2 |
+| 2026-09-19T12-26-46-corrected-critical-field.diagnostics.json | 2026-09-19 | deployed | corrected-critical-field | 393ms | 177ms | greeting | 72159ms | 2467ms | 5 | 5 | 0 |
+| 2026-09-19T12-28-00-barge-in-interrupt.diagnostics.json | 2026-09-19 | deployed | barge-in-interrupt | 407ms | 179ms | greeting | 68970ms | 2780ms | 5 | 4 | 2 |
+| 2026-09-19T12-29-16-hangup-after-request.diagnostics.json | 2026-09-19 | deployed | hangup-after-request | 523ms | 184ms | greeting | 65674ms | 8645ms | 1 | 1 | 0 |
+| 2026-09-19T12-30-53-prompt-injection-midcall.diagnostics.json | 2026-09-19 | deployed | prompt-injection-midcall | 309ms | 169ms | greeting | 91967ms | 2668ms | 6 | 7 | 1 |
+| 2026-09-19T12-32-07-dana-patient.diagnostics.json | 2026-09-19 | deployed | dana-patient | 374ms | 177ms | greeting | 69032ms | 2992ms | 5 | 5 | 0 |
+| 2026-09-19T12-33-07-miller-patient.diagnostics.json | 2026-09-19 | deployed | miller-patient | 328ms | 185ms | greeting | 42500ms | 2377ms | 3 | 2 | 2 |
+| 2026-09-19T12-34-38-identity-switch.diagnostics.json | 2026-09-19 | deployed | identity-switch | 349ms | 175ms | greeting | 84813ms | 2175ms | 5 | 6 | 1 |
+| 2026-09-19T12-35-13-judge-out-of-scope.diagnostics.json | 2026-09-19 | deployed | judge-out-of-scope | 338ms | 175ms | greeting | UNKNOWN | UNKNOWN | 2 | 2 | 0 |
+| 2026-09-19T13-28-41-miller-patient.diagnostics.json | 2026-09-19 | deployed | miller-patient | 678ms | 42ms | greeting | 42542ms | 9496ms | 4 | 3 | 1 |
+| 2026-09-19T13-30-33-identity-switch.diagnostics.json | 2026-09-19 | deployed | identity-switch | 450ms | 29ms | greeting | 85812ms | 19763ms | 5 | 6 | 1 |
+| 2026-09-19T13-31-59-corrected-critical-field.diagnostics.json | 2026-09-19 | deployed | corrected-critical-field | 377ms | 178ms | greeting | 76136ms | 9028ms | 7 | 5 | 0 |
+| 2026-09-19T13-33-20-barge-in-interrupt.diagnostics.json | 2026-09-19 | deployed | barge-in-interrupt | 384ms | 47ms | greeting | 68956ms | 9602ms | 5 | 4 | 2 |
+| 2026-09-19T13-34-35-hangup-after-request.diagnostics.json | 2026-09-19 | deployed | hangup-after-request | 302ms | 171ms | greeting | 64453ms | 8252ms | 1 | 1 | 0 |
+| 2026-09-19T13-36-20-prompt-injection-midcall.diagnostics.json | 2026-09-19 | deployed | prompt-injection-midcall | 384ms | 179ms | greeting | 92546ms | 9765ms | 6 | 7 | 1 |
+| 2026-09-19T13-37-43-dana-patient.diagnostics.json | 2026-09-19 | deployed | dana-patient | 354ms | 183ms | greeting | 71247ms | 10155ms | 5 | 5 | 0 |
+| 2026-09-19T13-38-18-judge-out-of-scope.diagnostics.json | 2026-09-19 | deployed | judge-out-of-scope | 395ms | 178ms | greeting | UNKNOWN | UNKNOWN | 2 | 2 | 0 |
+| 2026-09-19T13-39-12-miller-patient.diagnostics.json | 2026-09-19 | deployed | miller-patient | 382ms | 179ms | greeting | 44948ms | 8058ms | 3 | 3 | 1 |
+| 2026-09-19T13-40-38-identity-switch.diagnostics.json | 2026-09-19 | deployed | identity-switch | 455ms | 39ms | greeting | 73414ms | 6784ms | 5 | 6 | 1 |
+| 2026-09-19T14-00-06-miller-patient.diagnostics.json | 2026-09-19 | deployed | miller-patient | 587ms | 58ms | greeting | 45854ms | 18829ms | 3 | 3 | 1 |
+| 2026-09-19T14-02-11-identity-switch.diagnostics.json | 2026-09-19 | deployed | identity-switch | 410ms | 181ms | greeting | 95470ms | 23808ms | 7 | 6 | 1 |
+| 2026-09-19T14-03-38-corrected-critical-field.diagnostics.json | 2026-09-19 | deployed | corrected-critical-field | 427ms | 183ms | greeting | 72691ms | 13077ms | 6 | 5 | 0 |
+| 2026-09-19T14-04-57-barge-in-interrupt.diagnostics.json | 2026-09-19 | deployed | barge-in-interrupt | 348ms | 204ms | greeting | 64361ms | 11229ms | 5 | 4 | 2 |
+| 2026-09-19T14-06-15-hangup-after-request.diagnostics.json | 2026-09-19 | deployed | hangup-after-request | 375ms | 177ms | greeting | 66978ms | 8895ms | 1 | 1 | 0 |
+| 2026-09-19T14-08-07-prompt-injection-midcall.diagnostics.json | 2026-09-19 | deployed | prompt-injection-midcall | 367ms | 174ms | greeting | 98830ms | 11159ms | 6 | 6 | 1 |
+| 2026-09-19T14-09-35-dana-patient.diagnostics.json | 2026-09-19 | deployed | dana-patient | 426ms | 33ms | greeting | 75284ms | 11121ms | 5 | 5 | 0 |
+| 2026-09-19T14-10-10-judge-out-of-scope.diagnostics.json | 2026-09-19 | deployed | judge-out-of-scope | 367ms | 231ms | greeting | UNKNOWN | UNKNOWN | 2 | 2 | 0 |
+| 2026-09-19T14-11-13-miller-patient.diagnostics.json | 2026-09-19 | deployed | miller-patient | 365ms | 174ms | greeting | 42132ms | 17492ms | 3 | 3 | 1 |
+| 2026-09-19T14-13-21-identity-switch.diagnostics.json | 2026-09-19 | deployed | identity-switch | 402ms | 173ms | greeting | 97371ms | 25240ms | 7 | 6 | 1 |
+| 2026-09-19T14-17-22-miller-patient.diagnostics.json | 2026-09-19 | deployed | miller-patient | 643ms | 76ms | greeting | 42009ms | 9505ms | 5 | 3 | 2 |
+| 2026-09-19T14-19-30-identity-switch.diagnostics.json | 2026-09-19 | deployed | identity-switch | 334ms | 176ms | greeting | 96999ms | 27431ms | 7 | 7 | 1 |
+| 2026-09-19T14-20-58-corrected-critical-field.diagnostics.json | 2026-09-19 | deployed | corrected-critical-field | 458ms | 135ms | greeting | 82884ms | 3198ms | 5 | 5 | 0 |
+| 2026-09-19T14-22-19-barge-in-interrupt.diagnostics.json | 2026-09-19 | deployed | barge-in-interrupt | 410ms | 175ms | greeting | 73968ms | 4453ms | 5 | 4 | 2 |
+| 2026-09-19T14-23-38-hangup-after-request.diagnostics.json | 2026-09-19 | deployed | hangup-after-request | 452ms | 36ms | greeting | 68320ms | 9049ms | 1 | 1 | 0 |
+| 2026-09-19T14-25-30-prompt-injection-midcall.diagnostics.json | 2026-09-19 | deployed | prompt-injection-midcall | 432ms | 84ms | greeting | 104395ms | 4541ms | 6 | 7 | 1 |
+| 2026-09-19T14-26-54-dana-patient.diagnostics.json | 2026-09-19 | deployed | dana-patient | 339ms | 182ms | greeting | 77699ms | 4547ms | 5 | 5 | 0 |
+| 2026-09-19T14-27-29-judge-out-of-scope.diagnostics.json | 2026-09-19 | deployed | judge-out-of-scope | 363ms | 208ms | greeting | UNKNOWN | UNKNOWN | 3 | 2 | 0 |
+| 2026-09-19T14-28-27-miller-patient.diagnostics.json | 2026-09-19 | deployed | miller-patient | 383ms | 179ms | greeting | 50942ms | 2443ms | 4 | 3 | 1 |
+| 2026-09-19T14-30-31-identity-switch.diagnostics.json | 2026-09-19 | deployed | identity-switch | 394ms | 176ms | greeting | 96060ms | 24376ms | 7 | 7 | 1 |
 
 ## 1. Socket connect to AssemblyAI ready -- p50/p95 across runs
 
@@ -292,21 +330,21 @@ Runs with a diagnostics bundle: n=263, date range 2026-09-09 to 2026-09-18.
 | --- | --- | --- | --- |
 | local / scenario-a-dana-legitimate | 3 | 979ms | 1105ms |
 | local / all scenarios | 3 | 979ms | 1105ms |
-| deployed / barge-in-interrupt | 28 | 409ms | 710ms |
-| deployed / corrected-critical-field | 20 | 393ms | 630ms |
-| deployed / dana-patient | 33 | 422ms | 629ms |
-| deployed / hangup-after-request | 22 | 402ms | 585ms |
-| deployed / identity-switch | 19 | 359ms | 483ms |
-| deployed / judge-out-of-scope | 20 | 379ms | 703ms |
-| deployed / miller-patient | 32 | 427ms | 681ms |
+| deployed / barge-in-interrupt | 32 | 402ms | 704ms |
+| deployed / corrected-critical-field | 24 | 394ms | 619ms |
+| deployed / dana-patient | 37 | 412ms | 618ms |
+| deployed / hangup-after-request | 26 | 402ms | 573ms |
+| deployed / identity-switch | 26 | 383ms | 466ms |
+| deployed / judge-out-of-scope | 24 | 376ms | 698ms |
+| deployed / miller-patient | 39 | 426ms | 683ms |
 | deployed / miller-silent-after-amount | 15 | 363ms | 512ms |
-| deployed / prompt-injection-midcall | 23 | 405ms | 481ms |
+| deployed / prompt-injection-midcall | 27 | 399ms | 480ms |
 | deployed / scenario-a-dana-legitimate | 9 | 581ms | 633ms |
 | deployed / scenario-b-miller-fraud | 5 | 438ms | 467ms |
 | deployed / single-wrong-answer | 17 | 396ms | 473ms |
 | deployed / structuring-two-wires | 17 | 390ms | 799ms |
-| deployed / all scenarios | 260 | 405ms | 663ms |
-| all targets / all scenarios | 263 | 405ms | 690ms |
+| deployed / all scenarios | 298 | 401ms | 652ms |
+| all targets / all scenarios | 301 | 401ms | 686ms |
 
 ## 2. Ready to first agent audio -- p50/p95 across runs, split by whether a greeting was configured
 
@@ -316,9 +354,9 @@ Runs with a diagnostics bundle: n=263, date range 2026-09-09 to 2026-09-18.
 | --- | --- | --- | --- |
 | local / first reply, greeting_configured unknown -- older bundle (includes caller talk time before the agent speaks) | 3 | 17394ms | 17489ms |
 | deployed / first reply, greeting_configured unknown -- older bundle (includes caller talk time before the agent speaks) | 4 | 17876ms | 18144ms |
-| deployed / greeting | 256 | 175ms | 200ms |
+| deployed / greeting | 294 | 175ms | 202ms |
 | all targets / first reply, greeting_configured unknown -- older bundle (includes caller talk time before the agent speaks) | 7 | 17499ms | 18115ms |
-| all targets / greeting | 256 | 175ms | 200ms |
+| all targets / greeting | 294 | 175ms | 202ms |
 
 ## 3a. Server relay gap after AssemblyAI's end-of-turn event (not perceived latency) -- p50/p95 across ALL TURNS, not runs
 
@@ -328,21 +366,21 @@ Runs with a diagnostics bundle: n=263, date range 2026-09-09 to 2026-09-18.
 | --- | --- | --- | --- |
 | local / scenario-a-dana-legitimate | 21 | 11ms | 35ms |
 | local / all scenarios | 21 | 11ms | 35ms |
-| deployed / barge-in-interrupt | 205 | 9ms | 3972ms |
-| deployed / corrected-critical-field | 118 | 12ms | 4031ms |
-| deployed / dana-patient | 226 | 11ms | 3952ms |
-| deployed / hangup-after-request | 26 | 8ms | 11332ms |
-| deployed / identity-switch | 143 | 10ms | 3977ms |
-| deployed / judge-out-of-scope | 126 | 6ms | 4010ms |
-| deployed / miller-patient | 139 | 11ms | 4044ms |
+| deployed / barge-in-interrupt | 225 | 9ms | 3966ms |
+| deployed / corrected-critical-field | 141 | 12ms | 3949ms |
+| deployed / dana-patient | 246 | 11ms | 3836ms |
+| deployed / hangup-after-request | 30 | 8ms | 11222ms |
+| deployed / identity-switch | 186 | 10ms | 3973ms |
+| deployed / judge-out-of-scope | 135 | 6ms | 4034ms |
+| deployed / miller-patient | 164 | 11ms | 4034ms |
 | deployed / miller-silent-after-amount | 62 | 9ms | 8483ms |
-| deployed / prompt-injection-midcall | 161 | 10ms | 4655ms |
+| deployed / prompt-injection-midcall | 185 | 10ms | 4033ms |
 | deployed / scenario-a-dana-legitimate | 56 | 9ms | 114ms |
 | deployed / scenario-b-miller-fraud | 18 | 7ms | 181ms |
 | deployed / single-wrong-answer | 118 | 9ms | 3955ms |
 | deployed / structuring-two-wires | 98 | 8ms | 3954ms |
-| deployed / all scenarios | 1496 | 10ms | 3973ms |
-| all targets / all scenarios | 1517 | 10ms | 3972ms |
+| deployed / all scenarios | 1664 | 10ms | 3969ms |
+| all targets / all scenarios | 1685 | 10ms | 3969ms |
 
 ## 3b. Perceived response latency (the gap a judge feels) -- ESTIMATE, p50/p95 across ALL TURNS, not runs
 
@@ -352,21 +390,21 @@ Method: harness wall clock from the synthetic caller's last audio frame to the a
 | --- | --- | --- | --- |
 | local / scenario-a-dana-legitimate | 29 | 657ms | 1813ms |
 | local / all scenarios | 29 | 657ms | 1813ms |
-| deployed / barge-in-interrupt | 173 | 624ms | 3848ms |
-| deployed / corrected-critical-field | 105 | 655ms | 4598ms |
-| deployed / dana-patient | 191 | 642ms | 2948ms |
-| deployed / hangup-after-request | 21 | 541ms | 929ms |
-| deployed / identity-switch | 126 | 638ms | 1785ms |
-| deployed / judge-out-of-scope | 118 | 8ms | 729ms |
-| deployed / miller-patient | 98 | 666ms | 1515ms |
+| deployed / barge-in-interrupt | 189 | 619ms | 3833ms |
+| deployed / corrected-critical-field | 125 | 629ms | 4572ms |
+| deployed / dana-patient | 211 | 637ms | 2898ms |
+| deployed / hangup-after-request | 25 | 546ms | 894ms |
+| deployed / identity-switch | 170 | 624ms | 1796ms |
+| deployed / judge-out-of-scope | 126 | 8ms | 723ms |
+| deployed / miller-patient | 118 | 656ms | 1514ms |
 | deployed / miller-silent-after-amount | 51 | 639ms | 1831ms |
-| deployed / prompt-injection-midcall | 161 | 634ms | 1837ms |
+| deployed / prompt-injection-midcall | 188 | 615ms | 1823ms |
 | deployed / scenario-a-dana-legitimate | 68 | 620ms | 1772ms |
 | deployed / scenario-b-miller-fraud | 17 | 628ms | 803ms |
 | deployed / single-wrong-answer | 122 | 737ms | 4480ms |
 | deployed / structuring-two-wires | 93 | 653ms | 1861ms |
-| deployed / all scenarios | 1344 | 637ms | 1860ms |
-| all targets / all scenarios | 1373 | 637ms | 1862ms |
+| deployed / all scenarios | 1503 | 629ms | 1840ms |
+| all targets / all scenarios | 1532 | 629ms | 1840ms |
 
 ## 4. Connect to terminal verdict -- p50/p95 across runs
 
@@ -374,21 +412,21 @@ Method: harness wall clock from the synthetic caller's last audio frame to the a
 | --- | --- | --- | --- |
 | local / scenario-a-dana-legitimate | 2 | 105374ms | 115844ms |
 | local / all scenarios | 2 | 105374ms | 115844ms |
-| deployed / barge-in-interrupt | 28 | 102356ms | 168827ms |
-| deployed / corrected-critical-field | 20 | 90629ms | 165008ms |
-| deployed / dana-patient | 33 | 82557ms | 166137ms |
-| deployed / hangup-after-request | 19 | 67736ms | 81482ms |
-| deployed / identity-switch | 19 | 136690ms | 177161ms |
+| deployed / barge-in-interrupt | 32 | 92075ms | 166410ms |
+| deployed / corrected-critical-field | 24 | 86617ms | 162355ms |
+| deployed / dana-patient | 37 | 80364ms | 164582ms |
+| deployed / hangup-after-request | 23 | 67191ms | 76525ms |
+| deployed / identity-switch | 26 | 114656ms | 175916ms |
 | deployed / judge-out-of-scope | 0 | UNKNOWN | UNKNOWN |
-| deployed / miller-patient | 32 | 47638ms | 88043ms |
+| deployed / miller-patient | 39 | 46893ms | 83103ms |
 | deployed / miller-silent-after-amount | 15 | 73587ms | 91649ms |
-| deployed / prompt-injection-midcall | 23 | 114996ms | 172668ms |
+| deployed / prompt-injection-midcall | 27 | 113013ms | 172242ms |
 | deployed / scenario-a-dana-legitimate | 9 | 81496ms | 97781ms |
 | deployed / scenario-b-miller-fraud | 5 | 45133ms | 83094ms |
 | deployed / single-wrong-answer | 16 | 136735ms | 194758ms |
 | deployed / structuring-two-wires | 15 | 100215ms | 141218ms |
-| deployed / all scenarios | 234 | 85572ms | 173286ms |
-| all targets / all scenarios | 236 | 86210ms | 173221ms |
+| deployed / all scenarios | 268 | 84342ms | 172154ms |
+| all targets / all scenarios | 270 | 84443ms | 171946ms |
 
 ## 5. Verdict to call end -- p50/p95 across runs
 
@@ -396,18 +434,18 @@ Method: harness wall clock from the synthetic caller's last audio frame to the a
 | --- | --- | --- | --- |
 | local / scenario-a-dana-legitimate | 2 | 13975ms | 26527ms |
 | local / all scenarios | 2 | 13975ms | 26527ms |
-| deployed / barge-in-interrupt | 28 | 10464ms | 45006ms |
-| deployed / corrected-critical-field | 20 | 7572ms | 29752ms |
-| deployed / dana-patient | 33 | 9674ms | 18889ms |
-| deployed / hangup-after-request | 19 | 9137ms | 18510ms |
-| deployed / identity-switch | 19 | 12434ms | 23597ms |
+| deployed / barge-in-interrupt | 32 | 9928ms | 45006ms |
+| deployed / corrected-critical-field | 24 | 7572ms | 29286ms |
+| deployed / dana-patient | 37 | 9674ms | 18770ms |
+| deployed / hangup-after-request | 23 | 8895ms | 18170ms |
+| deployed / identity-switch | 26 | 13184ms | 26883ms |
 | deployed / judge-out-of-scope | 0 | UNKNOWN | UNKNOWN |
-| deployed / miller-patient | 32 | 11550ms | 28416ms |
+| deployed / miller-patient | 39 | 11366ms | 27761ms |
 | deployed / miller-silent-after-amount | 15 | 18452ms | 45004ms |
-| deployed / prompt-injection-midcall | 23 | 13110ms | 42674ms |
+| deployed / prompt-injection-midcall | 27 | 11854ms | 38013ms |
 | deployed / scenario-a-dana-legitimate | 9 | 15534ms | 48371ms |
 | deployed / scenario-b-miller-fraud | 5 | 15005ms | 19770ms |
 | deployed / single-wrong-answer | 16 | 12545ms | 37564ms |
 | deployed / structuring-two-wires | 15 | 15005ms | 28502ms |
-| deployed / all scenarios | 234 | 12594ms | 43688ms |
-| all targets / all scenarios | 236 | 12594ms | 43486ms |
+| deployed / all scenarios | 268 | 11909ms | 34897ms |
+| all targets / all scenarios | 270 | 11909ms | 34844ms |
