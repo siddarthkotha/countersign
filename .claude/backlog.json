@@ -3250,16 +3250,17 @@
     },
     {
       "id": "OUTAGE-2026-09-18-EVENING",
-      "title": "live service accepted TCP and returned zero bytes from about 4:42 PM Friday until the forced redeploy 95d4948 restored it Saturday 12:04 PM; cause UNKNOWN; the regex-backtracking hypothesis is REFUTED by measurement (matcher is 20 ms on a 300 KB transcript, linear)",
+      "title": "NOT AN OUTAGE (founder correction 2026-09-19): the laptop lid was closed, so my health probes were suspended curls, not a silent server; the 12:04 PM 21.5 s response was an idle cold start; the forced redeploy 95d4948 was unnecessary and harmless",
       "files": [],
-      "status": "held",
-      "held_because": "no further evidence available locally; Render logs are the only unread source and the founder has the dashboard; if it recurs, capture before redeploying",
+      "status": "done",
+      "held_because": "",
       "agent_id": "",
-      "started_at": ""
+      "started_at": "",
+      "lane_note": "keep as the record of the wrong call: I read my own suspended process as evidence about the server, twice, with the elapsed-vs-max-time tell in my own output"
     },
     {
       "id": "DEPLOY-53-BATCH-REDO",
-      "title": "the deploy-53 eight-case graded batch is incomplete and unusable (outage mid-batch, 7 of 8, two runs corrupted by machine sleep); re-run on 95d4948 with the laptop awake; this is the first clean read on the last repeat fix and the turn_detection removal",
+      "title": "the deploy-53 eight-case graded batch is incomplete and unusable (the laptop lid closed mid-batch: 7 of 8, two runs corrupted by sleep); re-run on 95d4948 with the machine awake; first clean read on the last repeat fix and the turn_detection removal",
       "files": [
         "scripts/rehearse/**"
       ],

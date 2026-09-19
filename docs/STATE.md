@@ -21,18 +21,22 @@ call on repeated questions, merged replies, talk-overs and holding spam; it fail
 of his records and it failed four harness calls the old grader had passed.
 
 ## PROVEN at this close
-- Live: https://countersign-bf8q.onrender.com is UP again, /health 200 at 12:04 PM,
-  /version 95d4948 (the forced redeploy). It had been DOWN from about 4:42 PM Friday to
-  that redeploy: TCP connected in 48 ms, zero bytes returned, three attempts 06:01 to 08:02.
-- Outage cause: UNKNOWN. My leading hypothesis (catastrophic regex backtracking in the new
-  matcher pegging the event loop) is REFUTED by measurement: replyCoversCurrentRendering runs
-  20 ms on a 300 KB transcript, linear. No other cause identified; a redeploy cleared it.
+- Live: https://countersign-bf8q.onrender.com is UP, /health 200 at 12:04 PM (21.5 s cold
+  start), /version 95d4948.
+- THERE WAS NO OUTAGE. Founder correction 2026-09-19 12:06 PM, and his observation outranks
+  my inference: he shut the laptop lid. Every probe I ran was on his machine, so "TCP
+  connected in 48 ms then zero bytes for 6784 s" is a SUSPENDED CURL, not a silent server.
+  The tell was in my own output and I missed it: a curl with --max-time 45 reported
+  total=428 s, and one with --max-time 120 reported 6784 s. The 12:04 PM recovery was a
+  21.5 s cold start, which is an idle Render service waking, not a hung process recovering.
+  The redeploy (95d4948) was unnecessary and harmless. The matcher measurement stands and is
+  still useful: replyCoversCurrentRendering is linear, 20 ms on a 300 KB transcript.
 - Credit scare checked and FALSE: the "488 s" call ended cleanly server-side at 115.6 s,
-  billed 115.57 s; the "33,626 s" call is harness wall clock across a sleeping laptop with no
-  session behind it (diagnostics fetch failed).
+  billed 115.57 s; the "33,626 s" call is harness wall clock across the sleeping laptop with
+  no session behind it (diagnostics fetch failed because the session was long gone).
 - Experience grades, same eight cases, same grader: deploy 51 repeated_question 23,
   merged 0, talk_over 8; deploy 52 repeats 2, merged 0, talk_over 4, goodbye ~3 s.
-  Deploy 53's batch is INCOMPLETE and unusable (the outage hit mid-batch, 7 of 8, two runs
+  Deploy 53's batch is INCOMPLETE and unusable (the lid closed mid-batch: 7 of 8, two runs
   corrupted by machine sleep).
 - Close gate numbers on the closing AUTOPILOT_LOG line.
 
@@ -40,8 +44,11 @@ of his records and it failed four harness calls the old grader had passed.
 1. Re-run the eight-case graded batch on deploy 53 (95d4948) with the laptop awake. This is
    the first clean read on whether the last repeat fix and the turn_detection removal worked.
    Target: repeated_question 0, merged_reply 0, talk_over 0, holding_spam 0.
-2. The outage: if it recurs, capture it before redeploying (Render logs are the only source
-   we have not read; the founder has the dashboard). Do not assume it was the code.
+2. Harness hygiene, the real lesson: a sleeping laptop corrupts every wall-clock number the
+   harness and my own probes produce (it invented a 488 s call that really ran 115.6 s and a
+   33,626 s call that never existed). Before any batch, confirm the machine will stay awake,
+   and treat any probe whose elapsed time exceeds its own --max-time as suspended, not as
+   evidence about the server.
 3. EVALUATE-DIAG-DEDUP-HIDES-GRADING (P1): the server only writes an evaluate diag when
    verdict/state/goal/reasons change, so the grader's "was it already graded" condition is
    effectively dead for readbacks. Fix before trusting the grader on new shapes.
@@ -69,6 +76,6 @@ machine corrupts the harness's wall-clock grading.
 
 ## Next session
 "Day 11 resume: read docs/STATE.md, then the tail of docs/AUTOPILOT_LOG.md from the
-2026-09-18 3:00 PM entry. Live is 95d4948 and UP. First: confirm /health, then re-run the
-eight-case graded batch with the laptop awake and report repeated_question, merged_reply,
+2026-09-18 3:00 PM entry. Live is 95d4948 and UP; there was no outage, the laptop lid was
+closed. First: confirm /health, then re-run the eight-case graded batch with the laptop awake and report repeated_question, merged_reply,
 talk_over, holding_spam. Do not ask the founder for his voice until that batch is 0/0/0/0."
