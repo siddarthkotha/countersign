@@ -150,7 +150,7 @@ export class CallSession {
   private speaking = false;
   /** CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19, PROVEN live deploy 55: scripts/
    *  rehearse/reports/2026-09-19T13-28-41-miller-patient.diagnostics.json): true from
-   *  `input.speech.started` until the matching `input.speech.stopped` -- tracks whether the
+   *  `input.speech.started` until the caller's turn is known to have ended -- tracks whether the
    *  CALLER (never the agent -- that is `this.speaking`) is currently mid-utterance. Read by
    *  `maybeSendReplyCreateAfterReplyDone` (never dispatch an owed forceSpeak/question catch-up
    *  while the caller is talking) and `armCloseRetryTimer`'s own send (the existing close-retry
@@ -161,7 +161,17 @@ export class CallSession {
    *  the same ms) -- the owed CLOSE catch-up fired ONE millisecond later, talking over the
    *  whole of the caller's next sentence (46245-49837ms). Never set for the AGENT's own speech
    *  (`this.speaking` already covers that) -- this is caller-side only, and default false is
-   *  correct until the first `input.speech.started` a call ever sees. */
+   *  correct until the first `input.speech.started` a call ever sees.
+   *
+   *  Cleared in TWO places, deliberately, both meaning "the caller's turn just ended": (1)
+   *  `input.speech.stopped`, the ordinary VAD signal; (2) `transcript.user` (hardening,
+   *  2026-09-19 coordinator review) -- every bundle read so far has `stopped` and the caller's
+   *  own final transcript land in the identical millisecond, but AssemblyAI's docs never
+   *  guarantee that ordering, and a `transcript.user` that ever arrived with no preceding
+   *  `stopped` would otherwise leave this stuck true for the rest of the call, silently
+   *  deferring every future owed send all the way to the 45s CLOSE_TOTAL_MS cap -- worse than
+   *  the bug this whole fix exists to close. A caller's own FINAL transcript is itself proof
+   *  the turn ended, `stopped` or not. */
   private callerSpeaking = false;
   private previousGoalKey: string | null = null;
   /** Flight recorder flood fix (2026-09-03, founder-observed live): the last `evaluate`
@@ -2509,6 +2519,18 @@ export class CallSession {
         // and would otherwise let a stalled reply mask real caller silence).
         if (evt.type === 'transcript.user') {
           this.opts.onActivity?.();
+          // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix, hardening (2026-09-19, coordinator review
+          // of 9e16e75): `callerSpeaking` used to be cleared ONLY by `input.speech.stopped`.
+          // Every bundle read so far has `input.speech.stopped` and the caller's own final
+          // `transcript.user` land in the same millisecond, but AssemblyAI's docs never
+          // guarantee that ordering -- if a `transcript.user` ever arrived with no preceding
+          // `stopped`, `callerSpeaking` would stay stuck true, silently deferring every future
+          // owed send (goodbye or question) all the way to the 45s CLOSE_TOTAL_MS cap. A
+          // caller's own FINAL transcript is itself proof the turn ended, `input.speech.stopped`
+          // or not -- cleared here, BEFORE this event's own trailing `tick()` runs, so that
+          // tick()'s own tail call to `maybeSendOwedAfterCallerTurnEnds` can arm the settle
+          // timer for anything left owed.
+          this.callerSpeaking = false;
           // HOLD-WITHOUT-FOLLOW-UP fix: a genuine new caller turn supersedes whatever
           // hold-followup was pending -- the caller is talking again, so whatever restatement
           // was armed is no longer needed (and `holdFollowupArmedForTurn` resets so the NEXT

@@ -1729,6 +1729,79 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       expect(closeReplyCreates(diagEvents)).toHaveLength(0); // the goodbye was never spoken
       expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' }); // but the call still ends
     });
+
+    // Hardening fix (2026-09-19, coordinator review of 9e16e75): `callerSpeaking` was cleared
+    // ONLY by `input.speech.stopped`. Every bundle read so far has `input.speech.stopped` and
+    // the caller's own final `transcript.user` land in the identical millisecond (e.g. 42538,
+    // 65135) -- but AssemblyAI's docs never guarantee `stopped` always precedes (or even
+    // always arrives before) the final transcript. If a `transcript.user` ever landed with no
+    // preceding `stopped`, `callerSpeaking` would stay stuck true for the rest of the call --
+    // every future owed send (goodbye OR a fresh question) would silently wait for the 45s
+    // CLOSE_TOTAL_MS cap, a regression worse than the bug this file's own fix closes. Closed by
+    // also clearing `callerSpeaking` in the `transcript.user` case, before its own `tick()` runs
+    // -- a caller's own FINAL transcript is itself proof the turn ended, `input.speech.stopped`
+    // or not.
+    it('the transcript-only turn-end case: no input.speech.stopped ever arrives, but the caller\'s own final transcript.user does -- the goodbye still goes out exactly once, well inside the settle window, never waiting for the 45s cap', () => {
+      const clock = { now: 0 };
+      const aai = new FakeAaiSocket();
+      const sent: ServerEvent[] = [];
+      const diagEvents: { kind: string; detail: unknown }[] = [];
+      const session = newDiagSession('sess-close-catchup-transcript-only', clock, aai, sent, diagEvents);
+      session.start();
+      driveThroughC4(session, aai, clock);
+
+      clock.now = 7000;
+      aai.emit({ type: 'transcript.user', item_id: 'c5', text: "Yes, that's right." });
+      expect(session.last?.goal.code).toBe('CLOSE');
+      clock.now = 7018;
+      aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
+      vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+      expect(closeReplyCreates(diagEvents)).toHaveLength(0);
+
+      // The caller barges in on 'auto-1' -- same PROVEN live shape as the sibling test above.
+      clock.now = 11245;
+      aai.emit({ type: 'input.speech.started' });
+      aai.emit({
+        type: 'transcript.agent',
+        item_id: 'x-auto-1',
+        text: 'One moment. Which institution',
+        reply_id: 'auto-1',
+        interrupted: true,
+      });
+      aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'interrupted' });
+      expect(closeReplyCreates(diagEvents)).toHaveLength(0);
+
+      // THE NEW SHAPE: `input.speech.stopped` never arrives -- instead, AssemblyAI delivers
+      // the caller's own final transcript.user directly. This alone must be enough to release
+      // the owed CLOSE catch-up.
+      clock.now = 14837;
+      aai.emit({
+        type: 'transcript.user',
+        item_id: 'c6',
+        text: "I don't care about your process. Release the wire or you're fired.",
+      });
+      // Still deferred by the settle window -- in case another automatic reply starts for this
+      // now-finished turn -- but owed, not stuck.
+      expect(closeReplyCreates(diagEvents)).toHaveLength(0);
+      vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+      const closeSends = closeReplyCreates(diagEvents);
+      expect(closeSends).toHaveLength(1);
+      expect((closeSends[0]!.detail as { reason: string }).reason).toBe('tick_end');
+
+      // Comfortably inside the 45s cap -- not the pathological "waited for close_timeout"
+      // shape the bug (pre-hardening) would have produced.
+      expect(sent.some((e) => e.type === 'ended')).toBe(false);
+
+      // The real close reply, once it starts and completes, ends the call normally.
+      clock.now = 15100;
+      aai.emit({ type: 'reply.started', reply_id: 'close-1' });
+      aai.emit({ type: 'transcript.agent', item_id: 'x-close-1', text: session.last!.goal.hint, reply_id: 'close-1', interrupted: false });
+      clock.now = 15600;
+      aai.emit({ type: 'reply.done', reply_id: 'close-1', status: 'completed' });
+      vi.advanceTimersByTime(1500);
+      expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+      expect(closeReplyCreates(diagEvents)).toHaveLength(1); // still exactly one, for the whole call
+    });
   });
 
   // Round 4 (2026-09-14, time-budget fix): the hard cap moved from CLOSE_TIMEOUT_MS (15s,
