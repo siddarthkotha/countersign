@@ -3292,11 +3292,22 @@
         "packages/server/src/call/prompt.ts",
         "packages/server/test/**"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
-      "agent_id": "ae842a39c6d207b48",
+      "agent_id": "",
       "started_at": "2026-09-19T17:37:10.185Z",
-      "note": "worktree lane (Sonnet, SONNET-JUSTIFIED: AAI reply/session.update race); root-cause with evidence, TDD fix; merge order: grader lane first, then this one rebases"
+      "note": "landed on main 76969ee (cherry-pick), push 55. Root cause PROVEN H2: CLOSE reply.create sent synchronously in the caller-turn tick raced the AssemblyAI automatic reply and was folded into one reply_id; e99e17f had exempted CLOSE/ANNOUNCE_* from the 150 ms settle. Fix: defer forceSpeak sends on callerTurnTick via the same settle timer with an owedForceSpeakGoalKey; second bug fixed: the deferred CLOSE could be dropped forever because an ambient reply labelled with the same goal code made mustForceSpeak false. Live proof owed: re-batch on deploy 55 with miller and identity twice each."
+    },
+    {
+      "id": "CLOSE-TAIL-AUDIO-SECONDS-UNDERCOUNT",
+      "title": "server: close_tail_wait.audio_seconds = relayed audio bytes / 48000 at reply.done, reads 0.87 s for a 142-char reply and 1.26 s for an 86-char goodbye (5 to 10x too short for TTS pacing): either frames are not all attributed to the reply_id or reply.done fires before the audio finishes streaming; the audio-based close deadline then loses to the flat 1500 ms floor and the socket may close before a browser finishes playing the goodbye. UNKNOWN, needs one live call correlating browser playback end, or a diag counting reply.audio frames arriving after that reply's own reply.done",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "held",
+      "held_because": "UNKNOWN cause; needs a live-call diagnostic before any fix (lane finding 2026-09-19 1:24 PM)",
+      "agent_id": "",
+      "started_at": ""
     }
   ]
 }
