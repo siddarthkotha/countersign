@@ -311,6 +311,69 @@ export function renderRollup(r: RollupResult): string {
   return lines.join('\n');
 }
 
+/** CLOSE-TAIL-AUDIO-SECONDS-UNDERCOUNT diagnostics (board item, 2026-09-19): renders the
+ *  goodbye reply's own `reply.audio.summary` event (session.ts's `finalizeReplyAudioSummary`,
+ *  added alongside this function) next to the existing `close_tail_wait` numbers -- neither
+ *  was ever shown in the rendered report before this, only visible by opening the raw
+ *  `.diagnostics.json` (exactly how the 0.87s/1.26s undercounts on 2026-09-19 were first
+ *  noticed, by hand). Returns null (render nothing) when the bundle has no `close_tail_wait`
+ *  event at all -- a call that never reached a spoken close has nothing to report here, same
+ *  "only show what applies" convention `renderFreePlaySection` above already uses.
+ *
+ *  The correlating reply id is read off the LAST `reply.done` event at or before the
+ *  `close_tail_wait` event, in the bundle's own chronological event order: `beginCloseGrace`
+ *  (packages/server/src/call/session.ts) always calls `this.diag('close_tail_wait', ...)`
+ *  synchronously in the same dispatch as either that reply's own `reply.done` case, or (the
+ *  transcript-confirmed-before-reply.done path) an event that reply's `reply.done` has
+ *  already fired before. If no matching `reply.audio.summary` event exists for that reply id
+ *  (an older bundle, from before this diagnostic existed), says so plainly rather than
+ *  guessing a number. */
+function renderCloseTailAudioSummary(r: RunResult): string | null {
+  const events = r.raw_diagnostics?.server_events;
+  if (!events || events.length === 0) return null;
+  let closeTailWait: (typeof events)[number] | null = null;
+  for (const e of events) {
+    if (e.kind === 'close_tail_wait') closeTailWait = e;
+  }
+  if (!closeTailWait) return null;
+
+  let replyId: string | null = null;
+  for (const e of events) {
+    if (e.t_ms > closeTailWait.t_ms) break;
+    if (e.kind === 'reply.done' && typeof e.detail === 'object' && e.detail !== null && 'reply_id' in e.detail) {
+      const id = (e.detail as Record<string, unknown>).reply_id;
+      if (typeof id === 'string') replyId = id;
+    }
+  }
+
+  const closeTailDetail = (closeTailWait.detail ?? {}) as Record<string, unknown>;
+  const audioSeconds = typeof closeTailDetail.audio_seconds === 'number' ? closeTailDetail.audio_seconds : 'n/a';
+  const waitedMs = typeof closeTailDetail.waited_ms === 'number' ? closeTailDetail.waited_ms : 'n/a';
+
+  const summaryEvent = replyId
+    ? events.find(
+        (e) =>
+          e.kind === 'reply.audio.summary' &&
+          typeof e.detail === 'object' &&
+          e.detail !== null &&
+          (e.detail as Record<string, unknown>).reply_id === replyId,
+      )
+    : undefined;
+
+  const lines = [`- Close-tail wait: sized off ${audioSeconds}s of relayed audio, waited ${waitedMs}ms after the goodbye's reply.done.`];
+  if (!summaryEvent) {
+    lines.push(
+      '- Goodbye reply audio summary: not available in this bundle (predates the CLOSE-TAIL-AUDIO-SECONDS-UNDERCOUNT diagnostic, or no matching reply.done was found).',
+    );
+  } else {
+    const d = summaryEvent.detail as Record<string, unknown>;
+    lines.push(
+      `- Goodbye reply (${replyId}) audio: ${d.total_bytes ?? 'n/a'} bytes total, ${d.bytes_after_done ?? 'n/a'} bytes after its own reply.done, last audio frame ${d.last_audio_ms_after_done ?? 'n/a'}ms relative to reply.done, first-to-last-audio span ${d.first_to_last_audio_ms ?? 'n/a'}ms.`,
+    );
+  }
+  return lines.join('\n');
+}
+
 export function renderReport(r: RunResult): string {
   const lines: string[] = [];
   lines.push(`# Rehearsal report: ${r.scenario.title}`);
@@ -352,6 +415,8 @@ export function renderReport(r: RunResult): string {
     lines.push(`- Ready to first agent audio: ${fmtMs(r.timings.first_audio_ms)}`);
   }
   lines.push(`- Greeting configured: ${greetingConfigured === true ? 'yes' : greetingConfigured === false ? 'no' : 'unknown'}`);
+  const closeTailAudio = renderCloseTailAudioSummary(r);
+  if (closeTailAudio) lines.push(closeTailAudio);
   lines.push('');
   lines.push('### Per-turn gaps (caller line end -> next agent audio)');
   lines.push('');

@@ -474,6 +474,28 @@ export class CallSession {
    *  confirmed goodbye reply only. */
   private readonly replyAudioBytes = new Map<string, number>();
   private readonly replyFirstAudioAt = new Map<string, number>();
+  /** CLOSE-TAIL-AUDIO-SECONDS-UNDERCOUNT diagnostics (2026-09-19, boarded UNKNOWN from the
+   *  MERGED-FREEZE-GOODBYE-MILLER commit: `close_tail_wait.audio_seconds` read 0.87s for a
+   *  142-char reply and 1.26s for an 86-char one, both implausibly short for TTS pacing).
+   *  DIAGNOSTICS ONLY -- none of these four maps/sets is read by any close-timing or
+   *  relay decision; `beginCloseGrace` and the `reply.audio` relay/suppression path are
+   *  untouched. Keyed by AAI reply id, same never-pruned convention as `replyAudioBytes`
+   *  above. `replyLastAudioAt` is the server clock time of the MOST RECENT relayed frame for
+   *  that reply id (updated every accepted frame, same clock as `replyFirstAudioAt`).
+   *  `replyDoneAt`/`replyBytesAtDone` snapshot, at that reply's own `reply.done`, the server
+   *  clock time and the `replyAudioBytes` total so far -- the only way to later compute how
+   *  many (if any) bytes arrived AFTER `reply.done`, since `replyAudioBytes` itself keeps
+   *  accumulating for as long as `currentReplyId` still points at this id (see
+   *  `currentReplyId`'s own doc comment: a reply.audio frame carries no id of its own, so
+   *  bytes that arrive after this reply's `reply.done` but before the NEXT `reply.started`
+   *  are still (correctly) counted here -- bytes arriving after that point are not, because
+   *  `currentReplyId` has already moved on). `repliesWithAudioSummary` guards the one-summary-
+   *  per-reply emission in `finalizeReplyAudioSummary` against ever firing twice for the same
+   *  id (it can be called both from the next `reply.started` and from `end()`). */
+  private readonly replyLastAudioAt = new Map<string, number>();
+  private readonly replyDoneAt = new Map<string, number>();
+  private readonly replyBytesAtDone = new Map<string, number>();
+  private readonly repliesWithAudioSummary = new Set<string>();
   /** Round 4: the reply id `maybeArmCloseOnTranscript` has already started the hang-up
    *  sequence for, so a second (or third) `transcript.agent` chunk for the SAME reply that
    *  still matches doesn't re-arm a fresh `CLOSE_DONE_WAIT_MS` timer on top of the one
@@ -2107,6 +2129,14 @@ export class CallSession {
     this.clearCloseTimers();
     this.clearDegradedStrikeTimers();
     this.clearHoldFollowupTimer();
+    // CLOSE-TAIL-AUDIO-SECONDS-UNDERCOUNT diagnostics (2026-09-19): whichever reply is still
+    // `currentReplyId` right now (typically the confirmed goodbye, since nothing else started
+    // after it) gets no further audio -- finalize its summary here. Covers both a call that
+    // ends with no further reply ever starting, and the close-tail-deadline timer itself
+    // (`beginCloseGrace`'s own `closeGraceTimer` calls `this.end(...)` directly). A no-op if
+    // the next `reply.started` already finalized this same id (see
+    // `finalizeReplyAudioSummary`'s own doc comment).
+    this.finalizeReplyAudioSummary(this.currentReplyId);
     // Red team item 4 (founder ruling, 2026-09-09): before anything else about ending the
     // call, record the structured fact that it ended -- LAW 3 forbids the SERVER from
     // deciding what that means (a rejected first attempt at this fix, branch
@@ -2226,6 +2256,45 @@ export class CallSession {
    *  throws, never touches `logs`/`last` -- diagnostics is a side channel, not evidence. */
   private diag(kind: string, detail: unknown): void {
     this.opts.onDiagnostic?.(kind, detail);
+  }
+
+  /** CLOSE-TAIL-AUDIO-SECONDS-UNDERCOUNT diagnostics (2026-09-19, boarded UNKNOWN from the
+   *  MERGED-FREEZE-GOODBYE-MILLER commit -- see the class-field doc comment above
+   *  `replyLastAudioAt` for the full context). Emits ONE `reply.audio.summary` server_event
+   *  for `replyId`, the moment its own audio-byte total can no longer change -- called from
+   *  the NEXT `reply.started` (before `currentReplyId` moves off this id) and from `end()`
+   *  (for whichever reply is still `currentReplyId` when the call ends, which covers both a
+   *  goodbye with no further reply ever starting and the close-tail-deadline timer itself,
+   *  since that timer's own callback ends the call). `repliesWithAudioSummary` makes calling
+   *  this twice for the same id (both triggers can fire for the same reply, e.g. a call that
+   *  ends immediately after its very last `reply.started`) a harmless no-op the second time.
+   *  A reply with no recorded audio at all (`replyFirstAudioAt` has no entry -- e.g. a reply
+   *  that never produced a single frame) has nothing to report and is skipped, same
+   *  convention `beginCloseGrace` already uses (bytes === 0 falls back to the flat grace
+   *  period, no audio-based math attempted).
+   *
+   *  DIAGNOSTICS ONLY: reads four maps this same fix populates, writes only to
+   *  `repliesWithAudioSummary` and `this.diag(...)` (a side channel per `diag`'s own doc
+   *  comment) -- touches no timer, no relay decision, no field `beginCloseGrace` or the
+   *  `reply.audio` case's relay/suppression logic reads. */
+  private finalizeReplyAudioSummary(replyId: string | null): void {
+    if (!replyId || this.repliesWithAudioSummary.has(replyId)) return;
+    const firstAudioAt = this.replyFirstAudioAt.get(replyId);
+    if (firstAudioAt === undefined) return; // no audio ever recorded for this reply
+    this.repliesWithAudioSummary.add(replyId);
+
+    const totalBytes = this.replyAudioBytes.get(replyId) ?? 0;
+    const lastAudioAt = this.replyLastAudioAt.get(replyId) ?? firstAudioAt;
+    const doneAt = this.replyDoneAt.get(replyId) ?? null;
+    const bytesAtDone = this.replyBytesAtDone.get(replyId) ?? null;
+
+    this.diag('reply.audio.summary', {
+      reply_id: replyId,
+      total_bytes: totalBytes,
+      bytes_after_done: doneAt !== null && bytesAtDone !== null ? totalBytes - bytesAtDone : null,
+      last_audio_ms_after_done: doneAt !== null ? lastAudioAt - doneAt : null,
+      first_to_last_audio_ms: lastAudioAt - firstAudioAt,
+    });
   }
 
   private buildEngineInput(): EngineInput {
@@ -2535,6 +2604,17 @@ export class CallSession {
         // itself, is AssemblyAI generating something nobody asked for (its own turn-driven
         // follow-up, or a queued reply.create) -- see the class-field doc comment on
         // `goodbyeConfirmed`. Logged once, here, rather than per-frame.
+        // CLOSE-TAIL-AUDIO-SECONDS-UNDERCOUNT diagnostics (2026-09-19): the PREVIOUS reply is
+        // about to lose `currentReplyId` -- any audio frame from here on, however it should
+        // truly be attributed, is counted (or dropped) against `evt.reply_id`, never against
+        // it again (see `currentReplyId`'s own doc comment). This is therefore the last point
+        // its own audio total can still change, so finalize (and emit) its one summary now,
+        // before reassigning below. A no-op if it already has no recorded audio, or was
+        // already finalized (should not happen via this path, but `finalizeReplyAudioSummary`
+        // guards it regardless -- see `repliesWithAudioSummary`).
+        if (this.currentReplyId && this.currentReplyId !== evt.reply_id) {
+          this.finalizeReplyAudioSummary(this.currentReplyId);
+        }
         this.currentReplyId = evt.reply_id;
         this.suppressPostGoodbyeReplyAudio = this.goodbyeConfirmed && evt.reply_id !== this.goodbyeConfirmedReplyId;
         if (this.suppressPostGoodbyeReplyAudio) this.diag('post_goodbye_reply_suppressed', { reply_id: evt.reply_id });
@@ -2598,6 +2678,10 @@ export class CallSession {
           if (!this.replyFirstAudioAt.has(this.currentReplyId)) {
             this.replyFirstAudioAt.set(this.currentReplyId, this.opts.now());
           }
+          // CLOSE-TAIL-AUDIO-SECONDS-UNDERCOUNT diagnostics (2026-09-19): last-relayed-frame
+          // time for this reply id, read only by `finalizeReplyAudioSummary` -- never by any
+          // close-timing decision (see that map's own doc comment).
+          this.replyLastAudioAt.set(this.currentReplyId, this.opts.now());
         }
         // Flight recorder: only the FIRST audio frame of this reply -- a reply can carry
         // dozens of frames, and recording every one was the bulk of what starved the live
@@ -2628,6 +2712,16 @@ export class CallSession {
         // `maybeArmCloseOnTranscript` (indirectly, via a later `transcript.agent` event) for
         // it -- see `repliesWithDone`'s own doc comment.
         this.repliesWithDone.add(evt.reply_id);
+        // CLOSE-TAIL-AUDIO-SECONDS-UNDERCOUNT diagnostics (2026-09-19): snapshot this reply's
+        // clock time and byte total AT `reply.done` -- the only way `finalizeReplyAudioSummary`
+        // (called later, at the next `reply.started` or at `end()`) can tell how many MORE
+        // bytes (if any) accumulated for this same id after this moment. `opts.now()` (not
+        // `nowT()`) to stay in the same clock as `replyFirstAudioAt`/`replyLastAudioAt` above,
+        // which `beginCloseGrace` already uses this way. Never read by any close-timing
+        // decision -- `beginCloseGrace` still reads `replyAudioBytes`/`replyFirstAudioAt`
+        // directly, unchanged.
+        this.replyDoneAt.set(evt.reply_id, this.opts.now());
+        this.replyBytesAtDone.set(evt.reply_id, this.replyAudioBytes.get(evt.reply_id) ?? 0);
         // Fix B: this reply is finished (whether it struck or not) -- nothing left for the
         // max-audio-only ceiling to watch for it.
         this.clearDegradedMaxAudioOnlyTimer(evt.reply_id);
