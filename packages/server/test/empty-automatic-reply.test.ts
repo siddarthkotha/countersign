@@ -193,16 +193,22 @@ describe('EMPTY HOLDING REPLY (2026-09-15): an automatic reply with no transcrip
     expect(closeRetryDiags).toHaveLength(1);
 
     // This retry's own reply actually says the close sentence -- the real goodbye.
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio (call/session.ts's own `closeReplyHasEnoughAudio`) -- 4.0s
+    // (192,000 bytes) comfortably clears the ~172,000-byte floor for a close sentence this
+    // length. `reply.done` below lands long after that audio would have finished streaming
+    // (audio-based deadline 53100+4000+1000=58100), so the flat CLOSE_GRACE_MS still governs
+    // the final wait below.
     clock.now = 53_100;
     aai.emit({ type: 'reply.started', reply_id: 'close-2' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'x-close-2', text: closeSentence, reply_id: 'close-2', interrupted: false });
-    const goodbyeHeardAt = 53_200;
+    const goodbyeHeardAt = 59_600;
     clock.now = goodbyeHeardAt;
     aai.emit({ type: 'reply.done', reply_id: 'close-2', status: 'completed' });
 
-    // Ends within CLOSE_GRACE_MS (1500ms; no audio was ever relayed for this transcript-only
-    // fixture, so the flat grace applies, never the longer audio-based tail wait) of the
-    // goodbye transcript actually landing -- not blocked or delayed by the earlier empty reply.
+    // Ends within CLOSE_GRACE_MS (1500ms) of the goodbye transcript actually landing -- not
+    // blocked or delayed by the earlier empty reply.
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
     vi.advanceTimersByTime(1_500);
     const ended = sent.find((e) => e.type === 'ended');

@@ -437,6 +437,59 @@ export class CallSession {
    *  CLOSE-reply duration this codebase has measured (`CLOSE_REPLY_STUCK_MS`'s own 79-sample
    *  p50 of 3952ms), so a genuine completed goodbye is never mistaken for a fragment. */
   private static readonly DEGRADED_CLOSE_CONFIRM_MIN_AUDIO_MS = 2_000;
+  /** GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19, PROVEN live twice on deploy
+   *  58, same day): a transcript match alone (the two branches above, and the one in
+   *  `armCloseTranscriptWait`/`scheduleCloseIfNeeded` below) used to confirm the goodbye
+   *  regardless of how much of it the caller actually heard. Two PROVEN live failures, both
+   *  with a transcript that fully matched the close sentence:
+   *   1. scripts/rehearse/reports/2026-09-19T14-17-22-miller-patient.diagnostics.json:
+   *      attempt 3's `transcript.agent` carried the FULL 86-char FREEZE goodbye at 50001ms,
+   *      but `input.speech.started` (a caller barge-in) and that same reply's own
+   *      `reply.done {status: 'interrupted'}` both landed 5ms later at 50006ms, with only
+   *      37,920 bytes (0.79s) of audio ever relayed -- the caller heard at most "This" before
+   *      being cut off, yet the old code confirmed the goodbye off the transcript alone and
+   *      hung up.
+   *   2. scripts/rehearse/reports/2026-09-19T14-20-58-corrected-critical-field.diagnostics.json:
+   *      PROVES `reply.done.status === 'completed'` is not sufficient evidence either -- a
+   *      folded reply ("One moment.Your request is staged for independent approval. The
+   *      payment is not released. Goodbye.", 97 chars) reported `reply.done` COMPLETED at
+   *      84574ms, but only the first ("One moment.") segment's audio was ever streamed:
+   *      81,120 bytes (1.69s) total, `first_to_last_audio_ms` 1611 -- nowhere near enough to
+   *      have spoken the whole 97-char line. AssemblyAI can report a reply complete with the
+   *      full text even when only part of its own audio ever reached the wire.
+   *  So confirmation now requires bytes actually relayed, never transcript text or
+   *  `reply.done.status` alone (`closeReplyHasEnoughAudio` below is ANDed into every match
+   *  branch that used to confirm on `transcriptMatchesCloseSentence` alone).
+   *
+   *  Formula: `CLOSE_AUDIO_BYTES_PER_CHAR` (4,000, a round ESTIMATE) is measured from the two
+   *  CLEAN, fully-relayed goodbyes recorded the same day: 339,840 bytes for an 86-char FREEZE
+   *  goodbye (2026-09-19T14-02-11-identity-switch, resp_753ca8a2 -- 3,951 bytes/char) and
+   *  361,080 bytes for an 86-char STAGE goodbye (2026-09-19T13-31-59-corrected-critical-field,
+   *  resp_37b81dde -- 4,199 bytes/char); average ~4,075 bytes/char, rounded down to 4,000.
+   *  `CLOSE_AUDIO_FLOOR_FRACTION` (0.5, i.e. 50% of the expected byte count) is chosen because
+   *  it separates the two live failures from the two clean successes by a wide margin: the
+   *  failures relayed 81,120/97 chars (41.8% of the 4,000-bytes/char expectation) and
+   *  37,920/86 chars (11.0%), while the clean successes relayed 98.8% and 105.0% of it -- a
+   *  50% floor sits clear of the worst failure (41.8%) with more than 8 points of margin, and
+   *  clear of the weakest success (98.8%) with essentially the whole other half of the range
+   *  to spare (coordinator ruling, 2026-09-19). Applied to `currentCloseSentence()`'s own
+   *  sentence text (never the "Say exactly this..." instruction wrapper, which is never
+   *  spoken). */
+  private static readonly CLOSE_AUDIO_BYTES_PER_CHAR = 4_000;
+  private static readonly CLOSE_AUDIO_FLOOR_FRACTION = 0.5;
+
+  private closeAudioFloorBytes(sentence: string): number {
+    return sentence.length * CallSession.CLOSE_AUDIO_BYTES_PER_CHAR * CallSession.CLOSE_AUDIO_FLOOR_FRACTION;
+  }
+
+  /** True once at least `CLOSE_AUDIO_FLOOR_FRACTION` of `sentence`'s expected TTS byte count
+   *  has actually been relayed to the browser for `replyId` -- see the class-field doc
+   *  comment above (`CLOSE_AUDIO_BYTES_PER_CHAR`) for the formula and its source numbers.
+   *  Reads `replyAudioBytes` (already maintained by the `reply.audio` case), never a new
+   *  counter. */
+  private closeReplyHasEnoughAudio(replyId: string, sentence: string): boolean {
+    return (this.replyAudioBytes.get(replyId) ?? 0) >= this.closeAudioFloorBytes(sentence);
+  }
   /** PROVEN defect (2026-09-14, scripts/rehearse/reports/2026-09-14T17-58-23-barge-in-
    *  interrupt.md + .diagnostics.json): a CLOSE `reply.create` was sent, `reply.started` and
    *  `reply.audio.first` both arrived, then NOTHING else for the rest of the call (no further
@@ -1627,6 +1680,15 @@ export class CallSession {
 
     const transcript = this.replyTranscripts.get(replyId) ?? '';
     if (!transcriptMatchesCloseSentence(transcript, sentence)) return;
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): a matching transcript is
+    // no longer enough on its own -- see `closeReplyHasEnoughAudio`'s own doc comment for the
+    // two PROVEN live failures this closes. This reply may still be mid-flight (more audio
+    // yet to relay) with no way to know its eventual `reply.done.status` from here; a
+    // negative result here is never a final "not heard" verdict, just "not yet, or not
+    // enough" -- `scheduleCloseIfNeeded` (this reply's own `reply.done`, which always fires
+    // regardless of what this method decided) makes the final call with the reply's final
+    // byte count and status.
+    if (!this.closeReplyHasEnoughAudio(replyId, sentence)) return;
 
     this.closeArmedForReplyId = replyId;
     // Round 5: this IS the transcript confirmation -- see the class-field doc comment on
@@ -1715,7 +1777,11 @@ export class CallSession {
       const sentence = this.currentCloseSentence();
       if (!sentence) return;
       const transcript = this.replyTranscripts.get(replyId) ?? '';
-      if (transcriptMatchesCloseSentence(transcript, sentence)) {
+      // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): same gate as
+      // `scheduleCloseIfNeeded`'s own primary branch -- see `closeReplyHasEnoughAudio`'s doc
+      // comment. This timer fires CLOSE_TRANSCRIPT_WAIT_MS after `reply.done`, so no more
+      // audio can arrive for this reply id by now -- the byte count read here is final.
+      if (transcriptMatchesCloseSentence(transcript, sentence) && this.closeReplyHasEnoughAudio(replyId, sentence)) {
         this.goodbyeConfirmed = true;
         this.goodbyeConfirmedReplyId = replyId;
         this.beginCloseGrace();
@@ -1915,7 +1981,14 @@ export class CallSession {
 
     const transcript = this.replyTranscripts.get(replyId) ?? '';
 
-    if (transcriptMatchesCloseSentence(transcript, sentence)) {
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): `status` alone (even
+    // 'completed') is not enough either -- see `closeReplyHasEnoughAudio`'s own doc comment,
+    // second PROVEN incident (a folded reply reported COMPLETED with only its first,
+    // unrelated segment's audio ever relayed). This is the FINAL byte count for this reply
+    // (nothing more will arrive for this id once its own `reply.done` has fired), so a
+    // negative result here is authoritative, unlike `maybeArmCloseOnTranscript`'s own
+    // mid-stream check.
+    if (transcriptMatchesCloseSentence(transcript, sentence) && this.closeReplyHasEnoughAudio(replyId, sentence)) {
       // Round 5: this IS the transcript confirmation (when `maybeArmCloseOnTranscript` did
       // not already catch it mid-stream) -- see the class-field doc comment on
       // `goodbyeConfirmed` above for what this triggers.

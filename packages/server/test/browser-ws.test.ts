@@ -405,6 +405,11 @@ describe('ws/browser — /ws/call/:id', () => {
     const aai = aaiInstances.get(session_id)!;
     await pollUntil(() => (aai.sent as { type?: string }[]).some((m) => m.type === 'reply.create'));
     aai.emit({ type: 'reply.started', reply_id: 'goodbye-1' });
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio (call/session.ts's own `closeReplyHasEnoughAudio`) -- the
+    // 32-char "Thank you for calling. Goodbye." line needs ~64,000 bytes (50% of ~4,000
+    // bytes/char); 70,000 clears that with headroom, adding well under 3s of real wait below.
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(70_000).toString('base64') });
     aai.emit({
       type: 'transcript.agent',
       item_id: 'a-goodbye-1',
@@ -414,7 +419,7 @@ describe('ws/browser — /ws/call/:id', () => {
     });
     aai.emit({ type: 'reply.done', reply_id: 'goodbye-1', status: 'completed' });
 
-    await pollUntil(() => messages.some((m) => m.type === 'ended'), 4000);
+    await pollUntil(() => messages.some((m) => m.type === 'ended'), 6000);
     expect(messages.find((m) => m.type === 'ended')).toEqual({ type: 'ended', reason: 'idle_timeout' });
     // The browser socket itself is closed by `endCall`, not left dangling for the client to
     // notice on its own.

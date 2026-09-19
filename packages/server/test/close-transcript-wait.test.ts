@@ -161,14 +161,22 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
     // reply.done fires with NO transcript recorded yet for this reply at all.
     clock.now = 7500;
     aai.emit({ type: 'reply.started', reply_id: 'a5' });
-    clock.now = 7700;
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio (see call/session.ts's own `closeReplyHasEnoughAudio`) --
+    // 4.0s (192,000 bytes) comfortably clears the ~172,000-byte floor for this STAGE sentence.
+    // `reply.done`/the matching transcript below both land long after that audio would have
+    // finished streaming (audio-based deadline 7500+4000+1000=12500), so the flat
+    // CLOSE_GRACE_MS (not the audio-tail formula, close-tail-wait.test.ts's own concern) is
+    // still what governs the final wait below.
+    aai.emit({ type: 'reply.audio', data: pcmBase64ForSeconds(4.0) });
+    clock.now = 15_000;
     aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' });
     expect(replyCreates()).toHaveLength(baseline); // no retry sent synchronously
 
     // The close line's own transcript.agent chunk lands 400ms later -- well inside the
     // CLOSE_TRANSCRIPT_WAIT_MS (1500ms) window this fix adds.
     vi.advanceTimersByTime(400);
-    clock.now = 8100;
+    clock.now = 15_400;
     aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
 
     // No retry was ever sent -- the late transcript confirmed the goodbye instead.
@@ -176,10 +184,10 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
 
     // goodbye-tail lane, review fix (2026-09-15, Important): reply.done for 'a5' already fired
     // BEFORE this transcript completed the match, so there is no reply.done left to wait for --
-    // the hang-up begins right here (the unchanged flat CLOSE_GRACE_MS, no audio was ever
-    // relayed for this reply), not after a moot CLOSE_DONE_WAIT_MS (4000ms) timer that no
-    // reply.done can ever satisfy. Upper bound: ends within CLOSE_GRACE_MS of the match -- well
-    // under the pre-fix 4000ms + 1500ms = 5500ms of silence the caller used to sit through.
+    // the hang-up begins right here (the unchanged flat CLOSE_GRACE_MS), not after a moot
+    // CLOSE_DONE_WAIT_MS (4000ms) timer that no reply.done can ever satisfy. Upper bound: ends
+    // within CLOSE_GRACE_MS of the match -- well under the pre-fix 4000ms + 1500ms = 5500ms of
+    // silence the caller used to sit through.
     vi.advanceTimersByTime(1_499);
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
     vi.advanceTimersByTime(1);
@@ -204,10 +212,16 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
 
     clock.now = 7500;
     aai.emit({ type: 'reply.started', reply_id: 'a5' });
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- see test (a)'s own comment above for the byte math.
+    // The transcript/reply.done below both land long after that audio would have finished
+    // streaming (audio-based deadline 7500+4000+1000=12500), so the flat CLOSE_GRACE_MS still
+    // governs the final wait below.
+    aai.emit({ type: 'reply.audio', data: pcmBase64ForSeconds(4.0) });
     // The matching transcript arrives FIRST this time -- reply.done for 'a5' has not fired
     // yet, so `repliesWithDone` does not have it: `maybeArmCloseOnTranscript` takes the
     // unchanged CLOSE_DONE_WAIT_MS branch (nothing this fix touches).
-    clock.now = 7700;
+    clock.now = 11_000;
     aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
 
@@ -215,7 +229,7 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
     // CLOSE_DONE_WAIT_MS window -- and wins the race: the grace period starts now, not 4s
     // after the transcript match.
     vi.advanceTimersByTime(200);
-    clock.now = 7900;
+    clock.now = 11_200;
     aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' });
 
     vi.advanceTimersByTime(1_499);
@@ -265,11 +279,18 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
     session.start();
     driveToSealedStage(session, aai, clock);
 
-    // The goodbye is confirmed immediately -- a fully-matching reply, reply.done, no audio.
+    // The goodbye is confirmed immediately -- a fully-matching reply, reply.done.
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the
+    // ~172,000-byte floor for this STAGE sentence (see test (a)'s own comment above). `reply.done`
+    // arrives long after that audio would have finished playing, so the flat CLOSE_GRACE_MS
+    // (not the audio-tail formula) is what should govern the final wait below -- same
+    // reasoning as close-tail-wait.test.ts's own test (b).
     clock.now = 7500;
     aai.emit({ type: 'reply.started', reply_id: 'a5' });
+    aai.emit({ type: 'reply.audio', data: pcmBase64ForSeconds(4.0) });
     aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
-    clock.now = 7700;
+    clock.now = 20_000;
     aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' });
 
     const audioEventsBefore = sent.filter((e) => e.type === 'audio').length;
@@ -277,7 +298,7 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
     // A NEW reply starts (AssemblyAI's own turn-driven follow-up, or a queued reply.create) --
     // its audio must be dropped, never relayed, and must not be double-counted into
     // `replyAudioBytes` for the (already-confirmed) goodbye reply id either.
-    clock.now = 7750;
+    clock.now = 20_050;
     aai.emit({ type: 'reply.started', reply_id: 'a6' });
     aai.emit({ type: 'reply.audio', data: pcmBase64ForSeconds(2.0) });
 
@@ -286,9 +307,9 @@ describe('Defect B: CLOSE retry waits for a late transcript before concluding th
     expect(suppressed).toHaveLength(1);
     expect(suppressed[0]!.detail).toEqual({ reply_id: 'a6' });
 
-    // The call still ends on the unchanged schedule (no audio was ever relayed for the
-    // CONFIRMED reply 'a5' -- the suppressed frames belong to 'a6' -- so the flat
-    // CLOSE_GRACE_MS applies).
+    // The call still ends on the unchanged schedule (the goodbye's own audio already finished
+    // streaming well before `reply.done` -- the suppressed frames belong to 'a6' -- so the
+    // flat CLOSE_GRACE_MS applies).
     vi.advanceTimersByTime(1_500);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
   });

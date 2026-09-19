@@ -953,6 +953,7 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
   // level "explicit override still passes through" case is covered directly in
   // aai-config.test.ts (buildInitialSessionUpdate is the pure function under test there);
   // this test covers call/session.ts's own per-goal sender, which never passes an override.
+  //
   // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism A (2026-09-19): CLOSE is now the ONE
   // deliberate exception (see session.ts's own doc comment on that send) -- this drive runs
   // Scenario B (Robert Miller, fraud) all the way through its own three challenges and, per
@@ -1161,10 +1162,16 @@ describe('CallSession — end() reaches the engine\'s call-ended row (RT-4)', ()
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
     expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(true);
 
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio (session.ts's own `closeReplyHasEnoughAudio`) -- 4.0s
+    // (192,000 bytes) comfortably clears the floor for this ESCALATE sentence. `reply.done`
+    // below lands long after that audio would have finished streaming (audio-based deadline
+    // 30100+4000+1000=35100), so the flat CLOSE_GRACE_MS still governs the final wait below.
     clock.now = 30100;
     aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'a1', text: session.last!.goal.hint, reply_id: 'r1', interrupted: false });
-    clock.now = 30200;
+    clock.now = 35_200;
     aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
 
     expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
@@ -1204,10 +1211,14 @@ describe('CallSession — end() reaches the engine\'s call-ended row (RT-4)', ()
       | undefined;
     expect(sentReplyCreate?.instructions).toContain('Thank you for calling. Goodbye.');
 
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- see the test above this one for the byte/timing math
+    // (identical shape, different sentence).
     clock.now = 30100;
     aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'a1', text: 'Thank you for calling. Goodbye.', reply_id: 'r1', interrupted: false });
-    clock.now = 30200;
+    clock.now = 35_200;
     aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
 
     vi.advanceTimersByTime(1500);
@@ -1270,10 +1281,14 @@ describe('CallSession — end() reaches the engine\'s call-ended row (RT-4)', ()
 
     // The reply that follows must be checked against the ESCALATE sentence (this.last.goal
     // .hint), never the stale NO_ACTION line -- proven by it actually ending the call.
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- see this describe block's first test for the byte/
+    // timing math.
     clock.now = 31100;
     aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'a1', text: session.last!.goal.hint, reply_id: 'r1', interrupted: false });
-    clock.now = 31200;
+    clock.now = 36_200;
     aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
 
     expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
@@ -1447,10 +1462,16 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     // Not yet ended: the CLOSE reply hasn't completed yet.
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
 
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the floor for
+    // this STAGE sentence. `reply.done` below lands long after that audio would have finished
+    // streaming (audio-based deadline 7500+4000+1000=12500), so the flat CLOSE_GRACE_MS still
+    // governs the final wait below.
     clock.now = 7500;
     aai.emit({ type: 'reply.started', reply_id: 'a5' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
-    clock.now = 8000;
+    clock.now = 12_600;
     aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' });
 
     // Still not ended immediately -- the grace period lets the close line's audio flush.
@@ -1487,12 +1508,24 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     session.start();
     driveToSealedStage(session, aai, clock);
 
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio, REGARDLESS of `reply.done.status` (a completed reply
+    // below the floor is exactly as unconfirmed as an interrupted one -- see session.ts's own
+    // `closeReplyHasEnoughAudio` doc comment for the two PROVEN live failures this closes).
+    // This test's own subject -- rule 3, a matching transcript heard before the barge-in still
+    // arms the hang-up -- still holds, but only once ENOUGH of the goodbye was actually heard;
+    // 4.0s (192,000 bytes) comfortably clears the floor for this STAGE sentence.
+    // scripts/rehearse/reports/2026-09-19T14-17-22-miller-patient.diagnostics.json's own
+    // attempt 3 is the negative of this shape (interrupted, full transcript, but only 0.79s of
+    // audio) -- goodbye-cut-by-caller-pressure.test.ts covers that case directly.
     clock.now = 7500;
     aai.emit({ type: 'reply.started', reply_id: 'a5' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     // The caller barges in right as the close line finishes (interrupted status), but the
-    // transcript already carries the whole sentence -- rule 3: matched-on-partial still arms.
+    // transcript already carries the whole sentence -- rule 3: matched-on-partial still arms,
+    // once enough audio was also relayed.
     aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: true });
-    clock.now = 7700;
+    clock.now = 12_600;
     aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'interrupted' });
 
     vi.advanceTimersByTime(1500);
@@ -1713,11 +1746,16 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       expect((closeSends[0]!.detail as { reason: string }).reason).toBe('tick_end');
 
       // The real close reply, once it starts and completes, carries the engine's own sentence,
-      // confirmed heard -- the call ends normally.
+      // confirmed heard -- the call ends normally. GOODBYE-CUT-BY-CALLER-PRESSURE fix,
+      // mechanism B (2026-09-19): confirmation now also requires enough relayed audio -- 4.0s
+      // (192,000 bytes) comfortably clears the floor for this FREEZE sentence. `reply.done`
+      // lands long after that audio would have finished streaming (audio-based deadline
+      // 15100+4000+1000=20100), so the flat CLOSE_GRACE_MS still governs the final wait below.
       clock.now = 15100;
       aai.emit({ type: 'reply.started', reply_id: 'close-1' });
+      aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
       aai.emit({ type: 'transcript.agent', item_id: 'x-close-1', text: session.last!.goal.hint, reply_id: 'close-1', interrupted: false });
-      clock.now = 15600;
+      clock.now = 20_200;
       aai.emit({ type: 'reply.done', reply_id: 'close-1', status: 'completed' });
       vi.advanceTimersByTime(1500);
       expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
@@ -1822,10 +1860,13 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       expect(sent.some((e) => e.type === 'ended')).toBe(false);
 
       // The real close reply, once it starts and completes, ends the call normally.
+      // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+      // requires enough relayed audio -- see the sibling test above for the byte/timing math.
       clock.now = 15100;
       aai.emit({ type: 'reply.started', reply_id: 'close-1' });
+      aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
       aai.emit({ type: 'transcript.agent', item_id: 'x-close-1', text: session.last!.goal.hint, reply_id: 'close-1', interrupted: false });
-      clock.now = 15600;
+      clock.now = 20_200;
       aai.emit({ type: 'reply.done', reply_id: 'close-1', status: 'completed' });
       vi.advanceTimersByTime(1500);
       expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
@@ -1989,10 +2030,16 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
     expect(sent.some((e) => e.type === 'ended')).toBe(false); // proves the stale id was rejected, not just delayed
 
     // A genuinely NEW reply ('a5') -- the actual close line -- starts and completes.
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the floor for
+    // this close sentence. `reply.done` lands long after that audio would have finished
+    // streaming (audio-based deadline 7000+4000+1000=12000), so the flat CLOSE_GRACE_MS still
+    // governs the final wait below.
     clock.now = 7000;
     aai.emit({ type: 'reply.started', reply_id: 'a5' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
-    clock.now = 7500;
+    clock.now = 12_100;
     aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' });
     expect(sent.some((e) => e.type === 'ended')).toBe(false); // not yet -- grace period still running
 
@@ -2127,10 +2174,15 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
 
       // The reply that follows (the actual close line, prompted by our reply.create) is a
       // fresh reply phrased under CLOSE -- completing it is what finally ends the call.
+      // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+      // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the floor.
+      // `reply.done` lands long after that audio would have finished streaming (audio-based
+      // deadline 8100+4000+1000=13100), so the flat CLOSE_GRACE_MS still governs the wait.
       clock.now = 8100;
       aai.emit({ type: 'reply.started', reply_id: 'a5' });
+      aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
       aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
-      clock.now = 8600;
+      clock.now = 13_200;
       aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' });
       expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
 
@@ -2218,9 +2270,14 @@ describe('CallSession — CLOSE hangup (2026-09-11 fix): the server ends the cal
       // Drive 'tools-1' (already speaking, started inside the helper) to completion, this
       // time with a transcript that actually says the close line -- the match arms the
       // hang-up and cancels the still-pending (never fired) a3/a4 retry.
+      // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+      // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the floor.
+      // `reply.done` lands long after that audio would have finished streaming (audio-based
+      // deadline 51000+4000+1000=56000), so the flat CLOSE_GRACE_MS still governs the wait.
       clock.now = 51000;
+      aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
       aai.emit({ type: 'transcript.agent', item_id: 'a-tools-1', text: session.last!.goal.hint, reply_id: 'tools-1', interrupted: false });
-      clock.now = 51500;
+      clock.now = 56_100;
       aai.emit({ type: 'reply.done', reply_id: 'tools-1', status: 'completed' });
       expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
 
@@ -2549,10 +2606,15 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     expect(retryMsg.instructions).toContain(ENGINE_CLOSE_SENTENCES.FREEZE);
 
     // A fresh reply starts, and THIS one's transcript is the real FREEZE close sentence.
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the floor.
+    // `reply.done` lands long after that audio would have finished streaming (audio-based
+    // deadline 6100+4000+1000=11100), so the flat CLOSE_GRACE_MS still governs the wait.
     clock.now = 6100;
     aai.emit({ type: 'reply.started', reply_id: 'aai-turn-2' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'x2', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'aai-turn-2', interrupted: false });
-    clock.now = 6200;
+    clock.now = 11_200;
     aai.emit({ type: 'reply.done', reply_id: 'aai-turn-2', status: 'completed' });
 
     expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
@@ -2582,10 +2644,15 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
     const replyCreateCount = () => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
     const baseline = replyCreateCount();
 
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the floor.
+    // `reply.done` lands long after that audio would have finished streaming (audio-based
+    // deadline 4100+4000+1000=9100), so the flat CLOSE_GRACE_MS still governs the wait.
     clock.now = 4100;
     aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
-    clock.now = 4200;
+    clock.now = 9_200;
     aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
 
     expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
@@ -2764,13 +2831,20 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       expect(sent.some((e) => e.type === 'ended')).toBe(false);
 
       // The reply that finally says the full close sentence completes here -- comfortably
-      // inside the 45s budget.
+      // inside the 45s budget. GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19):
+      // confirmation now also requires enough relayed audio -- 4.0s (192,000 bytes)
+      // comfortably clears the floor. This test never advances `clock.now` past the value the
+      // drive left it at (4000, unlike the vi fake-timer virtual clock, which this test DOES
+      // advance throughout) -- so `first_audio_relayed_at` and `reply.done`'s own `now()`
+      // reading are BOTH 4000 here, and the wait becomes the audio-based deadline
+      // (4000+4000+1000=9000, i.e. 5000ms from `now`), not the flat 1500ms grace.
       aai.emit({ type: 'reply.started', reply_id: 'r4' });
+      aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
       aai.emit({ type: 'transcript.agent', item_id: 'x4', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r4', interrupted: false });
       aai.emit({ type: 'reply.done', reply_id: 'r4', status: 'completed' });
 
       expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
-      vi.advanceTimersByTime(1500);
+      vi.advanceTimersByTime(5000);
       expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
     });
 
@@ -2861,11 +2935,16 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       expect(replyCreates()).toHaveLength(baseline + 1);
 
       // The reply.started that eventually arrives (for the superseding request) is accepted
-      // normally, and a matching close line still ends the call.
+      // normally, and a matching close line still ends the call. GOODBYE-CUT-BY-CALLER-
+      // PRESSURE fix, mechanism B (2026-09-19): confirmation now also requires enough relayed
+      // audio -- 4.0s (192,000 bytes) comfortably clears the floor. This test never advances
+      // `clock.now` past the value the drive left it at, so the audio-based tail-wait (5000ms)
+      // dominates the flat 1500ms grace (see the round-4 (d) test above for the same shape).
       aai.emit({ type: 'reply.started', reply_id: 'late' });
+      aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
       aai.emit({ type: 'transcript.agent', item_id: 'x', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'late', interrupted: false });
       aai.emit({ type: 'reply.done', reply_id: 'late', status: 'completed' });
-      vi.advanceTimersByTime(1500);
+      vi.advanceTimersByTime(5000);
       expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
     });
 
@@ -2894,7 +2973,14 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       driveToFreezeCloseWithFirstSend(session, aai, clock);
       expect(session.last?.goal.code).toBe('CLOSE');
 
+      // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+      // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the floor.
+      // This test never advances `clock.now` past the value the drive left it at, so
+      // `first_audio_relayed_at` and every later `now()` reading are the SAME value throughout
+      // -- the audio-based tail-wait deadline (4000ms of audio + 1000ms buffer = 5000ms from
+      // "now") dominates the flat 1500ms grace once `beginCloseGrace` finally runs, below.
       aai.emit({ type: 'reply.started', reply_id: 'r1' });
+      aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
       // The transcript arrives (matches the full close sentence) but reply.done for 'r1' is
       // deliberately never emitted -- reproducing the PROVEN bundles above.
       aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
@@ -2903,10 +2989,11 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       expect(sent.some((e) => e.type === 'ended')).toBe(false);
       vi.advanceTimersByTime(3999);
       expect(sent.some((e) => e.type === 'ended')).toBe(false);
-      // CLOSE_DONE_WAIT_MS (4000ms) elapses with no reply.done -- the grace timer starts now.
+      // CLOSE_DONE_WAIT_MS (4000ms) elapses with no reply.done -- the grace timer starts now,
+      // sized by the audio-tail formula (5000ms, not the flat 1500ms) per the comment above.
       vi.advanceTimersByTime(1);
       expect(sent.some((e) => e.type === 'ended')).toBe(false);
-      vi.advanceTimersByTime(1499);
+      vi.advanceTimersByTime(4999);
       expect(sent.some((e) => e.type === 'ended')).toBe(false);
       vi.advanceTimersByTime(1);
       expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
@@ -2927,19 +3014,24 @@ describe('CallSession — reply.create fix, round 3: CLOSE is transcript-confirm
       driveToFreezeCloseWithFirstSend(session, aai, clock);
       expect(session.last?.goal.code).toBe('CLOSE');
 
+      // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+      // requires enough relayed audio -- see test (d) above for the byte/timing math (same
+      // shape: `clock.now` frozen throughout, so the audio-based tail-wait (5000ms) dominates
+      // the flat 1500ms grace).
       aai.emit({ type: 'reply.started', reply_id: 'r1' });
+      aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
       aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
       vi.advanceTimersByTime(500); // well inside the 4s CLOSE_DONE_WAIT_MS window
       aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
 
       // Grace period starts NOW (from reply.done), not 4s after the transcript match.
       expect(sent.some((e) => e.type === 'ended')).toBe(false);
-      vi.advanceTimersByTime(1499);
+      vi.advanceTimersByTime(4999);
       expect(sent.some((e) => e.type === 'ended')).toBe(false);
       vi.advanceTimersByTime(1);
       expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
-      // Ended well before the 4s CLOSE_DONE_WAIT_MS + grace would have elapsed (500+1+1500 <<
-      // 4000+1500), proving reply.done -- not the timeout -- decided the timing.
+      // Ended well before the 4s CLOSE_DONE_WAIT_MS + grace would have elapsed (500+1+5000 <<
+      // 4000+5000), proving reply.done -- not the timeout -- decided the timing.
       expect(sent.filter((e) => e.type === 'ended')).toHaveLength(1);
     });
   });
@@ -3020,7 +3112,13 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
     expect(session.last?.goal.code).toBe('CLOSE');
 
     // The goodbye is spoken and transcript-confirmed mid-stream (maybeArmCloseOnTranscript).
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the floor. This
+    // test never advances `clock.now` past the value the drive left it at, so the audio-based
+    // tail-wait (5000ms) dominates the flat 1500ms grace (same shape as the round-4 (d)/(e)
+    // tests above).
     aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
     aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
 
@@ -3043,10 +3141,10 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
     expect(suppressed).toHaveLength(1);
     expect(suppressed[0]!.detail).toEqual({ reply_id: 'r2' });
 
-    // The hang-up still fires on schedule (CLOSE_GRACE_MS after the confirmed reply's own
+    // The hang-up still fires on schedule (the audio-tail wait after the confirmed reply's own
     // reply.done, unaffected by whatever AssemblyAI does afterward).
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
-    vi.advanceTimersByTime(1500);
+    vi.advanceTimersByTime(5000);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
   });
 
@@ -3064,6 +3162,9 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
     // A frame BEFORE the transcript match -- ordinary forwarding, sanity baseline.
     aai.emit({ type: 'reply.audio', data: 'pre-match' });
     expect(sent.some((e) => e.type === 'audio' && e.data === 'pre-match')).toBe(true);
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the floor.
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
 
     // The transcript now matches the full close sentence -- confirms the goodbye mid-stream.
     aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
@@ -3075,7 +3176,9 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
     expect(sent.some((e) => e.type === 'audio' && e.data === 'post-match-same-reply')).toBe(true);
 
     aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
-    vi.advanceTimersByTime(1500);
+    // This test never advances `clock.now` past the value the drive left it at, so the
+    // audio-based tail-wait (5000ms) dominates the flat 1500ms grace.
+    vi.advanceTimersByTime(5000);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
   });
 
@@ -3089,7 +3192,10 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
     driveToFreezeCloseWithFirstSend(session, aai, clock);
     expect(session.last?.goal.code).toBe('CLOSE');
 
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the floor.
     aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
     aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
 
@@ -3142,7 +3248,12 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
     driveToFreezeCloseWithFirstSend(session, aai, clock);
     expect(session.last?.goal.code).toBe('CLOSE');
 
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the floor. This
+    // test never advances `clock.now` past the value the drive left it at, so the audio-based
+    // tail-wait (5000ms) dominates the flat 1500ms grace.
     aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
     aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
 
@@ -3169,7 +3280,7 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
 
     // The hang-up still fires on the unchanged schedule.
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
-    vi.advanceTimersByTime(1500);
+    vi.advanceTimersByTime(5000);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
   });
 
@@ -3196,7 +3307,12 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
 
     const conversationLengthBefore = session.logs.conversation.length;
 
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the floor. This
+    // test never advances `clock.now` past the value the drive left it at, so the audio-based
+    // tail-wait (5000ms) dominates the flat 1500ms grace.
     aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'x1', text: ENGINE_CLOSE_SENTENCES.FREEZE, reply_id: 'r1', interrupted: false });
 
     expect(session.logs.conversation).toHaveLength(conversationLengthBefore + 1);
@@ -3204,7 +3320,7 @@ describe('CallSession — post-goodbye reply suppression (round 5, 2026-09-14, P
     expect(diagEvents.some((e) => e.kind === 'post_goodbye_transcript_dropped')).toBe(false);
 
     aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
-    vi.advanceTimersByTime(1500);
+    vi.advanceTimersByTime(5000);
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
   });
 });
@@ -4188,11 +4304,16 @@ describe('CallSession — a CLOSE reply that never completes (no transcript, no 
     expect(retried.instructions).toEqual(expect.stringContaining('Say exactly this'));
 
     // AssemblyAI's own next reply is the retried one, and this time it actually says the
-    // close line and completes normally.
+    // close line and completes normally. GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B
+    // (2026-09-19): confirmation now also requires enough relayed audio -- 4.0s (192,000
+    // bytes) comfortably clears the floor. `reply.done` lands long after that audio would have
+    // finished streaming (audio-based deadline 65500+4000+1000=70500), so the flat
+    // CLOSE_GRACE_MS still governs the final wait below.
     clock.now = 65500;
     aai.emit({ type: 'reply.started', reply_id: 'close-2' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'close-2-t', text: closeSentence, reply_id: 'close-2', interrupted: false });
-    clock.now = 66000;
+    clock.now = 70_600;
     aai.emit({ type: 'reply.done', reply_id: 'close-2', status: 'completed' });
 
     vi.advanceTimersByTime(1500); // CLOSE_GRACE_MS
@@ -4224,6 +4345,15 @@ describe('CallSession — a CLOSE reply that never completes (no transcript, no 
       clock.now = 53000 + (i * 100);
       aai.emit({ type: 'reply.audio', data: 'audio' });
     }
+
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- the 140 tiny 'audio' frames above total only a few
+    // hundred bytes, nowhere near the floor for this close sentence. One more, larger frame
+    // (192,000 bytes) clears it; `replyFirstAudioAt` was already set by the FIRST (tiny) frame
+    // above (t=53000), so the audio-based tail-wait deadline (53000+4000+1000=58000) is
+    // already long past by `reply.done` (t=67000) below -- the flat CLOSE_GRACE_MS still
+    // governs the final wait, unaffected by adding this frame.
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
 
     // At 14 seconds, transcript and reply.done arrive.
     clock.now = 53000 + 14000;
@@ -4507,10 +4637,16 @@ describe('CallSession — idle-activity touch points (Defect 1 fix, timing-analy
     expect(session.last?.verdict).toBe('NO_ACTION');
     expect(sent.some((e) => e.type === 'ended')).toBe(false);
 
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio -- 4.0s (192,000 bytes) comfortably clears the floor for
+    // this 32-char NO_ACTION line. `reply.done` lands long after that audio would have
+    // finished streaming (audio-based deadline 45100+4000+1000=50100), so the flat
+    // CLOSE_GRACE_MS still governs the final wait below.
     clock.now = 45100;
     aai.emit({ type: 'reply.started', reply_id: 'goodbye-1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'a1', text: 'Thank you for calling. Goodbye.', reply_id: 'goodbye-1', interrupted: false });
-    clock.now = 45200;
+    clock.now = 50_200;
     aai.emit({ type: 'reply.done', reply_id: 'goodbye-1', status: 'completed' });
 
     vi.advanceTimersByTime(1500); // CLOSE_GRACE_MS after the goodbye is transcript-confirmed

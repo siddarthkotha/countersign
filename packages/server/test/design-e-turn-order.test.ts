@@ -350,16 +350,23 @@ describe('Design E: the automatic reply is a holding beat only; the server\'s ow
     expect(closeDiags).toHaveLength(1);
 
     // The goodbye is confirmed: a reply whose own transcript says the close sentence.
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio (call/session.ts's own `closeReplyHasEnoughAudio`) -- 4.0s
+    // (192,000 bytes) comfortably clears the ~172,000-byte floor for this 86-char FREEZE
+    // sentence. `reply.done` below lands long after that audio would have finished streaming
+    // (audio-based deadline 51000+4000+1000=56000), so the flat CLOSE_GRACE_MS (not the
+    // audio-tail formula) still governs the final wait below.
     const closeSentence = session.last!.goal.hint;
     clock.now = 51_000;
     aai.emit({ type: 'reply.started', reply_id: 'close-1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
     aai.emit({ type: 'transcript.agent', item_id: 'x-close-1', text: closeSentence, reply_id: 'close-1', interrupted: false });
-    clock.now = 51_100;
+    clock.now = 56_000;
     aai.emit({ type: 'reply.done', reply_id: 'close-1', status: 'completed' });
 
     // A stray automatic reply starts AFTER the goodbye is transcript-confirmed -- its audio
     // must be suppressed (unchanged round-5 mechanism), not relayed.
-    clock.now = 51_150;
+    clock.now = 56_050;
     aai.emit({ type: 'reply.started', reply_id: 'stray-1' });
     const suppressed = diagEvents.filter((e) => e.kind === 'post_goodbye_reply_suppressed');
     expect(suppressed).toHaveLength(1);

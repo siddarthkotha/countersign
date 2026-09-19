@@ -154,7 +154,18 @@ describe('Defect A: CLOSE hang-up waits for the goodbye\'s own estimated playbac
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
   });
 
-  it('(b) a 1.0s goodbye keeps today\'s timing: the wait stays CLOSE_GRACE_MS (1500ms), not stretched by the audio floor', () => {
+  // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): a 1.0s goodbye is no longer
+  // a realistic fixture -- the two clean, fully-relayed goodbyes measured live the same day
+  // took 7.08s/7.52s for an 86-char sentence (~4,000 bytes/char), and confirmation now
+  // requires at least 50% of that expected byte count (`closeReplyHasEnoughAudio`,
+  // call/session.ts) before the goodbye can be confirmed heard at all -- 1.0s of audio for a
+  // sentence this long would now be REJECTED and retried, never reach `beginCloseGrace`. This
+  // test's subject (once confirmed, a goodbye whose audio already finished streaming keeps
+  // the flat CLOSE_GRACE_MS wait, not stretched by the audio-tail formula) still needs its own
+  // case: sized dynamically off the REAL sentence so it clears the new confirmation floor with
+  // headroom, and with `reply.done` arriving well after that audio would already have finished
+  // playing, so the GRACE-based deadline (not the audio-based one) is what dominates.
+  it('(b) once confirmed, a goodbye whose audio already finished streaming well before reply.done keeps today\'s timing: the wait stays CLOSE_GRACE_MS (1500ms), not stretched by the audio floor', () => {
     vi.useFakeTimers();
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
@@ -164,19 +175,23 @@ describe('Defect A: CLOSE hang-up waits for the goodbye\'s own estimated playbac
     session.start();
     driveToSealedStage(session, aai, clock);
 
-    // A realistic 1.0s goodbye: reply.done arrives right as the last audio frame finishes
-    // (1000ms after the first frame).
+    const sentence = session.last!.goal.hint;
+    // 50% of ~4,000 bytes/char (session.ts's own `closeAudioFloorBytes` formula), plus 20%
+    // headroom, rounded up to a whole second for a clean fixture value.
+    const floorBytes = sentence.length * 4_000 * 0.5;
+    const audioSeconds = Math.ceil((floorBytes / 48_000) * 1.2);
     clock.now = 7500;
     aai.emit({ type: 'reply.started', reply_id: 'a5' });
-    aai.emit({ type: 'reply.audio', data: pcmBase64ForSeconds(1.0) });
-    clock.now = 8500;
-    aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
+    aai.emit({ type: 'reply.audio', data: pcmBase64ForSeconds(audioSeconds) });
+    // reply.done arrives 5s after that audio would have finished playing -- the audio-based
+    // deadline (first_audio + audioSeconds + 1s tail buffer) is already in the past by the
+    // time reply.done fires, leaving only the flat CLOSE_GRACE_MS window to matter.
+    clock.now = 7500 + audioSeconds * 1000 + 5000;
+    aai.emit({ type: 'transcript.agent', item_id: 'a5', text: sentence, reply_id: 'a5', interrupted: false });
     aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' });
 
-    // graceBasedDeadline = 8500 + 1500 = 10000; audioBasedDeadline = 7500 + 1000 + 1000 =
-    // 9500; max = 10000 => delayMs = 1500, unchanged from before this fix.
     const closeTailWait = diagEvents.find((e) => e.kind === 'close_tail_wait');
-    expect(closeTailWait?.detail).toEqual({ audio_seconds: 1, waited_ms: 1500 });
+    expect(closeTailWait?.detail).toEqual({ audio_seconds: audioSeconds, waited_ms: 1500 });
 
     vi.advanceTimersByTime(1_499);
     expect(sent.some((e) => e.type === 'ended')).toBe(false);

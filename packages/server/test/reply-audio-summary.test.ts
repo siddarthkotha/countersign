@@ -227,21 +227,32 @@ describe('CallSession -- per-reply audio summary diagnostics (CLOSE-TAIL-AUDIO-S
     driveToSealedStage(session, aai, clock);
     expect(session.last?.goal.code).toBe('CLOSE');
 
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism B (2026-09-19): confirmation now also
+    // requires enough relayed audio (call/session.ts's own `closeReplyHasEnoughAudio`) -- the
+    // first frame is now 4.0s (192,000 bytes), comfortably clearing the ~172,000-byte floor
+    // for this ~86-char STAGE sentence (the old 1.0s/48,000-byte frame this test used before
+    // mechanism B would now be REJECTED and retried, never reach `reply.done`'s confirmation
+    // branch at all). This changes `close_tail_wait`'s own numbers below (audio_seconds/
+    // waited_ms scale with the bigger frame) but not this test's actual subject -- the
+    // byte-accounting math for audio arriving AFTER `reply.done`, which is unaffected by how
+    // big the first frame is.
     clock.now = 7500;
     aai.emit({ type: 'reply.started', reply_id: 'a5' });
-    aai.emit({ type: 'reply.audio', data: pcmBase64ForSeconds(1.0) }); // 48000 bytes, first frame t=7500
+    aai.emit({ type: 'reply.audio', data: pcmBase64ForSeconds(4.0) }); // 192000 bytes, first frame t=7500
     clock.now = 8500;
     aai.emit({ type: 'transcript.agent', item_id: 'a5', text: session.last!.goal.hint, reply_id: 'a5', interrupted: false });
-    aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' }); // confirms the goodbye; bytesAtDone=48000, doneAt=8500
+    aai.emit({ type: 'reply.done', reply_id: 'a5', status: 'completed' }); // confirms the goodbye; bytesAtDone=192000, doneAt=8500
 
-    // close_tail_wait's own payload shape (audio_seconds, waited_ms) is unaffected by this fix.
+    // close_tail_wait's own payload shape (audio_seconds, waited_ms) is unaffected by this fix
+    // -- graceBasedDeadline=8500+1500=10000; audioBasedDeadline=7500+4000+1000=12500; max=12500
+    // => waited_ms=12500-8500=4000.
     const closeTailWait = diagEvents.find((e) => e.kind === 'close_tail_wait');
-    expect(closeTailWait?.detail).toEqual({ audio_seconds: 1, waited_ms: 1500 });
+    expect(closeTailWait?.detail).toEqual({ audio_seconds: 4, waited_ms: 4000 });
 
     // More of the SAME reply's audio keeps arriving -- currentReplyId is still 'a5' (nothing
     // else has started yet), so this is (correctly, today) still counted for it.
     clock.now = 8600;
-    aai.emit({ type: 'reply.audio', data: pcmBase64ForSeconds(0.2) }); // +9600 bytes, total 57600
+    aai.emit({ type: 'reply.audio', data: pcmBase64ForSeconds(0.2) }); // +9600 bytes, total 201600
 
     // AssemblyAI's own ambient follow-up reply starts 100ms later -- immediately suppressed
     // (goodbyeConfirmed && this new id !== the goodbye's own id), same live shape as both
@@ -254,7 +265,7 @@ describe('CallSession -- per-reply audio summary diagnostics (CLOSE-TAIL-AUDIO-S
     const goodbyeSummary = diagEvents.find((d) => d.kind === 'reply.audio.summary' && (d.detail as { reply_id: string }).reply_id === 'a5');
     expect(goodbyeSummary?.detail).toEqual({
       reply_id: 'a5',
-      total_bytes: 57_600,
+      total_bytes: 201_600,
       bytes_after_done: 9_600, // the 0.2s frame that arrived after reply.done
       last_audio_ms_after_done: 100, // last frame at t=8600, reply.done at t=8500
       first_to_last_audio_ms: 1_100, // first frame t=7500, last frame t=8600
