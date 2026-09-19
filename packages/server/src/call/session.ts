@@ -1852,10 +1852,28 @@ export class CallSession {
    *  `maybeSendReplyCreateAfterReplyDone`'s own new guard exists to close, just ~1.9s later
    *  (CLOSE_TRANSCRIPT_WAIT_MS + this timer's own gap) instead of one ms later -- PROVEN by a
    *  fake-clock replay of the exact deploy-55 sequence (session.test.ts's own
-   *  "CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix" describe block). A drop here is never a dropped
-   *  goodbye: `owedForceSpeakGoalKey` stays owed the whole time (nothing in this file's CLOSE-
-   *  retry chain ever touches it), so `maybeSendOwedAfterCallerTurnEnds` still delivers it, once,
-   *  cleanly, the instant the caller's turn actually ends. */
+   *  "CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix" describe block).
+   *
+   *  SYNCHRONOUS-CLOSE-RETRY-CATCHUP fix (2026-09-19, mechanism C, PROVEN live deploy 58:
+   *  scripts/rehearse/reports/2026-09-19T14-19-30-identity-switch.diagnostics.json): the
+   *  comment above used to claim "a drop here is never a dropped goodbye: `owedForceSpeakGoalKey`
+   *  stays owed the whole time" -- true only when the ORIGINAL CLOSE send was itself deferred
+   *  through that same owed-key mechanism. Since FORCE-SPEAK-SETTLE-ZERO made the class default
+   *  `forceSpeakSettleMs` 0 (synchronous), the very first CLOSE send never touches
+   *  `owedForceSpeakGoalKey` at all -- so a LATER drop right here, on this timer's own callback,
+   *  was the first and only place anything was ever owed, and nothing recorded it. PROVEN live:
+   *  attempt 3 was cut by a barge-in, this timer's own retry callback dropped it on
+   *  `this.callerSpeaking` (the caller kept talking through two more transcripts), and because
+   *  nothing here ever set `owedForceSpeakGoalKey`, the goodbye was left to be rescued only by
+   *  luck -- an ambient AssemblyAI automatic reply that happened to get labelled CLOSE and
+   *  happened to speak a real goodbye, 25.6s after CLOSE first rendered (`goodbye_delay`), not by
+   *  design. Fixed by recording the goal as owed on exactly this drop (never on the
+   *  `speaking`/`replyCreateAwaitingStart` drops, which already have their own current reply's
+   *  own `reply.done` about to trigger this exact chain again): `maybeSendOwedAfterCallerTurnEnds`
+   *  (called from both `input.speech.stopped` and the tail of every `tick()`) then delivers it,
+   *  once, cleanly, the instant the caller's turn actually ends -- see that method's own doc
+   *  comment for why it now uses `forceSpeakSettleMs` (0 by default), not
+   *  `AUTOMATIC_REPLY_SETTLE_MS`, for this exact owed key. */
   private armCloseRetryTimer(): void {
     if (this.closeRetryTimer) return;
     this.closeRetryTimer = setTimeout(() => {
@@ -1863,7 +1881,14 @@ export class CallSession {
       if (this.ended) return;
       const sentence = this.currentCloseSentence();
       if (!sentence) return;
-      if (this.speaking || this.replyCreateAwaitingStart || this.callerSpeaking) return;
+      if (this.speaking || this.replyCreateAwaitingStart || this.callerSpeaking) {
+        // SYNCHRONOUS-CLOSE-RETRY-CATCHUP fix (2026-09-19): only the `callerSpeaking` drop
+        // needs to record anything owed -- the other two conditions mean some OTHER reply is
+        // already in flight, and that reply's own `reply.done` re-runs this exact chain
+        // (`scheduleCloseIfNeeded`/`armCloseTranscriptWait`/`armCloseRetryTimer`) on its own.
+        if (this.callerSpeaking && this.last) this.owedForceSpeakGoalKey = JSON.stringify(this.last.goal);
+        return;
+      }
       const wrapper = `Say exactly this and nothing else: "${sentence}"`;
       this.sendReplyCreate('CLOSE', 'close_retry', wrapper, { countAttempt: !this.closeLastReplyWasEmpty });
     }, CallSession.CLOSE_RETRY_MIN_GAP_MS);
@@ -4338,32 +4363,41 @@ export class CallSession {
    *  to, its own `input.speech.stopped` -- and is a harmless no-op the rest of the time, since
    *  the `!owed` check below makes it free whenever nothing is actually pending).
    *
-   *  Re-arms the SAME `armTickEndSendTimer`/`AUTOMATIC_REPLY_SETTLE_MS` deferral the
-   *  freshQuestion send path already uses -- ALWAYS that class constant here, deliberately
-   *  never `this.forceSpeakSettleMs` (FORCE-SPEAK-SETTLE-ZERO, 2026-09-19): this is a DIFFERENT
-   *  race than the one that constant governs. `forceSpeakSettleMs` decides whether the
-   *  ORIGINAL forceSpeak send (the instant a callerTurnTick first reaches CLOSE/ANNOUNCE_*)
-   *  waits for THAT turn's own automatic reply; by the time this method ever runs, the send was
-   *  already deferred for an unrelated reason (the caller was speaking, or that reply was
-   *  interrupted -- see `maybeSendReplyCreateAfterReplyDone`'s own new guard) and the caller has
-   *  now finished a LATER turn -- giving AssemblyAI's own automatic reply for THAT turn a
-   *  moment to start first is still the right call regardless of how the very first send was
-   *  configured. So a catch-up here still yields to that fresh automatic reply rather than
-   *  immediately racing it -- this is deliberately not a direct `sendReplyCreate` call.
-   *  `armTickEndSendTimer`'s own callback re-reads `this.last.goal`/the owed keys at fire time,
-   *  so this is safe to call speculatively on every tick without its own busy/goal-match check
-   *  duplicated here beyond the cheap early outs below (a no-op call costs nothing but a
-   *  `JSON.stringify` and two comparisons). */
+   *  Re-arms the SAME `armTickEndSendTimer` mechanism the freshQuestion send path already
+   *  uses, but the delay now depends on WHICH key is owed.
+   *
+   *  For `owedQuestionGoalKey`: always `AUTOMATIC_REPLY_SETTLE_MS` (150ms), deliberately never
+   *  `this.forceSpeakSettleMs` -- unchanged reasoning from the original CLOSE-CATCHUP-OVER-
+   *  CALLER-BARGE-IN fix: this is a DIFFERENT race than the one `forceSpeakSettleMs` governs.
+   *  By the time this method ever runs, the send was already deferred for an unrelated reason
+   *  (the caller was speaking, or the reply that would have caught it up was interrupted) and
+   *  the caller has now finished a LATER turn -- giving AssemblyAI's own automatic reply for
+   *  THAT turn a moment to start first is still the right call for a question.
+   *
+   *  For `owedForceSpeakGoalKey` (CLOSE/ANNOUNCE_*): SYNCHRONOUS-CLOSE-RETRY-CATCHUP fix
+   *  (2026-09-19, REVERSAL of the paragraph above's original reasoning for this key -- PROVEN
+   *  live deploy 58: scripts/rehearse/reports/2026-09-19T14-19-30-identity-switch
+   *  .diagnostics.json, and the FORCE-SPEAK-SETTLE-ZERO doc comment on `forceSpeakSettleMs`
+   *  itself): this now uses `this.forceSpeakSettleMs` (0 by default), not
+   *  `AUTOMATIC_REPLY_SETTLE_MS`. Waiting 150ms here handed the slot to AssemblyAI's own
+   *  automatic reply on 100% of the PROVEN live gaps (8-63ms, comfortably inside 150ms) --
+   *  exactly the failure `FORCE_SPEAK_SETTLE_MS = 0` already fixed for the ORIGINAL CLOSE
+   *  send; this catch-up path is the SAME race (a goodbye trying to win the very next turn
+   *  slot against AssemblyAI's own automatic reply) and must be governed by the SAME constant,
+   *  synchronously, exactly as the first CLOSE send does -- not by the question-settle window,
+   *  which was never about this race at all. `armTickEndSendTimer`'s own callback re-reads
+   *  `this.last.goal`/the owed keys at fire time, so this is safe to call speculatively on
+   *  every tick without its own busy/goal-match check duplicated here beyond the cheap early
+   *  outs below (a no-op call costs nothing but a `JSON.stringify` and two comparisons). */
   private maybeSendOwedAfterCallerTurnEnds(): void {
     if (this.ended || !this.last) return;
     if (this.callerSpeaking) return; // still mid-utterance -- nothing owed can be sent yet
     if (this.speaking || this.replyCreateAwaitingStart) return; // something else already in flight
     const goalKey = JSON.stringify(this.last.goal);
-    const owed =
-      (this.owedForceSpeakGoalKey !== null && this.owedForceSpeakGoalKey === goalKey) ||
-      (this.owedQuestionGoalKey !== null && this.owedQuestionGoalKey === goalKey);
-    if (!owed) return;
-    this.armTickEndSendTimer(CallSession.AUTOMATIC_REPLY_SETTLE_MS);
+    const owedForceSpeak = this.owedForceSpeakGoalKey !== null && this.owedForceSpeakGoalKey === goalKey;
+    const owedQuestion = this.owedQuestionGoalKey !== null && this.owedQuestionGoalKey === goalKey;
+    if (!owedForceSpeak && !owedQuestion) return;
+    this.armTickEndSendTimer(owedForceSpeak ? this.forceSpeakSettleMs : CallSession.AUTOMATIC_REPLY_SETTLE_MS);
   }
 
   /** Fired from `reply.done`, after the tool.result flush/discard rule has already run
