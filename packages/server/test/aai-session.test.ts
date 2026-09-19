@@ -209,6 +209,41 @@ describe('connectAai', () => {
     expect(readyCalls[0]![1]).toBe(true);
   });
 
+  // TURN-DETECTION-RESTORE-EXPLICIT-CONFIG (2026-09-19): `onReady`'s third argument must be
+  // the EXACT `turn_detection` object this connect's initial session.update put on the
+  // wire, read back off the built message rather than recomputed -- so index.ts's
+  // `aai_ready` diag can prove what was actually sent (see aai/config.ts's
+  // `buildInitialSessionUpdate` for the documented defaults).
+  it('reports the exact turn_detection object sent on connect as onReady\'s third argument', async () => {
+    const { deps, sockets } = makeDeps();
+    const readyCalls: Record<string, unknown>[] = [];
+    deps.onReady = (_ms, _greeting_configured, turn_detection_sent) => readyCalls.push(turn_detection_sent);
+
+    const connectPromise = connectAai(cfg(), deps);
+    await waitFor(() => expect(sockets.length).toBe(1));
+    sockets[0]!.triggerOpen();
+    await waitFor(() => expect(sockets[0]!.sent.length).toBe(1));
+    sockets[0]!.triggerMessage({ type: 'session.ready', session_id: 'sess-1' });
+    await connectPromise;
+
+    expect(readyCalls).toEqual([{ vad_threshold: 0.5, interrupt_response: true }]);
+  });
+
+  it('reports a caller-supplied turn_detection override to onReady exactly as it was sent', async () => {
+    const { deps, sockets } = makeDeps();
+    const readyCalls: Record<string, unknown>[] = [];
+    deps.onReady = (_ms, _greeting_configured, turn_detection_sent) => readyCalls.push(turn_detection_sent);
+
+    const connectPromise = connectAai(cfg({ turn_detection: { min_silence: 1200 } }), deps);
+    await waitFor(() => expect(sockets.length).toBe(1));
+    sockets[0]!.triggerOpen();
+    await waitFor(() => expect(sockets[0]!.sent.length).toBe(1));
+    sockets[0]!.triggerMessage({ type: 'session.ready', session_id: 'sess-1' });
+    await connectPromise;
+
+    expect(readyCalls).toEqual([{ vad_threshold: 0.5, interrupt_response: true, min_silence: 1200 }]);
+  });
+
   // Founder ruling 2026-09-11 (agent speaks first): AssemblyAI treats `greeting` as
   // immutable after session.ready -- "changing them returns immutable_field"
   // (docs/aai-verify-2026-09-02.md). This proves the resume path structurally cannot

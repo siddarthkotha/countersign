@@ -255,12 +255,18 @@ function createAai(session_id: string): AaiSocket {
     // records "AAI connected/ready" with the elapsed ms since this connect started, the
     // fact the live-call bundle previously had no way to show at all (see aai/session.ts's
     // `onReady` doc comment).
-    onReady: (ms, greeting_configured) =>
+    onReady: (ms, greeting_configured, turn_detection_sent) =>
       recordServerEvent(diagnostics, session_id, Date.now(), 'aai_ready', {
         ms_since_connect_start: ms,
         // Founder ruling 2026-09-11: proves in the raw bundle whether this call's connect
         // actually asked AssemblyAI to speak first.
         greeting_configured,
+        // TURN-DETECTION-RESTORE-EXPLICIT-CONFIG (2026-09-19): proves in the raw bundle
+        // exactly what turn_detection object this connect put on the wire (e.g.
+        // {vad_threshold: 0.5, interrupt_response: true}) -- see call/session.ts's
+        // `turn_detection_omitted: true` on the per-goal session.update diag for the other
+        // half of the picture (updates never resend this key).
+        turn_detection_sent,
       }),
     // Defect 2 fix (2026-09-15): when close() times out waiting for AssemblyAI's own
     // session.ended Termination event, record aai_terminate_timeout so a bundle shows

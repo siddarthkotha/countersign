@@ -500,3 +500,133 @@ stronger signal that adaptive pacing itself is the thing not working.
 **Live effect: UNKNOWN**, same discipline as the section above -- this analysis never called
 the live API; it is a code change grounded in a live docs re-fetch and the founder's own
 PROVEN recorded diagnostics, awaiting the next rehearsal batch's measurement.
+
+**See also:** the reading above (omit the key entirely) was re-examined and reversed the
+next day -- see "VERIFY-AT-BUILD re-check 2026-09-19 (turn_detection restored)" below.
+
+## VERIFY-AT-BUILD re-check 2026-09-19 (turn_detection restored)
+
+SONNET-JUSTIFIED lane, TURN-DETECTION-RESTORE-EXPLICIT-CONFIG: the 2026-09-18 re-check above
+concluded the `turn_detection` key should be omitted entirely on connect, reading the docs as
+tying full adaptive pacing to "no turn_detection config" being sent at all. Re-verified
+against the SAME live docs page today and that reading does not hold up -- the docs tie the
+pacing-disabling behavior to a NAMED PAIR of fields (min_silence/max_silence), never to the
+key's mere presence.
+
+**Verified verbatim today (2026-09-19 1:39 PM CDT), page
+`https://www.assemblyai.com/docs/voice-agents/voice-agent-api/turn-detection-and-interruptions`,
+copied character for character by a verification errand:**
+
+> "Setting `min_silence` or `max_silence` turns off the adaptive pacing and entity-aware
+> waiting described above for the rest of the session."
+
+> "With no `turn_detection` config, the agent adapts to each speaker's pace and
+> automatically slows down to capture values your tools need, like a phone number or
+> email."
+
+The page names five `turn_detection` sub-fields: `vad_threshold`, `min_silence`,
+`max_silence`, `interrupt_response`, `interruption_delay`. Documented purposes, quoted:
+`interruption_delay` -- "How long after the user starts speaking, in ms (`0` to `1000`),
+before a barge-in can interrupt the agent."; `interrupt_response` -- "Set `false` to disable
+barge-in entirely." Neither of these two, nor `vad_threshold`, is named anywhere as
+disabling adaptive pacing or entity-aware waiting -- only `min_silence`/`max_silence` are.
+
+**Also verified verbatim today, the seven client events AssemblyAI's Voice Agent API
+accepts** (`input.audio`, `session.update`, `session.resume`, `session.end`, `tool.result`,
+`reply.create`, `conversation.message`), **and that no client event cancels an in-flight
+reply and no session field disables automatic reply generation.** This matters here because
+it rules out a client-side "stop the ambient reply" lever existing at all -- the only
+observed way an instructed (`ours: true`) reply wins the race against AssemblyAI's own
+automatic one is by starting first, which is exactly what restoring `turn_detection` at
+connect changes the odds of (see the evidence below), not by cancelling a reply already in
+flight (no such call exists).
+
+**Conclusion: the 2026-09-18 reading above was WRONG** about which fields disable adaptive
+pacing. A `turn_detection` object present on the wire but carrying only
+`vad_threshold`/`interrupt_response` (no `min_silence`/`max_silence`) was never the
+documented trigger for disabling adaptive pacing or entity-aware waiting -- omitting the key
+entirely bought nothing beyond what omitting just `min_silence`/`max_silence` already
+bought, and its live cost (see below) was a race this repo did not have on deploy 52.
+
+**Live evidence (read directly from the named diagnostics bundles with
+`fs.readFileSync`/`JSON.parse` before any code was changed, per this lane's task
+instructions):**
+
+- **Deploy 52** (`2be1d3e`, `turn_detection` SENT: `{vad_threshold: 0.5,
+  interrupt_response: true}`) -- miller-patient
+  (`scripts/rehearse/reports/2026-09-18T15-52-39-miller-patient.diagnostics.json`): the CLOSE
+  goal fired three `reply_create_sent` attempts (the caller barged in twice); all three
+  resulting `reply.started` events are tagged `ours: true` with no ambient (`ours: false`)
+  reply racing into that window, and the final attempt speaks the exact, unmerged CLOSE
+  sentence ("This transfer is frozen and an incident is open. The payment is not released.
+  Goodbye.") cleanly. `goodbye_delay` (terminal_action to the close line actually spoken,
+  per `scripts/rehearse/experienceGrading.ts`) reads 8.231s in this bundle's own `.md`,
+  inflated by the caller's two barge-ins/retries, not by any merge or race.
+- **Deploy 52, identity-switch**
+  (`2026-09-18T15-54-39-identity-switch.diagnostics.json`): NOT as clean -- an `ours: true`
+  reply (`resp_745a0e2c...`, 70ms turn_to_reply_gap) speaks a mismatched, seemingly-stale
+  line ("Authority, urgency, or threats are not verification. One moment. Please state the
+  purpose of this transfer.") instead of the CLOSE text, and a SECOND reply
+  (`resp_2dfb400f...`, tagged `ours: false`, gap_ms 2972) immediately follows and speaks the
+  actual, unmerged goodbye text. `goodbye_delay` for this bundle is 10.607s. This is a real,
+  PROVEN anomaly in the deploy-52 bundle that does not match a simple "clean ours:true"
+  story -- flagged here rather than smoothed over; it predates this lane's change (deploy 52
+  already shipped before this restore) and is a variant of the same ambient-reply-race
+  family as MERGED-FREEZE-GOODBYE-MILLER, not something this restore is claimed to fix.
+- **Deploy 53** (`f880b91`, key omitted entirely): per
+  `docs/AUTOPILOT_LOG.md`'s 2026-09-19 12:37 PM entry, the automatic reply raced ours and
+  merged text into one `reply_id` on 3/3 CLOSE turns that day (MERGED-FREEZE-GOODBYE-MILLER,
+  root-caused and fixed in `76969ee`).
+- **Deploy 55** (`b6fcd8f`, key still omitted, plus `76969ee`'s forceSpeak deferral) --
+  miller-patient (`2026-09-19T13-28-41-miller-patient.diagnostics.json`): the merge is gone,
+  but an ambient reply (`ours: false`, `resp_b952af72...`) starts immediately after
+  `terminal_action` and speaks a stale line ("One moment. Which institution") before being
+  interrupted once the deferred CLOSE reply_create fires (`reason:
+  reply_done_goal_diverged`); the CLOSE reply (`ours: true`, `resp_6be68045...`) then speaks
+  the clean, correct goodbye. Measured `goodbye_delay` (terminal_action to the close line
+  actually spoken): **7.98s**, matching this bundle's own `.md` exactly.
+  identity-switch (`2026-09-19T13-30-33-identity-switch.diagnostics.json`) shows the same
+  shape: an ambient reply (`ours: false`, `resp_1c035231...`) speaks a full, uninterrupted
+  stale line ("Authority or urgency are not verification. One moment. Please state the
+  purpose of this transfer.") before the deferred CLOSE reply (`ours: true`,
+  `resp_718cff0c...`) speaks the correct goodbye. Measured `goodbye_delay`: **17.954s**,
+  again matching this bundle's own `.md` exactly.
+
+**The change made (this lane, `packages/server/src/aai/config.ts` +
+`packages/server/src/aai/session.ts` + `packages/server/src/index.ts`; `call/session.ts`
+untouched, owned by other lanes this session):**
+
+- `aai/config.ts`'s `buildInitialSessionUpdate`: `turn_detection` is now ALWAYS present on
+  connect, exactly as deploy 52 sent it -- `{vad_threshold: cfg.turn_detection?.vad_threshold
+  ?? 0.5, interrupt_response: cfg.turn_detection?.interrupt_response ?? true}`, with
+  `min_silence`/`max_silence` still omitted unless `cfg.turn_detection` explicitly sets one
+  (sent exactly as given, alongside the two defaulted fields -- not replacing them).
+- `call/session.ts`'s per-goal sender is UNCHANGED by this lane: it still omits
+  `turn_detection` entirely on every goal change (never resends `{}`) -- that omission was
+  never the field this restore is about; the connect-time defaults are the only thing
+  restored.
+- `aai/session.ts`'s `connectAai` now reads the `turn_detection` object back off the actual
+  built `session.update` message (never recomputed) and passes it as a third argument to
+  `deps.onReady`; `index.ts`'s `aai_ready` diag records it as `turn_detection_sent` (no
+  existing field renamed). `call/session.ts`'s existing per-goal `session_config_updated`
+  diag already records `turn_detection_omitted: true` on every update -- unchanged, still
+  accurate.
+- Tests flipped: `packages/server/test/aai-config.test.ts`'s two "omits the turn_detection
+  key" tests now assert the key is present with the documented defaults (and that
+  min_silence/max_silence stay absent); its override tests now expect the defaulted
+  vad_threshold/interrupt_response alongside the explicit override, not in place of it.
+  Added `packages/server/test/aai-session.test.ts` tests asserting `onReady`'s new third
+  argument matches the built message exactly, both with defaults and with a caller
+  override.
+
+**What a live caller may hear differently:** the CLOSE goodbye is expected to go out first
+again in the common case, as measured on deploy 52, rather than losing the race to a stale
+ambient line first (as measured on deploy 55, 7.98s-17.95s delay). `76969ee`'s forceSpeak
+deferral logic stays in place underneath as the safety net for whenever an automatic reply
+still starts first regardless (the deploy-52 identity-switch anomaly above shows this can
+still happen even with the key present) -- it is not removed or weakened by this change.
+
+**Live effect: UNKNOWN until the next rehearsal batch measures it against the deployed
+build.** This lane never called the live API -- all evidence above is either a verbatim docs
+re-fetch or a replay of already-recorded diagnostics bundles, per this repo's determinism
+rule.

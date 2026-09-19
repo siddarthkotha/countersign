@@ -84,8 +84,17 @@ export interface AaiConnectDeps {
    *  Founder ruling 2026-09-11: also carries `greeting_configured` (whether `cfg.greeting`
    *  was set on THIS connect's initial session.update) so the flight recorder's raw bundle
    *  can prove, after the fact, whether a live call actually asked AssemblyAI to speak
-   *  first -- see `aai_ready`'s detail in index.ts. */
-  onReady?: (ms_since_connect_start: number, greeting_configured: boolean) => void;
+   *  first -- see `aai_ready`'s detail in index.ts.
+   *  TURN-DETECTION-RESTORE-EXPLICIT-CONFIG (2026-09-19): also carries `turn_detection_sent`
+   *  -- the exact `input.turn_detection` object this connect's initial session.update
+   *  actually put on the wire (read back off the built message itself, never recomputed) --
+   *  so a bundle proves what was sent without guessing from the code that built it. See
+   *  aai/config.ts's `buildInitialSessionUpdate` doc comment for what belongs in it. */
+  onReady?: (
+    ms_since_connect_start: number,
+    greeting_configured: boolean,
+    turn_detection_sent: Record<string, unknown>
+  ) => void;
   /** Defect 2 fix: tests shrink `CLOSE_TERMINATION_TIMEOUT_MS` (2000ms in production) so a
    *  test proving the timeout path doesn't have to actually wait 2 real seconds -- same
    *  role as `openTimeoutMs` above for the connect-side open wait. */
@@ -514,7 +523,15 @@ export async function connectAai(cfg: AaiSessionConfig, deps: AaiConnectDeps): P
   const effectiveCfg: AaiSessionConfig = voice === cfg.voice ? cfg : { ...cfg, voice };
   const ws = await openSocket(deps.WebSocketImpl, token, deps.openTimeoutMs ?? OPEN_TIMEOUT_MS);
 
-  ws.send(JSON.stringify(buildInitialSessionUpdate(effectiveCfg)));
+  const initialUpdate = buildInitialSessionUpdate(effectiveCfg);
+  ws.send(JSON.stringify(initialUpdate));
+  // TURN-DETECTION-RESTORE-EXPLICIT-CONFIG (2026-09-19): read the turn_detection object
+  // back off the message actually sent, rather than recomputing the same defaulting logic
+  // here a second time -- one source of truth for what's on the wire.
+  const turnDetectionSent =
+    ((initialUpdate.session.input as Record<string, unknown> | undefined)?.turn_detection as
+      | Record<string, unknown>
+      | undefined) ?? {};
 
   return new Promise<AaiSocket>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -530,7 +547,7 @@ export async function connectAai(cfg: AaiSessionConfig, deps: AaiConnectDeps): P
       if (msg.type === 'session.ready' && typeof msg.session_id === 'string') {
         settled = true;
         clearTimeout(timeout);
-        deps.onReady?.(deps.now() - connectStartedAt, Boolean(effectiveCfg.greeting));
+        deps.onReady?.(deps.now() - connectStartedAt, Boolean(effectiveCfg.greeting), turnDetectionSent);
         resolve(new RealAaiSocket(ws, msg.session_id, effectiveCfg, deps));
       } else if (msg.type === 'session.error') {
         settled = true;
