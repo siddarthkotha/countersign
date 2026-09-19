@@ -3329,11 +3329,11 @@
         "packages/server/src/call/session.ts",
         "packages/server/test/**"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
-      "agent_id": "a18bdcbd0737a6f50",
+      "agent_id": "",
       "started_at": "2026-09-19T18:30:24.520Z",
-      "note": "worktree lane (Sonnet, SONNET-JUSTIFIED: reply.done interrupted / caller speech state); merge order: diag lane first, then this"
+      "note": "landed on main fb6bef8 + 34cc309 (cherry-picks), push 58: callerSpeaking flag (cleared by speech.stopped AND transcript.user), owed sends held through interrupted or caller-speaking, re-armed via the settle when the turn ends, close-retry chain guarded, 45 s cap intact; three tests proven RED first"
     },
     {
       "id": "STALE-AMBIENT-LINE-AFTER-VERDICT",
@@ -3373,6 +3373,43 @@
       "agent_id": "",
       "started_at": "2026-09-19T18:40:40.769Z",
       "note": "landed on main dd88270 + 7ee197b (cherry-picks; the first is the lane checkpoint, rewriting is rail-blocked), push 57; connect-time turn_detection {vad_threshold 0.5, interrupt_response true}, no min/max_silence, goal updates still omit the key; aai_ready diag now records turn_detection_sent. Correction: deploy-55 miller goodbye_delay was 7.98 s, not 4.3 s. Lane flagged: deploy-52 identity-switch also lost one close to an ambient reply, so this reduces the odds, the deferral stays as the net; live effect UNKNOWN until the deploy-57 batch"
+    },
+    {
+      "id": "DEPLOY-57-BATCH",
+      "title": "10-run graded batch on deploy 57 (72097ee, turn_detection restored, same scenario order as the deploy-55 batch): attributes the restore by goodbye_delay, ours:true/false on closes, and the four counts; first bundles carrying reply.audio.summary",
+      "files": [
+        "scripts/rehearse/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-19T18:59:22.893Z",
+      "note": "done 2026-09-19 2:13 PM CDT, 10/10 executed 2:00 to 2:13 PM, 14.0 est. minutes: repeated 0, merged 0, talk_over 1 (barge-in-interrupt, the No.-pause cutoff, AssemblyAI-side), holding 0; every close was taken by the automatic reply (gaps 8 to 63 ms) with goodbye_delay 7.1 to 23.4 s. Rollup 2026-09-19T14-13-21-batch-rollup.md"
+    },
+    {
+      "id": "HARNESS-AGENT-AUDIO-CAPTURE",
+      "title": "harness: record every agent audio frame per run to <run>.agent.wav with a t_ms frame index, compute an RMS-per-250ms speech/silence timeline, per-reply speech/silence/overlap-with-caller seconds, render an Audio section in the report, and an offline audio:timeline command; answers what the caller heard (deploy-57 miller: 17.3 s of audio bytes for an 86-char goodbye, transcript cannot say if stale speech or silence)",
+      "files": [
+        "scripts/rehearse/**"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "ab4511cf29c109cd8",
+      "started_at": "2026-09-19T19:01:49.162Z",
+      "note": "worktree lane (Sonnet); harness only, no packages/server"
+    },
+    {
+      "id": "FORCE-SPEAK-SETTLE-ZERO",
+      "title": "server: with turn_detection restored the automatic reply starts at 58 to 61 ms, so the 150 ms forceSpeak deferral (76969ee) hands every close to a stale automatic line (deploy 57 goodbye_delay 17.1 s and 22.0 s); deploy 52 sent CLOSE synchronously with 0 merges across 16 calls. Add FORCE_SPEAK_SETTLE_MS (default 0, synchronous as before 76969ee), keep the 150 ms question settle and all owed-key and callerSpeaking machinery as the net",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/test/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-19T19:03:26.506Z",
+      "note": "landed on main 4e80c41 (cherry-pick), push 58: FORCE_SPEAK_SETTLE_MS default 0 (synchronous CLOSE on the caller-turn tick, as before 76969ee), injectable via CallSessionOpts.forceSpeakSettleMs, question settle 150 kept, owed-key and callerSpeaking machinery kept; test (e-0) proven RED first. Live proof owed: deploy-58 batch goodbye_delay and merged_reply"
     }
   ]
 }
