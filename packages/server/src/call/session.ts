@@ -27,6 +27,7 @@ import {
 } from '@countersign/engine';
 import { evaluate } from '@countersign/engine';
 import type { AaiEvent, AaiSocket, ReplyCreateMessage } from '../aai/types.js';
+import { DEFAULT_VAD_THRESHOLD } from '../aai/config.js';
 import { isToolName, toolLogEntryFromCall, utteranceFromTranscript } from './events.js';
 import { renderPrompt, type PromptCtx } from './prompt.js';
 import { toolSchemasFor, paramsFor } from './allowlist.js';
@@ -3738,19 +3739,38 @@ export class CallSession {
       // so if repetition or bare presence matters at all, this is where it would show up.
       // The per-goal update has never had an explicit-override path (no caller-supplied
       // turn_detection reaches this branch), so there is nothing to preserve here: the key
-      // is now OMITTED from this send entirely -- never re-asserted mid-call, for any goal.
-      // See config.ts's buildInitialSessionUpdate for the matching initial-connect change
-      // and docs/ASSEMBLYAI_INTEGRATION.md, "VERIFY-AT-BUILD re-check 2026-09-18
-      // (turn_detection key presence)" for the full quotes. Live effect UNKNOWN until the
-      // next rehearsal batch measures it.
+      // is OMITTED from this send entirely for every goal EXCEPT CLOSE -- never re-asserted
+      // mid-call otherwise. See config.ts's buildInitialSessionUpdate for the matching
+      // initial-connect change and docs/ASSEMBLYAI_INTEGRATION.md, "VERIFY-AT-BUILD re-check
+      // 2026-09-18 (turn_detection key presence)" for the full quotes.
+      //
+      // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism A (2026-09-19, ONE deliberate exception
+      // to "never re-asserted mid-call" above -- PROVEN live, deploy 58, three consecutive
+      // barge-ins cut the goodbye to 0.79s of audio, scripts/rehearse/reports/2026-09-19T14-17-
+      // 22-miller-patient.diagnostics.json): once the goal is CLOSE, the verdict is already
+      // sealed and containment has already run (LAW 2) -- nothing the caller says from here
+      // can change the outcome, so there is no more reason to let them interrupt the goodbye.
+      // The live docs' own "Mutability after session.ready" table (re-verified 2026-09-19,
+      // see docs/ASSEMBLYAI_INTEGRATION.md's dated subsection for the verbatim quote and URL)
+      // say `input.turn_detection` IS mutable mid-session ("Adjust... barge-in on the fly"),
+      // and `interrupt_response`'s own field reference says "Set `false` to disable barge-in
+      // entirely." `vad_threshold` is resent alongside it, unchanged from the connect-time
+      // default (`DEFAULT_VAD_THRESHOLD`, aai/config.ts) -- never omitted here, so a partial
+      // update can never be read as resetting it to some other default; `min_silence`/
+      // `max_silence` stay omitted, exactly as every other goal's update already does.
+      const isCloseGoal = output.goal.code === 'CLOSE';
+      const input: Record<string, unknown> = {
+        keyterms: output.goal.keyterms.slice(0, 100),
+      };
+      if (isCloseGoal) {
+        input.turn_detection = { vad_threshold: DEFAULT_VAD_THRESHOLD, interrupt_response: false };
+      }
       this.opts.aai.send({
         type: 'session.update',
         session: {
           system_prompt: renderPrompt(output.goal, this.promptCtx(output)),
           tools: toolSchemasFor(output.allowed_tools),
-          input: {
-            keyterms: output.goal.keyterms.slice(0, 100),
-          },
+          input,
         },
       });
       this.logs.actions.push({
@@ -3767,13 +3787,17 @@ export class CallSession {
       // reconstructed from goal_code + engine source, as this lane had to do for the
       // analysis above. FOLLOW-UP (2026-09-18, same day): the field previously logged the
       // literal `{}` object sent as `turn_detection`; now that the key is omitted from the
-      // wire entirely (see the send above), `turn_detection_sent` would always be a lie if
-      // left as an object -- `turn_detection_omitted: true` states the actual fact instead.
+      // wire entirely for every non-CLOSE goal (see the send above), `turn_detection_sent`
+      // would always be a lie if left as an object for those -- `turn_detection_omitted: true`
+      // states the actual fact instead. Mechanism A (2026-09-19): for CLOSE, the literal object
+      // actually sent is logged instead (`turn_detection_omitted: false`), so a bundle can
+      // PROVE `interrupt_response: false` went out on the wire without reconstructing it.
       this.diag('session_config_updated', {
         goal_code: output.goal.code,
         keyterms_count: output.goal.keyterms.length,
         tools_count: output.allowed_tools.length,
-        turn_detection_omitted: true,
+        turn_detection_omitted: !isCloseGoal,
+        ...(isCloseGoal ? { turn_detection_sent: input.turn_detection } : {}),
       });
       // The hard cap starts the moment CLOSE is first rendered (session.update just sent
       // it) -- not from `this.last = output` below, which would fire on every tick, and not

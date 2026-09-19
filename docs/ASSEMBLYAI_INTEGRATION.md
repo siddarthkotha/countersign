@@ -630,3 +630,75 @@ still happen even with the key present) -- it is not removed or weakened by this
 build.** This lane never called the live API -- all evidence above is either a verbatim docs
 re-fetch or a replay of already-recorded diagnostics bundles, per this repo's determinism
 rule.
+
+## VERIFY-AT-BUILD re-check 2026-09-19 (turn_detection mutability mid-session; GOODBYE-CUT-BY-CALLER-PRESSURE, mechanism A)
+
+Same day, later lane (GOODBYE-CUT-BY-CALLER-PRESSURE, PROVEN on deploy 58: three barge-ins cut
+the CLOSE goodbye to 0.79s of relayed audio on one call, and a folded reply reported
+`reply.done` COMPLETED on another with only its first, unrelated segment's audio ever
+streamed -- see `packages/server/test/goodbye-cut-by-caller-pressure.test.ts` for both replays
+in full). This lane needed to know whether `turn_detection` (specifically
+`interrupt_response`) can be changed via a **mid-session** `session.update`, i.e. AFTER
+`session.ready` -- everything above this section is about the CONNECT-time config only.
+
+**Fetched today** (this lane could not call `WebFetch` directly -- routed through a
+haiku-pinned lookup agent per this session's own research-guard rail; the agent's own report is
+reproduced verbatim below, not summarized further by this lane):
+
+> URL successfully fetched: `https://www.assemblyai.com/docs/voice-agents/voice-agent-api/session-configuration.md`
+> and `https://www.assemblyai.com/docs/voice-agents/voice-agent-api/turn-detection-and-interruptions.md`
+>
+> From the "Mutability after `session.ready`" table in session-configuration.md:
+>
+> | Field | Mutable after `session.ready`? |
+> | --- | --- |
+> | `session.input.turn_detection` | "Yes. Adjust VAD thresholds, silence windows, and barge-in on the fly." |
+>
+> From the field reference table in turn-detection-and-interruptions.md:
+>
+> | Field | Default | Description |
+> | --- | --- | --- |
+> | `interrupt_response` | `true` | "Set `false` to disable barge-in entirely." |
+
+**Verdict: MUTABLE.** `input.turn_detection` (and therefore `interrupt_response`) can be
+changed via `session.update` after `session.ready` -- this lane built mechanism (A) on that
+basis: the per-goal `session.update` for the CLOSE goal now carries `turn_detection: {
+vad_threshold: 0.5, interrupt_response: false }` (`call/session.ts`'s `applyEvaluate`, using
+`aai/config.ts`'s exported `DEFAULT_VAD_THRESHOLD` so the two send sites can never silently
+drift apart). Every OTHER goal's per-goal update is UNCHANGED -- it still omits
+`turn_detection` entirely, exactly as the 2026-09-18 lane above established.
+
+**Caveat, stated plainly (this is a lower-trust source than this lane's own earlier verbatim
+fetches):** the quote above was produced by a cheap, model-summarized lookup (a haiku agent),
+not a byte-for-byte page fetch this lane read itself -- the table formatting may be the agent's
+own reformatting of prose rather than a literal on-page table. Treat the SUBSTANCE (mutable;
+`interrupt_response: false` disables barge-in) as PROVEN-by-quote, but a from-scratch human or
+higher-effort re-fetch would be needed before calling the exact table layout itself verbatim.
+
+**Live evidence check (2026-09-19):** grepped every bundle under
+`scripts/rehearse/reports/2026-09-18T15-*` (deploy 52, the day `turn_detection` was last
+verified present on the wire at CONNECT time) for any `session.error` or `immutable_field`
+event correlated with `turn_detection` -- zero hits across all eight bundles. This is
+EVIDENCE the connect-time config was accepted without error, but it is NOT direct evidence of
+mid-session mutability specifically: `call/session.ts`'s per-goal sender has never, before this
+lane, sent `turn_detection` in a session.update AFTER connect (every goal's own comment says
+so, dated 2026-09-18) -- so no bundle on disk exercises a mid-session `turn_detection` update
+either accepted or rejected. **Live effect of mechanism (A) itself is therefore UNKNOWN until
+the next rehearsal batch measures it against the deployed build** -- the docs quote above is
+the basis for building it, not proof it behaves as documented once actually sent mid-call.
+
+**Mechanism (B) and (C), for completeness (no further docs lookup needed -- both are
+server-side confirmation/retry logic, not new AssemblyAI wire behavior):**
+- (B) A goodbye's relayed audio bytes must reach 50% of its expected TTS byte count (~4,000
+  bytes/char, measured from two clean, fully-relayed goodbyes recorded the same day: 339,840
+  bytes for an 86-char line, 361,080 bytes for another 86-char line) before it can be confirmed
+  heard -- regardless of transcript match or `reply.done.status`. See `call/session.ts`'s
+  `closeReplyHasEnoughAudio`/`closeAudioFloorBytes` for the exact formula and the two live
+  failures (41.8% and 11.0% of expected bytes) the 50% floor separates from the two clean
+  successes (98.8% and 105.0%).
+- (C) A CLOSE/ANNOUNCE_* send dropped because the caller was still speaking now records the
+  goal as owed (`owedForceSpeakGoalKey`) and is delivered synchronously
+  (`forceSpeakSettleMs`, 0 by default) the instant the caller's turn ends, rather than waiting
+  `AUTOMATIC_REPLY_SETTLE_MS` (150ms) -- PROVEN live gaps for an AssemblyAI automatic reply are
+  8-63ms, comfortably inside that 150ms window, so waiting handed it the slot on deploy 58's
+  own identity-switch bundle (`goodbye_delay` 25.6s).

@@ -921,6 +921,10 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
     expect(diagsAfterScenarioB.length).toBeGreaterThan(1);
 
     // Every diag event should have all required fields with correct types.
+    // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism A (2026-09-19): this drive (Scenario B,
+    // Robert Miller fraud) reaches SEALED/CLOSE by the end, so ONE of these diag events is now
+    // legitimately the CLOSE goal, whose `turn_detection_omitted` is false (mechanism A's one
+    // deliberate exception) -- every OTHER goal's own diag still reads true, unchanged.
     diagsAfterScenarioB.forEach((diag) => {
       const detail = diag.detail as {
         goal_code: string;
@@ -931,10 +935,12 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
       expect(typeof detail.goal_code).toBe('string');
       expect(typeof detail.keyterms_count).toBe('number');
       expect(typeof detail.tools_count).toBe('number');
-      expect(detail.turn_detection_omitted).toBe(true);
+      expect(detail.turn_detection_omitted).toBe(detail.goal_code !== 'CLOSE');
       expect(detail.keyterms_count).toBeGreaterThanOrEqual(0);
       expect(detail.tools_count).toBeGreaterThanOrEqual(0);
     });
+    expect(session.last?.goal.code).toBe('CLOSE'); // confirms the CLOSE diag above was actually exercised, not hypothetical
+    expect(diagsAfterScenarioB.some((d) => (d.detail as { goal_code: string }).goal_code === 'CLOSE')).toBe(true);
   });
 
   // 2026-09-18 follow-up (same day, SONNET-JUSTIFIED lane): asserts the LITERAL wire payload
@@ -947,7 +953,15 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
   // level "explicit override still passes through" case is covered directly in
   // aai-config.test.ts (buildInitialSessionUpdate is the pure function under test there);
   // this test covers call/session.ts's own per-goal sender, which never passes an override.
-  it('never sends the turn_detection key at all on the wire for any goal, default or patient (CHALLENGE)', () => {
+  // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism A (2026-09-19): CLOSE is now the ONE
+  // deliberate exception (see session.ts's own doc comment on that send) -- this drive runs
+  // Scenario B (Robert Miller, fraud) all the way through its own three challenges and, per
+  // this lane's own test run, reaches SEALED/CLOSE by the end, so `allUpdates` now legitimately
+  // includes one CLOSE update carrying `turn_detection`. This test's own subject (every OTHER
+  // goal never carries it) is unaffected -- the CLOSE update is excluded from the loop below
+  // by goal, not silently accepted; goodbye-cut-by-caller-pressure.test.ts asserts the CLOSE
+  // update's own contents directly.
+  it('never sends the turn_detection key at all on the wire for any goal EXCEPT CLOSE (default, or patient/CHALLENGE)', () => {
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
     const sent: ServerEvent[] = [];
@@ -978,9 +992,16 @@ describe('CallSession — protocol rules independent of any one scenario', () =>
     // Scenario B reaches ASK_CHALLENGE (a 'patient'-hint goal) along the way -- confirmed by
     // the session having issued at least one challenge (never a silent assumption).
     expect(session.logs.actions.some((a) => a.kind === 'challenge_issued')).toBe(true);
-    for (const update of allUpdates) {
-      expect(update.session.input).not.toHaveProperty('turn_detection');
-    }
+    // Confirms this drive really does reach CLOSE (mechanism A's one exception actually
+    // exercised here, not merely hypothetical) -- session.last is the final, post-drive goal.
+    expect(session.last?.goal.code).toBe('CLOSE');
+    const withTurnDetection = allUpdates.filter((u) => u.session.input.turn_detection !== undefined);
+    const withoutTurnDetection = allUpdates.filter((u) => u.session.input.turn_detection === undefined);
+    expect(withoutTurnDetection.length).toBeGreaterThan(0); // GREET, ASK_CHALLENGE, etc. -- the unchanged majority
+    // And exactly one CLOSE update DOES carry it (mechanism A) -- never zero, never more than
+    // the single CLOSE rendering this drive produces.
+    expect(withTurnDetection).toHaveLength(1);
+    expect(withTurnDetection[0]!.session.input.turn_detection).toEqual({ vad_threshold: 0.5, interrupt_response: false });
   });
 
   it('ends on session.error and on session.ended, closing the AAI socket', () => {

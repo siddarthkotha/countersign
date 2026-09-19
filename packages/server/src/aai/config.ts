@@ -158,6 +158,17 @@ export interface TurnDetectionConfig {
   interrupt_response?: boolean;
 }
 
+// GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism A (2026-09-19): the documented default for
+// `turn_detection.vad_threshold` (also `buildInitialSessionUpdate`'s own default just below),
+// exported so `call/session.ts`'s per-goal CLOSE update (the one exception to "never resend
+// turn_detection mid-call", see that file's own doc comment) can echo the SAME value back
+// instead of hardcoding a second copy that could silently drift from this one. Today's real
+// connect wiring (`index.ts`) never overrides `vad_threshold`, so this constant IS what every
+// live call's connect-time value actually is -- if that ever changes (a future
+// `COUNTERSIGN_VAD_THRESHOLD` env, say), both send sites must be updated together, or the
+// per-goal CLOSE update would silently reset vad_threshold back to this default mid-call.
+export const DEFAULT_VAD_THRESHOLD = 0.5;
+
 // REVERSAL (2026-09-18, coordinator ruling, same day as the ANALYSIS above): the first pass
 // of this fix left `call/session.ts`'s 'patient'-hint goals (CHALLENGE, CONSISTENCY_CHECK
 // rule_hit 5) sending an explicit `min_silence: 1200`, reasoning that value was PROVEN
@@ -303,7 +314,7 @@ export function buildInitialSessionUpdate(cfg: AaiSessionConfig, turn_detection_
   // sends the key only if a caller override sets a field, or omits it entirely if no override.
   if (turn_detection_mode === 'explicit') {
     const turnDetection: Record<string, unknown> = {
-      vad_threshold: cfg.turn_detection?.vad_threshold ?? 0.5,
+      vad_threshold: cfg.turn_detection?.vad_threshold ?? DEFAULT_VAD_THRESHOLD,
       interrupt_response: cfg.turn_detection?.interrupt_response ?? true,
     };
     if (cfg.turn_detection?.min_silence !== undefined) turnDetection.min_silence = cfg.turn_detection.min_silence;
