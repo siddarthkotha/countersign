@@ -3469,11 +3469,11 @@
       "files": [
         "scripts/rehearse/**"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
       "agent_id": "",
       "started_at": "2026-09-19T20:32:07.564Z",
-      "note": "detached nohup under caffeinate behind the deploy watch; log batch-deploy60.log in the session scratchpad"
+      "note": "done 2026-09-19 3:45 PM CDT (read at 8:07 PM after a session limit): 10/10 PASS, 0/0/0/0 on every run, batch exit 0, first all-clean batch; goodbye_delay 5.7 to 7.5 s on eight runs (a full 7 s goodbye starting right after the verdict), 9.2 s and 15.9 s on the two that needed one retry; one .agent.wav per run recorded. Rollup 2026-09-19T15-45-43-batch-rollup.md"
     }
   ]
 }
