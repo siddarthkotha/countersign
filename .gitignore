@@ -24,6 +24,8 @@ Thumbs.db
 .superpowers/
 .claude/autopilot.on
 .claude/compaction-log.txt
+.claude/worktree-sweep.hold
+.claude/worktree-sweep.log
 !.env.example
 
 # Agent worktrees (isolated lanes; their diffs land on main as patches, never committed from here)
