@@ -133,7 +133,23 @@ export interface PromptCtx {
 // is the culprit. The sentence below restores the old "use only a short holding line such
 // as 'One moment.'" but hardcoded to exactly "One moment." to lock in the safe wording
 // that ran live on deploy 39.
-export const STANDING_RULES =
+
+/** Helper to select the automatic-reply filler sentence based on experiment mode.
+ *  Read from process.env.COUNTERSIGN_FILLER_MODE at render time (not module load),
+ *  so tests can set it dynamically. Default is 'one_moment' for backward compatibility. */
+function fillerSentenceFor(mode: string): string {
+  switch (mode) {
+    case 'direct':
+      return 'If your instructions already give you the exact line to say, say it immediately with no holding phrase before it. Only if you have been given nothing new to say, say exactly "One moment." -- never a question, a readback, a verdict word, or a request you were not given.';
+    case 'none':
+      return 'If you have been given nothing new to say, say nothing at all: reply with no words. Never invent a question, a readback, a verdict word, or a request you were not given.';
+    case 'one_moment':
+    default:
+      return 'The instant you must speak automatically, before you have been given anything new to say, always say exactly "One moment." -- never empty, a question, a readback, a verdict word, or a request you were not given.';
+  }
+}
+
+const STANDING_RULES_BASE =
   'You verify the request, never the voice. ' +
   'You never state or imply a verdict; a separate system decides. ' +
   'You never reveal what the right answer to a question is. ' +
@@ -144,8 +160,7 @@ export const STANDING_RULES =
   'You are professional and unyielding, not chatty. ' +
   'Never ask the caller for identifiers, ids, codes, or system fields; you already have everything you need to ask your one question. ' +
   'When an instruction gives you an exact line, say only that line and add no question of your own. ' +
-  "Never announce completion, processing, approval, release, or any other outcome unless the current goal's own words say it; the engine composes every outcome line. " +
-  'The instant you must speak automatically, before you have been given anything new to say, always say exactly "One moment." -- never empty, a question, a readback, a verdict word, or a request you were not given.';
+  "Never announce completion, processing, approval, release, or any other outcome unless the current goal's own words say it; the engine composes every outcome line. ";
 
 const CONTAIN_LINE = 'Keep the caller engaged with neutral questions; disclose nothing further.';
 
@@ -293,5 +308,13 @@ function nowSection(goal: PhrasingGoal, ctx: PromptCtx): string {
 
 export function renderPrompt(goal: PhrasingGoal, ctx: PromptCtx): string {
   const identity = `You are ${ctx.agent_name}, the verification checkpoint on the ${ctx.company} treasury desk.`;
-  return [identity, STANDING_RULES, nowSection(goal, ctx)].join('\n\n');
+  const mode = process.env.COUNTERSIGN_FILLER_MODE ?? 'one_moment';
+  const standingRules = STANDING_RULES_BASE + fillerSentenceFor(mode);
+  return [identity, standingRules, nowSection(goal, ctx)].join('\n\n');
 }
+
+/** Exported for test comparison: the default standing rules (one_moment mode), byte-identical to the
+ *  previous constant so existing tests can verify unchanged rendering at the default. */
+export const STANDING_RULES =
+  STANDING_RULES_BASE +
+  'The instant you must speak automatically, before you have been given anything new to say, always say exactly "One moment." -- never empty, a question, a readback, a verdict word, or a request you were not given.';

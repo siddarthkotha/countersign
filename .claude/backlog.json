@@ -3691,10 +3691,11 @@
         "packages/server/src/call/session.ts",
         "packages/server/src/call/prompt.ts"
       ],
-      "status": "held",
-      "held_because": "founder decision: bounded experiment behind an env flag (instructed readbacks and challenges at caller-turn end, no filler) measured by the harness on audio seconds per character, repeated_question and merged_reply, vs ship as is",
+      "status": "running",
+      "held_because": "",
       "agent_id": "",
-      "priority": "P1"
+      "priority": "P1",
+      "note": "founder chose option 2 (2026-09-22 2:22 PM): env-flagged experiment tonight, harness-measured, numbers to him tomorrow morning; CORRECTION 2:30 PM: same-sentence auto vs instructed differs little (0.073 vs 0.064 s/char on the deadline line); the bulk is the One moment. filler (1.6 to 3.3 s each, before 4 of 7 lines in case 1) and digit readbacks; target the filler first; docs errand checking for a manual-reply mode and a TTS rate setting"
     },
     {
       "id": "OUT-OF-SCOPE-TRIPLE-GOODBYE",

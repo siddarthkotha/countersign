@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import type { ChallengeSpec, GoalCode, PhrasingGoal } from '@countersign/engine';
 import { renderPrompt, type PromptCtx } from '../src/call/prompt.js';
 import { stallLineFor, type StallKind } from '../src/call/stalls.js';
@@ -511,4 +511,93 @@ describe('renderPrompt', () => {
       expect(prompt).not.toContain('Some check-specific hint');
     });
   }
+
+  describe('COUNTERSIGN_FILLER_MODE experiment switch', () => {
+    const originalEnv = process.env.COUNTERSIGN_FILLER_MODE;
+
+    afterEach(() => {
+      process.env.COUNTERSIGN_FILLER_MODE = originalEnv;
+    });
+
+    it('default (unset) rendering is byte-identical to the old constant for a READBACK goal', () => {
+      delete process.env.COUNTERSIGN_FILLER_MODE;
+      const goal = baseGoal('READBACK', {
+        hint: 'Just to confirm, the amount is $84,500. Is that correct?',
+        readback: { field: 'amount_usd', value: '84500' },
+      });
+      const prompt = renderPrompt(goal, makeCtx());
+      expect(prompt).toContain(STANDING_RULES_VERBATIM);
+    });
+
+    it('default (unset) rendering is byte-identical to the old constant for an ASK_CHALLENGE goal', () => {
+      delete process.env.COUNTERSIGN_FILLER_MODE;
+      const challenge: ChallengeSpec = {
+        challenge_id: 'c1',
+        kind: 'SEED_FACT',
+        field: 'counsel',
+        ask: 'Who is the counsel of record on this deal?',
+        expect: { accept_tokens: ['whitfield'] },
+      };
+      const goal = baseGoal('ASK_CHALLENGE', { challenge });
+      const prompt = renderPrompt(goal, makeCtx());
+      expect(prompt).toContain(STANDING_RULES_VERBATIM);
+    });
+
+    it('default (unset) rendering is byte-identical to the old constant for a CLOSE goal', () => {
+      delete process.env.COUNTERSIGN_FILLER_MODE;
+      const goal = baseGoal('CLOSE', {
+        hint: 'Your request is staged for independent approval. The payment is not released. Goodbye.',
+      });
+      const prompt = renderPrompt(goal, makeCtx());
+      expect(prompt).toContain(STANDING_RULES_VERBATIM);
+    });
+
+    it("'direct' mode contains the direct filler sentence, not the one_moment sentence", () => {
+      process.env.COUNTERSIGN_FILLER_MODE = 'direct';
+      const goal = baseGoal('GREET');
+      const prompt = renderPrompt(goal, makeCtx());
+      expect(prompt).toContain('If your instructions already give you the exact line to say, say it immediately with no holding phrase before it.');
+      expect(prompt).not.toContain('The instant you must speak automatically, before you have been given anything new to say, always say exactly "One moment."');
+    });
+
+    it("'none' mode contains the none filler sentence, not the one_moment sentence", () => {
+      process.env.COUNTERSIGN_FILLER_MODE = 'none';
+      const goal = baseGoal('GREET');
+      const prompt = renderPrompt(goal, makeCtx());
+      expect(prompt).toContain('If you have been given nothing new to say, say nothing at all: reply with no words.');
+      expect(prompt).not.toContain('The instant you must speak automatically, before you have been given anything new to say, always say exactly "One moment."');
+    });
+
+    it("'one_moment' mode explicitly set renders the original sentence", () => {
+      process.env.COUNTERSIGN_FILLER_MODE = 'one_moment';
+      const goal = baseGoal('GREET');
+      const prompt = renderPrompt(goal, makeCtx());
+      expect(prompt).toContain('The instant you must speak automatically, before you have been given anything new to say, always say exactly "One moment."');
+    });
+
+    it('unrecognized mode value falls back to one_moment', () => {
+      process.env.COUNTERSIGN_FILLER_MODE = 'unknown_mode';
+      const goal = baseGoal('GREET');
+      const prompt = renderPrompt(goal, makeCtx());
+      expect(prompt).toContain('The instant you must speak automatically, before you have been given anything new to say, always say exactly "One moment."');
+    });
+
+    it('the mode is re-read per render call (dynamic, not cached at module load)', () => {
+      // First render with direct mode
+      process.env.COUNTERSIGN_FILLER_MODE = 'direct';
+      const goal = baseGoal('GREET');
+      const prompt1 = renderPrompt(goal, makeCtx());
+      expect(prompt1).toContain('If your instructions already give you the exact line to say, say it immediately');
+
+      // Change env and render again
+      process.env.COUNTERSIGN_FILLER_MODE = 'none';
+      const prompt2 = renderPrompt(goal, makeCtx());
+      expect(prompt2).toContain('If you have been given nothing new to say, say nothing at all');
+
+      // Change back and verify again
+      process.env.COUNTERSIGN_FILLER_MODE = 'one_moment';
+      const prompt3 = renderPrompt(goal, makeCtx());
+      expect(prompt3).toContain('The instant you must speak automatically');
+    });
+  });
 });
