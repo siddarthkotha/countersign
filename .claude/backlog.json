@@ -3695,6 +3695,18 @@
       "held_because": "founder decision: bounded experiment behind an env flag (instructed readbacks and challenges at caller-turn end, no filler) measured by the harness on audio seconds per character, repeated_question and merged_reply, vs ship as is",
       "agent_id": "",
       "priority": "P1"
+    },
+    {
+      "id": "OUT-OF-SCOPE-TRIPLE-GOODBYE",
+      "title": "live (harness judge-out-of-scope 1:44/1:45 PM 2026-09-22 on 5172a5e): the automatic reply now says the goodbye 0.6 s after the caller's line (mechanism 2 works), but the instructed out_of_scope_close send and two close_catchup sends followed and the agent said 'Thank you for calling. Goodbye.' three times; hang-up 7.4 to 8.4 s after the caller's line",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "note": "Sonnet lane: remove close_catchup; defer the instructed send behind a 700 ms grace re-checked at fire time | landed 2026-09-22 ~2:10 PM, 9 tests in the file",
+      "priority": "P0"
     }
   ]
 }

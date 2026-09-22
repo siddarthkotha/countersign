@@ -1536,6 +1536,11 @@ export class CallSession {
     // just above -- not CLOSE-specific, but `end()` already funnels every pending send/wait
     // timer through here.
     this.clearTickEndSendTimer();
+    // TRIPLE-GOODBYE fix (2026-09-22): same reasoning -- `end()` already funnels every
+    // pending send/wait timer through here, and the deferred out-of-scope-goodbye send is no
+    // exception (a call that ends for some other reason before its own grace window elapses
+    // must never have that send fire afterward).
+    this.clearOutOfScopeCloseTimer();
   }
 
   /** The close sentence currently owed, if any. Review fix (2026-09-15, Critical -- FAIL on
@@ -1652,7 +1657,39 @@ export class CallSession {
    *       simply stops applying rather than needing a separate check) -- also the
    *       "never while a terminal STAGE/FREEZE/ESCALATE verdict exists" guard: any of
    *       those verdicts fails the `verdict !== 'NO_ACTION'`/`state !== 'OUT_OF_SCOPE'`
-   *       check outright. */
+   *       check outright.
+   *
+   *  TRIPLE-GOODBYE fix (2026-09-22, PROVEN live regression on deploy 5172a5e -- see
+   *  scripts/rehearse/reports/2026-09-22T13-45-12-judge-out-of-scope.diagnostics.json /
+   *  2026-09-22T13-44-35-judge-out-of-scope.diagnostics.json): this used to call
+   *  `sendNoActionCloseGoodbye` (arm + send) unconditionally and immediately, the same
+   *  shape the idle-timeout path still uses. Live, the caller's turn ended at 26273ms; our
+   *  own `out_of_scope_close` `reply.create` went out at that same instant; but
+   *  AssemblyAI's own AUTOMATIC reply for that same turn had ALSO started (now correctly
+   *  obeying `pushOutOfScopeGoodbyeInstruction`'s standing instruction) and spoke the
+   *  goodbye itself at 26922ms. Because our own send was already queued, it played too --
+   *  and the (now-removed) CLOSE-CATCHUP-ON-OVERRIDE branch in `scheduleCloseIfNeeded` fired
+   *  AGAIN on top of that, for a total of three "Thank you for calling. Goodbye." lines and
+   *  an 8.4s hang-up. The root cause: nothing here ever gave the automatic reply a chance to
+   *  go first, so "queue behind it" (the intended design) always lost the race in practice --
+   *  reply.create is near-instant to send; AssemblyAI's automatic reply takes real
+   *  inference time to start composing.
+   *
+   *  Fix: arm the override and the close backstop here, exactly as before, but do NOT send
+   *  the instructed `reply.create` synchronously. Instead schedule a deferred send
+   *  (`armOutOfScopeCloseTimer`, `OUT_OF_SCOPE_CLOSE_GRACE_MS` = 700ms) that re-reads state
+   *  at FIRE time -- the same "never trust what was true at arm time" rule every other
+   *  deferred send in this class already follows (`armTickEndSendTimer`,
+   *  `armHoldFollowupTimer`). If an automatic reply has started speaking by then (the normal
+   *  case now that mechanism 2 is in place), nothing is sent: that reply's own
+   *  `reply.done`/transcript is what `scheduleCloseIfNeeded`/`maybeArmCloseOnTranscript`
+   *  already pick up -- either confirming the goodbye it just spoke, or (if it said
+   *  something else) falling through to the existing `armCloseTranscriptWait` ->
+   *  `armCloseRetryTimer` chain, unchanged. Only a caller turn that produces NO automatic
+   *  reply at all within the grace window still gets our own instructed send. */
+  private static readonly OUT_OF_SCOPE_CLOSE_GRACE_MS = 700;
+  private outOfScopeCloseTimer: ReturnType<typeof setTimeout> | null = null;
+
   private maybeBeginOutOfScopeGoodbye(callerTurnTick: boolean): void {
     if (!callerTurnTick) return;
     if (this.ended || this.goodbyeConfirmed || this.outOfScopeGoodbyeSent) return;
@@ -1662,7 +1699,47 @@ export class CallSession {
     if (this.last.verdict !== 'NO_ACTION' || this.last.state !== 'OUT_OF_SCOPE') return;
     if (this.last.goal.code !== 'EXPLAIN_OUT_OF_SCOPE') return;
     this.outOfScopeGoodbyeSent = true;
-    this.sendNoActionCloseGoodbye('out_of_scope_close');
+    this.closeSentenceOverride = 'Thank you for calling. Goodbye.';
+    this.armClose();
+    this.armOutOfScopeCloseTimer();
+  }
+
+  /** TRIPLE-GOODBYE fix (2026-09-22): the deferred send `maybeBeginOutOfScopeGoodbye` arms
+   *  instead of sending synchronously -- see that method's own doc comment for the full
+   *  incident and reasoning. Every check here is re-read fresh at fire time, never trusted
+   *  from arm time: `!this.ended` and `!this.goodbyeConfirmed` (the call may have finished,
+   *  or the goodbye may already be confirmed heard, by the time this fires -- most commonly
+   *  because the automatic reply said it first and its own `reply.done` landed inside the
+   *  grace window); `this.closeSentenceOverride !== null` (the override is still the thing
+   *  owed -- defensive, mirrors `currentCloseSentence()`'s own priority rule); `!this.speaking`
+   *  and `!this.replyCreateAwaitingStart` (something is already talking or about to -- an
+   *  automatic reply has started for this same turn, and ITS OWN settling is what
+   *  `scheduleCloseIfNeeded`/`maybeArmCloseOnTranscript` pick up from here, exactly the same
+   *  "the in-flight reply's own reply.done/transcript will pick this up" rule
+   *  `sendNoActionCloseGoodbye` already documents); `!this.callerSpeaking` (never talk over
+   *  the caller -- the same CLOSE-CATCHUP-OVER-CALLER-BARGE-IN guard `armCloseRetryTimer`
+   *  already applies). Only when ALL of those hold -- nothing spoke, nothing is about to,
+   *  the caller isn't mid-utterance, and the goodbye still is not confirmed -- does this send
+   *  the same one-shot "say exactly this" wrapper every other close send in this file uses,
+   *  tagged `out_of_scope_close` (the reason string this lane has always used; unchanged). */
+  private armOutOfScopeCloseTimer(): void {
+    this.clearOutOfScopeCloseTimer();
+    this.outOfScopeCloseTimer = setTimeout(() => {
+      this.outOfScopeCloseTimer = null;
+      if (this.ended || this.goodbyeConfirmed) return;
+      if (this.closeSentenceOverride === null) return;
+      if (this.speaking || this.replyCreateAwaitingStart) return;
+      if (this.callerSpeaking) return;
+      const wrapper = `Say exactly this and nothing else: "${this.closeSentenceOverride}"`;
+      this.sendReplyCreate('CLOSE', 'out_of_scope_close', wrapper);
+    }, CallSession.OUT_OF_SCOPE_CLOSE_GRACE_MS);
+  }
+
+  private clearOutOfScopeCloseTimer(): void {
+    if (this.outOfScopeCloseTimer) {
+      clearTimeout(this.outOfScopeCloseTimer);
+      this.outOfScopeCloseTimer = null;
+    }
   }
 
   /** OUT-OF-SCOPE-GOODBYE lane, mechanism 2 (2026-09-22, PROVEN live: founder call a845c867,
@@ -2174,38 +2251,25 @@ export class CallSession {
       return;
     }
 
-    // CLOSE-CATCHUP-ON-OVERRIDE fix (2026-09-22, PROVEN live: founder call a845c867, 1:28 PM
-    // CDT -- see `pushOutOfScopeGoodbyeInstruction`'s own doc comment for the sibling mechanism-
-    // 2 fix and the full incident): a `closeSentenceOverride` goodbye (out_of_scope_close or
-    // idle_no_action_close -- never an engine-rendered CLOSE goal, which `currentCloseSentence`
-    // already prioritizes over the override, so `this.last?.goal.code !== 'CLOSE'` here is
-    // never false while `this.closeSentenceOverride` is non-null) has no goal-code change of
-    // its own for `maybeSendReplyCreateAfterReplyDone`'s MERGED-FREEZE-GOODBYE catch-up
-    // (`mustForceSpeak`) to ever notice -- EXPLAIN_OUT_OF_SCOPE stays EXPLAIN_OUT_OF_SCOPE the
-    // whole time the override is in flight, so `label === current` there and that catch-up
-    // silently no-ops. This reply's own transcript, checked just above, already proves the
-    // close line was NOT heard -- rather than waiting `CLOSE_TRANSCRIPT_WAIT_MS` (1.5s) for a
-    // late chunk that will never arrive (the transcript is already final and non-matching) and
-    // then `CLOSE_RETRY_MIN_GAP_MS` (400ms) more on top, only to have that retry itself dropped
-    // by `armCloseRetryTimer`'s own `this.speaking` guard the instant AssemblyAI chains ANOTHER
-    // automatic reply onto the same turn (exactly what happened live: a THIRD reply,
-    // `resp_1b025d...`, started 1ms after this one's own `reply.done` and was still speaking
-    // when the caller hung up at 33s, so the spaced retry never got a turn at all), resend
-    // immediately here instead -- one send, no wait, the same "say exactly this" wrapper every
-    // other close send uses. Never while the caller is talking (`callerSpeaking`): a resend that
-    // talks over the caller is the identical failure `armCloseRetryTimer`'s own
-    // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN guard exists to avoid, and the unmatched `status ===
-    // 'interrupted'` case below falls through to the existing `armCloseTranscriptWait` ->
-    // `armCloseRetryTimer` chain unchanged (a reply cut short by the caller barging in is not
-    // this method's problem to race back into). The existing chain remains the backstop for
-    // every case this fast path does not cover (an engine-rendered CLOSE goal, an interrupted
-    // reply, a caller mid-utterance) -- nothing below this branch is removed.
-    if (this.closeSentenceOverride !== null && this.last?.goal.code !== 'CLOSE' && status === 'completed' && !this.callerSpeaking) {
-      this.closeLastReplyWasEmpty = transcript.trim().length === 0;
-      const wrapper = `Say exactly this and nothing else: "${sentence}"`;
-      this.sendReplyCreate('CLOSE', 'close_catchup', wrapper);
-      return;
-    }
+    // CLOSE-CATCHUP-ON-OVERRIDE fix (2026-09-22) REMOVED (2026-09-22, PROVEN live regression on
+    // deploy 5172a5e -- see `maybeBeginOutOfScopeGoodbye`'s own doc comment for the replacement
+    // mechanism and scripts/rehearse/reports/2026-09-22T13-45-12-judge-out-of-scope.diagnostics.json
+    // / 2026-09-22T13-44-35-judge-out-of-scope.diagnostics.json for the incident this removal
+    // fixes): with `pushOutOfScopeGoodbyeInstruction` now making the automatic reply itself say
+    // the override goodbye correctly on the FIRST turn (mechanism 2, still in place, unchanged),
+    // this fast-resend branch became a race rather than a backstop -- our own instructed
+    // `out_of_scope_close` `reply.create` (sent unconditionally, the instant the goodbye was
+    // owed) queued BEHIND the automatic reply for the same turn; the automatic reply spoke the
+    // goodbye correctly, then our queued send went out anyway and this branch (finding THAT
+    // reply's own transcript "matched", since it runs per-reply) additionally misfired a
+    // `close_catchup` resend for a goodbye that had, in fact, already been heard -- three
+    // goodbyes total on the live call. `maybeBeginOutOfScopeGoodbye` now defers its own send
+    // long enough for the automatic reply to speak first and re-checks `this.speaking` at fire
+    // time, so no reply.create is ever queued behind an ambient one that is about to say the
+    // same words -- there is nothing left for a same-tick fast resend to race. The existing
+    // transcript-wait + spaced-retry chain below (`armCloseTranscriptWait` -> `armCloseRetryTimer`)
+    // remains the sole backstop for an automatic reply that ignores the goodbye (or the
+    // instruction) entirely.
 
     // DEGRADED-TRANSCRIPTS mode: snapshotted here, synchronously, at THIS reply's own
     // reply.done -- see `armCloseTranscriptWait`'s own doc comment on `degradedAtReplyDone`
