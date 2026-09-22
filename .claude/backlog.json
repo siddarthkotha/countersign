@@ -3691,8 +3691,8 @@
         "packages/server/src/call/session.ts",
         "packages/server/src/call/prompt.ts"
       ],
-      "status": "running",
-      "held_because": "",
+      "status": "held",
+      "held_because": "founder chose the flagged experiment (option 2, 2:22 PM); switch landed a9c4897; local A/B batches not yet run (session closed 3:21 PM)",
       "agent_id": "",
       "priority": "P1",
       "note": "founder chose option 2 (2026-09-22 2:22 PM): env-flagged experiment tonight, harness-measured, numbers to him tomorrow morning; CORRECTION 2:30 PM: same-sentence auto vs instructed differs little (0.073 vs 0.064 s/char on the deadline line); the bulk is the One moment. filler (1.6 to 3.3 s each, before 4 of 7 lines in case 1) and digit readbacks; target the filler first; docs errand checking for a manual-reply mode and a TTS rate setting"
@@ -3715,10 +3715,10 @@
       "files": [
         "packages/server/src/aai/config.ts"
       ],
-      "status": "running",
-      "held_because": "",
-      "agent_id": "a1530c99a1940c389",
-      "note": "Haiku lane: COUNTERSIGN_MIN_SILENCE_MS / MAX_SILENCE_MS / INTERRUPTION_DELAY_MS env in explicit mode; founder-voice A/B next (harness cannot pause like a person)",
+      "status": "held",
+      "held_because": "fix live (fb6106c, min_silence 1500) and harness-proven; founder-voice confirmation on case 6 pending",
+      "agent_id": "",
+      "note": "Haiku lane: COUNTERSIGN_MIN_SILENCE_MS / MAX_SILENCE_MS / INTERRUPTION_DELAY_MS env in explicit mode; founder-voice A/B next (harness cannot pause like a person) | fb6106c live 3:10 PM: turn_detection_sent {vad 0.5, interrupt true, min_silence 1500}; harness pause-after-name: agent waited through the pause, full request as one turn, STAGE, grade clean; founder 3-call test pending",
       "priority": "P0"
     }
   ]
