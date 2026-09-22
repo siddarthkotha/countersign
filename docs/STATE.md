@@ -1,91 +1,78 @@
 # Countersign, session snapshot (overwritten at every close; never appended)
 
-Last close: Saturday 2026-09-19, 11:10 PM CDT (Day 11, which ran 12:08 PM to 11:10 PM with a
-session-limit gap from about 3:40 PM to 8:07 PM). Autopilot ON throughout. No lanes in flight.
+Last close: Monday 2026-09-21, 10:35 PM CDT (Day 12, which ran 8:39 AM to 10:35 PM with a
+founder gap from about 9:45 AM to 7:36 PM). Autopilot ON throughout. No lanes in flight.
+No sandboxes on disk (worktree-cap + worktree-sweep hooks live since b62dc4b).
 
 ## The one-paragraph version
 
-Day 11 was the day the harness stopped lying about goodbyes and the demo finally read clean.
-The deploy-53 batch found two grader blind spots (fixed) and one real regression: AssemblyAI
-folded its own automatic reply into our goodbye. Chasing that exposed, one layer at a time,
-a stale line before every goodbye, a goodbye talked over a barging caller, a goodbye cut by a
-barging caller, and folded goodbyes that reported "complete" with under a second of audio so
-the server hung up on silence. Seven pushes (54 to 60) closed all of it. Deploy 60 is the first
-batch to read 10 of 10 clean on every experience count, and every rehearsal now records the
-agent's audio. The founder's feedback at 8:07 PM was about cost, not correctness: five live
-batches and seven lanes in one day hit the session limit before he saw the clean result. The
-cadence rule is now written down (memory: feedback-batch-cadence-and-session-budget).
+Day 12 was the founder's first clean voice session, and it took three defects to get there.
+Morning: 110 leftover lane sandboxes (14 GB) were removed with his yes, disk went from 5.7
+to 34 GB free, and two hooks now make that mechanical. Evening: he passed cases 11 and 7
+by ear on deploy 60; case 5 failed three ways in sequence, each PROVEN from his own record.
+(1) A one-second pause after his name ended the turn, AssemblyAI's automatic reply asked
+"What do you need today?", and the server asked it again at once because the paraphrase
+goals never matched (d813717, Sonnet lane, 11 tests; grader gained a repeated-identical-
+question signal, 5 tests; two new harness cases). (2) His speech through the agent's
+question vanished for six seconds on the browser side: the harness transcribed the same
+overlap in full; AssemblyAI's browser docs say noiseSuppression OFF and ours was on
+(5c5d7c1; mic_level trace added; his next two calls captured every word). (3) After a hard
+reload he started with no role card, the server defaulted to the attacker context, and an
+honest script correctly escalated (8316ca3: button gated, card named on screen, kept across
+reload). He also ruled: freeze new behaviour; his voice is the gate; Thursday Sep 24 is the
+submission target; the employer service-desk arena is a separate post-Sep-30 track and never
+enters the repo.
 
 ## PROVEN at this close
-- Live: https://countersign-bf8q.onrender.com is UP, /health 200 at 11:08 PM (21.5 s cold
-  start, idle service waking), /version e23ae04 (deploy 60).
-- Gate on main at e23ae04: typecheck clean, 2348/2348 tests on 120 files.
-- Deploy 60 batch (3:45 PM, roll-up 2026-09-19T15-45-43-batch-rollup.md): 10/10 PASS,
-  repeated_question 0, merged_reply 0, talk_over 0, holding_spam 0 on every run; goodbyes
-  play in full starting right after the verdict (5.7 to 7.5 s to the end of the line on eight
-  runs, 9.2 and 15.9 s on two that needed one retry); ten .agent.wav files recorded.
-- The day in counts (same grader, per deploy, repeated/merged/talk_over/holding over N):
-  53: 0/3/1/0 over 14 · 55: 1/0/3/0 over 10 · 57: 0/0/1/0 over 10 · 58: 0/2/4/1 over 10 ·
-  60: 0/0/0/0 over 10.
-- Cost of the day: about 65 minutes of live calls (ESTIMATE, roll-up minutes summed, about
-  $4.90 at $4.50 per hour), seven lanes, pushes 54 to 60.
+- Live: https://countersign-bf8q.onrender.com UP, /health 200, /version 8316ca3 (10:30 PM).
+- Gate on main at 8316ca3 (run 10:24 PM on this tree): typecheck clean, 2387/2387 tests on
+  121 files, web build clean.
+- Founder calls today (records copied to scripts/rehearse/reports/2026-09-21-founder-*):
+  case 11 STAGE (5af4583c), case 7 ESCALATE (b674e6e8), case 5 failed on deploy 60
+  (d27536a0) and on d813717 (b8114756), case 5 STAGE on 5c5d7c1 (163fef3a), plus aec29b64
+  ESCALATE from the no-card trap. Mic rms 0.05 to 0.17 every second he spoke on 5c5d7c1.
+- Harness on today's deploys: corrected-critical-field, barge-in-interrupt,
+  hangup-after-request, barge-in-pause-after-name, barge-in-talk-through-question all PASS
+  with repeated_question 0 (one run each; the 8:31 PM FAIL was a mid-call redeploy).
+- Disk: 34 GB free at 9:14 AM after removing 110 sandboxes; countersign folder 574 MB.
 
-## What deploy 60 runs (the settled configuration)
-- turn_detection OMITTED on connect by default (COUNTERSIGN_TURN_DETECTION unset = omit;
-  "explicit" restores the deploy-52 defaults). Omitted keeps AssemblyAI's adaptive turn-taking,
-  which took comma-pause cutoffs from 4 of 10 (deploy 58) to 0 of 10.
-- The goodbye (CLOSE/ANNOUNCE_*) is sent synchronously on the caller-turn tick
-  (FORCE_SPEAK_SETTLE_MS 0); fresh questions keep the 150 ms settle.
-- The CLOSE session.update sets interrupt_response false (no barge-in during the goodbye;
-  mid-session mutability quoted from the docs, live effect measured clean once).
-- A goodbye counts as heard only when its relayed audio bytes reach 50 percent of about
-  4,000 bytes per character; otherwise it is retried, synchronously at the caller's turn end.
-- An owed send is never made while the caller is speaking (callerSpeaking, cleared by
-  speech.stopped and by transcript.user); the 45 s cap remains the backstop.
-- Evaluate diags are written on any evidence-card change; the grader's talk_over check
-  exempts a window whose final transcript already landed.
+## Rulings today (founder)
+- Freeze new behaviour; only demo-path defects get fixed; the founder's voice is the gate.
+- Submission target Thursday 2026-09-24 (deadline Wed Sep 30 10:00 AM Central).
+- Whether lablab lets a submission be edited after sending: UNKNOWN (pages silent); the
+  team page form behind his login would show it.
+- Employer arena (service-desk identity verification): separate track after Sep 30; run the
+  Origination Protocol then; never in the repo (memory: project-employer-arena-stays-out-of-repo).
+- Cleanup is mechanical now; never leave sandboxes behind.
 
 ## Open, in the order to take them
-1. FOUNDER VOICE SESSION on deploy 60: cases 11, 5, 7 (the three he quit on Day 10), about
-   twenty minutes, morning. Before it: one 3-run check on those cases (about 4 min), not a
-   full batch. Fetch his records before any deploy (memory: founder-calls-need-zero-step-capture).
-2. Read the first .agent.wav timelines from the deploy-60 reports (Audio section) and settle
-   the one open measurement: our instructed goodbyes carried about 3 s of audio on deploy 58
-   while automatic replies speaking the same sentence carried 7 s; deploy 60 goodbyes read
-   5.7 to 7.5 s, so this may already be closed. Say so with the numbers.
-3. DEGRADED-CLOSE-FLOOR-INCONSISTENT (flat 2,000 ms audio floor vs the new scaled floor).
-4. Residuals to keep counting, not fix blind: STALE-AMBIENT-LINE-AFTER-VERDICT and
-   AMBIENT-DOUBLE-TURN-END-REPEAT (AssemblyAI-side; 0 occurrences on deploy 60).
-5. Parked founder rulings (nine): LAW-F-FLOOR-JUSTIFICATION-WRONG is now moot for deploy 60
-   (no floor needed while omitted); SECOND-SEED-NAME-IS-CONTAMINATION, CHALLENGE-WINDOW-
-   LATE-UTTERANCE (ruling 10), plus the Day-9 set.
-6. Then G5 (50+ rehearsals with tail latency: docs/LATENCY.md now reads p50 629 ms, p95
-   1840 ms over 1532 turns, ESTIMATE) and G6 (video, due Sunday 2026-09-27). Submission
-   Wednesday 2026-09-30.
+1. TUESDAY: founder plays cases 1, 2, 3 (honest Dana, CEO impostor, off-script judge) and
+   case 5 once more on 8316ca3, laptop speakers and built-in mic, own words. Before it: one
+   3-run check (cases 1, 2, 3) so the line and the capture path are proven that day. Fetch
+   his records via /api/admin/sessions (token in .env), never ask for codes.
+2. Fix only what his session finds. Then code freeze Tuesday night if clean.
+3. Wednesday: README final pass, docs/PREFLIP_CHECKLIST.md dry run (add: whole-word grep for
+   the employer name and "CISO" across tracked files and history, excluding docs/design),
+   record the video (>= 2:20 live agent).
+4. Thursday: judge-sim on the full package, submit; Friday to Sep 30 is buffer.
+5. Residuals held, count before fixing: TALK-OVER-AFTER-TRAP-CORRECTION (grader talk_over=1 on
+   both 10 PM calls, verdicts right), BARGE-IN-FLUSH-LAG (376 ms), MIC-TRACK-SETTINGS-NOT-
+   RECORDED, CASE11-GOODBYE-RETRY-FOUNDER (15 s goodbye, one extra hold line),
+   TURN-ENDS-ON-NAME-PAUSE (AssemblyAI min_silence default 1000 ms).
 
-## Cadence rule from the founder (2026-09-19 8:07 PM)
-Full 10-run batches only before a founder session or after a BUNDLE of fixes. Mid-day: 3-run
-checks on the affected cases. At most two lanes at once, each with a stated budget. One status
-per batch end, never per run. Close before the budget runs out.
+## Cadence rules in force
+Full 10-run batches only before a founder session or after a bundle of fixes; 3-run checks
+mid-day; at most two lanes at once; one status per batch; never push while a live check is
+in flight (the 8:31 PM lesson); remove a lane's sandbox the minute its files land.
 
 ## How to test without being the tester
 `npm run rehearse:batch -- --url https://countersign-bf8q.onrender.com --runs 3 --scenarios
-<case,case,case> --max-minutes 10` for a check; the same with `--runs 10` and the eight-case
-list (miller-patient,identity-switch,corrected-critical-field,barge-in-interrupt,
-hangup-after-request,prompt-injection-midcall,dana-patient,judge-out-of-scope) for a batch.
-`npm run grade:record -- <bundle.diagnostics.json>` for the experience counts;
-`npm run audio:timeline -- <run>.agent.wav <run>.diagnostics.json` for what the caller heard.
-Keep the laptop awake (caffeinate -i wraps the batch; the lid must stay open).
-
-## Housekeeping
-A git stash entry tagged GOODBYE-CUT-VERIFY-RED-CHECK is inert in the stash stack (a lane's
-RED check; the rails would not let it drop). Two lane checkpoint commits sit on main (dd88270,
-the config lane's "wip", and the sequence is otherwise clean). About 110 lane worktrees exist
-under .claude/worktrees; none is in use.
+<case,case,case> --max-minutes 10`; `npm run grade:record -- <bundle.diagnostics.json>`;
+founder records: GET /api/admin/sessions (Bearer COUNTERSIGN_ADMIN_TOKEN) then
+GET /api/session/<id>/diagnostics. Keep the lid open (caffeinate -i wraps batches).
 
 ## Next session
-"Day 12 resume: read docs/STATE.md, then the tail of docs/AUTOPILOT_LOG.md from the
-2026-09-19 3:38 PM entry. Live is e23ae04 (deploy 60), the first 10/10 clean batch. First:
-confirm /health, run a 3-run check on cases 11, 5, 7, read their Audio sections, then ask
-the founder for his twenty-minute voice session on those three cases. No full batch before
-that. One status per batch, two lanes at most."
+"Day 13 resume: read docs/STATE.md, then the tail of docs/AUTOPILOT_LOG.md from the
+2026-09-21 8:35 PM entry. Live is 8316ca3. First: confirm /health and /version, run a 3-run
+check on dana-patient, miller-patient, judge-out-of-scope, then hand the founder the script
+for cases 1, 2, 3 and 5. No full batch before that. Freeze holds: fix only what he finds."
