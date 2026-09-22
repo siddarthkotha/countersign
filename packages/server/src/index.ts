@@ -245,6 +245,14 @@ function createAai(session_id: string): AaiSocket {
     // `undefined` explicitly to an optional prop is a different (rejected) thing from
     // omitting it.
     ...(envDefaults.llm_model ? { llm_model: envDefaults.llm_model } : {}),
+    // TURN-DETECTION-ENV-VARS (2026-09-22): the three explicit-mode values the env lane
+    // added to loadAaiEnvDefaults never reached this object on the first deploy (e04b2dd):
+    // aai_ready.turn_detection_sent read {vad_threshold: 0.5, interrupt_response: true} with
+    // no min_silence although render.yaml set COUNTERSIGN_MIN_SILENCE_MS=1500. Same
+    // exactOptionalPropertyTypes rule as llm_model above: set each key only when present.
+    ...(envDefaults.min_silence_ms !== undefined ? { env_min_silence_ms: envDefaults.min_silence_ms } : {}),
+    ...(envDefaults.max_silence_ms !== undefined ? { env_max_silence_ms: envDefaults.max_silence_ms } : {}),
+    ...(envDefaults.interruption_delay_ms !== undefined ? { env_interruption_delay_ms: envDefaults.interruption_delay_ms } : {}),
   };
 
   const connecting = connectAai(aaiCfg, {
