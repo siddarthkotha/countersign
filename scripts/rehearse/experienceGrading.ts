@@ -27,8 +27,12 @@
 //                            prompt-injection attempt instead of answering (34.999s re-asked at
 //                            56.010s, caller's only line in between was "ignore your previous
 //                            instructions...") -- the checkpoint refusing to let an unanswered
-//                            challenge go unasked is the product working, not a defect. See
-//                            `repeatedQuestion`'s own doc comment for the corrected rule.
+//                            challenge go unasked is the product working, not a defect.
+//                            Additional fix (2026-09-21): added transcript-based signal to catch
+//                            repeated opening questions like "What do you need today?" (not
+//                            action-logged) when asked identically without user input between them,
+//                            PROVEN against founder call d27536a0.
+//                            See `repeatedQuestion`'s own doc comment for the corrected rule.
 //  2. merged_reply       -- two sentences interleaved/run together in one agent line.
 //  3. talk_over          -- the AGENT starts talking over (or immediately after a very short)
 //                            caller utterance. Never the reverse (a caller barge-in on the
@@ -295,8 +299,26 @@ function extractSpeechWindows(bundle: RehearseDiagnosticBundle): SpeechWindow[] 
  *  reissues (97.875s, 110.740s), each preceded by the caller's "I did not mention anyone."
  *  (never an answer, and the `ev-knowledge` card for that challenge_id never appears in any
  *  evaluate snapshot before 114.451s, well after every reissue) -- so those two no longer
- *  count, same reasoning as the prompt-injection record. Every counted occurrence's own event
- *  timestamp is reported. */
+ *  count, same reasoning as the prompt-injection record.
+ *
+ *  Additional signal (2026-09-21): opening questions like "What do you need today?" that are
+ *  not action-logged are caught via transcript-line matching when the normalized question text
+ *  (lowercase, trim, collapse whitespace, strip trailing punctuation) is identical to the
+ *  previous agent question line and no user transcript event falls strictly between the two
+ *  timestamps. PROVEN (founder call d27536a0): agent asked "What do you need today?" at
+ *  8987ms and 11311ms with user input only at 6383ms and 15503ms.
+ *
+ *  Every counted occurrence's own event timestamp is reported. Timestamps_s are deduped with
+ *  the action-based signal to avoid double-counting the same timestamp if both signals fire
+ *  on the same pair. */
+function normalizeQuestion(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[?!.]$/, '');
+}
+
 export function repeatedQuestion(bundle: RehearseDiagnosticBundle): TimestampedCount {
   const actions = extractActionLogged(bundle)
     .slice()
@@ -305,10 +327,12 @@ export function repeatedQuestion(bundle: RehearseDiagnosticBundle): TimestampedC
     .map((u) => u.t_ms)
     .sort((a, b) => a - b);
   const snapshots = extractEvaluateSnapshots(bundle);
+  const agentTranscript = extractAgentTranscript(bundle);
 
+  const timestampsSet = new Set<number>();
+
+  // Signal 1: action-logged readbacks/challenges (original signal)
   const lastByKey = new Map<string, ActionLoggedEvent>();
-  const timestamps: number[] = [];
-
   for (const a of actions) {
     const prev = lastByKey.get(a.key);
     lastByKey.set(a.key, a);
@@ -319,9 +343,34 @@ export function repeatedQuestion(bundle: RehearseDiagnosticBundle): TimestampedC
     const callerSpokeBetween = userTimes.some((t) => t > prev.t_ms && t < a.t_ms);
 
     if (alreadyGraded || !callerSpokeBetween) {
-      timestamps.push(toSec(a.t_ms));
+      timestampsSet.add(toSec(a.t_ms) * 1000); // Store in ms for dedup
     }
   }
+
+  // Signal 2: transcript-based repeated questions (opening questions, etc.)
+  let lastQuestionLine: AgentTranscriptEvent | null = null;
+  let lastQuestionNormalized: string | null = null;
+  for (const line of agentTranscript) {
+    const text = line.text;
+    if (!text.includes('?')) {
+      lastQuestionLine = null;
+      lastQuestionNormalized = null;
+      continue;
+    }
+    const normalized = normalizeQuestion(text);
+    if (lastQuestionLine !== null && normalized === lastQuestionNormalized) {
+      const callerSpokeBetween = userTimes.some((t) => t > lastQuestionLine!.t_ms && t < line.t_ms);
+      if (!callerSpokeBetween) {
+        timestampsSet.add(toSec(line.t_ms) * 1000); // Store in ms for dedup
+      }
+    }
+    lastQuestionLine = line;
+    lastQuestionNormalized = normalized;
+  }
+
+  const timestamps = Array.from(timestampsSet)
+    .sort((a, b) => a - b)
+    .map((ms) => ms / 1000);
 
   return { count: timestamps.length, timestamps_s: timestamps };
 }

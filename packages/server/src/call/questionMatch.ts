@@ -482,19 +482,106 @@ export function loadBearingValueFor(goal: PhrasingGoal): { field: ClaimField; va
   return null;
 }
 
+/** Paraphrase-goal catch-up fix (2026-09-21, PROVEN live defect -- founder's own call, record
+ *  at scratchpad/founder-2026-09-21/194254-d27536a0.diagnostics.json): the caller said only
+ *  "This is Dana Whitfield, Corporate Treasury." and paused (transcript.user, t_ms 6383); the
+ *  goal moved to ELICIT_REQUEST; an AssemblyAI AMBIENT reply (no reply.create of ours) asked
+ *  "What do you need today?" (transcript.agent, t_ms 8987; reply.done completed, t_ms 9251);
+ *  at t_ms 9252 the catch-up path sent its own instructed reply.create (reason
+ *  reply_done_goal_diverged), and the agent asked "What do you need today?" a SECOND time
+ *  (transcript.agent, t_ms 11311) with no caller speech in between -- three identical
+ *  questions inside 12 seconds total (a third ask followed the caller's next, unrelated
+ *  answer), and the founder hung up.
+ *
+ *  Root cause: for ELICIT_REQUEST, ELICIT_IDENTITY and PROBE_CONSISTENCY, `verbatimQuestionSentence`
+ *  returns null (each goal's `hint` is a paraphrase instruction to the model, e.g. "Ask what
+ *  the caller needs." -- see that function's own doc comment) and `loadBearingValueFor` returns
+ *  null too (neither goal has a `readback` or `challenge`) -- so BOTH of `replyCoversCurrentRendering`'s
+ *  pre-existing branches always fall through to false for these three goals, and an ambient
+ *  reply that asked EXACTLY the right question in its own words was always followed by our own
+ *  duplicate ask.
+ *
+ *  Fix: a third, CONTENT-shaped check for exactly these three goals -- true when the
+ *  accumulated reply transcript both (a) asks a question at all, by `transcriptAsksQuestion`'s
+ *  own bare-"?"/imperative-opener test (reused directly, via `transcriptAsksParaphraseGoalQuestion`
+ *  below), and (b) names one of a small per-goal lexicon of question shapes
+ *  (`PARAPHRASE_GOAL_LEXICON`, see its own doc comment) once leniently normalized
+ *  (`normalizeForCloseMatch`, the same tolerance every other branch in this file already gives
+ *  TTS/STT punctuation/casing drift). A reply that only speaks a holding line ("One moment.")
+ *  or asks an unrelated question (test (f) below, "Is this line secure?", or `design-e-turn-
+ *  order.test.ts`'s own F3 shape) still fails (a) or (b) and correctly returns false, so our
+ *  own instructed ask still goes out. This is a PACING fix only, same as every other branch in
+ *  this file (LAW 3 unaffected): it only ever decides whether the server sends its OWN copy of
+ *  an already-computed question the caller was already asked, in substance, by AssemblyAI's own
+ *  ambient reply -- never what the question is, and never a verdict. */
+export const PARAPHRASE_GOAL_LEXICON: Partial<Record<GoalCode, readonly string[]>> = {
+  ELICIT_REQUEST: [
+    'what do you need',
+    'how can i help',
+    'how may i help',
+    'what can i help',
+    'what can i do for you',
+    'what brings you',
+    'what would you like',
+    'what is your request',
+    'what is the request',
+    'what are you calling about',
+  ],
+  ELICIT_IDENTITY: [
+    'who is calling',
+    'who am i speaking',
+    'who is this',
+    'may i have your name',
+    'can i get your name',
+    'can i have your name',
+    'your name please',
+    'what is your name',
+  ],
+  PROBE_CONSISTENCY: [
+    'which is correct',
+    'which one is correct',
+    'which is right',
+    'why did it change',
+    'why did that change',
+    'which should i use',
+  ],
+};
+
+/** The two-part test `PARAPHRASE_GOAL_LEXICON`'s own doc comment above describes: no lexicon
+ *  entry for `goalCode` (every goal other than the three paraphrase goals) or an empty
+ *  transcript both return false immediately, unchanged from before this fix -- `goal.code` was
+ *  never previously read by this file's checks at all for those goals. `transcriptAsksQuestion`
+ *  is called with `verbatimSentence: null` deliberately -- its own sentence-match branch is a
+ *  no-op with no sentence supplied, leaving exactly the bare-"?"/`QUESTION_IMPERATIVE_STARTS`
+ *  test this fix needs, reused rather than duplicated. */
+function transcriptAsksParaphraseGoalQuestion(accumulatedTranscript: string, goalCode: GoalCode): boolean {
+  const lexicon = PARAPHRASE_GOAL_LEXICON[goalCode];
+  if (!lexicon || lexicon.length === 0) return false;
+  if (accumulatedTranscript.trim().length === 0) return false;
+  if (!transcriptAsksQuestion(accumulatedTranscript, null)) return false;
+  const normalized = normalizeForCloseMatch(accumulatedTranscript);
+  return lexicon.some((phrase) => normalized.includes(phrase));
+}
+
 /** THE combined check `call/session.ts`'s catch-up path (`maybeSendReplyCreateAfterReplyDone`)
  *  actually calls: true when the completed reply either spoke the rendering's own exact
  *  composed sentence (`transcriptAsksExactSentence`) or asked SOME question that names the
  *  rendering's own load-bearing content (`transcriptContainsLoadBearingValue`, only reached
  *  when `loadBearingValueFor` finds one, and applying the extra same-sentence + cue test for a
- *  'label' kind). See each function's own doc comment for the PROVEN live incidents this
- *  closes, and `LoadBearingKind`'s own doc comment for the PROVEN over-suppression the 'label'
- *  branch's own extra requirement fixes. */
+ *  'label' kind) or -- for the three paraphrase goals with neither a verbatim sentence nor a
+ *  load-bearing value (`transcriptAsksParaphraseGoalQuestion`, new) -- asks a question shaped
+ *  like the goal's own lexicon. See each function's own doc comment for the PROVEN live
+ *  incidents this closes, and `LoadBearingKind`'s own doc comment for the PROVEN
+ *  over-suppression the 'label' branch's own extra requirement fixes. The first two branches
+ *  are unchanged: a goal that matches either still returns true without ever reaching the
+ *  third. */
 export function replyCoversCurrentRendering(accumulatedTranscript: string, goal: PhrasingGoal): boolean {
   if (transcriptAsksExactSentence(accumulatedTranscript, verbatimQuestionSentence(goal))) return true;
   const loadBearing = loadBearingValueFor(goal);
-  if (!loadBearing) return false;
-  return transcriptContainsLoadBearingValue(accumulatedTranscript, loadBearing.field, loadBearing.value, loadBearing.kind);
+  if (loadBearing && transcriptContainsLoadBearingValue(accumulatedTranscript, loadBearing.field, loadBearing.value, loadBearing.kind)) {
+    return true;
+  }
+  return transcriptAsksParaphraseGoalQuestion(accumulatedTranscript, goal.code);
 }
 
 /** Fragment-brake fix (2026-09-15, PROVEN live from a fresh sample against deploy 39 --

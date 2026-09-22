@@ -167,6 +167,59 @@ describe('repeatedQuestion', () => {
     const b = bundle([readbackIssued(1000, 'amount_usd', 'r1'), readbackIssued(2000, 'account_last4', 'r2')]);
     expect(repeatedQuestion(b).count).toBe(0);
   });
+
+  // NEW: Transcript-based signal for repeated opening questions (2026-09-21)
+  it('PROVEN d27536a0 (2026-09-21): two identical agent questions "What do you need today?" at 8987ms and 11311ms with no user transcript between them -- 1 repeat', () => {
+    const b = bundle([
+      agentTranscript(5330, 'Meridian payments desk, verification line. How can I help you today?'),
+      userTranscript(6383, 'This is Dana Whitfield, Corporate Treasury.'),
+      agentTranscript(8987, 'What do you need today?'),
+      agentTranscript(11311, 'What do you need today?'),
+      userTranscript(15503, 'The people\'s meeting.'),
+    ]);
+    const result = repeatedQuestion(b);
+    expect(result.count).toBe(1);
+    expect(result.timestamps_s).toEqual([11.311]);
+  });
+
+  it('transcript-based: two identical agent questions WITH a user transcript event between them gives 0', () => {
+    const b = bundle([
+      agentTranscript(8987, 'What do you need today?'),
+      userTranscript(10000, 'I need to make a transfer.'),
+      agentTranscript(11311, 'What do you need today?'),
+    ]);
+    const result = repeatedQuestion(b);
+    expect(result.count).toBe(0);
+  });
+
+  it('transcript-based: two DIFFERENT questions in a row gives 0', () => {
+    const b = bundle([
+      agentTranscript(8987, 'What do you need today?'),
+      agentTranscript(11311, 'Who are you calling from?'),
+    ]);
+    const result = repeatedQuestion(b);
+    expect(result.count).toBe(0);
+  });
+
+  it('transcript-based: two identical agent lines that are statements, not questions ("One moment." twice) give 0 from this signal', () => {
+    const b = bundle([
+      agentTranscript(1000, 'One moment.'),
+      agentTranscript(2000, 'One moment.'),
+      agentTranscript(3000, 'Just to confirm, the amount is $84,500. Is that correct?'),
+    ]);
+    const result = repeatedQuestion(b);
+    expect(result.count).toBe(0);
+  });
+
+  it('existing action-based tests remain green (account_last4 readback at 57.841s and 65.765s)', () => {
+    const b = bundle([
+      readbackIssued(57841, 'account_last4', 'r1'),
+      readbackIssued(65765, 'account_last4', 'r2'),
+    ]);
+    const result = repeatedQuestion(b);
+    expect(result.count).toBe(1);
+    expect(result.timestamps_s).toEqual([65.765]);
+  });
 });
 
 describe('mergedReply', () => {

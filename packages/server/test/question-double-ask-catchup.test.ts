@@ -31,9 +31,10 @@
 // question.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { MERIDIAN, mockToolResult } from '@countersign/engine';
-import type { CallContext, ServerEvent, ChallengeSpec } from '@countersign/engine';
+import type { CallContext, ServerEvent, ChallengeSpec, PhrasingGoal } from '@countersign/engine';
 import { CallSession } from '../src/call/session.js';
 import { FakeAaiSocket } from '../src/aai/fake.js';
+import { replyCoversCurrentRendering } from '../src/call/questionMatch.js';
 import scenarioB from '../../engine/corpus/scenario-b-miller-fraud.json' with { type: 'json' };
 
 const CALL_DANA: CallContext = { session_id: 'sess-catchup-readback', origin_kind: 'registered_device', origin_geo: 'Austin, TX' };
@@ -811,5 +812,182 @@ describe('CallSession -- push-52 review fix, second pass: the label branch requi
     ).length;
     expect(replyCreatesOf(aai)).toHaveLength(0);
     expect(challengeIssuedCount).toBe(1);
+  });
+});
+
+// Paraphrase-goal catch-up fix (2026-09-21, PROVEN live defect -- the founder's own call
+// tonight, record at scratchpad/founder-2026-09-21/194254-d27536a0.diagnostics.json): the
+// caller said only "This is Dana Whitfield, Corporate Treasury." and paused (transcript.user,
+// t_ms 6383); the goal moved to ELICIT_REQUEST; an AssemblyAI AMBIENT reply (no reply.create of
+// ours) asked "What do you need today?" (transcript.agent, t_ms 8987; reply.done completed,
+// t_ms 9251); at t_ms 9252 the catch-up path sent its own instructed reply.create (reason
+// reply_done_goal_diverged), and the agent asked "What do you need today?" a SECOND time
+// (transcript.agent, t_ms 11311) with no caller speech in between -- three identical questions
+// in 12 seconds; the founder hung up.
+//
+// Root cause: for ELICIT_REQUEST, ELICIT_IDENTITY and PROBE_CONSISTENCY, `verbatimQuestionSentence`
+// returns null (each `hint` is a paraphrase instruction, not one fixed sentence) and
+// `loadBearingValueFor` returns null too (neither goal has a `readback` or `challenge`), so
+// `replyCoversCurrentRendering`'s pre-existing two branches always fell through to false for
+// these three goals, and an ambient reply that asked EXACTLY the right question in its own
+// words was always followed by our own duplicate ask.
+//
+// Fix (questionMatch.ts): `PARAPHRASE_GOAL_LEXICON`/`transcriptAsksParaphraseGoalQuestion` --
+// see each function's own doc comment.
+describe('CallSession -- paraphrase-goal catch-up fix (2026-09-21, PROVEN live defect from the founder\'s own call): the catch-up path never re-asks ELICIT_REQUEST/ELICIT_IDENTITY/PROBE_CONSISTENCY when an ambient reply already asked, in substance, the same question', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('(r) ELICIT_REQUEST: an ambient reply (no reply.create of ours) whose transcript is exactly "What do you need today?" (the PROVEN live text -- scratchpad/founder-2026-09-21/194254-d27536a0.diagnostics.json, transcript.agent t_ms 8987, reply.done t_ms 9251) gets NO catch-up reply_create_sent, and the call still advances when the caller then states the request', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_DANA, aai, sent, diagEvents);
+
+    // PROVEN live caller line, verbatim (transcript.user, t_ms 6383).
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: 'This is Dana Whitfield, Corporate Treasury.' });
+    expect(session.last?.goal.code).toBe('ELICIT_REQUEST');
+    expect(session.last!.goal.hint).toBe('What do you need today?'); // same wording the live record shows -- but verbatimQuestionSentence still returns null for ELICIT_REQUEST (see questionMatch.ts), so this test proves the NEW paraphrase branch, not the pre-existing exact-sentence one
+
+    const sendsBefore = replyCreatesOf(aai).length;
+    const reasksAtStart = diagEvents.filter(
+      (e) => e.kind === 'reply_create_sent' && (e.detail as { goal_code?: string }).goal_code === 'ELICIT_REQUEST'
+    ).length;
+
+    // PROVEN live shape: an ambient reply for this caller turn speaks the goal's own question,
+    // exactly (transcript.agent, t_ms 8987).
+    clock.now = 1004;
+    aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'x-auto-1',
+      reply_id: 'auto-1',
+      text: 'What do you need today?',
+      interrupted: false,
+    });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+    expect(replyCreatesOf(aai).length).toBe(sendsBefore); // still busy -- deferred, not lost
+
+    clock.now = 1300;
+    aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'completed' });
+
+    // THE FIX: no catch-up send, and no reply_create_sent diagnostic for ELICIT_REQUEST at all --
+    // the PROVEN live defect (t_ms 9252, reason reply_done_goal_diverged) does not recur.
+    expect(replyCreatesOf(aai).length).toBe(sendsBefore);
+    const reasksAfter = diagEvents.filter(
+      (e) => e.kind === 'reply_create_sent' && (e.detail as { goal_code?: string }).goal_code === 'ELICIT_REQUEST'
+    ).length;
+    expect(reasksAfter).toBe(reasksAtStart);
+    expect(session.last?.goal.code).toBe('ELICIT_REQUEST'); // still unresolved -- caller has not stated the request yet
+
+    // The call still advances once the caller states the request -- nothing about suppressing
+    // the catch-up send leaves this rendering stuck waiting for an ask that will never come.
+    clock.now = 1600;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c2',
+      text: 'I need to wire it to Meridian Supply — $84,500, account ending 4471 — moving today instead of Friday, approved in yesterday\'s close meeting.',
+    });
+    expect(session.last?.goal.code).not.toBe('ELICIT_REQUEST');
+  });
+
+  it('(s) ELICIT_REQUEST: an ambient reply that says only "One moment." still gets exactly one instructed ask', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const session = newSession(clock, CALL_DANA, aai, sent, diagEvents);
+
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: 'This is Dana Whitfield, Corporate Treasury.' });
+    expect(session.last?.goal.code).toBe('ELICIT_REQUEST');
+    const requestSentence = session.last!.goal.hint;
+
+    clock.now = 1004;
+    aai.emit({ type: 'reply.started', reply_id: 'auto-1' });
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'x-auto-1',
+      reply_id: 'auto-1',
+      text: 'One moment.',
+      interrupted: false,
+    });
+    vi.advanceTimersByTime(AUTOMATIC_REPLY_SETTLE_MS);
+    expect(replyCreatesOf(aai)).toHaveLength(0); // still busy -- deferred, not lost
+
+    clock.now = 1300;
+    aai.emit({ type: 'reply.done', reply_id: 'auto-1', status: 'completed' });
+
+    // A holding line is not a question at all (no "?", no imperative opener) -- our own
+    // instructed ask still goes out, exactly once. ELICIT_REQUEST has no verbatim sentence
+    // (`verbatimQuestionSentence` returns null for it -- see questionMatch.ts), so
+    // `instructedSentenceFor` phrases it as a paraphrase instruction, not a "say exactly this"
+    // one -- same convention test (f) already relies on for ELICIT_IDENTITY.
+    const replyCreates = replyCreatesOf(aai);
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toContain(requestSentence);
+
+    // No further instructed send once nothing new is owed.
+    clock.now = 1600;
+    aai.emit({ type: 'reply.started', reply_id: 'r2' });
+    aai.emit({ type: 'transcript.agent', item_id: 'x-r2', reply_id: 'r2', text: requestSentence, interrupted: false });
+    clock.now = 1900;
+    aai.emit({ type: 'reply.done', reply_id: 'r2', status: 'completed' });
+    vi.advanceTimersByTime(1000);
+    expect(replyCreatesOf(aai)).toHaveLength(1);
+  });
+
+  // (t) unit tests on `replyCoversCurrentRendering` directly, one goal object per paraphrase
+  // goal (built by hand -- these three goals never carry a `readback`/`challenge`, matching how
+  // fsm.ts actually composes them, e.g. ELICIT_IDENTITY's real hint "Ask who is calling."). Each
+  // goal gets: a matching question shape (true), an unrelated question (false), and a statement
+  // that contains a lexicon phrase but asks no question at all (false).
+  describe('(t) replyCoversCurrentRendering unit tests for the three paraphrase goals', () => {
+    const requestGoal: PhrasingGoal = { code: 'ELICIT_REQUEST', hint: 'What do you need today?', keyterms: [], turn_detection_hint: 'default' };
+    const identityGoal: PhrasingGoal = { code: 'ELICIT_IDENTITY', hint: 'Ask who is calling.', keyterms: [], turn_detection_hint: 'default' };
+    const probeGoal: PhrasingGoal = {
+      code: 'PROBE_CONSISTENCY',
+      hint: 'Ask which is correct and why it changed.',
+      keyterms: [],
+      turn_detection_hint: 'default',
+    };
+
+    it('ELICIT_REQUEST: a matching question shape returns true', () => {
+      expect(replyCoversCurrentRendering('One moment. What do you need today?', requestGoal)).toBe(true);
+      expect(replyCoversCurrentRendering('How can I help you today?', requestGoal)).toBe(true);
+    });
+    it('ELICIT_REQUEST: an unrelated question returns false', () => {
+      expect(replyCoversCurrentRendering('One moment. Is this line secure?', requestGoal)).toBe(false);
+    });
+    it('ELICIT_REQUEST: a statement containing a lexicon phrase but no question shape returns false', () => {
+      expect(replyCoversCurrentRendering('I understand what you need today.', requestGoal)).toBe(false);
+    });
+
+    it('ELICIT_IDENTITY: a matching question shape returns true', () => {
+      expect(replyCoversCurrentRendering('One moment. Who is calling?', identityGoal)).toBe(true);
+      expect(replyCoversCurrentRendering('May I have your name?', identityGoal)).toBe(true);
+    });
+    it('ELICIT_IDENTITY: an unrelated question returns false (regression guard for test (f)\'s own shape)', () => {
+      expect(replyCoversCurrentRendering('One moment. Is this line secure?', identityGoal)).toBe(false);
+    });
+    it('ELICIT_IDENTITY: a statement containing a lexicon phrase but no question shape returns false', () => {
+      expect(replyCoversCurrentRendering('I know who is calling.', identityGoal)).toBe(false);
+    });
+
+    it('PROBE_CONSISTENCY: a matching question shape returns true', () => {
+      expect(replyCoversCurrentRendering('One moment. Which is correct?', probeGoal)).toBe(true);
+      expect(replyCoversCurrentRendering('Why did it change?', probeGoal)).toBe(true);
+    });
+    it('PROBE_CONSISTENCY: an unrelated question returns false', () => {
+      expect(replyCoversCurrentRendering('One moment. Is this line secure?', probeGoal)).toBe(false);
+    });
+    it('PROBE_CONSISTENCY: a statement containing a lexicon phrase but no question shape returns false', () => {
+      expect(replyCoversCurrentRendering('I see which is correct now.', probeGoal)).toBe(false);
+    });
   });
 });

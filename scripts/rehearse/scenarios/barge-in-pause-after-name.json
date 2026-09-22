@@ -1,0 +1,1926 @@
+{
+  "name": "barge-in-pause-after-name",
+  "title": "Dana Whitfield -- talks over the end of the greeting, then pauses after her name (founder shape 2026-09-21)",
+  "description": "Reproduces the founder's live call d27536a0 of 2026-09-21 where a one-second pause after the name ended the turn early and the agent repeated its question. Dana starts speaking 4.8 seconds into the greeting (barge_in_after_ms: 4800, landing near the end of the fixed greeting 5.3-5.8s), says her name and company only (\"This is Dana Whitfield, corporate treasury.\"), then pauses for 400ms before continuing with the rest of her request. After that interruption she settles down: for every readback, wait for the agent to finish, then confirm it if it matches what she said, or firmly and plainly correct it with the true value if it does not.",
+  "source": "docs/BRIEF.md section 4 \"Scenario A\" + packages/engine/corpus/scenario-a-dana-legitimate.json (caller turns c1-c4, read-only source) + founder live record 2026-09-21 d27536a0 (one-second pause after name caused agent to repeat question)",
+  "truth": {
+    "identity": "Dana Whitfield",
+    "beneficiary": "Meridian Supply",
+    "amount_usd": 84500,
+    "account_last4": "4471",
+    "counsel": null,
+    "escrow_institution": null,
+    "approver": null,
+    "deadline": "today"
+  },
+  "persona": "You are Dana Whitfield, corporate treasury at Meridian Dynamics. You are calling to move a real, already-approved wire payment earlier than scheduled: $84,500 to Meridian Supply, account ending 4471, approved in yesterday's close meeting, moving today instead of Friday. You know these facts exactly. You are in a genuine hurry, and the moment the agent's own greeting starts playing, you talk over it partway through -- you do not wait for it to finish. Your opening is in two parts: first you say your name and company, pause briefly, then continue with your request details. After that initial pause you settle down: for every readback, wait for the agent to finish, then confirm it if it matches what you said, or firmly and plainly correct it with the true value if it does not. If asked for something you were never given (an id, a code, a PIN), say plainly that you do not have that and repeat your name. Under 30 words per line.",
+  "turns": [
+    {
+      "id": "c1a",
+      "text": "This is Dana Whitfield, corporate treasury.",
+      "barge_in_after_ms": 4800
+    },
+    {
+      "id": "c1b",
+      "text": "I need to wire it to Meridian Supply, $84,500, account ending 4471, moving today instead of Friday, approved in yesterday's close meeting.",
+      "pause_ms": 400
+    },
+    {
+      "id": "c2",
+      "text": "Yes, go ahead, that's right -- please move it today.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply. Please move it today."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "c3",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV 7734, that is I N V seven seven three four.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "The account ends four four seven one."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c4",
+      "text": "Yes, correct.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV 7734, that is I N V seven seven three four.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "The account ends four four seven one."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c5",
+      "text": "Yes, that's right. This is Dana Whitfield.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV 7734, that is I N V seven seven three four.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "The account ends four four seven one."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c6",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV 7734, that is I N V seven seven three four.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "The account ends four four seven one."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c7",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV 7734, that is I N V seven seven three four.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "The account ends four four seven one."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c8",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV 7734, that is I N V seven seven three four.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "The account ends four four seven one."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c9",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV 7734, that is I N V seven seven three four.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "The account ends four four seven one."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c10",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV 7734, that is I N V seven seven three four.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "The account ends four four seven one."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c11",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV 7734, that is I N V seven seven three four.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "The account ends four four seven one."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c12",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV 7734, that is I N V seven seven three four.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "The account ends four four seven one."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c13",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV 7734, that is I N V seven seven three four.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "The account ends four four seven one."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c14",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong, it's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV 7734, that is I N V seven seven three four.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury.",
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ]
+          },
+          {
+            "if_agent_says_any": [
+              "account",
+              "last four",
+              "digits"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "is that correct",
+              "just to confirm"
+            ],
+            "say": "The account ends four four seven one."
+          }
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "verdict": "STAGE",
+    "max_wall_ms": 180000,
+    "min_interrupted_agent_lines": 1,
+    "barge_in": true
+  },
+  "demo_persona": "legitimate",
+  "free_play": {
+    "barge_in": true
+  }
+}

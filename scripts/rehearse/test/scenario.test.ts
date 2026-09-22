@@ -3,7 +3,7 @@ import { listScenarioNames, loadAllScenarios, loadScenario, validateScenario, Sc
 import { matchRespondRules } from '../truthEngine.js';
 
 describe('scenario loading (no network)', () => {
-  it('lists the required scenario files (the original four, the four adversarial ones from item 16, and the two judge-sim mechanics scenarios from 2026-09-11)', async () => {
+  it('lists the required scenario files (the original four, the four adversarial ones from item 16, the two judge-sim mechanics scenarios from 2026-09-11, and the pause-after-name variant from 2026-09-21)', async () => {
     const names = await listScenarioNames();
     expect(names).toEqual(
       expect.arrayContaining([
@@ -17,6 +17,7 @@ describe('scenario loading (no network)', () => {
         'hangup-after-request',
         'barge-in-interrupt',
         'socket-drop-resume',
+        'barge-in-pause-after-name',
       ]),
     );
   });
@@ -751,6 +752,61 @@ describe('the two judge-sim mechanics scenarios (finding 2026-09-11)', () => {
     expect(s.truth).toBeDefined();
     expect(s.persona).toBeTruthy();
     expect(s.demo_persona).toBe('legitimate');
+  });
+
+  it('barge-in-pause-after-name expects STAGE and at least one interrupted agent line (founder shape 2026-09-21)', async () => {
+    const s = await loadScenario('barge-in-pause-after-name');
+    expect(s.expected.verdict).toBe('STAGE');
+    expect(s.expected.min_interrupted_agent_lines).toBeGreaterThanOrEqual(1);
+  });
+
+  it('barge-in-pause-after-name splits the opening request into two turns (c1a, c1b): c1a barges at 4800ms, c1b pauses 400ms after the agent reply', async () => {
+    const s = await loadScenario('barge-in-pause-after-name');
+    const c1a = s.turns.find((t) => t.id === 'c1a');
+    const c1b = s.turns.find((t) => t.id === 'c1b');
+    expect(c1a, 'barge-in-pause-after-name should have a c1a turn').toBeDefined();
+    expect(c1b, 'barge-in-pause-after-name should have a c1b turn').toBeDefined();
+    expect(c1a!.barge_in_after_ms).toBe(4800);
+    expect(c1a!.pause_ms).toBeUndefined();
+    expect(c1b!.pause_ms).toBe(400);
+    expect(c1b!.barge_in_after_ms).toBeUndefined();
+  });
+
+  it('barge-in-pause-after-name c1a contains only the name and company (first part of opening)', async () => {
+    const s = await loadScenario('barge-in-pause-after-name');
+    const c1a = s.turns.find((t) => t.id === 'c1a');
+    expect(c1a!.text).toBe('This is Dana Whitfield, corporate treasury.');
+  });
+
+  it('barge-in-pause-after-name c1b contains the payment details (second part of opening after the pause)', async () => {
+    const s = await loadScenario('barge-in-pause-after-name');
+    const c1b = s.turns.find((t) => t.id === 'c1b');
+    expect(c1b!.text).toContain('I need to wire it to Meridian Supply');
+    expect(c1b!.text).toContain('$84,500');
+    expect(c1b!.text).toContain('account ending 4471');
+  });
+
+  it('barge-in-pause-after-name c1a is the only turn with barge_in_after_ms', async () => {
+    const s = await loadScenario('barge-in-pause-after-name');
+    const bargeInTurns = s.turns.filter((t) => t.barge_in_after_ms !== undefined);
+    expect(bargeInTurns).toHaveLength(1);
+    expect(bargeInTurns[0]!.id).toBe('c1a');
+  });
+
+  it('barge-in-pause-after-name carries a truth block and a persona (honest caller, Dana-shaped, founder recording d27536a0)', async () => {
+    const s = await loadScenario('barge-in-pause-after-name');
+    expect(s.truth).toBeDefined();
+    expect(s.truth?.identity).toBe('Dana Whitfield');
+    expect(s.truth?.beneficiary).toBe('Meridian Supply');
+    expect(s.truth?.amount_usd).toBe(84500);
+    expect(s.persona).toBeTruthy();
+    expect(s.demo_persona).toBe('legitimate');
+  });
+
+  it('barge-in-pause-after-name free_play has barge_in: true', async () => {
+    const s = await loadScenario('barge-in-pause-after-name');
+    expect(s.free_play).toBeDefined();
+    expect(s.free_play!.barge_in).toBe(true);
   });
 
   // Fix 2026-09-11: ensure no respond rule matches the engine's own readback opening,
