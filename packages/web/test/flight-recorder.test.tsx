@@ -205,7 +205,7 @@ describe('Call.tsx flight recorder wiring (Task W9)', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
     fake.emitState(baseState([{ id: 'u1', speaker: 'caller', text: 'This is Robert Miller.', t_ms: 500 }]));
@@ -262,7 +262,7 @@ describe('Call.tsx flight recorder wiring (Task W9)', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     // First caller line starts a turn -- no audio ever arrives for it (a silent, tool-only
@@ -304,7 +304,7 @@ describe('Call.tsx flight recorder wiring (Task W9)', () => {
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     const user = userEvent.setup();
-    const { unmount } = render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    const { unmount } = render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
     fake.emitState(baseState([]));
@@ -326,7 +326,7 @@ describe('Call.tsx flight recorder wiring (Task W9)', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
     fake.emitState(baseState([]));
 

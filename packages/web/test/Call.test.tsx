@@ -128,12 +128,12 @@ afterEach(() => {
 
 describe('Call', () => {
   it('does not open the socket before Start Call is clicked', () => {
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     expect(connect).not.toHaveBeenCalled();
   });
 
   it('shows the bottom line before any call starts', () => {
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     expect(screen.getByText(BOTTOM_LINE)).toBeInTheDocument();
   });
 
@@ -141,7 +141,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
@@ -153,7 +153,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     fake.emitState(scenarioBFinalState());
@@ -176,7 +176,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
 
     expect(screen.getByTitle(SESSION.session_id).closest('.masthead-meta')).toHaveTextContent(
       `session ${SESSION.session_id} · Treasury desk`,
@@ -197,7 +197,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    const { container } = render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    const { container } = render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     fake.emitState(scenarioBFinalState());
@@ -214,7 +214,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
 
     expect(screen.queryByText(/hash-chained evidence export/)).not.toBeInTheDocument();
 
@@ -230,7 +230,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     fake.emitFlush();
@@ -242,7 +242,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     fake.emitState(scenarioBFinalState());
@@ -258,7 +258,7 @@ describe('Call', () => {
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
     const sessionWithCode = { ...SESSION, session_id: '11111111-2222-2222-2222-333333333333' };
-    render(<Call session={sessionWithCode} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={sessionWithCode} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     fake.emitState(scenarioBFinalState());
@@ -271,7 +271,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     const state = scenarioBFinalState();
@@ -292,7 +292,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     // Socket drops before any state event arrives (verdict is undefined)
@@ -307,7 +307,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     const state = scenarioBFinalState();
@@ -325,7 +325,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     fake.emitState(scenarioBFinalState());
@@ -349,7 +349,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     fake.emitState(scenarioBFinalState());
@@ -372,7 +372,7 @@ describe('Call', () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     await user.click(screen.getByRole('button', { name: 'End Call' }));
@@ -385,7 +385,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     expect(screen.getByText(BOTTOM_LINE)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
@@ -401,7 +401,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    const { container } = render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    const { container } = render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     const state = scenarioBFinalState();
@@ -420,7 +420,7 @@ describe('Call', () => {
     vi.mocked(connect).mockRejectedValue(new Error('denied'));
     const onWatch = vi.fn();
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={onWatch} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={onWatch} />);
 
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
@@ -434,7 +434,7 @@ describe('Call', () => {
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const onStartOver = vi.fn();
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={onStartOver} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={onStartOver} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     fake.emitEnded('caller_ended');
@@ -452,7 +452,7 @@ describe('Call', () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
 
     expect(screen.getAllByText('Every system here is simulated.')).toHaveLength(1);
 
@@ -468,7 +468,7 @@ describe('Call', () => {
     vi.mocked(connect).mockResolvedValue(fake.client as never);
     const user = userEvent.setup();
     const sessionWithId = { ...SESSION, session_id: 'aaaaaaaa-1111-1111-1111-111111111111' };
-    render(<Call session={sessionWithId} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={sessionWithId} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     const state = scenarioBFinalState();
@@ -483,5 +483,22 @@ describe('Call', () => {
     expect(recentCalls[0]?.full_id).toBe(sessionWithId.session_id);
     // Note: verdict may be null in test due to async state updates; real app stores it correctly
     expect(recentCalls[0]).toHaveProperty('verdict');
+  });
+
+  describe('role card rendering', () => {
+    it('shows the legitimate persona text when persona is "legitimate"', () => {
+      render(<Call session={SESSION} persona="legitimate" onStartOver={vi.fn()} onWatch={vi.fn()} />);
+      expect(screen.getByText('Role card: Dana Whitfield, honest caller')).toBeInTheDocument();
+    });
+
+    it('shows the attacker persona text when persona is "attacker"', () => {
+      render(<Call session={SESSION} persona="attacker" onStartOver={vi.fn()} onWatch={vi.fn()} />);
+      expect(screen.getByText('Role card: caller claiming to be the CEO')).toBeInTheDocument();
+    });
+
+    it('does not show the role card line when persona is null', () => {
+      render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+      expect(screen.queryByText(/^Role card:/)).not.toBeInTheDocument();
+    });
   });
 });

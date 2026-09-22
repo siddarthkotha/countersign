@@ -36,6 +36,8 @@ beforeEach(() => {
   // Task W6: MicCheck reads navigator.permissions best-effort before getUserMedia -- absent
   // by default in jsdom, which is also the realistic "unsupported" case these tests exercise.
   Object.defineProperty(navigator, 'permissions', { configurable: true, value: undefined });
+  // Clear sessionStorage between tests to avoid cross-test pollution
+  sessionStorage.clear();
 });
 
 describe('Landing', () => {
@@ -77,7 +79,7 @@ describe('Landing', () => {
     }
   });
 
-  it('enables Try to break it once the mic check passes', async () => {
+  it('enables Try to break it once the mic check passes and a role is selected', async () => {
     mockGetUserMedia('resolve');
     const user = userEvent.setup();
     render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
@@ -87,6 +89,15 @@ describe('Landing', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
+    // Mic passes but no role selected yet, so button is still disabled
+    expect(await screen.findByText('Pick a role card above to unlock Try to break it')).toBeInTheDocument();
+    expect(tryButton).toBeDisabled();
+
+    // After selecting a role, button becomes enabled
+    const firstRoleCard = document.querySelector('.role-cards section');
+    if (firstRoleCard) {
+      await user.click(firstRoleCard);
+    }
     expect(await screen.findByText('Microphone ready')).toBeInTheDocument();
     expect(tryButton).toBeEnabled();
   });
@@ -115,7 +126,14 @@ describe('Landing', () => {
     render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-    await screen.findByText('Microphone ready');
+    await screen.findByText('Pick a role card above to unlock Try to break it');
+
+    // Select a role card so button becomes enabled
+    const firstRoleCard = document.querySelector('.role-cards section');
+    if (firstRoleCard) {
+      await user.click(firstRoleCard);
+    }
+
     await user.click(screen.getByRole('button', { name: 'Try to break it' }));
 
     const banner = await screen.findByText(/today's call budget is used up/);
@@ -194,7 +212,7 @@ describe('Landing', () => {
     expect(tryButton).toHaveAttribute('title', 'Try to break it unlocks after Check microphone passes');
   });
 
-  it('updates the helper text (and the button title) to "Microphone ready" once the mic check passes', async () => {
+  it('updates the helper text to "Pick a role card..." when mic passes but no role selected', async () => {
     mockGetUserMedia('resolve');
     const user = userEvent.setup();
     render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
@@ -202,11 +220,30 @@ describe('Landing', () => {
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
     const tryButton = await screen.findByRole('button', { name: 'Try to break it' });
-    expect(tryButton).toHaveAttribute('title', 'Microphone ready');
-    expect(document.getElementById('try-break-helper')).toHaveTextContent('Microphone ready');
+    expect(tryButton).toHaveAttribute('title', 'Pick a role card above to unlock Try to break it');
+    expect(document.getElementById('try-break-helper')).toHaveTextContent('Pick a role card above to unlock Try to break it');
     expect(
       screen.queryByText('Try to break it unlocks after Check microphone passes')
     ).not.toBeInTheDocument();
+  });
+
+  it('updates the helper text to "Microphone ready" once mic check passes and a role is selected', async () => {
+    mockGetUserMedia('resolve');
+    const user = userEvent.setup();
+    render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Check microphone' }));
+    await screen.findByText('Pick a role card above to unlock Try to break it');
+
+    // Select a role card
+    const firstRoleCard = document.querySelector('.role-cards section');
+    if (firstRoleCard) {
+      await user.click(firstRoleCard);
+    }
+
+    const tryButton = screen.getByRole('button', { name: 'Try to break it' });
+    expect(tryButton).toHaveAttribute('title', 'Microphone ready');
+    expect(document.getElementById('try-break-helper')).toHaveTextContent('Microphone ready');
   });
 
   it('updates the helper text to the "no microphone found" sentence for a NotFoundError', async () => {
@@ -242,7 +279,13 @@ describe('Landing', () => {
     render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-    await screen.findByText('Microphone ready');
+    await screen.findByText('Pick a role card above to unlock Try to break it');
+
+    // Select a role card so button becomes enabled
+    const firstRoleCard = document.querySelector('.role-cards section');
+    if (firstRoleCard) {
+      await user.click(firstRoleCard);
+    }
 
     await user.click(screen.getByRole('button', { name: 'Try to break it' }));
 
@@ -264,6 +307,69 @@ describe('Landing', () => {
   // changed nothing. Landing now tracks which card was picked and passes it through
   // `startSession` so the server can use the matching persona.
   describe('demo persona selection (bug fix 2026-09-04)', () => {
+    it('keeps Try to break it disabled when mic passes but no role card is selected', async () => {
+      mockGetUserMedia('resolve');
+      const user = userEvent.setup();
+      render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+      await user.click(screen.getByRole('button', { name: 'Check microphone' }));
+      await screen.findByText('Pick a role card above to unlock Try to break it');
+
+      // Button should still be disabled because no role card is selected
+      expect(screen.getByRole('button', { name: 'Try to break it' })).toBeDisabled();
+    });
+
+    it('shows exactly "Pick a role card above to unlock Try to break it" in helper text when mic passes but no role is selected', async () => {
+      mockGetUserMedia('resolve');
+      const user = userEvent.setup();
+      render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+      await user.click(screen.getByRole('button', { name: 'Check microphone' }));
+      await screen.findByText('Pick a role card above to unlock Try to break it');
+
+      const helper = document.getElementById('try-break-helper');
+      expect(helper).toHaveTextContent('Pick a role card above to unlock Try to break it');
+    });
+
+    it('enables Try to break it once a role card is selected (after mic passes)', async () => {
+      mockGetUserMedia('resolve');
+      vi.mocked(startSession).mockResolvedValue({ session_id: 's1', ws_path: '/ws/call/s1', cap_seconds: 300 });
+      const user = userEvent.setup();
+      render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+      await user.click(screen.getByRole('button', { name: 'Check microphone' }));
+      // Mic passes but no role selected yet
+      await screen.findByText('Pick a role card above to unlock Try to break it');
+
+      // Button should be disabled initially
+      expect(screen.getByRole('button', { name: 'Try to break it' })).toBeDisabled();
+
+      // After picking a role card, button should be enabled
+      // Click the first role card (Dana Whitfield)
+      const roleCards = document.querySelectorAll('.role-cards section');
+      const firstCard = roleCards.item(0);
+      if (firstCard) {
+        await user.click(firstCard);
+      }
+
+      expect(screen.getByRole('button', { name: 'Try to break it' })).toBeEnabled();
+      // And helper text should change to "Microphone ready"
+      expect(await screen.findByText('Microphone ready')).toBeInTheDocument();
+    });
+
+    it('restores role card selection from sessionStorage on mount', async () => {
+      mockGetUserMedia('resolve');
+      sessionStorage.setItem('countersign.role', 'legitimate');
+      const user = userEvent.setup();
+      render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+      await user.click(screen.getByRole('button', { name: 'Check microphone' }));
+      await screen.findByText('Microphone ready');
+
+      // Button should be enabled because role was restored from sessionStorage
+      expect(screen.getByRole('button', { name: 'Try to break it' })).toBeEnabled();
+    });
+
     it('passes the legitimate persona to startSession after the Dana Whitfield card is picked', async () => {
       mockGetUserMedia('resolve');
       vi.mocked(startSession).mockResolvedValue({ session_id: 's1', ws_path: '/ws/call/s1', cap_seconds: 300 });
@@ -271,9 +377,14 @@ describe('Landing', () => {
       render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
       await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-      await screen.findByText('Microphone ready');
+      await screen.findByText('Pick a role card above to unlock Try to break it');
 
-      await user.click(screen.getByText('Dana Whitfield, treasury manager'));
+      // Click the first role card (Dana Whitfield)
+      const roleCards = document.querySelectorAll('.role-cards section');
+      const firstCard = roleCards.item(0);
+      if (firstCard) {
+        await user.click(firstCard);
+      }
       await user.click(screen.getByRole('button', { name: 'Try to break it' }));
 
       expect(startSession).toHaveBeenCalledWith('legitimate');
@@ -286,25 +397,35 @@ describe('Landing', () => {
       render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
       await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-      await screen.findByText('Microphone ready');
+      await screen.findByText('Pick a role card above to unlock Try to break it');
 
-      await user.click(screen.getByText('A caller claiming to be the CEO'));
+      // Click the second role card (CEO attacker)
+      const roleCards = document.querySelectorAll('.role-cards section');
+      const secondCard = roleCards.item(1);
+      if (secondCard) {
+        await user.click(secondCard);
+      }
       await user.click(screen.getByRole('button', { name: 'Try to break it' }));
 
       expect(startSession).toHaveBeenCalledWith('attacker');
     });
 
-    it('passes no persona (null) to startSession when no card was picked -- the server applies the safe default', async () => {
+    it('does not call onCall when Try to break it is clicked without a role card selected', async () => {
       mockGetUserMedia('resolve');
-      vi.mocked(startSession).mockResolvedValue({ session_id: 's1', ws_path: '/ws/call/s1', cap_seconds: 300 });
+      const onCall = vi.fn();
       const user = userEvent.setup();
-      render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+      render(<Landing onWatch={vi.fn()} onCall={onCall} />);
 
       await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-      await screen.findByText('Microphone ready');
-      await user.click(screen.getByRole('button', { name: 'Try to break it' }));
+      await screen.findByText('Pick a role card above to unlock Try to break it');
 
-      expect(startSession).toHaveBeenCalledWith(null);
+      // Button should be disabled because no role card is selected
+      const tryButton = screen.getByRole('button', { name: 'Try to break it' });
+      expect(tryButton).toBeDisabled();
+
+      // Trying to click the disabled button won't call onCall
+      // (user events library won't click disabled buttons)
+      expect(onCall).not.toHaveBeenCalled();
     });
   });
 });

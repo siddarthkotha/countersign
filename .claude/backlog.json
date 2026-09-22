@@ -3532,10 +3532,10 @@
         "packages/web/src/audio/capture.ts",
         "packages/web/src/components/MicCheck.tsx"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
-      "agent_id": "a030c31bd26e514c6",
-      "note": "lane: mic_level trace + noiseSuppression off per AssemblyAI browser-integration docs; founder tests pending (headset vs speakers; wait vs talk-through); harness scenario barge-in-talk-through-question isolates the AAI side",
+      "agent_id": "",
+      "note": "lane: mic_level trace + noiseSuppression off per AssemblyAI browser-integration docs; founder tests pending (headset vs speakers; wait vs talk-through); harness scenario barge-in-talk-through-question isolates the AAI side | landed 5c5d7c1 2026-09-21 9:49 PM; founder calls aec29b64 and 163fef3a at 10:07/10:08 PM captured the full request with mic rms 0.05-0.17 throughout",
       "priority": "P0"
     },
     {
@@ -3544,11 +3544,54 @@
       "files": [
         "packages/web/src/audio/capture.ts"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
-      "agent_id": "a030c31bd26e514c6",
-      "note": "quoted 2026-09-21 by the docs errand from https://www.assemblyai.com/docs/voice-agents/voice-agent-api/browser-integration",
+      "agent_id": "",
+      "note": "quoted 2026-09-21 by the docs errand from https://www.assemblyai.com/docs/voice-agents/voice-agent-api/browser-integration | landed 5c5d7c1 2026-09-21 9:49 PM; founder calls aec29b64 and 163fef3a at 10:07/10:08 PM captured the full request with mic rms 0.05-0.17 throughout",
       "priority": "P0"
+    },
+    {
+      "id": "MIC-TRACK-SETTINGS-NOT-RECORDED",
+      "title": "web: mic_track_settings event absent from both founder records on 5c5d7c1 although mic_level recorded 360+ samples",
+      "files": [
+        "packages/web/src/audio/capture.ts",
+        "packages/web/src/screens/Call.tsx"
+      ],
+      "status": "held",
+      "held_because": "diagnostic only; check whether getSettings() ran before the first level callback or the first-call flag was skipped",
+      "agent_id": "",
+      "priority": "P3"
+    },
+    {
+      "id": "ROLE-CARD-NOT-REQUIRED",
+      "title": "web: 'Try to break it' enabled with no role card picked; server defaults the missing persona to the CEO-impostor context (founder call aec29b64 10:07 PM 2026-09-21: honest Dana script from the attacker context ended ESCALATE, looked broken; a reloading judge hits the same trap)",
+      "files": [
+        "packages/web/src/screens/Landing.tsx",
+        "packages/web/src/screens/Call.tsx"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "note": "Haiku lane: gate the button on a card, name the card on the call screen, remember the card across reload | landed 2026-09-21 10:30 PM; 8 tests",
+      "priority": "P0"
+    },
+    {
+      "id": "TALK-OVER-AFTER-TRAP-CORRECTION",
+      "title": "live: grader talk_over=1 on both founder calls 10:07/10:08 PM (41.8 s, 36.1 s): the amount readback lands as the caller starts a one-word 'Yes'; one call shows a 2 ms phantom speech window then a duplicate 'Yes'; verdicts correct, founder did not report it",
+      "files": [],
+      "status": "held",
+      "held_because": "freeze: count on the next batches; overlaps AMBIENT-DOUBLE-TURN-END-REPEAT (AssemblyAI-side)",
+      "agent_id": "",
+      "priority": "P2"
+    },
+    {
+      "id": "BARGE-IN-FLUSH-LAG",
+      "title": "live: founder call 163fef3a: caller speech detected at 6024 ms, client flush at 6400 ms (376 ms), so the greeting's last half second played over him; he reported 'it continued to speak over me'",
+      "files": [],
+      "status": "held",
+      "held_because": "freeze: AssemblyAI's interruption detection is semantic (docs, 2026-09-21); measure across the next batch before touching the client queue",
+      "agent_id": "",
+      "priority": "P2"
     }
   ]
 }

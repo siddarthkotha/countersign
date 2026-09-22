@@ -16,7 +16,7 @@ import SimulatedBanner from '../components/SimulatedBanner';
 import Masthead from '../components/Masthead';
 import Footer from '../components/Footer';
 import { connect, type CallClient } from '../ws/client';
-import type { StartResult } from '../api';
+import type { StartResult, DemoPersona } from '../api';
 import {
   buildDiagnosticsPayload,
   markStartClick,
@@ -30,6 +30,7 @@ export type StartedSession = Extract<StartResult, { session_id: string }>;
 
 export type CallProps = {
   session: StartedSession;
+  persona: DemoPersona | null;
   onStartOver: () => void;
   onWatch: () => void;
 };
@@ -90,7 +91,11 @@ function endedReasonToPlainWords(reason: string, verdict?: string): string {
   return `The call ended: ${words ?? reason.replace(/_/g, ' ')}`;
 }
 
-export default function Call({ session, onStartOver, onWatch }: CallProps) {
+function personaToPlainWords(persona: DemoPersona): string {
+  return persona === 'legitimate' ? 'Dana Whitfield, honest caller' : 'caller claiming to be the CEO';
+}
+
+export default function Call({ session, persona, onStartOver, onWatch }: CallProps) {
   const [link, setLink] = useState<LinkState>('idle');
   // IMPORTANT 2 (final review): which transport dropped -- 'browser' or 'aai' -- so the
   // status line can say WHICH side is reconnecting instead of one message covering both.
@@ -425,6 +430,13 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
           whole screen (previously the source moved from here to CallView.tsx at the exact
           moment a call started; same "always on" guarantee, one component now, not two). */}
       <SimulatedBanner />
+
+      {/* Bug fix 2026-09-21: show which role card was selected in the request header strip.
+          This always renders (even before a state event) so the user knows immediately which
+          persona context the checkpoint is using. */}
+      {persona && (
+        <p>Role card: {personaToPlainWords(persona)}</p>
+      )}
 
       <CallControls
         link={link}

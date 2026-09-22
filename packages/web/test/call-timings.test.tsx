@@ -125,7 +125,7 @@ describe('Call timings (Task W8)', () => {
     const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     const user = userEvent.setup();
 
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
 
     // t=1000: Start Call click.
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
@@ -180,7 +180,7 @@ describe('Call timings (Task W8)', () => {
     const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     const user = userEvent.setup();
 
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Start Call' }));
 
     now = 1200;
@@ -195,7 +195,7 @@ describe('Call timings (Task W8)', () => {
   it('omits the Timings line before any state has arrived (nothing measured yet)', async () => {
     const fake = makeFakeClient();
     vi.mocked(connect).mockResolvedValue(fake.client as never);
-    render(<Call session={SESSION} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+    render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
 
     expect(screen.queryByText(/Timings \(measured in this browser\)/)).not.toBeInTheDocument();
     void fake; // keep referenced -- this test only asserts the pre-call screen.

@@ -9,7 +9,7 @@ type StartedSession = Extract<StartResult, { session_id: string }>;
 
 export type LandingProps = {
   onWatch: () => void;
-  onCall: (result: StartedSession) => void;
+  onCall: (result: StartedSession, persona: DemoPersona | null) => void;
 };
 
 // Task W6 (QA walk 2026-09-02, finding 1): "Try to break it" used to grey out with zero
@@ -19,6 +19,7 @@ export type LandingProps = {
 // way, never a second, drifting copy of the same idea.
 const MIC_HELPER_DEFAULT = 'Try to break it unlocks after Check microphone passes';
 const MIC_HELPER_PASSED = 'Microphone ready';
+const MIC_HELPER_ROLE_NEEDED = 'Pick a role card above to unlock Try to break it';
 const MIC_HELPER_BY_REASON: Record<Exclude<MicCheckReason, 'passed'>, string> = {
   'not-allowed': "Microphone blocked. Allow it in the browser's address bar, then check again",
   'not-found': 'No microphone found. The recorded attack works without one',
@@ -27,8 +28,9 @@ const MIC_HELPER_BY_REASON: Record<Exclude<MicCheckReason, 'passed'>, string> = 
   error: 'Microphone check failed. Use "Watch a recorded attack" instead'
 };
 
-function micHelperText(result: MicCheckResultInfo | null): string {
+function micHelperText(result: MicCheckResultInfo | null, roleSelected: boolean): string {
   if (!result) return MIC_HELPER_DEFAULT;
+  if (result.ok && !roleSelected) return MIC_HELPER_ROLE_NEEDED;
   return result.ok ? MIC_HELPER_PASSED : MIC_HELPER_BY_REASON[result.reason];
 }
 
@@ -41,9 +43,9 @@ function micHelperText(result: MicCheckResultInfo | null): string {
 // as before.
 const STARTING_HELPER = 'Waking the server. This can take up to a minute on the free plan';
 
-function tryButtonHelperText(result: MicCheckResultInfo | null, starting: boolean): string {
+function tryButtonHelperText(result: MicCheckResultInfo | null, starting: boolean, roleSelected: boolean): string {
   if (starting) return STARTING_HELPER;
-  return micHelperText(result);
+  return micHelperText(result, roleSelected);
 }
 
 const REPLAY_ONLY_REASONS: Record<string, string> = {
@@ -94,6 +96,16 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
   const liveCallsDown = liveUnavailableReason !== undefined && liveUnavailableReason !== null;
 
   useEffect(() => {
+    // Restore role card selection from sessionStorage on mount
+    try {
+      const stored = sessionStorage.getItem('countersign.role');
+      if (stored && (stored === 'legitimate' || stored === 'attacker')) {
+        setRole(stored);
+      }
+    } catch {
+      // sessionStorage unavailable (private window, etc.) -- fail silently
+    }
+
     let cancelled = false;
     getHealth().then((health) => {
       if (cancelled) return;
@@ -104,6 +116,20 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
     };
   }, []);
 
+  function handleRoleSelect(selectedRole: DemoPersona | null) {
+    setRole(selectedRole);
+    // Persist role selection to sessionStorage
+    try {
+      if (selectedRole) {
+        sessionStorage.setItem('countersign.role', selectedRole);
+      } else {
+        sessionStorage.removeItem('countersign.role');
+      }
+    } catch {
+      // sessionStorage unavailable -- fail silently
+    }
+  }
+
   async function handleTry() {
     setStarting(true);
     setUnavailableReason(null);
@@ -113,7 +139,7 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
       setUnavailableReason(reasonToPlainWords(result.reason));
       return;
     }
-    onCall(result);
+    onCall(result, role);
   }
 
   return (
@@ -166,9 +192,9 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
           <button
             type="button"
             onClick={handleTry}
-            disabled={!micOk || starting}
+            disabled={!micOk || starting || !role}
             aria-describedby="try-break-helper"
-            title={tryButtonHelperText(micResult, starting)}
+            title={tryButtonHelperText(micResult, starting, !!role)}
           >
             Try to break it
           </button>
@@ -181,7 +207,7 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
           Judge review finding (2026-09-04), defect 1: while `starting` is true this shows the
           cold-start sentence instead (see `tryButtonHelperText` above). Hidden along with the
           button itself while live calls are down -- the banner above already explains why. */}
-      {!liveCallsDown && <p id="try-break-helper">{tryButtonHelperText(micResult, starting)}</p>}
+      {!liveCallsDown && <p id="try-break-helper">{tryButtonHelperText(micResult, starting, !!role)}</p>}
 
       {unavailableReason && (
         <p className="banner" role="alert">Live calls are unavailable right now: {unavailableReason}</p>
@@ -189,7 +215,7 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
 
       <MicCheck onResult={setMicResult} />
 
-      <RoleCards selected={role} onSelect={setRole} />
+      <RoleCards selected={role} onSelect={handleRoleSelect} />
 
       <RecentCalls />
 
