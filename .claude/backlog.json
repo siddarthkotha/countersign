@@ -3350,7 +3350,7 @@
     },
     {
       "id": "AMBIENT-DOUBLE-TURN-END-REPEAT",
-      "title": "live: a phantom 1 ms caller speech window (66035 to 66036) followed by a duplicate STT transcript (That is right, 66335) after the real Yes that is right (65135) gave AssemblyAI two turn-ends, and its automatic reply asked the beneficiary readback twice (resp_25ab at 65145 and resp_8d80 at 67160, both ours:false); we sent nothing. Grader repeated_question 1 at 73.0 s, and a human hears the question twice. Deploy 55, 2026-09-19T13-31-59-corrected-critical-field. Nothing on our side to suppress unless automatic replies can be disabled",
+      "title": "live: a phantom 1 ms caller speech window (66035 to 66036) followed by a duplicate STT transcript (That is right, 66335) after the real Yes that is right (65135) gave AssemblyAI two turn-ends, and its automatic reply asked the beneficiary readback twice (resp_25ab at 65145 and resp_8d80 at 67160, both ours:false); we sent nothing. Grader repeated_question 1 at 73.0 s, and a human hears the question twice. Deploy 55, 2026-09-19T13-31-59-corrected-critical-field. Nothing on our side to suppress unless automatic replies can be disabled | 2026-09-22 2:29 PM single-wrong-answer check: our instructed readback completed, a 0.7 s phantom caller window followed, and a chained automatic reply repeated the same readback with 'One moment.' 6.7 s later; auto-then-ours/ours-then-auto identical question shape: 1 of 46 records since 2026-09-21 beyond the two fixed paraphrase cases",
       "files": [
         "packages/server/src/call/session.ts",
         "docs/ASSEMBLYAI_INTEGRATION.md"
@@ -3707,6 +3707,18 @@
       "held_because": "",
       "agent_id": "",
       "note": "Sonnet lane: remove close_catchup; defer the instructed send behind a 700 ms grace re-checked at fire time | landed 2026-09-22 ~2:10 PM, 9 tests in the file",
+      "priority": "P0"
+    },
+    {
+      "id": "PREMATURE-END-OF-TURN-HUMAN-PAUSE",
+      "title": "live (founder 2:33 to 2:40 PM 2026-09-22, calls e4526d7a, 39dc704a, ff84b7e0): adaptive turn-taking (turn_detection omitted) ends the caller's turn on a natural mid-sentence pause ('corporate treasury. [pause] This has been approved by Marcus Obi' cut after treasury; 'I need [pause] to wire' cut after need); the agent replies over the rest; his voice at normal mic level from 11.3 to 18.5 s in e4526d7a was never detected; case 6 could not register the approver and ended STAGE",
+      "files": [
+        "packages/server/src/aai/config.ts"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "a1530c99a1940c389",
+      "note": "Haiku lane: COUNTERSIGN_MIN_SILENCE_MS / MAX_SILENCE_MS / INTERRUPTION_DELAY_MS env in explicit mode; founder-voice A/B next (harness cannot pause like a person)",
       "priority": "P0"
     }
   ]

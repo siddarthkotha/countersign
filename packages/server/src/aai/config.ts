@@ -156,6 +156,7 @@ export interface TurnDetectionConfig {
   min_silence?: number;
   max_silence?: number;
   interrupt_response?: boolean;
+  interruption_delay?: number;
 }
 
 // GOODBYE-CUT-BY-CALLER-PRESSURE fix, mechanism A (2026-09-19): the documented default for
@@ -248,21 +249,47 @@ export interface AaiSessionConfig {
   tools: object[];
   keyterms: string[];
   turn_detection?: TurnDetectionConfig;
+  /** TURN-DETECTION-ENV-VARS (2026-09-22): env default min_silence_ms from
+   *  COUNTERSIGN_MIN_SILENCE_MS, applied in explicit mode. */
+  env_min_silence_ms?: number;
+  /** TURN-DETECTION-ENV-VARS (2026-09-22): env default max_silence_ms from
+   *  COUNTERSIGN_MAX_SILENCE_MS, applied in explicit mode. */
+  env_max_silence_ms?: number;
+  /** TURN-DETECTION-ENV-VARS (2026-09-22): env default interruption_delay_ms from
+   *  COUNTERSIGN_INTERRUPTION_DELAY_MS, applied in explicit mode. */
+  env_interruption_delay_ms?: number;
 }
 
 export interface AaiEnvDefaults {
   voice: string;
   llm_model?: string;
   turn_detection_mode: TurnDetectionMode;
+  min_silence_ms?: number;
+  max_silence_ms?: number;
+  interruption_delay_ms?: number;
 }
 
 function envOrUndefined(v: string | undefined): string | undefined {
   return v && v.length > 0 ? v : undefined;
 }
 
+/** Parses and validates an integer env var. Returns undefined if unset, malformed,
+ *  negative, zero, or exceeds maxValue. Logs a console.warn if maxValue is exceeded. */
+function parsePositiveInt(v: string | undefined, maxValue: number): number | undefined {
+  if (!v || v.length === 0) return undefined;
+  const num = parseInt(v, 10);
+  if (isNaN(num) || num <= 0) return undefined;
+  if (num > maxValue) {
+    console.warn(`countersign: env value "${v}" exceeds max ${maxValue} -- ignored`);
+    return undefined;
+  }
+  return num;
+}
+
 /** Reads COUNTERSIGN_VOICE (default DEFAULT_VOICE), COUNTERSIGN_LLM_MODEL (default:
- *  unset, i.e. keep AssemblyAI's managed model), and COUNTERSIGN_TURN_DETECTION (default:
- *  'omit') from a process.env-shaped object. */
+ *  unset, i.e. keep AssemblyAI's managed model), COUNTERSIGN_TURN_DETECTION (default:
+ *  'omit'), COUNTERSIGN_MIN_SILENCE_MS, COUNTERSIGN_MAX_SILENCE_MS, and
+ *  COUNTERSIGN_INTERRUPTION_DELAY_MS from a process.env-shaped object. */
 export function loadAaiEnvDefaults(env: Record<string, string | undefined>): AaiEnvDefaults {
   const voice = envOrUndefined(env.COUNTERSIGN_VOICE) ?? DEFAULT_VOICE;
   const llm_model = envOrUndefined(env.COUNTERSIGN_LLM_MODEL);
@@ -270,8 +297,24 @@ export function loadAaiEnvDefaults(env: Record<string, string | undefined>): Aai
   // and validate it's one of 'explicit' or 'omit'. Default to 'omit' if unset or invalid.
   const rawMode = envOrUndefined(env.COUNTERSIGN_TURN_DETECTION);
   const turn_detection_mode: TurnDetectionMode = (rawMode === 'explicit' || rawMode === 'omit') ? rawMode : 'omit';
+
+  // TURN-DETECTION-ENV-VARS (2026-09-22, build lane): read COUNTERSIGN_MIN_SILENCE_MS,
+  // COUNTERSIGN_MAX_SILENCE_MS, and COUNTERSIGN_INTERRUPTION_DELAY_MS. Each is validated
+  // as a positive integer within its documented bounds. If turn_detection_mode is 'omit'
+  // and any value is set, warn that it will be ignored.
+  const min_silence_ms = parsePositiveInt(env.COUNTERSIGN_MIN_SILENCE_MS, 10000);
+  const max_silence_ms = parsePositiveInt(env.COUNTERSIGN_MAX_SILENCE_MS, 10000);
+  const interruption_delay_ms = parsePositiveInt(env.COUNTERSIGN_INTERRUPTION_DELAY_MS, 1000);
+
+  if (turn_detection_mode === 'omit' && (min_silence_ms !== undefined || max_silence_ms !== undefined || interruption_delay_ms !== undefined)) {
+    console.warn(`countersign: COUNTERSIGN_MIN_SILENCE_MS/COUNTERSIGN_MAX_SILENCE_MS/COUNTERSIGN_INTERRUPTION_DELAY_MS are ignored because COUNTERSIGN_TURN_DETECTION is not 'explicit'.`);
+  }
+
   const result: AaiEnvDefaults = { voice, turn_detection_mode };
   if (llm_model) result.llm_model = llm_model;
+  if (min_silence_ms !== undefined) result.min_silence_ms = min_silence_ms;
+  if (max_silence_ms !== undefined) result.max_silence_ms = max_silence_ms;
+  if (interruption_delay_ms !== undefined) result.interruption_delay_ms = interruption_delay_ms;
   return result;
 }
 
@@ -317,19 +360,27 @@ export function buildInitialSessionUpdate(cfg: AaiSessionConfig, turn_detection_
       vad_threshold: cfg.turn_detection?.vad_threshold ?? DEFAULT_VAD_THRESHOLD,
       interrupt_response: cfg.turn_detection?.interrupt_response ?? true,
     };
+    // TURN-DETECTION-ENV-VARS (2026-09-22): apply env defaults from loadAaiEnvDefaults if set,
+    // then allow cfg.turn_detection overrides on top.
+    if (cfg.env_min_silence_ms !== undefined) turnDetection.min_silence = cfg.env_min_silence_ms;
+    if (cfg.env_max_silence_ms !== undefined) turnDetection.max_silence = cfg.env_max_silence_ms;
+    if (cfg.env_interruption_delay_ms !== undefined) turnDetection.interruption_delay = cfg.env_interruption_delay_ms;
     if (cfg.turn_detection?.min_silence !== undefined) turnDetection.min_silence = cfg.turn_detection.min_silence;
     if (cfg.turn_detection?.max_silence !== undefined) turnDetection.max_silence = cfg.turn_detection.max_silence;
+    if (cfg.turn_detection?.interruption_delay !== undefined) turnDetection.interruption_delay = cfg.turn_detection.interruption_delay;
     input.turn_detection = turnDetection;
   } else if (cfg.turn_detection && (cfg.turn_detection.vad_threshold !== undefined ||
                                       cfg.turn_detection.interrupt_response !== undefined ||
                                       cfg.turn_detection.min_silence !== undefined ||
-                                      cfg.turn_detection.max_silence !== undefined)) {
+                                      cfg.turn_detection.max_silence !== undefined ||
+                                      cfg.turn_detection.interruption_delay !== undefined)) {
     // Mode 'omit' with a caller override: send only the fields that are set
     const turnDetection: Record<string, unknown> = {};
     if (cfg.turn_detection.vad_threshold !== undefined) turnDetection.vad_threshold = cfg.turn_detection.vad_threshold;
     if (cfg.turn_detection.interrupt_response !== undefined) turnDetection.interrupt_response = cfg.turn_detection.interrupt_response;
     if (cfg.turn_detection.min_silence !== undefined) turnDetection.min_silence = cfg.turn_detection.min_silence;
     if (cfg.turn_detection.max_silence !== undefined) turnDetection.max_silence = cfg.turn_detection.max_silence;
+    if (cfg.turn_detection.interruption_delay !== undefined) turnDetection.interruption_delay = cfg.turn_detection.interruption_delay;
     input.turn_detection = turnDetection;
   }
   // else: mode 'omit' with no override: omit turn_detection key entirely

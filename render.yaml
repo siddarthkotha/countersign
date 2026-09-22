@@ -55,3 +55,11 @@ services:
         value: "40"
       - key: COUNTERSIGN_KILL_SWITCH
         value: "0"
+      # Turn-taking test (founder, 2026-09-22 2:58 PM CDT): explicit turn detection with a fixed
+      # 1500 ms minimum silence before a caller turn ends. Adaptive mode (the key omitted) cut the
+      # founder mid-sentence on natural pauses in three calls that afternoon. Remove both lines to
+      # return to adaptive mode.
+      - key: COUNTERSIGN_TURN_DETECTION
+        value: "explicit"
+      - key: COUNTERSIGN_MIN_SILENCE_MS
+        value: "1500"

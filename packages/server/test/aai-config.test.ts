@@ -174,6 +174,97 @@ describe('buildInitialSessionUpdate', () => {
       expect(turnDetection).toEqual({ vad_threshold: 0.5, interrupt_response: true, min_silence: 1200 });
     });
   });
+
+  // TURN-DETECTION-ENV-VARS (2026-09-22, build lane): env defaults from loadAaiEnvDefaults
+  // are applied to the initial session.update when in explicit mode.
+  describe('turn_detection env vars applied in buildInitialSessionUpdate', () => {
+    it('applies env min_silence_ms in explicit mode (byte-identical without it)', () => {
+      const withoutEnv = buildInitialSessionUpdate(cfg(), 'explicit');
+      const withEnv = buildInitialSessionUpdate(cfg({ env_min_silence_ms: 1500 }), 'explicit');
+      const withoutTd = (withoutEnv.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+      const withTd = (withEnv.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+      expect(withoutTd).not.toHaveProperty('min_silence');
+      expect(withTd).toHaveProperty('min_silence', 1500);
+    });
+
+    it('applies env max_silence_ms in explicit mode (byte-identical without it)', () => {
+      const withoutEnv = buildInitialSessionUpdate(cfg(), 'explicit');
+      const withEnv = buildInitialSessionUpdate(cfg({ env_max_silence_ms: 4000 }), 'explicit');
+      const withoutTd = (withoutEnv.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+      const withTd = (withEnv.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+      expect(withoutTd).not.toHaveProperty('max_silence');
+      expect(withTd).toHaveProperty('max_silence', 4000);
+    });
+
+    it('applies env interruption_delay_ms in explicit mode (byte-identical without it)', () => {
+      const withoutEnv = buildInitialSessionUpdate(cfg(), 'explicit');
+      const withEnv = buildInitialSessionUpdate(cfg({ env_interruption_delay_ms: 200 }), 'explicit');
+      const withoutTd = (withoutEnv.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+      const withTd = (withEnv.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+      expect(withoutTd).not.toHaveProperty('interruption_delay');
+      expect(withTd).toHaveProperty('interruption_delay', 200);
+    });
+
+    it('applies all three env vars when all are set in explicit mode', () => {
+      const msg = buildInitialSessionUpdate(cfg({
+        env_min_silence_ms: 1500,
+        env_max_silence_ms: 4000,
+        env_interruption_delay_ms: 200,
+      }), 'explicit');
+      const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+      expect(turnDetection).toEqual({
+        vad_threshold: 0.5,
+        interrupt_response: true,
+        min_silence: 1500,
+        max_silence: 4000,
+        interruption_delay: 200,
+      });
+    });
+
+    it('allows cfg.turn_detection overrides to override env defaults in explicit mode', () => {
+      const msg = buildInitialSessionUpdate(cfg({
+        env_min_silence_ms: 1500,
+        turn_detection: { min_silence: 2000 },
+      }), 'explicit');
+      const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+      expect(turnDetection.min_silence).toBe(2000);
+    });
+
+    it('has no effect on env vars when mode is omit (byte-identical to no env vars)', () => {
+      const withoutEnv = buildInitialSessionUpdate(cfg(), 'omit');
+      const withEnv = buildInitialSessionUpdate(cfg({
+        env_min_silence_ms: 1500,
+        env_max_silence_ms: 4000,
+        env_interruption_delay_ms: 200,
+      }), 'omit');
+      expect(withoutEnv.session.input).toEqual(withEnv.session.input);
+    });
+
+    it('still allows caller cfg.turn_detection overrides in omit mode even when env vars are present', () => {
+      const msg = buildInitialSessionUpdate(cfg({
+        env_min_silence_ms: 1500,
+        turn_detection: { min_silence: 2000 },
+      }), 'omit');
+      const input = msg.session.input as Record<string, unknown>;
+      const turnDetection = input.turn_detection as Record<string, unknown> | undefined;
+      expect(turnDetection).toEqual({ min_silence: 2000 });
+    });
+
+    it('combines env vars with cfg.turn_detection overrides correctly in explicit mode', () => {
+      const msg = buildInitialSessionUpdate(cfg({
+        env_min_silence_ms: 1500,
+        env_max_silence_ms: 4000,
+        turn_detection: { max_silence: 5000, vad_threshold: 0.7 },
+      }), 'explicit');
+      const turnDetection = (msg.session.input as { turn_detection: Record<string, unknown> }).turn_detection;
+      expect(turnDetection).toEqual({
+        vad_threshold: 0.7,
+        interrupt_response: true,
+        min_silence: 1500,
+        max_silence: 5000,
+      });
+    });
+  });
 });
 
 // Bug fix (2026-09-03, founder-observed live run): `index.ts` sends `LIVE_SESSION_TOOLS`
@@ -292,6 +383,145 @@ describe('loadAaiEnvDefaults', () => {
     expect(loadAaiEnvDefaults({ COUNTERSIGN_TURN_DETECTION: 'explicit' })).toEqual({
       voice: DEFAULT_VOICE,
       turn_detection_mode: 'explicit',
+    });
+  });
+
+  // TURN-DETECTION-ENV-VARS (2026-09-22): min_silence_ms, max_silence_ms, interruption_delay_ms
+  describe('turn_detection env vars (MIN_SILENCE_MS, MAX_SILENCE_MS, INTERRUPTION_DELAY_MS)', () => {
+    it('reads all three env vars when set to valid values', () => {
+      expect(loadAaiEnvDefaults({
+        COUNTERSIGN_MIN_SILENCE_MS: '1500',
+        COUNTERSIGN_MAX_SILENCE_MS: '4000',
+        COUNTERSIGN_INTERRUPTION_DELAY_MS: '200',
+      })).toEqual({
+        voice: DEFAULT_VOICE,
+        turn_detection_mode: 'omit',
+        min_silence_ms: 1500,
+        max_silence_ms: 4000,
+        interruption_delay_ms: 200,
+      });
+    });
+
+    it('ignores min_silence_ms when malformed (non-numeric)', () => {
+      expect(loadAaiEnvDefaults({ COUNTERSIGN_MIN_SILENCE_MS: 'abc' })).toEqual({
+        voice: DEFAULT_VOICE,
+        turn_detection_mode: 'omit',
+      });
+    });
+
+    it('ignores max_silence_ms when malformed (non-numeric)', () => {
+      expect(loadAaiEnvDefaults({ COUNTERSIGN_MAX_SILENCE_MS: 'xyz' })).toEqual({
+        voice: DEFAULT_VOICE,
+        turn_detection_mode: 'omit',
+      });
+    });
+
+    it('ignores interruption_delay_ms when malformed (non-numeric)', () => {
+      expect(loadAaiEnvDefaults({ COUNTERSIGN_INTERRUPTION_DELAY_MS: 'not-a-number' })).toEqual({
+        voice: DEFAULT_VOICE,
+        turn_detection_mode: 'omit',
+      });
+    });
+
+    it('ignores min_silence_ms when negative', () => {
+      expect(loadAaiEnvDefaults({ COUNTERSIGN_MIN_SILENCE_MS: '-500' })).toEqual({
+        voice: DEFAULT_VOICE,
+        turn_detection_mode: 'omit',
+      });
+    });
+
+    it('ignores max_silence_ms when negative', () => {
+      expect(loadAaiEnvDefaults({ COUNTERSIGN_MAX_SILENCE_MS: '-1000' })).toEqual({
+        voice: DEFAULT_VOICE,
+        turn_detection_mode: 'omit',
+      });
+    });
+
+    it('ignores interruption_delay_ms when negative', () => {
+      expect(loadAaiEnvDefaults({ COUNTERSIGN_INTERRUPTION_DELAY_MS: '-100' })).toEqual({
+        voice: DEFAULT_VOICE,
+        turn_detection_mode: 'omit',
+      });
+    });
+
+    it('ignores min_silence_ms when zero', () => {
+      expect(loadAaiEnvDefaults({ COUNTERSIGN_MIN_SILENCE_MS: '0' })).toEqual({
+        voice: DEFAULT_VOICE,
+        turn_detection_mode: 'omit',
+      });
+    });
+
+    it('ignores max_silence_ms when zero', () => {
+      expect(loadAaiEnvDefaults({ COUNTERSIGN_MAX_SILENCE_MS: '0' })).toEqual({
+        voice: DEFAULT_VOICE,
+        turn_detection_mode: 'omit',
+      });
+    });
+
+    it('ignores interruption_delay_ms when zero', () => {
+      expect(loadAaiEnvDefaults({ COUNTERSIGN_INTERRUPTION_DELAY_MS: '0' })).toEqual({
+        voice: DEFAULT_VOICE,
+        turn_detection_mode: 'omit',
+      });
+    });
+
+    it('ignores min_silence_ms when exceeds upper bound (10000)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(loadAaiEnvDefaults({ COUNTERSIGN_MIN_SILENCE_MS: '99999' })).toEqual({
+        voice: DEFAULT_VOICE,
+        turn_detection_mode: 'omit',
+      });
+      expect(warn).toHaveBeenCalledWith('countersign: env value "99999" exceeds max 10000 -- ignored');
+      warn.mockRestore();
+    });
+
+    it('ignores max_silence_ms when exceeds upper bound (10000)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(loadAaiEnvDefaults({ COUNTERSIGN_MAX_SILENCE_MS: '11000' })).toEqual({
+        voice: DEFAULT_VOICE,
+        turn_detection_mode: 'omit',
+      });
+      expect(warn).toHaveBeenCalledWith('countersign: env value "11000" exceeds max 10000 -- ignored');
+      warn.mockRestore();
+    });
+
+    it('ignores interruption_delay_ms when exceeds upper bound (1000)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(loadAaiEnvDefaults({ COUNTERSIGN_INTERRUPTION_DELAY_MS: '2000' })).toEqual({
+        voice: DEFAULT_VOICE,
+        turn_detection_mode: 'omit',
+      });
+      expect(warn).toHaveBeenCalledWith('countersign: env value "2000" exceeds max 1000 -- ignored');
+      warn.mockRestore();
+    });
+
+    it('warns when mode is omit and any of the three env vars are set', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      loadAaiEnvDefaults({
+        COUNTERSIGN_TURN_DETECTION: 'omit',
+        COUNTERSIGN_MIN_SILENCE_MS: '1500',
+      });
+      expect(warn).toHaveBeenCalledWith(
+        'countersign: COUNTERSIGN_MIN_SILENCE_MS/COUNTERSIGN_MAX_SILENCE_MS/COUNTERSIGN_INTERRUPTION_DELAY_MS are ignored because COUNTERSIGN_TURN_DETECTION is not \'explicit\'.'
+      );
+      warn.mockRestore();
+    });
+
+    it('does not warn when mode is explicit and the env vars are set', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      loadAaiEnvDefaults({
+        COUNTERSIGN_TURN_DETECTION: 'explicit',
+        COUNTERSIGN_MIN_SILENCE_MS: '1500',
+      });
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it('does not warn when no env vars are set, regardless of mode', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      loadAaiEnvDefaults({ COUNTERSIGN_TURN_DETECTION: 'omit' });
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
     });
   });
 });
