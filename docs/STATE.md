@@ -51,9 +51,10 @@ enters the repo.
    3-run check (cases 1, 2, 3) so the line and the capture path are proven that day. Fetch
    his records via /api/admin/sessions (token in .env), never ask for codes.
 2. Fix only what his session finds. Then code freeze Tuesday night if clean.
-3. Wednesday: README final pass, docs/PREFLIP_CHECKLIST.md dry run (add: whole-word grep for
-   the employer name and "CISO" across tracked files and history, excluding docs/design),
-   record the video (>= 2:20 live agent).
+3. Wednesday: README final pass, docs/PREFLIP_CHECKLIST.md dry run (the private-reference
+   grep runs whole-word across tracked files and history, excluding docs/design),
+   record the video (>= 2:20 live agent). The private-reference search terms live in the
+   orchestrator's local memory, never here.
 4. Thursday: judge-sim on the full package, submit; Friday to Sep 30 is buffer.
 5. Residuals held, count before fixing: TALK-OVER-AFTER-TRAP-CORRECTION (grader talk_over=1 on
    both 10 PM calls, verdicts right), BARGE-IN-FLUSH-LAG (376 ms), MIC-TRACK-SETTINGS-NOT-

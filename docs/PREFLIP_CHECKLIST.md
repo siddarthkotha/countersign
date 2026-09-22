@@ -58,6 +58,17 @@ BEFORE the submission form is filed. Every box below gets checked, with evidence
       Countersign's own property. Percentage claims (74.6%/0% in both README.md and
       SUBMISSION-DRAFT.md) already carry a labelled source (APort Vault CTF, 879
       attempts) — compliant, no unmeasured numbers found. No "sub-second" anywhere.
+- [x] **Dry run 2026-09-21 10:50 PM CDT (read-only re-checks on 8316ca3):** secrets-shaped
+      grep over tracked files (excluding docs/design and tests) returned only the env-var
+      name `COUNTERSIGN_ADMIN_TOKEN` in docs/STATE.md, no values; `git ls-files` shows only
+      `.env.example`, never `.env`; claims grep for sub-second/immutable/sealed/deepfake in
+      README.md and packages/web/src returned only the attributed patent quotation
+      (README.md:236) and self-policing code comments; `npm audit --omit=dev` 0
+      vulnerabilities; private-reference whole-word grep across tracked files and full
+      history for the founder's employer returned zero hits (search terms kept in the
+      orchestrator's local memory, never in this repo; one stray checklist word found in
+      docs/STATE.md and removed the same night). STILL OPEN from 2026-09-11: the
+      `.claude/hooks/*.sh` and `CLAUDE.md` "ported from" comments (founder edits).
 - [ ] **Flip:** `gh repo edit siddarthkotha/countersign --visibility public`, then verify
       logged-out access to the repo, the README rendering, and the demo URL end-to-end.
       Needs founder: this is the founder's own visibility-flip action; not touched here.
