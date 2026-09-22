@@ -1,6 +1,6 @@
 # Countersign, session snapshot (overwritten at every close; never appended)
 
-Last close: Monday 2026-09-21, 10:35 PM CDT (Day 12, which ran 8:39 AM to 10:35 PM with a
+Last close: Monday 2026-09-21, 11:20 PM CDT (autopilot night run after the 10:35 PM close) (Day 12, which ran 8:39 AM to 10:35 PM with a
 founder gap from about 9:45 AM to 7:36 PM). Autopilot ON throughout. No lanes in flight.
 No sandboxes on disk (worktree-cap + worktree-sweep hooks live since b62dc4b).
 
@@ -24,13 +24,16 @@ submission target; the employer service-desk arena is a separate post-Sep-30 tra
 enters the repo.
 
 ## PROVEN at this close
-- Live: https://countersign-bf8q.onrender.com UP, /health 200, /version 8316ca3 (10:30 PM).
+- Live: https://countersign-bf8q.onrender.com UP, /health 200, /version 6bc7ea1 (11:20 PM; product code
+  unchanged since 8316ca3, the later commits are docs and harness only).
 - Gate on main at 8316ca3 (run 10:24 PM on this tree): typecheck clean, 2387/2387 tests on
   121 files, web build clean.
 - Founder calls today (records copied to scripts/rehearse/reports/2026-09-21-founder-*):
   case 11 STAGE (5af4583c), case 7 ESCALATE (b674e6e8), case 5 failed on deploy 60
   (d27536a0) and on d813717 (b8114756), case 5 STAGE on 5c5d7c1 (163fef3a), plus aec29b64
   ESCALATE from the no-card trap. Mic rms 0.05 to 0.17 every second he spoke on 5c5d7c1.
+- Night batch on 8316ca3 (10:43 to 10:56 PM): 10/10 verdicts correct, 8/10 clean on every
+  experience count; the two grader hits are held AssemblyAI-side classes on the board.
 - Harness on today's deploys: corrected-critical-field, barge-in-interrupt,
   hangup-after-request, barge-in-pause-after-name, barge-in-talk-through-question all PASS
   with repeated_question 0 (one run each; the 8:31 PM FAIL was a mid-call redeploy).
@@ -74,6 +77,6 @@ GET /api/session/<id>/diagnostics. Keep the lid open (caffeinate -i wraps batche
 
 ## Next session
 "Day 13 resume: read docs/STATE.md, then the tail of docs/AUTOPILOT_LOG.md from the
-2026-09-21 8:35 PM entry. Live is 8316ca3. First: confirm /health and /version, run a 3-run
+2026-09-21 8:35 PM entry. Live is 6bc7ea1 (product = 8316ca3). First: confirm /health and /version, run a 3-run
 check on dana-patient, miller-patient, judge-out-of-scope, then hand the founder the script
 for cases 1, 2, 3 and 5. No full batch before that. Freeze holds: fix only what he finds."
