@@ -354,6 +354,31 @@ export default function Call({ session, onStartOver, onWatch }: CallProps) {
         addRecentCall(session.session_id, screenState?.verdict ?? null);
         flushDiagnosticsFetch();
       });
+
+      // Mic level monitoring: record RMS and peak levels every 250ms (but cap at 4 events/sec).
+      // Also record track settings on the first call.
+      let lastLevelEventTime = 0;
+      let levelEventCount = 0;
+      const levelMonitorStartTime = performance.now();
+      const TEN_MINUTES_MS = 10 * 60 * 1000;
+
+      client.onLevel((tMs, rms, peak, trackSettings) => {
+        const now = performance.now();
+
+        // Record track settings on first level event (trackSettings is only provided once)
+        if (trackSettings) {
+          recordEvent('mic_track_settings', trackSettings);
+        }
+
+        // Cap at 4 events per second (250ms minimum between events)
+        // and stop recording after 10 minutes
+        if (now - lastLevelEventTime >= 250 && now - levelMonitorStartTime < TEN_MINUTES_MS) {
+          recordEvent('mic_level', { rms, peak });
+          lastLevelEventTime = now;
+          levelEventCount++;
+        }
+      });
+
       clientRef.current = client;
       client.send({ type: 'start' });
       setLink('live');

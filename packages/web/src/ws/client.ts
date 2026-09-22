@@ -5,7 +5,7 @@
 // send audio, playback <- audio frames, flush -> playback.flush() (the barge-in mechanism,
 // BRIEF engineering law a). This file computes nothing about verdicts; it only relays.
 import type { BrowserEvent, ScreenState, ServerEvent } from '@countersign/engine';
-import { startCapture, type CaptureHandle } from '../audio/capture';
+import { startCapture, type CaptureHandle, type MicLevelCallback } from '../audio/capture';
 import { createPlayback, type PlaybackHandle } from '../audio/playback';
 import type { LinkPost } from './worker';
 
@@ -33,6 +33,10 @@ export interface CallClient {
    *  AAI-leg `ServerEvent`, which never carries that field) -- purely additive, existing
    *  callers that only read the first two arguments are unaffected. */
   onLink(cb: (leg: 'browser' | 'aai', state: 'lost' | 'restored', dropped_frames?: number) => void): void;
+  /** Microphone level monitoring: called roughly every 250ms with RMS and peak levels
+   *  (0-1, normalized by full-scale amplitude). Only available on the live-call side
+   *  (connect()), not Replay (connectSocketOnly). Optional multicast listener. */
+  onLevel(cb: MicLevelCallback): void;
   close(): void;
 }
 
@@ -58,6 +62,8 @@ export function connectSocketOnly(ws_path: string, workerFactory: WorkerFactory 
   const flushCbs: (() => void)[] = [];
   let endedCb: ((reason: string) => void) | null = null;
   let linkCb: ((leg: 'browser' | 'aai', state: 'lost' | 'restored', dropped_frames?: number) => void) | null = null;
+  // Mic level callbacks (will be populated by connect(), ignored by Replay/connectSocketOnly)
+  const levelCbs: MicLevelCallback[] = [];
 
   // IMPORTANT 2 (final review): the worker posts either an ordinary `ServerEvent` (relayed
   // verbatim from the server -- a `link` one carries `leg:'aai'` for an AAI-transport drop)
@@ -96,6 +102,9 @@ export function connectSocketOnly(ws_path: string, workerFactory: WorkerFactory 
     onLink(cb) {
       linkCb = cb;
     },
+    onLevel(cb) {
+      levelCbs.push(cb);
+    },
     close() {
       worker.postMessage({ type: 'end' } satisfies BrowserEvent);
       worker.terminate();
@@ -117,12 +126,27 @@ export async function connect(
   client.onAudio((data) => playback.push(data));
   client.onFlush(() => playback.flush());
 
-  const capture = await startCapture((base64) => {
-    client.send({ type: 'audio', data: base64 });
-  });
+  // Mic level monitoring: create a multicast array for level callbacks.
+  // This will be populated via client.onLevel and invoked by startCapture.
+  const levelCallbacks: MicLevelCallback[] = [];
+
+  const capture = await startCapture(
+    (base64) => {
+      client.send({ type: 'audio', data: base64 });
+    },
+    (tMs, rms, peak) => {
+      for (const cb of levelCallbacks) {
+        cb(tMs, rms, peak);
+      }
+    },
+  );
 
   return {
     ...client,
+    // Override onLevel to use our levelCallbacks array instead of the one in connectSocketOnly
+    onLevel(cb: MicLevelCallback) {
+      levelCallbacks.push(cb);
+    },
     capture,
     playback,
     close() {

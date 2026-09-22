@@ -41,7 +41,7 @@ describe('MicCheck', () => {
 
     expect(await screen.findByText('PASSED: Microphone ready (USB Microphone).')).toBeInTheDocument();
     expect(getUserMedia).toHaveBeenCalledWith({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: true }
     });
     expect(stop).toHaveBeenCalled();
     expect(onResult).toHaveBeenCalledWith({ ok: true, reason: 'passed', deviceLabel: 'USB Microphone' });

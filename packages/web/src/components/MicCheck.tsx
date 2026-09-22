@@ -109,9 +109,11 @@ export default function MicCheck({ onResult, timeoutMs }: MicCheckProps) {
     await peekPermissionState();
 
     try {
+      // https://www.assemblyai.com/docs/voice-agents/voice-agent-api/browser-integration
+      // "Ask for the microphone with echoCancellation on and noiseSuppression off" (2026-09-21)
       const stream = await withTimeout(
         navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+          audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: true }
         }),
         effectiveTimeoutMs
       );

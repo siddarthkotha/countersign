@@ -100,6 +100,9 @@ function makeFakeClient() {
     onLink(cb: (leg: 'browser' | 'aai', state: 'lost' | 'restored', dropped_frames?: number) => void) {
       linkCb = cb;
     },
+    onLevel() {
+      // Not exercised here.
+    },
     close,
     capture: { stop: vi.fn() },
     playback: { flush: vi.fn(), push: vi.fn(), level: vi.fn(), close: vi.fn(), underrunCount },

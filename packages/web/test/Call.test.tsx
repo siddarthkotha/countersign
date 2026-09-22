@@ -69,6 +69,7 @@ function makeFakeClient() {
   // registration silently clobber the first and hide a real regression.
   const flushCbs: (() => void)[] = [];
   let linkCb: ((leg: 'browser' | 'aai', state: 'lost' | 'restored', dropped_frames?: number) => void) | null = null;
+  const levelCbs: ((tMs: number, rms: number, peak: number, trackSettings?: Record<string, unknown>) => void)[] = [];
   const playbackFlush = vi.fn();
   const send = vi.fn<(e: BrowserEvent) => void>();
   const close = vi.fn();
@@ -89,6 +90,9 @@ function makeFakeClient() {
     },
     onLink(cb: (leg: 'browser' | 'aai', state: 'lost' | 'restored', dropped_frames?: number) => void) {
       linkCb = cb;
+    },
+    onLevel(cb: (tMs: number, rms: number, peak: number, trackSettings?: Record<string, unknown>) => void) {
+      levelCbs.push(cb);
     },
     close,
     capture: { stop: vi.fn() },

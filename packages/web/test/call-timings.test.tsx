@@ -85,6 +85,9 @@ function makeFakeClient() {
     onLink() {
       // Not exercised here.
     },
+    onLevel() {
+      // Not exercised here.
+    },
     close,
     capture: { stop: vi.fn() },
     playback: { flush: vi.fn(), push: vi.fn(), level: vi.fn(), close: vi.fn() },
