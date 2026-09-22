@@ -702,3 +702,28 @@ server-side confirmation/retry logic, not new AssemblyAI wire behavior):**
   `AUTOMATIC_REPLY_SETTLE_MS` (150ms) -- PROVEN live gaps for an AssemblyAI automatic reply are
   8-63ms, comfortably inside that 150ms window, so waiting handed it the slot on deploy 58's
   own identity-switch bundle (`goodbye_delay` 25.6s).
+
+
+## VERIFY-AT-BUILD re-check 2026-09-21 (browser microphone constraints, turn_detection fields)
+
+Quoted by the docs errand on 2026-09-21 9:35 PM CDT (haiku, read-only) from the live docs:
+
+- Browser integration (https://www.assemblyai.com/docs/voice-agents/voice-agent-api/browser-integration):
+  "Ask for the microphone with echoCancellation on and noiseSuppression off." Also: browsers' built-in
+  acoustic echo cancellation lets the agent "work hands-free without headphones", and a non-default-rate
+  AudioContext "bypasses Firefox's echo canceller entirely". Our capture.ts and MicCheck.tsx requested
+  noiseSuppression: true until this date (a miss against this page); flipped off in the lane opened tonight.
+- Session configuration (https://www.assemblyai.com/docs/voice-agents/voice-agent-api/session-configuration):
+  turn_detection fields: vad_threshold (0-1, default 0.5), min_silence (ms, default 1000, "Minimum quiet
+  period before ending user turn"), max_silence (ms, default 3000), interrupt_response (boolean),
+  interruption_delay (0-1000 ms, "Delay before processing interruption"). The 1000 ms default explains the
+  founder's name-only turn: a one-second pause after "corporate treasury" ends the turn.
+- Turn detection and interruptions (https://www.assemblyai.com/docs/voice-agents/voice-agent-api/turn-detection-and-interruptions):
+  interruption is semantic, not energy-based ("Back-channels like uh-huh or makes sense don't interrupt;
+  wait, stop does"); an interrupted reply's transcript is "trimmed to what the user actually heard".
+  Whether caller audio overlapping the agent's reply is transcribed is NOT documented (UNKNOWN; the
+  barge-in-talk-through-question scenario measures it).
+- Events reference (https://www.assemblyai.com/docs/voice-agents/voice-agent-api/events-reference):
+  input.speech.started = "Turn detection determined the user has started speaking";
+  input.speech.stopped = the reverse; documented order input.speech.started -> transcript.user.delta ->
+  input.speech.stopped -> transcript.user -> reply.started.

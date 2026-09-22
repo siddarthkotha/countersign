@@ -3524,6 +3524,31 @@
       "agent_id": "",
       "note": "",
       "priority": "P2"
+    },
+    {
+      "id": "CALLER-SPEECH-LOST-DURING-AGENT-REPLY",
+      "title": "live (founder calls d27536a0 7:42 PM, b8114756 9:31 PM, 2026-09-21): after a name-only turn the caller kept talking through 'What do you need today?'; server saw no caller speech for ~6 s (6.7 to 13.0 s), only the tail arrived; amount/beneficiary unknown; legitimate re-ask",
+      "files": [
+        "packages/web/src/audio/capture.ts",
+        "packages/web/src/components/MicCheck.tsx"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "a030c31bd26e514c6",
+      "note": "lane: mic_level trace + noiseSuppression off per AssemblyAI browser-integration docs; founder tests pending (headset vs speakers; wait vs talk-through); harness scenario barge-in-talk-through-question isolates the AAI side",
+      "priority": "P0"
+    },
+    {
+      "id": "NOISE-SUPPRESSION-VS-DOCS",
+      "title": "VERIFY-AT-BUILD miss: AssemblyAI browser-integration docs say echoCancellation on, noiseSuppression OFF; capture.ts and MicCheck.tsx request noiseSuppression true",
+      "files": [
+        "packages/web/src/audio/capture.ts"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "a030c31bd26e514c6",
+      "note": "quoted 2026-09-21 by the docs errand from https://www.assemblyai.com/docs/voice-agents/voice-agent-api/browser-integration",
+      "priority": "P0"
     }
   ]
 }
