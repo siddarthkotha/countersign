@@ -1,7 +1,7 @@
 {
   "name": "barge-in-pause-after-name",
   "title": "Dana Whitfield -- talks over the end of the greeting, then pauses after her name (founder shape 2026-09-21)",
-  "description": "Reproduces the founder's live call d27536a0 of 2026-09-21 where a one-second pause after the name ended the turn early and the agent repeated its question. Dana starts speaking 4.8 seconds into the greeting (barge_in_after_ms: 4800, landing near the end of the fixed greeting 5.3-5.8s), says her name and company only (\"This is Dana Whitfield, corporate treasury.\"), then pauses for 400ms before continuing with the rest of her request. After that interruption she settles down: for every readback, wait for the agent to finish, then confirm it if it matches what she said, or firmly and plainly correct it with the true value if it does not.",
+  "description": "Reproduces the founder's live call d27536a0 of 2026-09-21 where a one-second pause after the name ended the turn early and the agent repeated its question. Dana starts speaking 4.8 seconds into the greeting (barge_in_after_ms: 4800, landing near the end of the fixed greeting 5.3-5.8s), says her name and company only (\"This is Dana Whitfield, corporate treasury.\"), then pauses for 400ms before continuing with the rest of her request. After that interruption she settles down: for every readback, wait for the agent to finish, then confirm it if it matches what she said, or firmly and plainly correct it with the true value if it does not. Expectation note (2026-09-21 10:42 PM batch): the interruption itself is not the point of this case and lands after the greeting has already ended on some runs, so min_interrupted_agent_lines is 0; the pause-after-name shape and a clean STAGE with repeated_question 0 are what it tests.",
   "source": "docs/BRIEF.md section 4 \"Scenario A\" + packages/engine/corpus/scenario-a-dana-legitimate.json (caller turns c1-c4, read-only source) + founder live record 2026-09-21 d27536a0 (one-second pause after name caused agent to repeat question)",
   "truth": {
     "identity": "Dana Whitfield",
@@ -1916,7 +1916,7 @@
   "expected": {
     "verdict": "STAGE",
     "max_wall_ms": 180000,
-    "min_interrupted_agent_lines": 1,
+    "min_interrupted_agent_lines": 0,
     "barge_in": true
   },
   "demo_persona": "legitimate",

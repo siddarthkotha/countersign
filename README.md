@@ -10,10 +10,29 @@ answers first. It conducts a calm, adaptive spoken interrogation (challenge ques
 cross-turn consistency probes, independent verification checks outside the current call) while a
 deterministic policy engine (never the LLM) computes the verdict from structured evidence. Verified requests are only ever
 **staged** for independent human second approval. Failed requests are frozen, an incident is
-opened, and a tamper-evident evidence record seals every claim, check, and decision.
+opened, and a hash-chained evidence export records every claim, check, and decision.
 
 Built solo, AI-assisted, on the AssemblyAI Voice Agent API for the AssemblyAI Voice Agent
 Hackathon (lablab.ai, September 1–30, 2026).
+
+## Try it in 30 seconds
+
+Live demo: https://countersign-bf8q.onrender.com. Desktop Chrome with a microphone, laptop
+speakers are fine. Pick one of the two role cards, an honest treasury manager or a caller
+claiming to be the CEO, click "Try to break it", then "Start Call", and talk. The card you
+picked is named on the call screen. Use your own words; the scenario cheat-sheet with every
+case, what to say, and what you should hear is [docs/PLAY-SHEET.md](docs/PLAY-SHEET.md). No
+microphone? "Watch a recorded attack" drives the full screen from a recorded call. Everyone
+and everything in the demo is synthetic; see Disclosure below.
+
+**How it is built, in one paragraph.** The browser captures your voice and plays the agent's
+replies. A small Node server mints a short-lived token, relays audio to and from the
+AssemblyAI Voice Agent API, and feeds every exact transcript line into a pure, dependency-free
+policy engine. That engine, a finite-state rule table, computes the verdict from structured
+evidence; the language model only phrases the conversation inside the state the engine
+allows and never decides. The server re-runs the same engine before any terminal action and
+acts only on a matching verdict. Voice can reach STAGED at most; a human second approval
+releases anything.
 
 ## Business value
 
@@ -25,26 +44,24 @@ Of those complaints, $30.3 million came from reports that referenced AI. The rep
 break out voice cloning, so Countersign makes no claim about how much of that was voice. PROVEN:
 same report, page 42, table titled AI References by Complaint Loss.
 
-On the live demo, the engine reached its verdict in 74 to 92 seconds for an honest caller across
-four rehearsals and froze the wire at 37 seconds on the fraud rehearsal. ESTIMATE: wall clock
-from socket connect to verdict on the deployed site, Sep 9 and Sep 11 2026, four honest runs and
-one fraud run; rehearsal reports are kept locally and are not in the repo.
+On the deployed demo, socket connect to terminal verdict takes p50 83.1 s and p95 170.8 s
+across 282 live rehearsal runs of every scenario (honest caller cases p50 80.3 s over 38 runs,
+CEO impostor cases p50 46.7 s over 41 runs). PROVEN: docs/LATENCY.md section 4, computed by
+`scripts/rehearse/latencyMath.ts` from the runs' own event timestamps, 2026-09-09 to
+2026-09-22.
 
 ## Status
 
-Countersign is built and deployed. PROVEN by `GET /health` on the live demo at
-https://countersign-bf8q.onrender.com (curl at 8:05 PM CDT, 2026-09-09): the live site serves
-commit `9e64bc5` and reports healthy. PROVEN by two consecutive runs of the honest-caller path
-(Scenario A) on the deployed site with zero resets, reaching STAGE at 73.8 s and 91.5 s
-(rehearsal reports `scripts/rehearse/reports/2026-09-09T20-02-51` and `2026-09-09T20-04-50`,
-gitignored, named here as the source). The fraud path (Scenario B, FREEZE) was proven live tonight against this same deployed
-commit at 57.4 s (report
-`scripts/rehearse/reports/2026-09-09T20-06-19-scenario-b-miller-fraud.md`). Both paths are
-now proven live on one commit. PROVEN by `npm test` on
-commit `1c47e13`: 1,077 tests pass across 71 files, typecheck is clean, and all 19 recorded call
-transcripts replay exactly through the real policy engine. The five-day honest-caller failure
-was a harness bug: the scenario loader dropped the persona field, fixed 2026-09-09 at commit
-`75e31df`. The policy engine itself was never wrong.
+Countersign is built and deployed. PROVEN by `GET /health` and `GET /version` on the live demo
+at https://countersign-bf8q.onrender.com (2026-09-21, 10:30 PM CDT): the live site serves
+commit `8316ca3` and reports healthy. PROVEN by `npm test` on that commit: 2,387 tests pass
+across 121 files, typecheck is clean, the web bundle builds, and all 42 recorded call
+transcripts in `packages/engine/corpus/` replay exactly through the real policy engine. Every
+one of the eleven judge cases in docs/PLAY-SHEET.md has passed live on the deployed site
+through the synthetic-caller harness, and the founder has played cases 5, 7 and 11 live with
+his own voice on 2026-09-21 (records kept locally, gitignored). The harness grades each live
+call on experience as well as verdict: repeated questions, merged replies, the agent talking
+over the caller, holding-line spam, and the delay from verdict to spoken goodbye.
 
 ## How Countersign uses the AssemblyAI Voice Agent API
 
@@ -195,18 +212,18 @@ flipped and reports which flips would change the verdict. Nothing here is simula
 from the real engine.
 
 **Replay guarantee:** the same inputs always produce the same verdict. `packages/engine/corpus/`
-holds 19 recorded transcripts replayed through this real engine on every test run
+holds 42 recorded transcripts replayed through this real engine on every test run
 (`test/corpus.test.ts`). Every rule-table row and invariant is also exercised directly, one
 scenario at a time, in `test/rules.test.ts`. On top of that, mutation tests
 (`test/mutants.test.ts`) deliberately break four specific rule mechanics: the readback gate
 (row 5), the freeze AND-vs-OR logic (row 8a), contradiction-triggered freeze (row 8b), and the
-exposure/structuring check (row 9). One at a time, it replays the full 18-transcript corpus
+exposure/structuring check (row 9). One at a time, it replays the full corpus
 under each break to prove those mechanics are load-bearing, not decorative. See "Replay the
 corpus" below.
 
 ## Replay the corpus
 
-`packages/engine/corpus/*.json` holds 19 transcripts replayed through the real engine every
+`packages/engine/corpus/*.json` holds 42 transcripts replayed through the real engine every
 test run (`test/corpus.test.ts`), and every rule mutant breaks at least one of them
 (`test/mutants.test.ts`). This is G3's evidence that the rulebook is load-bearing, not decorative.
 Inspect any file judge-legibly:
@@ -247,14 +264,19 @@ in this repository.
 
 ---
 
-*README structure (video, live demo, "why voice", architecture, deny conditions, evidence
-format, adversarial corpus, measured latency, setup) fills in as the build progresses.*
+## Measured latency (live AssemblyAI Voice Agent API, deployed site)
 
-## Measured latency (live AssemblyAI Voice Agent API, from the real stack)
+All rows are measured on the deployed demo across every scenario, 2026-09-09 to 2026-09-22,
+from the runs' own event timestamps. p50 and p95 use linear interpolation over the sorted
+sample; `n` is the exact sample size. Source and per-scenario breakdown: docs/LATENCY.md.
 
-| Date (CDT) | Runs | Connect → session.ready | session.ready → first reply audio | Notes |
+| What is measured | n | p50 | p95 | Label |
 |---|---|---|---|---|
-| 2026-09-02 11:13 AM | 1 | 995 ms | 221 ms | `npm run smoke:live` from the founder's Mac in Austin; single run, no percentiles yet. median and 95th percentile response times over 50+ rehearsals land in week 3 (gate G5). |
-| 2026-09-02 11:49 AM | 1 | 1740 ms | 76 ms | Same script, second run; voices endpoint returned 426 (fallback to `anna` worked). |
+| Perceived response: caller stops speaking to agent's first reply audio | 1,565 turns | 631 ms | 1,838 ms | ESTIMATE (harness wall clock; the synthetic caller is not a human) |
+| Socket connect to AssemblyAI session ready | 313 runs | 401 ms | 648 ms | PROVEN |
+| Session ready to first greeting audio | 316 runs | 175 ms | 200 ms | PROVEN |
+| Socket connect to terminal verdict | 282 runs | 83.1 s | 170.8 s | PROVEN |
+| Verdict to the call ending on its own | 282 runs | 11.5 s | 34.5 s | PROVEN |
 
-Method: `packages/server/scripts/smoke-live.ts` mints a token, opens the socket, sends `session.update`, times `session.ready`, then times the first `reply.audio` after the greeting. Opt-in only (`--live` + `ASSEMBLYAI_API_KEY`); never runs in CI.
+Never rounded into a qualitative claim: this README does not say "sub-second" anywhere,
+because the p95 is not.

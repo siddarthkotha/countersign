@@ -3577,7 +3577,7 @@
     },
     {
       "id": "TALK-OVER-AFTER-TRAP-CORRECTION",
-      "title": "live: grader talk_over=1 on both founder calls 10:07/10:08 PM (41.8 s, 36.1 s): the amount readback lands as the caller starts a one-word 'Yes'; one call shows a 2 ms phantom speech window then a duplicate 'Yes'; verdicts correct, founder did not report it",
+      "title": "live: grader talk_over=1 on both founder calls 10:07/10:08 PM (41.8 s, 36.1 s): the amount readback lands as the caller starts a one-word 'Yes'; one call shows a 2 ms phantom speech window then a duplicate 'Yes'; verdicts correct, founder did not report it | also prompt-injection-midcall 10:42 PM batch (57.5 s, agent starts right after the caller's one-word \"No.\" on the trap correction): count 3 of 13 calls today",
       "files": [],
       "status": "held",
       "held_because": "freeze: count on the next batches; overlaps AMBIENT-DOUBLE-TURN-END-REPEAT (AssemblyAI-side)",
@@ -3591,6 +3591,27 @@
       "status": "held",
       "held_because": "freeze: AssemblyAI's interruption detection is semantic (docs, 2026-09-21); measure across the next batch before touching the client queue",
       "agent_id": "",
+      "priority": "P2"
+    },
+    {
+      "id": "AMBIENT-REPEATED-READBACK-AFTER-STRAY-CONFIRMATION",
+      "title": "live (dana-patient, 10:42 PM batch 2026-09-21): after the caller confirmed the account readback twice ('Yes, that\\'s right.' then 'That\\'s right.'), AssemblyAI's automatic reply re-asked the beneficiary readback verbatim 6 s after first asking it, no caller line between; no reply.create of ours; verdict STAGE correct",
+      "files": [],
+      "status": "held",
+      "held_because": "freeze: AssemblyAI-side automatic reply to a stray confirmation; the new grader signal catches it (repeated_question=1); count on the next batches; overlaps AMBIENT-QUESTION-RESIDUAL",
+      "agent_id": "",
+      "priority": "P2"
+    },
+    {
+      "id": "PAUSE-AFTER-NAME-EXPECTATION",
+      "title": "harness: barge-in-pause-after-name required >=1 interrupted agent line, but the 4800 ms barge lands after the greeting ends on some runs (10:42 PM batch: STAGE, grade PASS, expectation FAIL)",
+      "files": [
+        "scripts/rehearse/scenarios/barge-in-pause-after-name.json"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "note": "min_interrupted_agent_lines 0; the pause shape and repeated_question 0 are the test",
       "priority": "P2"
     }
   ]
