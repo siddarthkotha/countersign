@@ -685,6 +685,21 @@ export class CallSession {
    *  `currentCloseSentence()` is the one place this is read; null for every ordinary
    *  (engine-driven) CLOSE. */
   private closeSentenceOverride: string | null = null;
+  /** OUT-OF-SCOPE-GOODBYE lane (2026-09-22, PROVEN live: founder call df3f9781,
+   *  2026-09-22 9:27 AM CDT -- see `maybeBeginOutOfScopeGoodbye`'s own doc comment). True
+   *  once a COMPLETED reply has actually spoken the EXPLAIN_OUT_OF_SCOPE line for this
+   *  call, checked at `reply.done` against that reply's own label
+   *  (`replyGoalAtStart.get(evt.reply_id) === 'EXPLAIN_OUT_OF_SCOPE'`). Never reset: a
+   *  call that stays out of scope keeps rendering the identical EXPLAIN_OUT_OF_SCOPE hint
+   *  (fsm.ts's OUT_OF_SCOPE branch), so there is no "goal restarted, explanation no
+   *  longer counts" case to guard against -- and a caller who DOES make a request moves
+   *  the goal to the different code EXPLAIN_OPEN_REQUEST, which
+   *  `maybeBeginOutOfScopeGoodbye`'s own goal-code check already excludes regardless of
+   *  this flag's value. */
+  private outOfScopeExplained = false;
+  /** OUT-OF-SCOPE-GOODBYE lane (2026-09-22): guards `maybeBeginOutOfScopeGoodbye` to fire
+   *  at most once per call. */
+  private outOfScopeGoodbyeSent = false;
   /** Round 4, requirement 9: `end()` only ever tries the idle-goodbye defer ONCE per call --
    *  guards against re-entering it when the deferred CLOSE machinery itself later calls
    *  `end('idle_timeout')` again to actually finish the job. */
@@ -1568,12 +1583,86 @@ export class CallSession {
    *  confirmed or the call ends, only that `closeSentenceOverride` (not an engine-rendered
    *  CLOSE goal) is what supplies the sentence to match against. */
   private beginIdleNoActionGoodbye(): void {
+    this.sendNoActionCloseGoodbye('idle_no_action_close');
+  }
+
+  /** OUT-OF-SCOPE-GOODBYE lane (2026-09-22): the actual send mechanism
+   *  `beginIdleNoActionGoodbye` used to inline directly, factored out so a SECOND trigger
+   *  (`maybeBeginOutOfScopeGoodbye`, a caller who stays out of scope past the explanation
+   *  without ever waiting for the 31s idle reaper) can reuse it verbatim while still
+   *  tagging its own `reply_create_sent` diag events with a distinct `reason` string --
+   *  the flight recorder can tell "the idle reaper caught this" from "the caller's own
+   *  next line caught this" apart. Everything below is unchanged from the idle path's
+   *  original inline body: same sentence, same `armClose`, same busy guard (an in-flight
+   *  reply's own `reply.done`/transcript is what picks this up via `scheduleCloseIfNeeded`/
+   *  `currentCloseSentence` once it settles, whichever `reason` armed it). */
+  private sendNoActionCloseGoodbye(reason: 'idle_no_action_close' | 'out_of_scope_close'): void {
     if (this.ended) return;
     this.closeSentenceOverride = 'Thank you for calling. Goodbye.';
     this.armClose();
     if (this.speaking || this.replyCreateAwaitingStart) return; // the in-flight reply's own reply.done/transcript will pick this up
     const wrapper = `Say exactly this and nothing else: "${this.closeSentenceOverride}"`;
-    this.sendReplyCreate('CLOSE', 'idle_no_action_close', wrapper);
+    this.sendReplyCreate('CLOSE', reason, wrapper);
+  }
+
+  /** OUT-OF-SCOPE-GOODBYE lane (2026-09-22, PROVEN live: founder call df3f9781, 9:27 AM
+   *  CDT, and the harness's own same-morning run,
+   *  scripts/rehearse/reports/2026-09-22T09-17-41-judge-out-of-scope.diagnostics.json):
+   *  a caller who says something like "I'm not the CEO, I'm testing this for a
+   *  hackathon" hears the demo explanation once (EXPLAIN_OUT_OF_SCOPE), then -- if they
+   *  keep talking without ever making a request -- got nothing but a bare "One moment."
+   *  automatic filler and a 2.5s `hold_followup` restatement of the SAME explanation,
+   *  repeated, until the 31s idle reaper finally invoked `beginIdleNoActionGoodbye`. Live,
+   *  the caller gave up and hung up first (61s; the harness run gave up at 33s) -- the
+   *  goodbye that DOES exist for this exact verdict/state never got a chance to fire
+   *  because nothing but idle silence ever triggered it.
+   *
+   *  This is the SAME goodbye (`sendNoActionCloseGoodbye`/`closeSentenceOverride`/
+   *  `armClose`/the existing transcript-confirmed hang-up chain), triggered earlier, from
+   *  the caller's own next turn instead of from silence. Reason string
+   *  `'out_of_scope_close'` (distinct from idle's own `'idle_no_action_close'`) so a bundle
+   *  can tell which trigger actually fired.
+   *
+   *  Called from `tick()`'s tail, once per tick, right after `maybeSendReplyCreateForTick`
+   *  has already had its own chance to speak for this tick (nothing in that method fires
+   *  for an UNCHANGED goal code, which EXPLAIN_OUT_OF_SCOPE -> EXPLAIN_OUT_OF_SCOPE always
+   *  is here, so there is nothing to race).
+   *
+   *  Conditions, all required:
+   *   (a) `callerTurnTick` -- this tick was triggered by the caller's own `transcript.user`
+   *       turn, never an ambient reply settling on its own and never the idle reaper's own
+   *       deferred `tick()` (which calls this same `tick()` but with
+   *       `tickTriggeredByCallerTurn` false -- see that field's own doc comment). Keeps
+   *       this lane and the idle lane mutually exclusive by construction: whichever fires
+   *       first (a caller line vs. 31s of silence) is the one that runs.
+   *   (b) not already ended, not already goodbye-confirmed, not already sent
+   *       (`outOfScopeGoodbyeSent`), and no goodbye already owed from ANY source
+   *       (`currentCloseSentence()` -- covers the idle path having armed this first, or a
+   *       genuinely fresh engine-rendered CLOSE, either of which must win outright rather
+   *       than being raced by a second `reply.create('CLOSE', ...)`).
+   *   (c) `outOfScopeExplained` -- the demo explanation has actually been SPOKEN in full at
+   *       least once already (a prior COMPLETED reply, set at `reply.done`) -- the
+   *       caller's very FIRST out-of-scope line still gets the ordinary explain/
+   *       hold_followup flow, unchanged; this only ever fires from the caller's line AFTER
+   *       that.
+   *   (d) the engine's OWN settled result for this tick is still verdict NO_ACTION, state
+   *       OUT_OF_SCOPE, goal EXPLAIN_OUT_OF_SCOPE (never EXPLAIN_OPEN_REQUEST -- a caller
+   *       who made a request keeps the existing hold_followup behaviour entirely
+   *       untouched; the goal CODE itself differs the moment they do, so this branch
+   *       simply stops applying rather than needing a separate check) -- also the
+   *       "never while a terminal STAGE/FREEZE/ESCALATE verdict exists" guard: any of
+   *       those verdicts fails the `verdict !== 'NO_ACTION'`/`state !== 'OUT_OF_SCOPE'`
+   *       check outright. */
+  private maybeBeginOutOfScopeGoodbye(callerTurnTick: boolean): void {
+    if (!callerTurnTick) return;
+    if (this.ended || this.goodbyeConfirmed || this.outOfScopeGoodbyeSent) return;
+    if (this.currentCloseSentence()) return; // something is already owed/in flight -- never race it
+    if (!this.outOfScopeExplained) return;
+    if (!this.last) return;
+    if (this.last.verdict !== 'NO_ACTION' || this.last.state !== 'OUT_OF_SCOPE') return;
+    if (this.last.goal.code !== 'EXPLAIN_OUT_OF_SCOPE') return;
+    this.outOfScopeGoodbyeSent = true;
+    this.sendNoActionCloseGoodbye('out_of_scope_close');
   }
 
   /** Called once, the first tick the goal becomes CLOSE (from `applyEvaluate`'s goal-changed
@@ -2877,6 +2966,16 @@ export class CallSession {
 
       case 'reply.done':
         this.speaking = false;
+        // OUT-OF-SCOPE-GOODBYE lane (2026-09-22): a COMPLETED reply labelled
+        // EXPLAIN_OUT_OF_SCOPE at its own `reply.started` (`replyGoalAtStart`, set BEFORE
+        // this event, whether this reply was ambient or instructed) is proof the demo
+        // explanation has actually been spoken in full at least once -- see
+        // `maybeBeginOutOfScopeGoodbye`'s own doc comment for why this gates that lane's
+        // condition (c). An INTERRUPTED reply never sets this: a caller who barges in
+        // mid-explanation has not actually heard it complete.
+        if (evt.status === 'completed' && this.replyGoalAtStart.get(evt.reply_id) === 'EXPLAIN_OUT_OF_SCOPE') {
+          this.outOfScopeExplained = true;
+        }
         // goodbye-tail lane, review fix (2026-09-15, Important): record that THIS reply's
         // `reply.done` has now fired, before anything below can call
         // `maybeArmCloseOnTranscript` (indirectly, via a later `transcript.agent` event) for
@@ -3627,6 +3726,11 @@ export class CallSession {
     this.runLookupsIfNeeded();
     this.runTerminalActionsIfNeeded();
     this.maybeSendReplyCreateForTick(goalAtTickStart, callerTurnTick);
+    // OUT-OF-SCOPE-GOODBYE lane (2026-09-22): after this tick's own force-speak decision
+    // above (which never fires for an unchanged goal code -- see its own doc comment for
+    // why there is nothing to race here), give a caller who has already heard the demo
+    // explanation and is still out of scope the goodbye instead of another silent hold.
+    this.maybeBeginOutOfScopeGoodbye(callerTurnTick);
     // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19): covers the `transcript.user`-
     // triggered tick (a caller turn can end with a final transcript arriving instead of, or in
     // addition to, its own `input.speech.stopped`) and is a safe no-op the rest of the time --

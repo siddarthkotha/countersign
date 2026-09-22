@@ -3622,10 +3622,10 @@
         "packages/engine/src/rules.ts",
         "scripts/rehearse/scenarios/judge-out-of-scope.json"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
       "agent_id": "",
-      "note": "P0 judge path; design after the reads",
+      "note": "P0 judge path; design after the reads | landed 2026-09-22 ~9:50 AM",
       "priority": "P0"
     },
     {
@@ -3634,10 +3634,10 @@
       "files": [
         "packages/server/src/call/questionMatch.ts"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
-      "agent_id": "a1669e82ce4f8cfe6",
-      "note": "Haiku lane: add repeat cues + tests",
+      "agent_id": "",
+      "note": "Haiku lane: add repeat cues + tests | landed 2026-09-22 ~9:50 AM",
       "priority": "P1"
     },
     {
