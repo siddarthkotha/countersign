@@ -3678,10 +3678,10 @@
         "packages/server/src/call/session.ts",
         "packages/server/src/call/prompt.ts"
       ],
-      "status": "running",
+      "status": "done",
       "held_because": "",
-      "agent_id": "a02c4c9637ed91210",
-      "note": "Sonnet lane: close_catchup on the ambient reply.done + post-explanation standing instruction so the automatic reply says the goodbye itself",
+      "agent_id": "",
+      "note": "Sonnet lane: close_catchup on the ambient reply.done + post-explanation standing instruction so the automatic reply says the goodbye itself | landed 2026-09-22 ~1:55 PM, 4 tests",
       "priority": "P0"
     },
     {

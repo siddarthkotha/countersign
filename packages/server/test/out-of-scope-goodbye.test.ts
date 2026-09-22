@@ -64,6 +64,20 @@ function outOfScopeCloseDiags(diagEvents: { kind: string; detail: unknown }[]): 
   return diagEvents.filter((e) => e.kind === 'reply_create_sent' && (e.detail as { reason?: string }).reason === 'out_of_scope_close');
 }
 
+// CLOSE-CATCHUP-ON-OVERRIDE / OUT-OF-SCOPE-GOODBYE mechanism 2 (2026-09-22) test helpers.
+function closeCatchupDiags(diagEvents: { kind: string; detail: unknown }[]): { kind: string; detail: unknown }[] {
+  return diagEvents.filter((e) => e.kind === 'reply_create_sent' && (e.detail as { reason?: string }).reason === 'close_catchup');
+}
+
+function sessionUpdatesOf(aai: FakeAaiSocket): { type?: string; session?: { system_prompt?: string } }[] {
+  return aai.sent.filter((m) => (m as { type?: string }).type === 'session.update') as {
+    type?: string;
+    session?: { system_prompt?: string };
+  }[];
+}
+
+const POST_EXPLANATION_INSTRUCTION_MARKER = 'The demo has been explained.';
+
 // The founder's own opening line and the agent's own explanation text -- both verbatim from
 // df3f9781's diagnostics.
 const OUT_OF_SCOPE_LINE = "I'm not the CEO. I'm testing this for a hackathon.";
@@ -246,5 +260,211 @@ describe('OUT-OF-SCOPE-GOODBYE lane: a caller who stays out of scope past the ex
 
     expect(goodbyeSendsOf(aai)).toHaveLength(1); // never a second send
     expect(outOfScopeCloseDiags(diagEvents)).toHaveLength(1);
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // CLOSE-CATCHUP-ON-OVERRIDE + post-explanation-instruction lane (2026-09-22, PROVEN live:
+  // founder call a845c867, 1:28 PM CDT, deployed_commit be6302887be13e25e58053d94df949c8d6e70488):
+  // mechanism 1 alone (the test above) still lost the race live -- our own out_of_scope_close
+  // reply.create landed at 26525ms, but AssemblyAI's own automatic reply for the SAME turn had
+  // already started composing under the plain (pre-explanation-aware) system_prompt and spoke a
+  // stale restatement instead ("One moment. Please select a role. Choose Dana or the caller
+  // claiming to be the CEO.", 28046ms) -- the goodbye was never heard, and the call ran out the
+  // clock on chained "One moment." replies until the caller hung up at 33s. Two independent
+  // fixes close this: (1) `scheduleCloseIfNeeded`'s new `close_catchup` fast path, which resends
+  // immediately (no CLOSE_TRANSCRIPT_WAIT_MS/CLOSE_RETRY_MIN_GAP_MS wait) the instant a
+  // COMPLETED reply's own transcript proves the override goodbye was not spoken; (2)
+  // `pushOutOfScopeGoodbyeInstruction`, which pushes a fresh system_prompt the instant the
+  // explanation is first heard, so AssemblyAI's own automatic reply has a chance to say the
+  // goodbye correctly the FIRST time, never needing the catch-up at all.
+  it("PROVEN live defect (a845c867): an ambient reply that completes WITHOUT the goodbye triggers exactly one immediate close_catchup resend, and the call ends agent_closed once the retry is heard", () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const call: CallContext = { session_id: 'sess-oos-catchup', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent, diagEvents);
+
+    session.start();
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: OUT_OF_SCOPE_LINE });
+    clock.now = 1200;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: EXPLANATION_TEXT, reply_id: 'a1', interrupted: false });
+    clock.now = 2300;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    // The caller's next line -- our own out_of_scope_close send fires, exactly as mechanism 1
+    // (the test above) already proves.
+    clock.now = 3000;
+    aai.emit({ type: 'transcript.user', item_id: 'c2', text: 'This for a hackathon.' });
+    expect(goodbyeSendsOf(aai)).toHaveLength(1);
+    expect(outOfScopeCloseDiags(diagEvents)).toHaveLength(1);
+
+    // AssemblyAI's own automatic reply for that SAME turn wins the race and speaks a stale
+    // restatement instead -- the founder's own a845c867 transcript, verbatim.
+    clock.now = 3001;
+    aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    clock.now = 4521;
+    aai.emit({
+      type: 'transcript.agent',
+      item_id: 'a2',
+      text: 'One moment. Please select a role. Choose Dana or the caller claiming to be the CEO.',
+      reply_id: 'r1',
+      interrupted: false,
+    });
+    clock.now = 4525;
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+
+    // Exactly one close_catchup resend follows, IMMEDIATELY -- no CLOSE_TRANSCRIPT_WAIT_MS
+    // (1.5s) or CLOSE_RETRY_MIN_GAP_MS (400ms) wait; `clock.now` has not advanced since 4525.
+    expect(closeCatchupDiags(diagEvents)).toHaveLength(1);
+    expect(goodbyeSendsOf(aai)).toHaveLength(2); // the original out_of_scope_close send + the catchup
+
+    // The engine's own goal/state/verdict are still untouched by the override.
+    expect(session.last?.verdict).toBe('NO_ACTION');
+    expect(session.last?.state).toBe('OUT_OF_SCOPE');
+    expect(session.last?.goal.code).toBe('EXPLAIN_OUT_OF_SCOPE');
+
+    // This time the goodbye is actually heard -- the existing transcript-confirmed hang-up
+    // machinery ends the call agent_closed.
+    clock.now = 4530;
+    aai.emit({ type: 'reply.started', reply_id: 'r2' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
+    aai.emit({ type: 'transcript.agent', item_id: 'a3', text: 'Thank you for calling. Goodbye.', reply_id: 'r2', interrupted: false });
+    clock.now = 9_700;
+    aai.emit({ type: 'reply.done', reply_id: 'r2', status: 'completed' });
+
+    expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
+    vi.advanceTimersByTime(1500);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+
+    // Never twice for the same completed reply, and never a THIRD send once the goodbye is
+    // actually confirmed.
+    expect(closeCatchupDiags(diagEvents)).toHaveLength(1);
+  });
+
+  it('mechanism 2 working: the ambient reply itself speaks the goodbye after the explanation (no close_catchup needed), and the call ends agent_closed', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const call: CallContext = { session_id: 'sess-oos-mechanism2', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent, diagEvents);
+
+    session.start();
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: OUT_OF_SCOPE_LINE });
+    clock.now = 1200;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: EXPLANATION_TEXT, reply_id: 'a1', interrupted: false });
+    clock.now = 2300;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    clock.now = 3000;
+    aai.emit({ type: 'transcript.user', item_id: 'c2', text: 'This for a hackathon.' });
+    expect(goodbyeSendsOf(aai)).toHaveLength(1); // our own out_of_scope_close send
+
+    // This time AssemblyAI's own automatic reply for that turn -- now composed under the
+    // pushed post-explanation instruction -- says the goodbye correctly the first time.
+    clock.now = 3001;
+    aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
+    clock.now = 3900;
+    aai.emit({ type: 'transcript.agent', item_id: 'a2', text: 'Thank you for calling. Goodbye.', reply_id: 'r1', interrupted: false });
+    // Same reply.started -> reply.done spacing (5100ms) the founder-sequence test above uses,
+    // so the flat CLOSE_GRACE_MS (1500ms) governs the final wait rather than the audio-length-
+    // based deadline (firstAudioAt + audioSeconds + CLOSE_AUDIO_TAIL_BUFFER_MS) `beginCloseGrace`
+    // also computes from the 192,000-byte goodbye audio above.
+    clock.now = 8101;
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+
+    // No extra send -- the transcript already matched on the FIRST check in
+    // `scheduleCloseIfNeeded`, before the close_catchup branch is ever reached.
+    expect(closeCatchupDiags(diagEvents)).toHaveLength(0);
+    expect(goodbyeSendsOf(aai)).toHaveLength(1);
+
+    expect(sent.some((e) => e.type === 'ended')).toBe(false); // grace period still running
+    vi.advanceTimersByTime(1500);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+  });
+
+  it('the post-explanation instruction is present in the session.update sent after the explanation completes, and absent from every session.update sent before it', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const call: CallContext = { session_id: 'sess-oos-instruction', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent, diagEvents);
+
+    session.start();
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: OUT_OF_SCOPE_LINE });
+    expect(session.last?.goal.code).toBe('EXPLAIN_OUT_OF_SCOPE');
+
+    // Every session.update sent so far (including the one this very turn just triggered, for
+    // the FIRST EXPLAIN_OUT_OF_SCOPE rendering) must NOT carry the post-explanation
+    // instruction -- "keep the initial EXPLAIN_OUT_OF_SCOPE rendering unchanged for the first
+    // reply".
+    const beforeUpdates = sessionUpdatesOf(aai);
+    expect(beforeUpdates.length).toBeGreaterThan(0);
+    for (const update of beforeUpdates) {
+      expect(update.session?.system_prompt ?? '').not.toContain(POST_EXPLANATION_INSTRUCTION_MARKER);
+    }
+
+    clock.now = 1200;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: EXPLANATION_TEXT, reply_id: 'a1', interrupted: false });
+    clock.now = 2300;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    // The explanation reply's own reply.done pushes a FRESH session.update carrying the
+    // post-explanation instruction -- EXPLAIN_OUT_OF_SCOPE -> EXPLAIN_OUT_OF_SCOPE is not a
+    // goal-key change, so this could only ever come from the dedicated push, never the
+    // ordinary goal-changed path.
+    const afterUpdates = sessionUpdatesOf(aai);
+    expect(afterUpdates.length).toBeGreaterThan(beforeUpdates.length);
+    const latest = afterUpdates.at(-1);
+    expect(latest?.session?.system_prompt ?? '').toContain(POST_EXPLANATION_INSTRUCTION_MARKER);
+    expect(latest?.session?.system_prompt ?? '').toContain('Thank you for calling. Goodbye.');
+  });
+
+  it('a caller who states a name and a request after the explanation gets no goodbye -- the call continues and the goal moves to EXPLAIN_OPEN_REQUEST', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const diagEvents: { kind: string; detail: unknown }[] = [];
+    const call: CallContext = { session_id: 'sess-oos-request-after-explain', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession(clock, call, aai, sent, diagEvents);
+
+    session.start();
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: OUT_OF_SCOPE_LINE });
+    clock.now = 1200;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: EXPLANATION_TEXT, reply_id: 'a1', interrupted: false });
+    clock.now = 2300;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+    // The post-explanation instruction is now pushed (proven by the test above); a caller who
+    // states a name and a request must still get no goodbye at all.
+    expect(goodbyeSendsOf(aai)).toHaveLength(0);
+
+    clock.now = 3000;
+    aai.emit({
+      type: 'transcript.user',
+      item_id: 'c2',
+      text: 'This is Dana Whitfield, corporate treasury. I need to wire $84,500 to Meridian Supply, account ending 4471.',
+    });
+
+    expect(session.last?.verdict).toBe('NO_ACTION');
+    expect(session.last?.state).toBe('OUT_OF_SCOPE');
+    expect(session.last?.goal.code).toBe('EXPLAIN_OPEN_REQUEST');
+    expect(goodbyeSendsOf(aai)).toHaveLength(0);
+    expect(outOfScopeCloseDiags(diagEvents)).toHaveLength(0);
+    expect(closeCatchupDiags(diagEvents)).toHaveLength(0);
   });
 });

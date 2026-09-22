@@ -1665,6 +1665,68 @@ export class CallSession {
     this.sendNoActionCloseGoodbye('out_of_scope_close');
   }
 
+  /** OUT-OF-SCOPE-GOODBYE lane, mechanism 2 (2026-09-22, PROVEN live: founder call a845c867,
+   *  1:28 PM CDT -- see `maybeBeginOutOfScopeGoodbye`'s own doc comment (mechanism 1) for the
+   *  sibling fix and `docs/AUTOPILOT_LOG.md`'s same-day entry for the full incident). Mechanism
+   *  1 alone still lost the race live: our own `out_of_scope_close` `reply.create` landed at
+   *  26525ms, one ms after the caller's turn ended, but AssemblyAI's own automatic reply for
+   *  that SAME turn had already started composing under the plain (pre-explanation-aware)
+   *  `EXPLAIN_OUT_OF_SCOPE` system_prompt and spoke a stale restatement instead ("One moment.
+   *  Please select a role. Choose Dana or the caller claiming to be the CEO.", 28046ms) --
+   *  exactly the undocumented, unstoppable-automatic-reply race `prompt.ts`'s own Design E doc
+   *  comment describes for every other goal. This closes it the same way Design E already
+   *  closes it elsewhere: make the automatic reply itself say something correct, rather than
+   *  trying to out-race it.
+   *
+   *  Pushes a FRESH `session.update` the instant `outOfScopeExplained` first flips true (called
+   *  once, from that same `reply.done` case, before `applyEvaluate`'s own tick even runs) --
+   *  reusing `renderPrompt`/`promptCtx` exactly as the ordinary goal-changed path
+   *  (`applyEvaluate`, below) does, so the wire payload (`system_prompt`/`tools`/`keyterms`)
+   *  and the `session_config_updated` action-log/diag bookkeeping are byte-for-byte the same
+   *  shape. The ONLY thing new here is WHEN this fires: `applyEvaluate`'s own send is gated on
+   *  `goalKey !== this.previousGoalKey`, and EXPLAIN_OUT_OF_SCOPE -> EXPLAIN_OUT_OF_SCOPE is
+   *  never a goal-key change (`fsm.ts` renders the identical hint every time a call stays out
+   *  of scope) -- so without this, `prompt.ts`'s new `ctx.outOfScopeExplained` branch (see that
+   *  file's own doc comment) would sit in `promptCtx()`'s output forever without ever actually
+   *  reaching the wire for a call that never triggers some UNRELATED goal change first.
+   *
+   *  Guarded to a no-op for anything other than "still genuinely OUT_OF_SCOPE /
+   *  EXPLAIN_OUT_OF_SCOPE right now" -- defensive only; the one call site already checks
+   *  `evt.status === 'completed' && replyGoalAtStart === 'EXPLAIN_OUT_OF_SCOPE'` before calling
+   *  this, so `this.last.goal.code` should already read EXPLAIN_OUT_OF_SCOPE here in every
+   *  reachable case, but this never assumes that from a label alone (same "a label proves a
+   *  request was sent, never what the engine currently says" reasoning `scheduleCloseIfNeeded`'s
+   *  own doc comment already applies). `previousGoalKey` is deliberately left untouched: the
+   *  next genuine goal change still sends its own `session.update` exactly as before, and would
+   *  needlessly diff against a key this push never updates. */
+  private pushOutOfScopeGoodbyeInstruction(): void {
+    if (this.ended || !this.last) return;
+    if (this.last.verdict !== 'NO_ACTION' || this.last.state !== 'OUT_OF_SCOPE') return;
+    if (this.last.goal.code !== 'EXPLAIN_OUT_OF_SCOPE') return;
+    const output = this.last;
+    this.opts.aai.send({
+      type: 'session.update',
+      session: {
+        system_prompt: renderPrompt(output.goal, this.promptCtx(output)),
+        tools: toolSchemasFor(output.allowed_tools),
+        input: { keyterms: output.goal.keyterms.slice(0, 100) },
+      },
+    });
+    this.logs.actions.push({
+      id: this.nextActionId(),
+      kind: 'session_config_updated',
+      t_ms: this.nowT(),
+      detail: `goal=${output.goal.code}:out_of_scope_explained`,
+    });
+    this.diag('session_config_updated', {
+      goal_code: output.goal.code,
+      keyterms_count: output.goal.keyterms.length,
+      tools_count: output.allowed_tools.length,
+      turn_detection_omitted: true,
+      reason: 'out_of_scope_explained',
+    });
+  }
+
   /** Called once, the first tick the goal becomes CLOSE (from `applyEvaluate`'s goal-changed
    *  branch): arms the CLOSE_TOTAL_MS (45s, round 4) hard cap in case no reply.done for the
    *  real close line ever arrives AND no transcript match is ever heard either (a dropped AAI
@@ -2109,6 +2171,39 @@ export class CallSession {
       this.goodbyeConfirmed = true;
       this.goodbyeConfirmedReplyId = replyId;
       this.beginCloseGrace();
+      return;
+    }
+
+    // CLOSE-CATCHUP-ON-OVERRIDE fix (2026-09-22, PROVEN live: founder call a845c867, 1:28 PM
+    // CDT -- see `pushOutOfScopeGoodbyeInstruction`'s own doc comment for the sibling mechanism-
+    // 2 fix and the full incident): a `closeSentenceOverride` goodbye (out_of_scope_close or
+    // idle_no_action_close -- never an engine-rendered CLOSE goal, which `currentCloseSentence`
+    // already prioritizes over the override, so `this.last?.goal.code !== 'CLOSE'` here is
+    // never false while `this.closeSentenceOverride` is non-null) has no goal-code change of
+    // its own for `maybeSendReplyCreateAfterReplyDone`'s MERGED-FREEZE-GOODBYE catch-up
+    // (`mustForceSpeak`) to ever notice -- EXPLAIN_OUT_OF_SCOPE stays EXPLAIN_OUT_OF_SCOPE the
+    // whole time the override is in flight, so `label === current` there and that catch-up
+    // silently no-ops. This reply's own transcript, checked just above, already proves the
+    // close line was NOT heard -- rather than waiting `CLOSE_TRANSCRIPT_WAIT_MS` (1.5s) for a
+    // late chunk that will never arrive (the transcript is already final and non-matching) and
+    // then `CLOSE_RETRY_MIN_GAP_MS` (400ms) more on top, only to have that retry itself dropped
+    // by `armCloseRetryTimer`'s own `this.speaking` guard the instant AssemblyAI chains ANOTHER
+    // automatic reply onto the same turn (exactly what happened live: a THIRD reply,
+    // `resp_1b025d...`, started 1ms after this one's own `reply.done` and was still speaking
+    // when the caller hung up at 33s, so the spaced retry never got a turn at all), resend
+    // immediately here instead -- one send, no wait, the same "say exactly this" wrapper every
+    // other close send uses. Never while the caller is talking (`callerSpeaking`): a resend that
+    // talks over the caller is the identical failure `armCloseRetryTimer`'s own
+    // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN guard exists to avoid, and the unmatched `status ===
+    // 'interrupted'` case below falls through to the existing `armCloseTranscriptWait` ->
+    // `armCloseRetryTimer` chain unchanged (a reply cut short by the caller barging in is not
+    // this method's problem to race back into). The existing chain remains the backstop for
+    // every case this fast path does not cover (an engine-rendered CLOSE goal, an interrupted
+    // reply, a caller mid-utterance) -- nothing below this branch is removed.
+    if (this.closeSentenceOverride !== null && this.last?.goal.code !== 'CLOSE' && status === 'completed' && !this.callerSpeaking) {
+      this.closeLastReplyWasEmpty = transcript.trim().length === 0;
+      const wrapper = `Say exactly this and nothing else: "${sentence}"`;
+      this.sendReplyCreate('CLOSE', 'close_catchup', wrapper);
       return;
     }
 
@@ -2974,7 +3069,18 @@ export class CallSession {
         // condition (c). An INTERRUPTED reply never sets this: a caller who barges in
         // mid-explanation has not actually heard it complete.
         if (evt.status === 'completed' && this.replyGoalAtStart.get(evt.reply_id) === 'EXPLAIN_OUT_OF_SCOPE') {
+          const wasAlreadyExplained = this.outOfScopeExplained;
           this.outOfScopeExplained = true;
+          // OUT-OF-SCOPE-GOODBYE lane, mechanism 2 (2026-09-22): the FIRST time this flips
+          // true, push a fresh `session.update` carrying the post-explanation instruction --
+          // see `pushOutOfScopeGoodbyeInstruction`'s own doc comment for why this cannot wait
+          // for the ordinary goal-changed `session.update` path (`applyEvaluate`, below):
+          // EXPLAIN_OUT_OF_SCOPE -> EXPLAIN_OUT_OF_SCOPE is not a goal change, so that path
+          // never fires again for a call that stays out of scope. Only once: a call whose
+          // goal has already moved on by the time a LATER EXPLAIN_OUT_OF_SCOPE reply happens
+          // to complete (re-entering OUT_OF_SCOPE some other way) would otherwise re-push the
+          // identical instruction for no reason.
+          if (!wasAlreadyExplained) this.pushOutOfScopeGoodbyeInstruction();
         }
         // goodbye-tail lane, review fix (2026-09-15, Important): record that THIS reply's
         // `reply.done` has now fired, before anything below can call
@@ -3855,6 +3961,9 @@ export class CallSession {
       state: output.state,
       stall_kind: stallKindFor(output),
       stalls: { pick: (kind: StallKind) => this.pickStallLine(kind) },
+      // OUT-OF-SCOPE-GOODBYE lane, mechanism 2 (2026-09-22): see `PromptCtx.outOfScopeExplained`'s
+      // own doc comment (prompt.ts) -- read only by the EXPLAIN_OUT_OF_SCOPE case there.
+      outOfScopeExplained: this.outOfScopeExplained,
     };
   }
 

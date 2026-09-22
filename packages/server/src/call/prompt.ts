@@ -31,6 +31,19 @@ export interface PromptCtx {
    *  lines instead of each render restarting from an empty `used` set. `call/session.ts`
    *  owns a `Map<StallKind, Set<string>>` for the life of the call and this closes over it. */
   stalls: { pick(kind: StallKind): string };
+  /** OUT-OF-SCOPE-GOODBYE lane, mechanism 2 (2026-09-22, PROVEN live: founder call a845c867,
+   *  1:28 PM CDT -- see `EXPLAIN_OUT_OF_SCOPE`'s own case below for the full incident): true
+   *  once the demo explanation has actually been SPOKEN in full at least once
+   *  (`call/session.ts`'s `outOfScopeExplained`, set at a COMPLETED reply.done labelled
+   *  EXPLAIN_OUT_OF_SCOPE). Read ONLY by the `EXPLAIN_OUT_OF_SCOPE` case -- every other goal
+   *  ignores it. False for the caller's very first out-of-scope turn (the explanation itself
+   *  renders unchanged, exactly as before this lane existed); `call/session.ts` forces a
+   *  fresh `session.update` the instant this flips true (never re-derived from a goal-code
+   *  change, since EXPLAIN_OUT_OF_SCOPE -> EXPLAIN_OUT_OF_SCOPE is not one). Optional (not
+   *  required) so `prompt.test.ts` (outside this lane's LANE-FILES) keeps constructing a
+   *  `PromptCtx` without it -- `undefined` reads exactly like `false` below, the correct
+   *  default for every goal that predates this field. */
+  outOfScopeExplained?: boolean;
 }
 
 // Verbatim (BRIEF task-S4): every rendered prompt contains this exact block, unedited except
@@ -237,15 +250,43 @@ function nowSection(goal: PhrasingGoal, ctx: PromptCtx): string {
       return CONTAIN_LINE;
     case 'GREET':
       return goal.hint;
+    // OUT-OF-SCOPE-GOODBYE lane, mechanism 2 (2026-09-22, PROVEN live founder call a845c867,
+    // 1:28 PM CDT): the caller's SECOND out-of-scope line ("This for a hackathon.") arrived
+    // 6.4s after the explanation finished, but AssemblyAI's own automatic reply for that turn
+    // -- generated under the plain `goal.hint` this case used to relay unconditionally -- had
+    // already started before the server's own instructed `close` reply.create could land, and
+    // it spoke a stale restatement of the explanation instead of any goodbye ("One moment.
+    // Please select a role. Choose Dana or the caller claiming to be the CEO."). The server's
+    // own catch-up mechanism (`call/session.ts`'s `scheduleCloseIfNeeded`, `close_catchup`
+    // reason) now resends the goodbye the instant that happens, but the faster fix is to make
+    // that automatic reply say the right thing itself the moment it is even possible to:
+    // `ctx.outOfScopeExplained` is true for every render from the SECOND out-of-scope turn
+    // onward, so the standing instruction below is already in force before AssemblyAI's own
+    // automatic reply for that turn ever starts composing (`session.update` applies "on the
+    // next turn" -- docs/TEST-PLAN.md -- which this IS, since it is pushed the instant the
+    // FIRST turn's own reply.done confirms the explanation was heard, not deferred to any
+    // later goal change). The caller's very first out-of-scope turn (`ctx.outOfScopeExplained`
+    // still false) renders the plain explanation, unchanged from before this lane existed --
+    // exactly what "Keep the initial EXPLAIN_OUT_OF_SCOPE rendering unchanged for the first
+    // reply" requires.
+    case 'EXPLAIN_OUT_OF_SCOPE':
+      if (ctx.outOfScopeExplained) {
+        return (
+          `${goal.hint} ` +
+          'The demo has been explained. If the caller says they are testing, have no request, or says goodbye, say exactly: ' +
+          '"Thank you for calling. Goodbye." and nothing else. If the caller states a name and a request, ask what they need.'
+        );
+      }
+      return goal.hint;
     default:
       if (ANNOUNCE_CODES.has(goal.code) && ctx.claimed_identity_name) {
         return `${goal.hint} Address the caller as ${ctx.claimed_identity_name}.`;
       }
-      // ELICIT_IDENTITY, PROBE_CONSISTENCY, REFUSE_AUTHORITY, EXPLAIN_OUT_OF_SCOPE,
-      // EXPLAIN_OPEN_REQUEST, and an ANNOUNCE_* goal before any identity is claimed: the
-      // hint, verbatim, and nothing added (the engine already wrote whatever reasons belong
-      // in it). CLOSE, RE_ELICIT_AFTER_SWITCH, ELICIT_MISSING_CRITICAL, and ELICIT_REQUEST
-      // have their own verbatim-wrapped cases above, not this one.
+      // ELICIT_IDENTITY, PROBE_CONSISTENCY, REFUSE_AUTHORITY, EXPLAIN_OPEN_REQUEST, and an
+      // ANNOUNCE_* goal before any identity is claimed: the hint, verbatim, and nothing added
+      // (the engine already wrote whatever reasons belong in it). CLOSE,
+      // RE_ELICIT_AFTER_SWITCH, ELICIT_MISSING_CRITICAL, ELICIT_REQUEST, and
+      // EXPLAIN_OUT_OF_SCOPE have their own cases above, not this one.
       return goal.hint;
   }
 }
