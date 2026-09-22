@@ -3474,6 +3474,56 @@
       "agent_id": "",
       "started_at": "2026-09-19T20:32:07.564Z",
       "note": "done 2026-09-19 3:45 PM CDT (read at 8:07 PM after a session limit): 10/10 PASS, 0/0/0/0 on every run, batch exit 0, first all-clean batch; goodbye_delay 5.7 to 7.5 s on eight runs (a full 7 s goodbye starting right after the verdict), 9.2 s and 15.9 s on the two that needed one retry; one .agent.wav per run recorded. Rollup 2026-09-19T15-45-43-batch-rollup.md"
+    },
+    {
+      "id": "PARAPHRASE-GOAL-DOUBLE-ASK",
+      "title": "server: ambient reply asking ELICIT_REQUEST/ELICIT_IDENTITY/PROBE_CONSISTENCY in its own words was never recognized, so the server re-asked at once (founder call d27536a0, 3 identical questions in 12 s)",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "note": "d813717 2026-09-21; Sonnet lane; 11 tests",
+      "priority": "P1"
+    },
+    {
+      "id": "GRADER-REPEATED-GOAL-QUESTION",
+      "title": "harness grader: repeated_question blind to identical back-to-back goal questions (only readback/challenge actions counted); founder record graded PASS",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "note": "d813717 2026-09-21; Haiku lane; 5 tests; founder record now FAIL, 7:39 PM harness records still PASS",
+      "priority": "P1"
+    },
+    {
+      "id": "SCENARIO-BARGE-PAUSE-AFTER-NAME",
+      "title": "harness: barge-in-pause-after-name.json reproduces the founder's shape (name, 1 s pause, request)",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "note": "d813717 2026-09-21; Haiku lane; 7 tests; first live run pending",
+      "priority": "P1"
+    },
+    {
+      "id": "CASE11-GOODBYE-RETRY-FOUNDER",
+      "title": "founder case 11 record 5af4583c (2026-09-21 7:40 PM): STAGE correct and founder satisfied, but grader FAIL on holding_spam=1 and goodbye needed a close_retry (15.3 s after verdict)",
+      "files": [],
+      "status": "held",
+      "held_because": "freeze: founder did not notice it; count on the next batches before fixing",
+      "agent_id": "",
+      "note": "",
+      "priority": "P2"
+    },
+    {
+      "id": "TURN-ENDS-ON-NAME-PAUSE",
+      "title": "live: a 1 s pause after 'This is Dana Whitfield, corporate treasury.' ends the caller turn (adaptive turn-taking, turn_detection omitted); tolerable once the double ask is gone, the agent asks once and the caller continues",
+      "files": [],
+      "status": "held",
+      "held_because": "AssemblyAI-side turn-taking; revisit only if the pause-after-name scenario fails on d813717",
+      "agent_id": "",
+      "note": "",
+      "priority": "P2"
     }
   ]
 }
