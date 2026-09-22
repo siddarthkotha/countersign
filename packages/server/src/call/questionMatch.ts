@@ -315,6 +315,9 @@ const LABEL_ATTACHMENT_PATTERNS: readonly ((label: string) => RegExp)[] = [
   (label) => new RegExp(`\\brestate the ${label}\\b`),
   (label) => new RegExp(`\\bgive me the ${label}\\b`),
   (label) => new RegExp(`\\bcan you (?:restate|give me) the ${label}\\b`),
+  (label) => new RegExp(`\\brepeat the ${label}\\b`),
+  (label) => new RegExp(`\\bcan you repeat the ${label}\\b`),
+  (label) => new RegExp(`\\bcould you repeat the ${label}\\b`),
 ];
 
 /** True when ONE sentence-like chunk (`questionSentencesOf`) contains a literal "?" AND one of

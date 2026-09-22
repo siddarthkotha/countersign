@@ -3613,6 +3613,41 @@
       "agent_id": "",
       "note": "min_interrupted_agent_lines 0; the pause shape and repeated_question 0 are the test",
       "priority": "P2"
+    },
+    {
+      "id": "OUT-OF-SCOPE-NEVER-CLOSES",
+      "title": "live (founder case 3 df3f9781 9:27 AM 2026-09-22 AND every harness judge-out-of-scope run): after EXPLAIN_OUT_OF_SCOPE the engine's goal never changes, no CLOSE is ever composed, the server never hangs up; the play sheet promises 'Thank you for calling. Goodbye.' and a self hang-up; harness passed because the scenario checks the verdict only",
+      "files": [
+        "packages/engine/src/fsm.ts",
+        "packages/engine/src/rules.ts",
+        "scripts/rehearse/scenarios/judge-out-of-scope.json"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "",
+      "note": "P0 judge path; design after the reads",
+      "priority": "P0"
+    },
+    {
+      "id": "DEADLINE-REPEAT-CUE",
+      "title": "live (founder case 2 f01289b6 9:25 AM): ambient 'Could you please repeat the deadline you provided earlier?' not recognised (no 'repeat' cue), server re-asked at once; grader repeated_question=1 at 42.4 s",
+      "files": [
+        "packages/server/src/call/questionMatch.ts"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "a1669e82ce4f8cfe6",
+      "note": "Haiku lane: add repeat cues + tests",
+      "priority": "P1"
+    },
+    {
+      "id": "ECHO-PHANTOM-CALLER-LINE",
+      "title": "live (founder case 5 a629d046 9:28 AM): a 301 ms 'speech' window starting 1 ms after the greeting completed produced the caller line 'They know it feels' with mic rms 0.01 (his real voice reads 0.05 to 0.08); the agent answered it and the real request came 25 s later",
+      "files": [],
+      "status": "held",
+      "held_because": "1 hit in 35 records since 2026-09-21 (counted); likely greeting echo after noiseSuppression off; count on the next batches before filtering short low-level windows",
+      "agent_id": "",
+      "priority": "P2"
     }
   ]
 }

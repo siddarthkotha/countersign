@@ -813,6 +813,26 @@ describe('CallSession -- push-52 review fix, second pass: the label branch requi
     expect(replyCreatesOf(aai)).toHaveLength(0);
     expect(challengeIssuedCount).toBe(1);
   });
+
+  it('(u) MUST KEEP suppressing: "Could you please repeat the deadline you provided earlier?" (the PROVEN live text from founder call f01289b6 2026-09-22 09:25 AM CDT, record at /private/tmp/claude-501/-Users-siddarthkotha-countersign/e1572f40-753f-4792-9519-90b49e39257d/scratchpad/founder-2026-09-22/092547-f01289b6.diagnostics.json, t_ms 38882/42106) -- repeat attaches to the label', () => {
+    const { replyCreates, challengeIssuedCount } = probeDeadlineLabel('Could you please repeat the deadline you provided earlier?');
+    expect(replyCreates).toHaveLength(0); // no catch-up send
+    expect(challengeIssuedCount).toBeGreaterThanOrEqual(1); // never zero issuances
+    expect(challengeIssuedCount).toBe(1);
+  });
+
+  it('(v) MUST STOP suppressing: "Can you hold while I repeat the process?" -- repeat attaches to "the process", not the label', () => {
+    const { replyCreates } = probeDeadlineLabel('Can you hold while I repeat the process?');
+    // THE FIX: our own real question now goes out -- the cue does not attach to the deadline
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]!.instructions).toBe(`Say exactly this and nothing else: "${OUR_SENTENCE}"`);
+  });
+
+  it('(w) MUST KEEP suppressing: "Can you repeat the deadline?" -- repeat attaches to the label, short form', () => {
+    const { replyCreates, challengeIssuedCount } = probeDeadlineLabel('Can you repeat the deadline?');
+    expect(replyCreates).toHaveLength(0);
+    expect(challengeIssuedCount).toBe(1);
+  });
 });
 
 // Paraphrase-goal catch-up fix (2026-09-21, PROVEN live defect -- the founder's own call

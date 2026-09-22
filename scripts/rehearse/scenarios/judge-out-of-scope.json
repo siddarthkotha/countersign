@@ -1,7 +1,7 @@
 {
   "name": "judge-out-of-scope",
   "title": "A judge (or stranger) discloses this is a test before any request",
-  "description": "BRIEF section 10 / risk register: \"a judge WILL say 'I'm not the CEO, I'm testing this for a hackathon'\" -- proves the FSM never deadlocks on an off-script opener. Verbatim from packages/engine/corpus/judge-out-of-scope-no-request.json's single caller turn. Expects NO_ACTION (state OUT_OF_SCOPE): the agent explains itself and nothing moves. Turn c2 carries hang_up:true (2026-09-14 ruling): this scenario intends the caller to leave once they've explained they're just testing, not to sit and wait for a goodbye -- the harness hangs up itself here and the report's Close line stays \"n/a (caller ended)\" by design, not a regression.",
+  "description": "BRIEF section 10 / risk register: \"a judge WILL say 'I'm not the CEO, I'm testing this for a hackathon'\" -- proves the FSM never deadlocks on an off-script opener. Verbatim from packages/engine/corpus/judge-out-of-scope-no-request.json's single caller turn. Expects NO_ACTION (state OUT_OF_SCOPE): the agent explains itself and nothing moves. Turn c2 carries hang_up:true (2026-09-14 ruling): this scenario intends the caller to leave once they've explained they're just testing, not to sit and wait for a goodbye -- the harness hangs up itself here and the report's Close line stays \"n/a (caller ended)\" by design, not a regression. Expectation change 2026-09-22: c2 no longer hangs up; the harness now waits for the server's own \"Thank you for calling. Goodbye.\" and hang-up (founder call df3f9781 9:27 AM showed the product never closed this case; the old hang_up flag hid it).",
   "source": "docs/BRIEF.md section 10 + packages/engine/corpus/judge-out-of-scope-no-request.json (caller turn c1, read-only source)",
   "truth": {
     "identity": null
@@ -20,8 +20,7 @@
       "respond": {
         "rules": [],
         "else_say": "That's right, just testing. I don't have a real request."
-      },
-      "hang_up": true
+      }
     }
   ],
   "expected": {
