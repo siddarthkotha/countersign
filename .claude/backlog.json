@@ -3648,6 +3648,53 @@
       "held_because": "1 hit in 35 records since 2026-09-21 (counted); likely greeting echo after noiseSuppression off; count on the next batches before filtering short low-level windows",
       "agent_id": "",
       "priority": "P2"
+    },
+    {
+      "id": "OUT-OF-SCOPE-GOODBYE-NEEDS-RETRY",
+      "title": "live (harness judge-out-of-scope 9:47 AM 2026-09-22 on be63028): the out_of_scope_close send at 25.5 s was folded under two automatic replies ('Understood. Please state your request...'), close_retry delivered 'Thank you for calling. Goodbye.' at 35.6 s, 10 s after the caller's line; ended agent_closed",
+      "files": [],
+      "status": "held",
+      "held_because": "freeze: goodbye-race family; correct outcome; count the delay on the next batches and on the founder's retry before touching CLOSE timing",
+      "agent_id": "",
+      "priority": "P2"
+    },
+    {
+      "id": "IDLE-CLOCK-STARTS-AT-MINT",
+      "title": "live (founder call 371ff775 1:28 PM 2026-09-22): session minted at the landing click, Start Call 28 s later, idle reaper fired 2.4 s after attach; caller heard the greeting then 'Thank you for calling. Goodbye.' without speaking; a judge who reads the screen for 30 s gets the same",
+      "files": [
+        "packages/server/src/ws/browser.ts",
+        "packages/server/src/caps.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "note": "Haiku lane: touch() the idle clock on first browser attach | landed 2026-09-22 ~1:50 PM, 2 tests",
+      "priority": "P0"
+    },
+    {
+      "id": "OUT-OF-SCOPE-GOODBYE-FOLDED",
+      "title": "live (founder call a845c867 1:28 PM 2026-09-22): out_of_scope_close send at 26.5 s folded under the automatic reply 'One moment. Please select a role...'; retry due ~34 s; founder hung up at 33 s; harness 9:47 AM needed the retry at +10 s",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/src/call/prompt.ts"
+      ],
+      "status": "running",
+      "held_because": "",
+      "agent_id": "a02c4c9637ed91210",
+      "note": "Sonnet lane: close_catchup on the ambient reply.done + post-explanation standing instruction so the automatic reply says the goodbye itself",
+      "priority": "P0"
+    },
+    {
+      "id": "READBACK-PACING-SLUGGISH",
+      "title": "live (founder cases 1 and 2, 9:24/9:25 AM 2026-09-22): agent audio starts 4 to 55 ms after the caller stops, but automatic readback replies carry 0.10 to 0.13 s of audio per character (7.7 to 8.2 s for a 62-char line) vs 0.064 to 0.09 for server-instructed lines; each exchange feels like an 8 s wait; 'One moment.' fillers add 1.6 to 3.3 s",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/src/call/prompt.ts"
+      ],
+      "status": "held",
+      "held_because": "founder decision: bounded experiment behind an env flag (instructed readbacks and challenges at caller-turn end, no filler) measured by the harness on audio seconds per character, repeated_question and merged_reply, vs ship as is",
+      "agent_id": "",
+      "priority": "P1"
     }
   ]
 }

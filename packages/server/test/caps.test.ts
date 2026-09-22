@@ -96,6 +96,45 @@ describe('caps', () => {
     expect(state.active.has('fresh')).toBe(true);
   });
 
+  // Defect fix (2026-09-22): session minted long before browser attaches would get reaped
+  // while the call was still running (founder call 371ff775: minted 28.4s before Start Click,
+  // then reaped 2.4s after attach). Touch restarts the idle clock when the browser first
+  // attaches, so the idle timer measures conversational silence, not time-since-mint.
+  describe('browser attach touches idle clock', () => {
+    it('session minted early, then browser attaches: touch on attach prevents reap within idle_timeout after attach', () => {
+      const state = newCapsState();
+      const c = cfg();
+      // Mint the session at t=0
+      startSession(state, 0, 'session-id');
+      // Time passes but no activity (browser hasn't attached yet)
+      const attachTime = 29000;
+      // Browser attaches and touches the clock
+      touch(state, 'session-id', attachTime);
+      // 2 more seconds pass without activity
+      const checkTime = 31000;
+      const ended = reapIdle(state, c, checkTime);
+      // Session should NOT be reaped: (31000 - 29000) = 2000 < 30000
+      expect(ended).toEqual([]);
+      expect(state.active.has('session-id')).toBe(true);
+    });
+
+    it('but session still IS reaped if idle for idle_timeout after browser attach', () => {
+      const state = newCapsState();
+      const c = cfg();
+      // Mint the session
+      startSession(state, 0, 'session-id');
+      // Browser attaches and touches the clock at t=29000
+      const attachTime = 29000;
+      touch(state, 'session-id', attachTime);
+      // Time passes with no activity for more than idle_timeout
+      const checkTime = attachTime + c.idle_timeout_ms + 1; // 29000 + 30000 + 1 = 59001
+      const ended = reapIdle(state, c, checkTime);
+      // Session SHOULD be reaped: (59001 - 29000) = 30001 > 30000
+      expect(ended).toEqual(['session-id']);
+      expect(state.active.has('session-id')).toBe(false);
+    });
+  });
+
   it('startSession prunes mint timestamps older than 60s so state.mints stays bounded', () => {
     const state = newCapsState();
     startSession(state, 0, 'old-1');

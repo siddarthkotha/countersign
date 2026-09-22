@@ -340,6 +340,11 @@ function handleCallSocket(
   // returned above, via `reattach`) -- "from the moment I start the script" starts the
   // bundle's clock right here, before the AAI connect even begins.
   createBundle(deps.diagnostics, session_id, deps.now());
+  // Defect fix (2026-09-22): restart the idle clock when the browser leg first attaches,
+  // so a session minted long before a judge clicks Start Call doesn't get reaped while
+  // the call is still running. The idle timer is meant to measure conversational silence
+  // (via onActivity in CallSession), not time since mint.
+  touch(deps.caps, session_id, deps.now());
   recordServerEvent(deps.diagnostics, session_id, deps.now(), 'link', { leg: 'browser', state: 'attach' });
 
   const seed = deps.seed ?? MERIDIAN;
