@@ -45,6 +45,15 @@ export interface ServerConfig {
    *  `ServerConfig` test fixtures that predate this field keep compiling unchanged;
    *  `loadConfig` always sets it. */
   debug_hooks_enabled?: boolean;
+  /** ONE-BRAIN LIVE PATH (2026-09-22, docs/plans/2026-09-22-one-brain-live-path.md §5):
+   *  `'endpoint'` points AssemblyAI's own automatic reply at our own `/api/brain` HTTP
+   *  endpoint (built by Lane C, not this file) instead of its managed model, removing the
+   *  two-writer race `call/session.ts`'s own §2 delete-list exists to manage. `'legacy'` (the
+   *  default -- unset, empty, or any other value) is today's exact path, byte-for-byte
+   *  unchanged; nothing about this field's presence changes legacy behavior. Optional so
+   *  existing hand-built `ServerConfig` test fixtures that predate this field keep compiling
+   *  unchanged; `loadConfig` always sets it. */
+  brain_mode?: 'legacy' | 'endpoint';
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -89,5 +98,6 @@ export function loadConfig(env: Record<string, string | undefined>): ServerConfi
     live_disabled: env.COUNTERSIGN_LIVE_DISABLED === 'credits' ? 'credits' : null,
     admin_token: env.COUNTERSIGN_ADMIN_TOKEN && env.COUNTERSIGN_ADMIN_TOKEN.length > 0 ? env.COUNTERSIGN_ADMIN_TOKEN : null,
     debug_hooks_enabled: env.COUNTERSIGN_DEBUG_HOOKS === '1',
+    brain_mode: env.COUNTERSIGN_BRAIN === 'endpoint' ? 'endpoint' : 'legacy',
   };
 }

@@ -74,6 +74,16 @@ export interface CallSessionOpts {
    *  `AUTOMATIC_REPLY_SETTLE_MS` here explicitly); index.ts's live wiring leaves this unset,
    *  taking the production default. */
   forceSpeakSettleMs?: number;
+  /** ONE-BRAIN LIVE PATH (2026-09-22, plan docs/plans/2026-09-22-one-brain-live-path.md §5):
+   *  `'endpoint'` means AssemblyAI's own automatic reply is calling OUR `/api/brain` HTTP
+   *  endpoint (not built by this lane -- Lane C) as its one and only LLM, so its words are
+   *  already correct by construction and this session must never ALSO send its own
+   *  `reply.create` for an ordinary turn (see the gated methods below, §2's delete-list) or
+   *  arm any of the retry/watchdog timers that exist only to manage the race between two
+   *  writers. `undefined`/`'legacy'` (the default -- every existing caller of this class)
+   *  keeps today's exact behavior, byte-for-byte unchanged: nothing in this field's own
+   *  presence or absence changes what the legacy path does. */
+  brainMode?: 'legacy' | 'endpoint';
 }
 
 interface PendingToolResult {
@@ -104,6 +114,41 @@ const IDENTITY_ARG_TOOLS = new Set<ToolName>(['get_request_history', 'check_sso_
  *  same pattern as `runTerminalActionsIfNeeded` -- the deterministic core drives the checks,
  *  not the model's whim (LAW 3). */
 const LOOKUP_TOOLS: ToolName[] = ['get_request_history', 'check_sso_context', 'verify_out_of_band'];
+
+/** ONE-BRAIN LIVE PATH (2026-09-22, Lane B: `CallSession.nextSpokenLine`, docs/plans/
+ *  2026-09-22-one-brain-live-path.md §1 step 4). Six `GoalCode`s already carry an exact,
+ *  ready-to-speak sentence composed by the engine itself (never an LLM paraphrase -- LAW 3):
+ *  `READBACK`/`RE_ELICIT_AFTER_SWITCH`/`ELICIT_MISSING_CRITICAL`/`ELICIT_REQUEST`/`CLOSE` via
+ *  `goal.hint` (fsm.ts's own comment: "5 ... already carry an exact, ready-to-speak sentence
+ *  in goal.hint today") and `ASK_CHALLENGE` via `goal.challenge.speak` (challenges.ts's
+ *  `selectLiveCommitment`/`selectTrapFact`/`selectRelational`/`selectSeedFact` all set it --
+ *  see the spoken-lines-draft finding this plan cites). `nextSpokenLine` below handles those
+ *  six directly and falls back to ONE entry from this map for every other `GoalCode` -- the
+ *  ones fsm.ts's own comment says "rely today on an LLM paraphrasing a DIRECTION into natural
+ *  speech", which endpoint mode (no LLM anywhere in the reply path) cannot do. Every line here
+ *  is deliberately, unmistakably NOT production copy -- the `[PLACEHOLDER ...]` prefix is the
+ *  point, so nothing here is ever mistaken for a real spoken sentence in a transcript, a demo,
+ *  or a test assertion. Lane A1 (packages/engine/src/fsm.ts) replaces these one by one as it
+ *  composes real sentences for each; the `Record` type below (every `GoalCode` except the six
+ *  handled directly) makes the compiler enforce that nothing is ever missing from this list. */
+export const PLACEHOLDER_GOAL_LINES: Record<
+  Exclude<GoalCode, 'READBACK' | 'RE_ELICIT_AFTER_SWITCH' | 'ELICIT_MISSING_CRITICAL' | 'ELICIT_REQUEST' | 'CLOSE' | 'ASK_CHALLENGE'>,
+  string
+> = {
+  GREET: '[PLACEHOLDER LINE - GREET] Ask who is calling and what they need.',
+  ELICIT_IDENTITY: '[PLACEHOLDER LINE - ELICIT_IDENTITY] Ask who is calling.',
+  STALL: '[PLACEHOLDER LINE - STALL] Checks are running. One moment.',
+  PROBE_CONSISTENCY: '[PLACEHOLDER LINE - PROBE_CONSISTENCY] Ask the caller which of their two answers is correct and why it changed.',
+  REFUSE_AUTHORITY: '[PLACEHOLDER LINE - REFUSE_AUTHORITY] Decline the request politely and explain why.',
+  ANNOUNCE_STAGED: '[PLACEHOLDER LINE - ANNOUNCE_STAGED] Say the request is staged for second approval; voice alone never releases a transfer.',
+  ANNOUNCE_FROZEN: '[PLACEHOLDER LINE - ANNOUNCE_FROZEN] Say the transfer is frozen, an incident is open, and nothing moves.',
+  ANNOUNCE_ESCALATED: '[PLACEHOLDER LINE - ANNOUNCE_ESCALATED] Say this cannot be completed by voice; a callback will follow.',
+  CONTAIN: '[PLACEHOLDER LINE - CONTAIN] Hold the floor with one short neutral line; never argue.',
+  CONTAIN_NO_DISCLOSURE: '[PLACEHOLDER LINE - CONTAIN_NO_DISCLOSURE] Hold the floor with one short neutral line; disclose no status or reasoning.',
+  EXPLAIN_OUT_OF_SCOPE: '[PLACEHOLDER LINE - EXPLAIN_OUT_OF_SCOPE] Explain plainly this is a demo checkpoint; nothing will move.',
+  EXPLAIN_OPEN_REQUEST:
+    '[PLACEHOLDER LINE - EXPLAIN_OPEN_REQUEST] Explain plainly this is a demo; the request stays open and unstaged; nothing moves.',
+};
 
 /** Founder ruling (flight recorder, 2026-09-09): the small, non-evidence detail an
  *  `evaluate` diagnostic event carries on a transition -- enough to answer "which
@@ -170,6 +215,10 @@ export class CallSession {
    *  and `CallSessionOpts.forceSpeakSettleMs`'s own doc comment for how a caller opts into the
    *  deferral instead. Set once, never reassigned. */
   private readonly forceSpeakSettleMs: number;
+  /** ONE-BRAIN LIVE PATH (2026-09-22, Lane B): see `CallSessionOpts.brainMode`'s own doc
+   *  comment. Resolved once, here, from the constructor opts -- never re-read from env or
+   *  config.ts directly (this file stays decoupled from config.ts, same as every other opt). */
+  private readonly brainMode: 'legacy' | 'endpoint';
   /** CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix (2026-09-19, PROVEN live deploy 55: scripts/
    *  rehearse/reports/2026-09-19T13-28-41-miller-patient.diagnostics.json): true from
    *  `input.speech.started` until the caller's turn is known to have ended -- tracks whether the
@@ -349,6 +398,11 @@ export class CallSession {
   /** Finding 5 (final review): the in-flight export-hash promise, if any -- `whenIdle()`
    *  lets a test await it deterministically instead of a real-clock `setTimeout` guess. */
   private pendingExport: Promise<void> | null = null;
+  /** ENDPOINT MODE (2026-09-22, Lane B): pending `awaitCallerUtterance` calls, modeled on
+   *  `whenIdle()`'s own settle-and-resolve pattern above. A plain array, not a Map, because
+   *  more than one waiter can legitimately be waiting on the SAME text at once (a test racing
+   *  two assertions) or on DIFFERENT text simultaneously (a harness pipelining ahead). */
+  private readonly callerUtteranceWaiters: { text: string; resolve: (matched: boolean) => void; timer: ReturnType<typeof setTimeout> }[] = [];
   private readonly agentName: string;
   /** Fix round 1, finding 1: owned for the life of the call (not per-render) so consecutive
    *  STALL goals of the same kind actually get different holding lines instead of each
@@ -881,6 +935,15 @@ export class CallSession {
    *  and `maybeArmHoldFollowup` so the two mechanisms can never disagree on when a bare hold
    *  reply is allowed to be read as "this rendering still needs asking". */
   private bareHoldAfterAlreadyAsked(goal: PhrasingGoal, replyId: string): boolean {
+    // ONE-BRAIN (2026-09-22, Lane B, plan §2 delete-list): this whole family of methods
+    // exists only to manage the race between AssemblyAI's own automatic reply and our own
+    // instructed `reply.create` -- two writers of words. Endpoint mode has exactly one writer
+    // (our `/api/brain` endpoint IS AssemblyAI's automatic reply, by construction), so there
+    // is nothing left to detect, retry, or reconcile; every method gated this way is a
+    // deliberate no-op in endpoint mode. Legacy mode (`brainMode !== 'endpoint'`, the
+    // default) takes this same `if` and falls straight through unchanged -- byte-for-byte the
+    // same behavior as before this lane.
+    if (this.brainMode === 'endpoint') return false;
     if (this.questionAskedGoalKey !== JSON.stringify(goal) || this.questionAskedCount < 1) return false;
     const transcript = this.replyTranscripts.get(replyId) ?? '';
     return normalizeForCloseMatch(transcript) === 'one moment';
@@ -1302,6 +1365,8 @@ export class CallSession {
    *  DEGRADED_INFLIGHT_STRIKE_MS) -- see the class-field doc comment above
    *  `DEGRADED_MODE_STRIKE_THRESHOLD` for the dedup guarantee and the diag shapes. */
   private recordDegradedStrike(replyId: string, detail: { in_flight: boolean; reason?: string }): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (this.repliesCountedAsDegradedStrike.has(replyId)) return; // one strike per reply, however it was caught
     this.repliesCountedAsDegradedStrike.add(replyId);
     if (this.degradedStrikeCount === 0) this.degradedStreakStartTMs = this.nowT();
@@ -1341,6 +1406,8 @@ export class CallSession {
    *  or delays, the CLOSE/QUESTION_GOALS-specific wait mechanisms already checking the exact
    *  same transcript for their own, unrelated reasons. */
   private armDegradedStrikeCheck(replyId: string): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
       this.degradedStrikeTimers.delete(timer);
       if (this.ended) return;
@@ -1373,6 +1440,8 @@ export class CallSession {
    *  see that field's own doc comment) shows audio arrived more recently than the full window,
    *  and only striking once the full window has passed with no new frame at all. */
   private armDegradedInflightStrikeCheck(replyId: string): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
       this.degradedStrikeTimers.delete(timer);
       this.checkDegradedInflightStrike(replyId);
@@ -1391,6 +1460,8 @@ export class CallSession {
    *  re-arms for the remaining time (exactly `checkCloseReplyStuck`'s own shape); the full
    *  window elapsed with no new frame is what actually strikes. */
   private checkDegradedInflightStrike(replyId: string): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (this.ended) return;
     if (this.repliesWithDone.has(replyId)) return; // finished already -- the reply.done path owns it
     if (this.currentReplyId !== replyId) return; // superseded by a newer reply -- stale check
@@ -1444,6 +1515,8 @@ export class CallSession {
   private degradedMaxAudioOnlyReplyId: string | null = null;
 
   private armDegradedMaxAudioOnlyCheck(replyId: string): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     this.clearDegradedMaxAudioOnlyTimer();
     this.degradedMaxAudioOnlyReplyId = replyId;
     const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
@@ -1900,6 +1973,8 @@ export class CallSession {
    *  `closeArmedForReplyId` guards against re-arming a second `CLOSE_DONE_WAIT_MS` timer on
    *  top of one already running for the same reply id as more transcript chunks stream in. */
   private maybeArmCloseOnTranscript(replyId: string): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (this.goodbyeConfirmed) return; // round 5: nothing left to arm -- already confirmed
     const sentence = this.currentCloseSentence();
     if (!sentence) return;
@@ -1992,6 +2067,8 @@ export class CallSession {
    *  audio-confirm branch below for why an `interrupted` reply can never be confirmed from
    *  audio alone. */
   private armCloseTranscriptWait(replyId: string, degradedAtReplyDone: boolean, replyStatus: string): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (this.closeTranscriptWaitTimer && this.closeTranscriptWaitReplyId === replyId) return;
     if (this.closeTranscriptWaitTimer) {
       clearTimeout(this.closeTranscriptWaitTimer);
@@ -2103,6 +2180,8 @@ export class CallSession {
    *  comment for why it now uses `forceSpeakSettleMs` (0 by default), not
    *  `AUTOMATIC_REPLY_SETTLE_MS`, for this exact owed key. */
   private armCloseRetryTimer(): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (this.closeRetryTimer) return;
     this.closeRetryTimer = setTimeout(() => {
       this.closeRetryTimer = null;
@@ -2140,6 +2219,8 @@ export class CallSession {
    *  fresh CLOSE reply is asked for via the spaced retry (`armCloseRetryTimer`) that every
    *  other CLOSE mismatch already uses. */
   private armCloseStuckWatchdog(replyId: string): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (this.closeStuckTimer) {
       clearTimeout(this.closeStuckTimer);
       this.closeStuckTimer = null;
@@ -2159,6 +2240,8 @@ export class CallSession {
    *  fail (a newer reply started, reply.done already ran, call ended, goodbye confirmed,
    *  or CLOSE is no longer owed). */
   private checkCloseReplyStuck(replyId: string): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (this.closeStuckTimer) {
       clearTimeout(this.closeStuckTimer);
       this.closeStuckTimer = null;
@@ -2222,6 +2305,8 @@ export class CallSession {
    *  (CLOSE_REPLY_ATTEMPTS is gone) -- retries continue, spaced, until either a match is
    *  heard or the CLOSE_TOTAL_MS (45s) hard cap (`armClose`) ends the call `close_timeout`. */
   private scheduleCloseIfNeeded(replyId: string, status: string): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     // Round 5: once confirmed, nothing is owed for any OTHER reply -- but the confirmed
     // reply's own `reply.done` must still fall through below (test (e)'s own PROVEN
     // "reply.done wins the race" behaviour: `beginCloseGrace` is idempotent, so letting this
@@ -2371,6 +2456,8 @@ export class CallSession {
   private holdFollowupArmedForTurn = false;
 
   private maybeArmHoldFollowup(replyId: string, status: string): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (this.ended || this.goodbyeConfirmed) return;
     if (!this.last) return;
     if (this.degradedTranscriptsMode) return;
@@ -2398,6 +2485,8 @@ export class CallSession {
   }
 
   private armHoldFollowupTimer(goalAtArmTime: PhrasingGoal): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     this.clearHoldFollowupTimer();
     const goalKeyAtArmTime = JSON.stringify(goalAtArmTime);
     const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
@@ -2427,6 +2516,7 @@ export class CallSession {
     this.startMs = opts.now();
     this.agentName = resolveAgentName(opts.agent_name);
     this.forceSpeakSettleMs = opts.forceSpeakSettleMs ?? CallSession.FORCE_SPEAK_SETTLE_MS;
+    this.brainMode = opts.brainMode ?? 'legacy';
     opts.aai.on((evt) => this.handleAaiEvent(evt));
     // aai-observability lane (2026-09-16, items 1 and 3): registers this session's own
     // `aai_unhandled_message` / delta-accounting handlers on whatever `AaiSocket` this call
@@ -2887,6 +2977,13 @@ export class CallSession {
         // caller's own silence window; the agent's transcript can land before or after that
         // and would otherwise let a stalled reply mask real caller silence).
         if (evt.type === 'transcript.user') {
+          // ENDPOINT MODE (2026-09-22, Lane B): resolve any pending `awaitCallerUtterance`
+          // waiters now that this caller transcript has been logged (pushed to
+          // `logs.conversation` just above) -- see that method's own doc comment for why
+          // this is the "processed" point, not `dispatchAaiEvent`'s own duplicate-item_id
+          // early return a few lines up (a duplicate is never logged, so it never resolves a
+          // waiter either).
+          this.resolveCallerUtteranceWaiters(evt.text);
           this.opts.onActivity?.();
           // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix, hardening (2026-09-19, coordinator review
           // of 9e16e75): `callerSpeaking` used to be cleared ONLY by `input.speech.stopped`.
@@ -3579,6 +3676,8 @@ export class CallSession {
    *  to `armQuestionReaskTimer` for the actual (spaced) send. See that method's own doc
    *  comment, and the class-field doc comment on `questionReaskTimer`, for why. */
   private maybeReaskQuestion(replyId: string, status: string): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (status !== 'completed') return;
     if (this.ended || this.goodbyeConfirmed) return;
     if (this.replyCreateAwaitingStart) return; // something else already sent one this turn
@@ -3706,6 +3805,8 @@ export class CallSession {
     sentence: string | null,
     instructions: string
   ): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (this.questionTranscriptWaitTimer && this.questionTranscriptWaitReplyId === replyId) return;
     if (this.questionTranscriptWaitTimer) {
       clearTimeout(this.questionTranscriptWaitTimer);
@@ -3760,6 +3861,8 @@ export class CallSession {
    *  generated, not refused), but for free, exactly as `armCloseRetryTimer`'s own
    *  `countAttempt`/`closeLastReplyWasEmpty` already treat an empty CLOSE reply. */
   private armQuestionReaskTimer(): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (this.questionReaskTimer) return;
     this.questionReaskTimer = setTimeout(() => {
       this.questionReaskTimer = null;
@@ -4218,6 +4321,11 @@ export class CallSession {
    *  label to the current goal, to catch up on whatever was owed while that reply was busy
    *  speaking). */
   private mustForceSpeak(fromCode: GoalCode | null, toCode: GoalCode): boolean {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    // (Both of this method's callers, maybeSendReplyCreateForTick and
+    // maybeSendReplyCreateAfterReplyDone, are themselves gated below, so this guard is
+    // belt-and-suspenders -- it should already be unreachable in endpoint mode.)
+    if (this.brainMode === 'endpoint') return false;
     if (toCode === 'GREET') return false;
     // Same CODE re-rendering (e.g. a fresh evidence quote changing the keyterms list, or a
     // new stall/challenge/readback line for the SAME code) is not a "change" -- only a
@@ -4277,6 +4385,8 @@ export class CallSession {
    *  see that field's own doc comment for exactly why `maybeSendReplyCreateAfterReplyDone`
    *  needs this narrower signal rather than re-deriving `isFreshQuestionGoal` on its own. */
   private maybeSendReplyCreateForTick(goalAtTickStart: GoalCode | null, callerTurnTick: boolean): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (this.ended || !this.last) return;
     const goal = this.last.goal;
     const finalGoal = goal.code;
@@ -4521,6 +4631,17 @@ export class CallSession {
    *  a fresh attempt. Also arms `armReplyCreateLostTimer` (requirement 5): every send starts
    *  a fresh watch for its own `reply.started` never showing up. */
   private sendReplyCreate(goalCode: GoalCode, reason: string, instructions?: string, opts?: { countAttempt?: boolean }): void {
+    // ONE-BRAIN (2026-09-22, Lane B, plan §2 delete-list): the single place that would
+    // actually put a `reply.create` on the wire for an ordinary turn -- gated first, before
+    // any of its bookkeeping (goodbyeConfirmed checks, closeReplySendCount, the lost-reply
+    // watchdog) runs, so nothing here has any side effect at all in endpoint mode. The plan's
+    // one KEPT exception -- a silent-caller nudge (idle no-action goodbye, the out-of-scope
+    // timed goodbye) still sending exactly one `reply.create` whose words come from the SAME
+    // endpoint -- is deliberately NOT wired back in by this lane: this task is scoped to the
+    // three ordinary-turn demo cases (STAGE/FREEZE/ESCALATE), which never reach that path.
+    // Whichever lane builds the real endpoint-mode nudge should re-open this guard for that
+    // one call site specifically, not remove it wholesale.
+    if (this.brainMode === 'endpoint') return;
     if (this.ended) return;
     // Round 5: once the goodbye is transcript-confirmed, nothing more is ever owed -- not
     // another CLOSE retry (the words were heard) and not any other goal's reply.create
@@ -4576,6 +4697,9 @@ export class CallSession {
    *  acknowledged at all -- reply.done-driven retries can't fire for a reply.started that
    *  never happened). */
   private armReplyCreateLostTimer(): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    // (Only caller, sendReplyCreate, is itself gated above, so this is belt-and-suspenders.)
+    if (this.brainMode === 'endpoint') return;
     this.clearReplyCreateLostTimer();
     this.replyCreateLostTimer = setTimeout(() => {
       this.replyCreateLostTimer = null;
@@ -4667,6 +4791,8 @@ export class CallSession {
    *  every tick without its own busy/goal-match check duplicated here beyond the cheap early
    *  outs below (a no-op call costs nothing but a `JSON.stringify` and two comparisons). */
   private maybeSendOwedAfterCallerTurnEnds(): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (this.ended || !this.last) return;
     if (this.callerSpeaking) return; // still mid-utterance -- nothing owed can be sent yet
     if (this.speaking || this.replyCreateAwaitingStart) return; // something else already in flight
@@ -4750,6 +4876,8 @@ export class CallSession {
    *  question-covered bookkeeping just above (`lastAskedQuestionKey`/`clearTickEndSendTimer`)
    *  runs on this path: nothing has been asked yet, so nothing should be recorded as asked. */
   private maybeSendReplyCreateAfterReplyDone(replyId: string, status: string): void {
+    // ONE-BRAIN (endpoint mode, plan §2 delete-list): no second writer to race -- no-op.
+    if (this.brainMode === 'endpoint') return;
     if (this.ended || !this.last) return;
     if (this.speaking || this.replyCreateAwaitingStart) return;
     const goal = this.last.goal;
@@ -4996,6 +5124,91 @@ export class CallSession {
    *  immediately when nothing is pending. */
   whenIdle(): Promise<void> {
     return this.pendingExport ?? Promise.resolve();
+  }
+
+  /** ONE-BRAIN LIVE PATH (2026-09-22, Lane B, additive -- see `CallSessionOpts.brainMode`'s
+   *  own doc comment): the exact next line to speak for the CURRENT goal (`this.last.goal`),
+   *  reusing whichever sentence the engine already composes verbatim -- never an LLM
+   *  paraphrase (LAW 3). See `PLACEHOLDER_GOAL_LINES`'s own doc comment above for the six
+   *  codes handled directly here (`goal.hint` for five, `goal.challenge.speak` for
+   *  `ASK_CHALLENGE`) versus the placeholder fallback for every other code.
+   *
+   *  `null` means "say nothing": only when no `evaluate()` has run yet (`this.last` is
+   *  `null`, i.e. before the first `tick()`) -- every real `GoalCode` past that point has
+   *  either an exact sentence or a placeholder line, never `null`. Read-only: never mutates
+   *  state, never sends anything over `this.opts.aai`, never logs -- safe to call as many
+   *  times as needed without side effects, and safe to call in EITHER `brainMode` (it is not
+   *  gated, unlike §2's send/timer methods, because it never sends anything itself; Lane C's
+   *  endpoint handler is the only intended real caller, in endpoint mode). */
+  nextSpokenLine(): string | null {
+    if (!this.last) return null;
+    const goal = this.last.goal;
+    switch (goal.code) {
+      case 'READBACK':
+      case 'RE_ELICIT_AFTER_SWITCH':
+      case 'ELICIT_MISSING_CRITICAL':
+      case 'ELICIT_REQUEST':
+      case 'CLOSE':
+        return goal.hint;
+      case 'ASK_CHALLENGE':
+        // CHALLENGE-SPEAKABLE (fsm.ts, 2026-09-11): `goal.challenge.speak` is the exact,
+        // ready-to-speak sentence for this challenge. Falls back to the placeholder (never to
+        // the raw `ask` instruction string, which prompt.ts's own comment records a live
+        // incident of the model reading aloud as stage directions) for the defensive case of
+        // no challenge/no `speak` on it at all.
+        return goal.challenge?.speak ?? PLACEHOLDER_GOAL_LINES.STALL;
+      default:
+        return PLACEHOLDER_GOAL_LINES[goal.code];
+    }
+  }
+
+  /** ONE-BRAIN LIVE PATH (2026-09-22, Lane B, additive): resolves `true` once this session
+   *  has PROCESSED (logged to `logs.conversation`, see `dispatchAaiEvent`'s `transcript.user`
+   *  case) a caller transcript whose text equals `text`, exact match after `.trim()` on both
+   *  sides. Modeled on `whenIdle()`'s own settle-and-resolve shape above. Resolves
+   *  immediately, without waiting, if a matching caller line was already logged before this
+   *  call -- the same "don't miss an event that already happened" guarantee `whenIdle()`
+   *  gives for `pendingExport`.
+   *
+   *  Resolves `false` (never rejects -- deliberately a plain boolean, not a rejection, so a
+   *  test harness can `await` it directly without a `try`/`catch` for the expected-timeout
+   *  case) if `timeoutMs` elapses with no match. The timer is `unref()`d, same convention as
+   *  every other timer in this class, so a pending wait never keeps the process alive on its
+   *  own. */
+  awaitCallerUtterance(text: string, timeoutMs: number): Promise<boolean> {
+    const target = text.trim();
+    const alreadySaid = this.logs.conversation.some((u) => u.speaker === 'caller' && u.text.trim() === target);
+    if (alreadySaid) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => {
+      const waiter: { text: string; resolve: (matched: boolean) => void; timer: ReturnType<typeof setTimeout> } = {
+        text: target,
+        resolve,
+        timer: setTimeout(() => {
+          const idx = this.callerUtteranceWaiters.indexOf(waiter);
+          if (idx !== -1) this.callerUtteranceWaiters.splice(idx, 1);
+          resolve(false);
+        }, timeoutMs),
+      };
+      waiter.timer.unref?.();
+      this.callerUtteranceWaiters.push(waiter);
+    });
+  }
+
+  /** Companion to `awaitCallerUtterance` above -- called from `dispatchAaiEvent`'s own
+   *  `transcript.user` case right after the caller's line is logged. Resolves (and removes)
+   *  every waiter whose exact trimmed text matches, not just the first -- see
+   *  `callerUtteranceWaiters`'s own field doc comment for why more than one can be pending on
+   *  the same text at once. Iterates backwards so splicing mid-loop is safe. */
+  private resolveCallerUtteranceWaiters(text: string): void {
+    if (this.callerUtteranceWaiters.length === 0) return;
+    const trimmed = text.trim();
+    for (let i = this.callerUtteranceWaiters.length - 1; i >= 0; i--) {
+      const waiter = this.callerUtteranceWaiters[i]!;
+      if (waiter.text !== trimmed) continue;
+      clearTimeout(waiter.timer);
+      this.callerUtteranceWaiters.splice(i, 1);
+      waiter.resolve(true);
+    }
   }
 
   private emitState(): void {
