@@ -38,11 +38,20 @@ function expectedLineFor(goal: PhrasingGoal): string | undefined {
   return PLACEHOLDER_GOAL_LINES[goal.code as keyof typeof PLACEHOLDER_GOAL_LINES];
 }
 
-function newSession(opts: { aai: FakeAaiSocket; sent: ServerEvent[]; clock: { now: number }; brainMode?: 'legacy' | 'endpoint' }): CallSession {
+function newSession(opts: {
+  aai: FakeAaiSocket;
+  sent: ServerEvent[];
+  clock: { now: number };
+  brainMode?: 'legacy' | 'endpoint';
+  // Override for the OUT_OF_SCOPE-GOODBYE tests below, which need a fresh call context
+  // rather than recorded-stage.json's own (a STAGE case that never reaches OUT_OF_SCOPE).
+  call?: CallContext;
+}): CallSession {
+  const call = opts.call ?? CALL;
   return new CallSession({
-    session_id: CALL.session_id,
+    session_id: call.session_id,
     seed: MERIDIAN,
-    call: CALL,
+    call,
     aai: opts.aai,
     now: () => opts.clock.now,
     onServerEvent: (e) => opts.sent.push(e),
@@ -52,6 +61,20 @@ function newSession(opts: { aai: FakeAaiSocket; sent: ServerEvent[]; clock: { no
     // not `'legacy' | 'endpoint' | undefined'`.
     ...(opts.brainMode !== undefined ? { brainMode: opts.brainMode } : {}),
   });
+}
+
+/** Every `session.update` this fake socket has on record whose `session` payload carries
+ *  `system_prompt` -- the live-run bug (scripts/spike/live-run/proxy-brain.log, PROVEN):
+ *  endpoint mode's per-call correlation token lives ONLY in the post-bind `system_prompt`
+ *  (`aai/config.ts` `buildPostBindSessionUpdate`, sent once from `aai/session.ts`
+ *  `connectAaiEndpoint` -- never by `CallSession`, which is never given the token at all).
+ *  Any `session.update` `CallSession` itself sends that also carries `system_prompt` would
+ *  overwrite that field and erase the token for the rest of the call. */
+function systemPromptSessionUpdatesOf(aai: FakeAaiSocket): { type?: string; session?: { system_prompt?: string } }[] {
+  return aai.sent.filter((m) => {
+    const msg = m as { type?: string; session?: { system_prompt?: string } };
+    return msg.type === 'session.update' && msg.session?.system_prompt !== undefined;
+  }) as { type?: string; session?: { system_prompt?: string } }[];
 }
 
 const CALLER_LINES = (recordedStage.conversation as { id: string; speaker: string; text: string }[]).filter((u) => u.speaker === 'caller');
@@ -107,6 +130,43 @@ describe('CallSession — endpoint mode (COUNTERSIGN_BRAIN=endpoint), one-brain 
     }
   });
 
+  // LIVE-RUN FIX (2026-09-23, PROVEN by scripts/spike/live-run/proxy-brain.log): the first
+  // live endpoint-mode run failed twice, deterministically -- every one of AssemblyAI's 8
+  // requests to our endpoint lacked the per-call token marker, so the endpoint answered every
+  // turn with an empty completion and the agent never spoke after the greeting. Root cause:
+  // the post-bind `session.update` (`aai/config.ts` `buildPostBindSessionUpdate`, sent once
+  // from `aai/session.ts` `connectAaiEndpoint`) carries the token in `system_prompt` -- but
+  // `applyEvaluate()`'s own ordinary per-goal `session.update` send (below) was NOT gated on
+  // `brainMode`, so the very first goal change (INTAKE, before the caller even speaks --
+  // `session.start()` alone triggers it) overwrote `system_prompt` and erased the token for
+  // the rest of the call. This test must FAIL on the pre-fix code (it drives the exact
+  // sequence that failed live) and pass once `applyEvaluate()`'s send is gated to endpoint
+  // mode never sending `system_prompt` at all.
+  it('never sends a session.update carrying system_prompt across the full recorded-stage.json conversation -- the post-bind token stays intact for the whole call', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint' });
+    session.start(); // INTAKE's first goal change -- exactly where the live bug fired
+
+    let replyCounter = 0;
+    for (const line of CALLER_LINES) {
+      clock.now += 3000;
+      aai.emit({ type: 'transcript.user', item_id: line.id, text: line.text });
+      const spoken = session.nextSpokenLine();
+      if (spoken !== null) {
+        replyCounter += 1;
+        const replyId = `no-system-prompt-reply-${replyCounter}`;
+        clock.now += 500;
+        aai.emit({ type: 'reply.started', reply_id: replyId });
+        aai.emit({ type: 'transcript.agent', item_id: `${replyId}-t`, text: spoken, reply_id: replyId, interrupted: false });
+        aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });
+      }
+    }
+
+    expect(systemPromptSessionUpdatesOf(aai)).toHaveLength(0);
+  });
+
   it('nextSpokenLine() returns null before any evaluate() has run (no tick yet)', () => {
     const clock = { now: 0 };
     const aai = new FakeAaiSocket();
@@ -151,6 +211,71 @@ describe('CallSession — legacy mode (default): unchanged, still sends reply.cr
     vi.advanceTimersByTime(1000);
 
     expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(true);
+  });
+
+  it('still sends its per-goal session.update carrying system_prompt exactly as before (contrast with the endpoint-mode fix above -- this gate is endpoint-only)', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock }); // brainMode omitted -- legacy, the default
+    session.start(); // INTAKE's first goal change alone already sends one
+
+    expect(systemPromptSessionUpdatesOf(aai).length).toBeGreaterThan(0);
+  });
+});
+
+// LIVE-RUN FIX, second unguarded send site (2026-09-23): `pushOutOfScopeGoodbyeInstruction`
+// (session.ts) is the OTHER place a per-goal `session.update` reaches the wire -- fired once,
+// from `reply.done`, the first time an EXPLAIN_OUT_OF_SCOPE reply completes (see that method's
+// own doc comment and out-of-scope-goodbye.test.ts for the full live incident). It was not
+// gated on `brainMode` either; left unfixed it would erase the per-call token exactly like
+// `applyEvaluate()`'s send did, for any call that goes out of scope.
+describe('CallSession — endpoint mode: the OUT_OF_SCOPE-GOODBYE instruction push never sends system_prompt either', () => {
+  const OUT_OF_SCOPE_LINE = "I'm not the CEO. I'm testing this for a hackathon.";
+  const EXPLANATION_TEXT = 'This is a demo checkpoint for a synthetic company. You may act as Dana or the CEO. Nothing will move.';
+
+  it('endpoint mode: pushOutOfScopeGoodbyeInstruction never puts a session.update carrying system_prompt on the wire', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-oos-endpoint-system-prompt', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint', call });
+    session.start();
+
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: OUT_OF_SCOPE_LINE });
+    expect(session.last?.goal.code).toBe('EXPLAIN_OUT_OF_SCOPE');
+
+    clock.now = 1200;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1-t', text: EXPLANATION_TEXT, reply_id: 'a1', interrupted: false });
+    clock.now = 2300;
+    // A COMPLETED reply labelled EXPLAIN_OUT_OF_SCOPE flips `outOfScopeExplained` and calls
+    // `pushOutOfScopeGoodbyeInstruction()` -- exactly the site under test.
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    expect(systemPromptSessionUpdatesOf(aai)).toHaveLength(0);
+  });
+
+  it('legacy mode (brainMode omitted): the same push still sends its session.update carrying system_prompt exactly as before (contrast -- this gate is endpoint-only)', () => {
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-oos-legacy-system-prompt', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession({ aai, sent, clock, call }); // legacy
+    session.start();
+
+    clock.now = 1000;
+    aai.emit({ type: 'transcript.user', item_id: 'c1', text: OUT_OF_SCOPE_LINE });
+    expect(session.last?.goal.code).toBe('EXPLAIN_OUT_OF_SCOPE');
+
+    clock.now = 1200;
+    aai.emit({ type: 'reply.started', reply_id: 'a1' });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1-t', text: EXPLANATION_TEXT, reply_id: 'a1', interrupted: false });
+    clock.now = 2300;
+    aai.emit({ type: 'reply.done', reply_id: 'a1', status: 'completed' });
+
+    expect(systemPromptSessionUpdatesOf(aai).length).toBeGreaterThan(0);
   });
 });
 

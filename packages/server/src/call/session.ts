@@ -1890,8 +1890,17 @@ export class CallSession {
    *  request was sent, never what the engine currently says" reasoning `scheduleCloseIfNeeded`'s
    *  own doc comment already applies). `previousGoalKey` is deliberately left untouched: the
    *  next genuine goal change still sends its own `session.update` exactly as before, and would
-   *  needlessly diff against a key this push never updates. */
+   *  needlessly diff against a key this push never updates.
+   *
+   *  ONE-BRAIN LIVE PATH, live-run fix (2026-09-23): the SECOND unguarded `session.update`
+   *  send this live run found (`scripts/spike/live-run/proxy-brain.log`) -- same reasoning as
+   *  `applyEvaluate`'s own per-goal send (see that gate's doc comment): endpoint mode's
+   *  `system_prompt` is the per-call token, set once post-bind, and `CallSession` is never
+   *  given that token to re-embed it here, so this whole push is skipped outright for endpoint
+   *  mode, same early-return convention every other two-writer-race method in this class
+   *  already uses. */
   private pushOutOfScopeGoodbyeInstruction(): void {
+    if (this.brainMode === 'endpoint') return;
     if (this.ended || !this.last) return;
     if (this.last.verdict !== 'NO_ACTION' || this.last.state !== 'OUT_OF_SCOPE') return;
     if (this.last.goal.code !== 'EXPLAIN_OUT_OF_SCOPE') return;
@@ -4444,51 +4453,73 @@ export class CallSession {
       // default (`DEFAULT_VAD_THRESHOLD`, aai/config.ts) -- never omitted here, so a partial
       // update can never be read as resetting it to some other default; `min_silence`/
       // `max_silence` stay omitted, exactly as every other goal's update already does.
-      const isCloseGoal = output.goal.code === 'CLOSE';
-      const input: Record<string, unknown> = {
-        keyterms: output.goal.keyterms.slice(0, 100),
-      };
-      if (isCloseGoal) {
-        input.turn_detection = { vad_threshold: DEFAULT_VAD_THRESHOLD, interrupt_response: false };
+      //
+      // ONE-BRAIN LIVE PATH, live-run fix (2026-09-23, PROVEN by
+      // scripts/spike/live-run/proxy-brain.log): this per-goal `session.update` must never
+      // reach AssemblyAI in endpoint mode. Endpoint mode's ONLY `system_prompt` is the
+      // per-call correlation token (`COUNTERSIGN_CALL_TOKEN:<token>`, `aai/config.ts`
+      // `buildPostBindSessionUpdate`), sent exactly once, post-bind, from
+      // `aai/session.ts`'s `connectAaiEndpoint` -- `CallSession` is never given that token at
+      // all (checked: no `callToken`/`brainToken` field reaches `CallSessionOpts`), so
+      // re-embedding it here is not an option. The first live endpoint-mode run sent this
+      // unconditionally and the very first goal change (INTAKE, before the caller even
+      // spoke -- `session.start()` alone triggers it) overwrote `system_prompt` and erased
+      // the token for the rest of the call: every subsequent request to our endpoint came in
+      // unrecognized and got an empty completion, so the agent never spoke again after the
+      // greeting. Endpoint mode needs none of this send's payload anyway -- keyterms and
+      // transcription mode are fixed once, post-bind, not per goal (plan §4) -- and
+      // `nextSpokenLine()` (used only by `brain/endpoint.ts`, in endpoint mode) reads
+      // `this.last`/`this.last.goal` directly, set unconditionally below regardless of this
+      // gate. Legacy mode (`brainMode !== 'endpoint'`) sends exactly as before, byte-for-byte.
+      if (this.brainMode !== 'endpoint') {
+        const isCloseGoal = output.goal.code === 'CLOSE';
+        const input: Record<string, unknown> = {
+          keyterms: output.goal.keyterms.slice(0, 100),
+        };
+        if (isCloseGoal) {
+          input.turn_detection = { vad_threshold: DEFAULT_VAD_THRESHOLD, interrupt_response: false };
+        }
+        this.opts.aai.send({
+          type: 'session.update',
+          session: {
+            system_prompt: renderPrompt(output.goal, this.promptCtx(output)),
+            tools: toolSchemasFor(output.allowed_tools),
+            input,
+          },
+        });
+        this.logs.actions.push({
+          id: this.nextActionId(),
+          kind: 'session_config_updated',
+          t_ms: this.nowT(),
+          detail: `goal=${output.goal.code}`,
+        });
+        // Observability fix (2026-09-18, same lane): `has_turn_detection: !!hint` was always
+        // true (`turn_detection_hint` is never empty) so it never actually said what we sent.
+        // LAW 4 (exact-transcript evidence -- facts stored separately from interpretation, no
+        // paraphrase): log the literal fact of what was placed on the wire, not a derived
+        // flag, so a bundle read later can PROVE what was sent rather than needing to be
+        // reconstructed from goal_code + engine source, as this lane had to do for the
+        // analysis above. FOLLOW-UP (2026-09-18, same day): the field previously logged the
+        // literal `{}` object sent as `turn_detection`; now that the key is omitted from the
+        // wire entirely for every non-CLOSE goal (see the send above), `turn_detection_sent`
+        // would always be a lie if left as an object for those -- `turn_detection_omitted: true`
+        // states the actual fact instead. Mechanism A (2026-09-19): for CLOSE, the literal object
+        // actually sent is logged instead (`turn_detection_omitted: false`), so a bundle can
+        // PROVE `interrupt_response: false` went out on the wire without reconstructing it.
+        this.diag('session_config_updated', {
+          goal_code: output.goal.code,
+          keyterms_count: output.goal.keyterms.length,
+          tools_count: output.allowed_tools.length,
+          turn_detection_omitted: !isCloseGoal,
+          ...(isCloseGoal ? { turn_detection_sent: input.turn_detection } : {}),
+        });
       }
-      this.opts.aai.send({
-        type: 'session.update',
-        session: {
-          system_prompt: renderPrompt(output.goal, this.promptCtx(output)),
-          tools: toolSchemasFor(output.allowed_tools),
-          input,
-        },
-      });
-      this.logs.actions.push({
-        id: this.nextActionId(),
-        kind: 'session_config_updated',
-        t_ms: this.nowT(),
-        detail: `goal=${output.goal.code}`,
-      });
-      // Observability fix (2026-09-18, same lane): `has_turn_detection: !!hint` was always
-      // true (`turn_detection_hint` is never empty) so it never actually said what we sent.
-      // LAW 4 (exact-transcript evidence -- facts stored separately from interpretation, no
-      // paraphrase): log the literal fact of what was placed on the wire, not a derived
-      // flag, so a bundle read later can PROVE what was sent rather than needing to be
-      // reconstructed from goal_code + engine source, as this lane had to do for the
-      // analysis above. FOLLOW-UP (2026-09-18, same day): the field previously logged the
-      // literal `{}` object sent as `turn_detection`; now that the key is omitted from the
-      // wire entirely for every non-CLOSE goal (see the send above), `turn_detection_sent`
-      // would always be a lie if left as an object for those -- `turn_detection_omitted: true`
-      // states the actual fact instead. Mechanism A (2026-09-19): for CLOSE, the literal object
-      // actually sent is logged instead (`turn_detection_omitted: false`), so a bundle can
-      // PROVE `interrupt_response: false` went out on the wire without reconstructing it.
-      this.diag('session_config_updated', {
-        goal_code: output.goal.code,
-        keyterms_count: output.goal.keyterms.length,
-        tools_count: output.allowed_tools.length,
-        turn_detection_omitted: !isCloseGoal,
-        ...(isCloseGoal ? { turn_detection_sent: input.turn_detection } : {}),
-      });
-      // The hard cap starts the moment CLOSE is first rendered (session.update just sent
-      // it) -- not from `this.last = output` below, which would fire on every tick, and not
-      // from `reply.done`, which is exactly the event this cap exists to cover the absence
-      // of. See `armClose`'s own doc comment.
+      // The hard cap starts the moment CLOSE is first rendered (legacy mode: session.update
+      // just sent it, above; endpoint mode: this is unconditional, deliberately outside the
+      // `brainMode !== 'endpoint'` gate above -- nothing else arms it in endpoint mode, see
+      // that gate's own doc comment) -- not from `this.last = output` below, which would fire
+      // on every tick, and not from `reply.done`, which is exactly the event this cap exists
+      // to cover the absence of. See `armClose`'s own doc comment.
       if (output.goal.code === 'CLOSE') {
         // Review fix (2026-09-15, Critical): the engine has just rendered a genuinely FRESH
         // CLOSE (this branch only runs on a goalKey change) -- if an idle+NO_ACTION override

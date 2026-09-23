@@ -11,6 +11,14 @@
 // call rather than crash the server (plan §4: "Failure to create the agent at boot must NOT
 // crash the server").
 //
+// LIVE-RUN FIX (2026-09-23): the first live run left TWO stored agents both named
+// "countersign-brain" after two server restarts -- a reconcile (PUT) that failed transiently
+// used to fall through to create (POST), leaking a duplicate every time. `ensureBrainAgent`
+// now cleans up duplicates (keeps the newest, deletes the rest, never by any name but its
+// own) and retries a failed PUT once before reusing the existing agent as-is -- POST is only
+// ever reached when nothing named `countersign-brain` exists at all. See that function's own
+// doc comment for the full reasoning.
+//
 // Voice and greeting move onto the stored agent's OWN creation/update payload (plan §4) --
 // PROVEN required because binding via `agent_id` is mutually exclusive with inline session
 // fields (docs/PANEL-2026-09-22-LIVE-RELIABILITY.md, "Stored agents" citation) -- reusing
@@ -64,6 +72,12 @@ export interface BrainAgent {
 interface AgentListItem {
   id: string;
   name: string;
+  /** ISO timestamp, when the API includes one (this module's header doc comment: the list
+   *  endpoint's records are `{id, name, created_at, updated_at, deleted_at}`) -- used only to
+   *  pick the newest of several same-named agents during cleanup (see `pickNewest` below).
+   *  Optional: a record missing or with an unparseable one falls back to the list's own
+   *  documented "newest first" order instead of ever throwing or mis-picking. */
+  created_at?: string;
 }
 
 function buildLlmBaseUrl(publicUrl: string): string {
@@ -90,10 +104,14 @@ async function listAgents(opts: EnsureBrainAgentOpts): Promise<AgentListItem[]> 
     if (!res.ok) return [];
     const body: unknown = await res.json();
     if (!Array.isArray(body)) return [];
-    return body.filter(
-      (e): e is AgentListItem =>
-        typeof e === 'object' && e !== null && typeof (e as AgentListItem).id === 'string' && typeof (e as AgentListItem).name === 'string'
-    );
+    const items: AgentListItem[] = [];
+    for (const e of body) {
+      if (typeof e !== 'object' || e === null) continue;
+      const rec = e as { id?: unknown; name?: unknown; created_at?: unknown };
+      if (typeof rec.id !== 'string' || typeof rec.name !== 'string') continue;
+      items.push({ id: rec.id, name: rec.name, ...(typeof rec.created_at === 'string' ? { created_at: rec.created_at } : {}) });
+    }
+    return items;
   } catch {
     return [];
   } finally {
@@ -166,27 +184,102 @@ async function updateAgent(opts: EnsureBrainAgentOpts, id: string, voice: string
   }
 }
 
-/** Idempotent at boot: finds an existing agent named `countersign-brain` (GET /v1/agents,
- *  filtered by name) and reconciles it (PUT) onto today's desired voice/greeting/base_url,
- *  reusing its `id`; creates one fresh (POST) if none is found, OR if reconciling an existing
- *  one fails (recreate rather than run a live call against a possibly-stale agent). Never
- *  throws: every internal failure is caught and logged here, and this function returns
- *  `null` -- `index.ts` treats `null` as "fall back to legacy for every call" (plan §4),
- *  never a crash. */
+/** DELETE /v1/agents/{id} -- PROVEN to exist (this module's header doc comment,
+ *  ".../api-spec/delete-agent"). Only ever called on ids already filtered to
+ *  `name === BRAIN_AGENT_NAME` exactly (see `ensureBrainAgent`'s cleanup step below) -- this
+ *  function itself does not re-check the name, so it must never be called with an id from
+ *  outside that filtered set. Best-effort: a failure is reported to the caller (`false`), not
+ *  thrown, so a stale duplicate that fails to delete is left in place for the next boot to
+ *  retry rather than aborting the whole bootstrap over a cleanup step. */
+async function deleteAgent(opts: EnsureBrainAgentOpts, id: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timeoutMs = opts.fetchTimeoutMs ?? 10000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  timer.unref();
+  try {
+    const res = await opts.fetchImpl(`${AGENTS_BASE}/agents/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: opts.assemblyai_api_key },
+      signal: controller.signal,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** `true` when `a` is provably newer than `b` by `created_at`; `false` whenever either side is
+ *  missing a parseable timestamp -- callers then fall back to the list's own order (the API's
+ *  documented "newest first", per this module's header doc comment), never guess. */
+function isNewer(a: AgentListItem, b: AgentListItem): boolean {
+  if (!a.created_at || !b.created_at) return false;
+  const at = Date.parse(a.created_at);
+  const bt = Date.parse(b.created_at);
+  if (Number.isNaN(at) || Number.isNaN(bt)) return false;
+  return at > bt;
+}
+
+/** Picks the newest of one or more same-named agent records. With no usable `created_at` on
+ *  either side of a comparison, `isNewer` always reads `false`, so this naturally falls back
+ *  to `items[0]` -- the list's own documented newest-first order -- without any separate
+ *  fallback branch. */
+function pickNewest(items: AgentListItem[]): AgentListItem {
+  let newest = items[0]!;
+  for (const item of items.slice(1)) {
+    if (isNewer(item, newest)) newest = item;
+  }
+  return newest;
+}
+
+/** Idempotent at boot: finds every agent named `countersign-brain` (GET /v1/agents, filtered
+ *  by name -- never any other name). Zero found -> create one fresh (POST). One or more found
+ *  -> DUPLICATE CLEANUP (live finding, 2026-09-23: two server restarts left two stored agents
+ *  both named "countersign-brain" -- `scripts/spike/live-run/proxy-brain.log`/live boot logs,
+ *  PROVEN): keep the newest (`pickNewest`) and `DELETE` every other match, then reconcile
+ *  (PUT) the survivor onto today's desired voice/greeting/base_url, reusing its `id`.
+ *
+ *  PUT-FAILURE-CREATES-DUPLICATE fix: the previous version fell through to POST whenever the
+ *  reconcile (PUT) failed -- on AssemblyAI's side that created a SECOND agent with the same
+ *  name every time a PUT happened to fail transiently, which is exactly how the live duplicate
+ *  got there in the first place. Now: retry the PUT once: if that also fails, REUSE the
+ *  existing agent's id as-is (its live config may be stale until a future successful boot)
+ *  rather than ever creating a duplicate. `createAgent` (POST) is reached ONLY when nothing
+ *  named `countersign-brain` existed at all.
+ *
+ *  Never throws: every internal failure (list/reconcile/cleanup/create) is caught and logged
+ *  here, and this function returns `null` only when there is truly no usable agent id at all
+ *  (no existing agent AND create failed) -- `index.ts` treats `null` as "fall back to legacy
+ *  for every call" (plan §4), never a crash. */
 export async function ensureBrainAgent(opts: EnsureBrainAgentOpts): Promise<BrainAgent | null> {
   const voice = resolveVoice(opts.voice);
   try {
     const list = await listAgents(opts);
-    const existing = list.find((a) => a.name === BRAIN_AGENT_NAME);
-    if (existing) {
-      const updated = await updateAgent(opts, existing.id, voice);
-      if (updated) return { id: existing.id };
-      console.warn(
-        `countersign: brain agent "${BRAIN_AGENT_NAME}" (${existing.id}) reconcile (PUT) failed -- recreating.`
-      );
-      // Fall through to create a fresh one below rather than run the call against a
-      // possibly-stale existing agent.
+    const matches = list.filter((a) => a.name === BRAIN_AGENT_NAME);
+
+    if (matches.length > 0) {
+      const survivor = pickNewest(matches);
+      const stale = matches.filter((a) => a.id !== survivor.id);
+      for (const dup of stale) {
+        const deleted = await deleteAgent(opts, dup.id);
+        if (!deleted) {
+          console.warn(
+            `countersign: duplicate brain agent "${BRAIN_AGENT_NAME}" (${dup.id}) cleanup (DELETE) failed -- left in place, will retry next boot.`
+          );
+        }
+      }
+
+      let updated = await updateAgent(opts, survivor.id, voice);
+      if (!updated) updated = await updateAgent(opts, survivor.id, voice); // one retry
+      if (!updated) {
+        console.warn(
+          `countersign: brain agent "${BRAIN_AGENT_NAME}" (${survivor.id}) reconcile (PUT) failed twice -- reusing it as-is rather than creating a duplicate (voice/greeting/endpoint config may be stale until the next successful boot).`
+        );
+      }
+      return { id: survivor.id };
     }
+
     const created = await createAgent(opts, voice);
     if (created) return created;
     console.error('countersign: ensureBrainAgent create (POST /v1/agents) failed -- falling back to legacy for every call.');

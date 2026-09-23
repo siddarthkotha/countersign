@@ -28,16 +28,21 @@ interface Call {
 }
 
 /** A scripted fake AssemblyAI agents API -- `listResponse` seeds what GET /v1/agents returns;
- *  `putOk`/`postOk` control whether PUT/POST succeed; every call is recorded to `calls` so a
- *  test can assert exactly what was sent and how many times. */
+ *  `putOk`/`postOk`/`deleteOk` control whether PUT/POST/DELETE succeed; `putResults` (when
+ *  given) overrides `putOk` with a per-call sequence, consumed in order and repeating its last
+ *  entry once exhausted -- used to script "fails once, succeeds on retry" and similar. Every
+ *  call is recorded to `calls` so a test can assert exactly what was sent and how many times. */
 function fakeFetch(state: {
-  listResponse: { id: string; name: string }[];
+  listResponse: { id: string; name: string; created_at?: string }[];
   putOk?: boolean;
+  putResults?: boolean[];
   postOk?: boolean;
   postId?: string;
+  deleteOk?: boolean;
   throwOnList?: boolean;
 }): { fetchImpl: typeof fetch; calls: Call[] } {
   const calls: Call[] = [];
+  let putCallIndex = 0;
   const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
@@ -49,11 +54,22 @@ function fakeFetch(state: {
       return new Response(JSON.stringify(state.listResponse), { status: 200 });
     }
     if (method === 'PUT') {
-      return new Response('{}', { status: state.putOk === false ? 500 : 200 });
+      let ok: boolean;
+      if (state.putResults) {
+        const idx = Math.min(putCallIndex, state.putResults.length - 1);
+        ok = state.putResults[idx] ?? true;
+        putCallIndex += 1;
+      } else {
+        ok = state.putOk !== false;
+      }
+      return new Response('{}', { status: ok ? 200 : 500 });
     }
     if (method === 'POST' && url === 'https://agents.assemblyai.com/v1/agents') {
       if (state.postOk === false) return new Response('server error', { status: 500 });
       return new Response(JSON.stringify({ id: state.postId ?? 'created-agent-id' }), { status: 200 });
+    }
+    if (method === 'DELETE') {
+      return new Response('{}', { status: state.deleteOk === false ? 500 : 200 });
     }
     return new Response('not found', { status: 404 });
   });
@@ -135,29 +151,102 @@ describe('ensureBrainAgent', () => {
     expect(second.calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
   });
 
-  it('recreates (POST) when reconciling an existing agent (PUT) fails', async () => {
+  // PUT-FAILURE-CREATES-DUPLICATE fix (live-run finding, 2026-09-23: two restarts left TWO
+  // stored agents both named "countersign-brain" -- a PUT reconcile failure used to fall
+  // through to POST every time, leaking a duplicate). Replaces the old
+  // "recreates (POST) when reconciling fails" test, whose premise (reconcile failure ->
+  // create) no longer holds: `createAgent` is only ever reached when nothing existed at all.
+  it('retries PUT once when reconcile fails, then reuses the existing agent as-is -- never creates a duplicate', async () => {
     const { fetchImpl, calls } = fakeFetch({ listResponse: [{ id: 'stale-id', name: BRAIN_AGENT_NAME }], putOk: false });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const result = await ensureBrainAgent(opts({ fetchImpl }));
 
-    expect(result).toEqual({ id: 'created-agent-id' });
-    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
-    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+    expect(result).toEqual({ id: 'stale-id' });
+    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(2); // original + one retry
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0); // never a duplicate
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
 
-  it('returns null (never throws) when create also fails after a reconcile failure', async () => {
-    const { fetchImpl } = fakeFetch({ listResponse: [{ id: 'stale-id', name: BRAIN_AGENT_NAME }], putOk: false, postOk: false });
+  it('a PUT that fails once but succeeds on retry reconciles cleanly -- no duplicate created', async () => {
+    const { fetchImpl, calls } = fakeFetch({
+      listResponse: [{ id: 'existing-id', name: BRAIN_AGENT_NAME }],
+      putResults: [false, true],
+    });
+
+    const result = await ensureBrainAgent(opts({ fetchImpl }));
+
+    expect(result).toEqual({ id: 'existing-id' });
+    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(2);
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+  });
+
+  // DUPLICATE-CLEANUP (live-run finding, 2026-09-23).
+  it('cleans up duplicates: when GET finds MULTIPLE agents named countersign-brain, keeps the newest (by created_at) and deletes the rest, then reconciles the survivor', async () => {
+    const { fetchImpl, calls } = fakeFetch({
+      listResponse: [
+        { id: 'newer-id', name: BRAIN_AGENT_NAME, created_at: '2026-09-23T02:00:00.000Z' },
+        { id: 'older-id', name: BRAIN_AGENT_NAME, created_at: '2026-09-22T20:00:00.000Z' },
+      ],
+    });
+
+    const result = await ensureBrainAgent(opts({ fetchImpl }));
+
+    expect(result).toEqual({ id: 'newer-id' });
+    const deleteCalls = calls.filter((c) => c.method === 'DELETE');
+    expect(deleteCalls).toHaveLength(1);
+    expect(deleteCalls[0]!.url).toBe('https://agents.assemblyai.com/v1/agents/older-id');
+    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+    expect(calls.find((c) => c.method === 'PUT')!.url).toBe('https://agents.assemblyai.com/v1/agents/newer-id');
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+  });
+
+  it('never deletes an agent whose name is not exactly countersign-brain', async () => {
+    const { fetchImpl, calls } = fakeFetch({
+      listResponse: [
+        { id: 'ours', name: BRAIN_AGENT_NAME, created_at: '2026-09-23T02:00:00.000Z' },
+        { id: 'someone-elses', name: 'some-other-agent', created_at: '2026-09-23T03:00:00.000Z' },
+      ],
+    });
+
+    const result = await ensureBrainAgent(opts({ fetchImpl }));
+
+    expect(result).toEqual({ id: 'ours' });
+    expect(calls.filter((c) => c.method === 'DELETE')).toHaveLength(0);
+  });
+
+  it('cleanup falls back to list order (API-documented newest-first) when created_at is missing', async () => {
+    const { fetchImpl, calls } = fakeFetch({
+      listResponse: [
+        { id: 'first-in-list', name: BRAIN_AGENT_NAME }, // no created_at
+        { id: 'second-in-list', name: BRAIN_AGENT_NAME },
+      ],
+    });
+
+    const result = await ensureBrainAgent(opts({ fetchImpl }));
+
+    expect(result).toEqual({ id: 'first-in-list' });
+    expect(calls.filter((c) => c.method === 'DELETE').map((c) => c.url)).toEqual([
+      'https://agents.assemblyai.com/v1/agents/second-in-list',
+    ]);
+  });
+
+  it('a failed DELETE during cleanup is logged and left for a future boot -- never fatal, survivor still reconciled', async () => {
+    const { fetchImpl } = fakeFetch({
+      listResponse: [
+        { id: 'newer-id', name: BRAIN_AGENT_NAME, created_at: '2026-09-23T02:00:00.000Z' },
+        { id: 'older-id', name: BRAIN_AGENT_NAME, created_at: '2026-09-22T20:00:00.000Z' },
+      ],
+      deleteOk: false,
+    });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    await expect(ensureBrainAgent(opts({ fetchImpl }))).resolves.toBeNull();
+    const result = await ensureBrainAgent(opts({ fetchImpl }));
 
-    expect(error).toHaveBeenCalled();
+    expect(result).toEqual({ id: 'newer-id' });
+    expect(warn).toHaveBeenCalled();
     warn.mockRestore();
-    error.mockRestore();
   });
 
   it('returns null (never throws) when create fails and nothing existed to reconcile', async () => {
@@ -246,27 +335,24 @@ describe('ensureBrainAgent', () => {
   );
 
   it(
-    'times out on PUT /v1/agents/{id} (updateAgent) and falls back to create, which also times out and resolves null',
+    'times out on PUT /v1/agents/{id} (updateAgent), retries once (also times out), then reuses the existing agent as-is rather than ever falling back to create',
     async () => {
-      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const wrappedFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-        const url = String(input);
         const method = init?.method ?? 'GET';
         // List returns an existing agent by name
         if (method === 'GET') {
           return new Response(JSON.stringify([{ id: 'existing-id', name: BRAIN_AGENT_NAME }]), { status: 200 });
         }
-        // PUT and POST will hang forever
+        // PUT (and any POST, which must never be reached -- reconcile failure never creates a
+        // duplicate) hang forever.
         return neverResolvingFetch()(input, init);
       }) as unknown as typeof fetch;
 
       const result = await ensureBrainAgent(opts({ fetchImpl: wrappedFetch, fetchTimeoutMs: 200 }));
 
-      expect(result).toBeNull();
-      expect(warn).toHaveBeenCalled(); // reconcile failed warning
-      expect(error).toHaveBeenCalled(); // final error after create also failed
-      error.mockRestore();
+      expect(result).toEqual({ id: 'existing-id' });
+      expect(warn).toHaveBeenCalled(); // reconcile-failed-twice, reusing-as-is warning
       warn.mockRestore();
     },
     { timeout: 3000 }
