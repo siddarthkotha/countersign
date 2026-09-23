@@ -25,7 +25,14 @@
 //     config.ts, not here.
 import { mintToken } from '../token.js';
 import type { AaiEvent, AaiSocket } from './types.js';
-import { buildInitialSessionUpdate, resolveVoice, type AaiSessionConfig, type TurnDetectionMode } from './config.js';
+import {
+  buildInitialSessionUpdate,
+  buildAgentBindUpdate,
+  buildPostBindSessionUpdate,
+  resolveVoice,
+  type AaiSessionConfig,
+  type TurnDetectionMode,
+} from './config.js';
 
 const WS_URL = 'wss://agents.assemblyai.com/v1/ws';
 const RESUME_WINDOW_MS = 30_000;
@@ -561,6 +568,86 @@ export async function connectAai(cfg: AaiSessionConfig, deps: AaiConnectDeps): P
         settled = true;
         clearTimeout(timeout);
         reject(new Error(`aai session.error before ready: ${String(msg.code)} ${String(msg.message)}`));
+      }
+    });
+  });
+}
+
+// ONE-BRAIN LIVE PATH (2026-09-22, docs/plans/2026-09-22-one-brain-live-path.md §1/§4, Lane
+// D). Additive: `connectAai` above is completely untouched by this addition -- every line of
+// it, and every helper it calls (`openSocket`, `parseMessage`, `mintToken`), is byte-for-byte
+// the same as before this lane started. `connectAaiEndpoint` is a SEPARATE entry point,
+// reached only from `index.ts`'s `createAai` when `COUNTERSIGN_BRAIN=endpoint` and the
+// boot-time stored-agent bootstrap (aai/agent.ts's `ensureBrainAgent`) has already resolved
+// an agent id for this process.
+
+export interface AaiEndpointBindOpts {
+  /** The ONE stored agent id for this whole process (aai/agent.ts's `ensureBrainAgent`,
+   *  called once at boot in index.ts -- never per call). */
+  agentId: string;
+  /** This call's own per-call correlation token (brain/registry.ts's
+   *  `generateCallToken()`), generated and registered by `ws/browser.ts` BEFORE this connect
+   *  starts, embedded in the post-bind `system_prompt` below so `/api/brain/chat/completions`
+   *  can route every request for this call back to its own `CallSession` (plan §1). */
+  callToken: string;
+  /** Proper-nouns-only keyterms for this call -- `index.ts` passes `aai/config.ts`'s
+   *  `BRAIN_KEYTERMS` in production; a test may supply its own fixed list. */
+  keyterms: string[];
+}
+
+/** Connects and binds to the ONE stored agent instead of sending today's inline
+ *  `buildInitialSessionUpdate` -- PROVEN two-step handshake (gate-results.json G0/G0B): first
+ *  `session.update{agent_id}` (mutually exclusive with any inline session field -- see
+ *  `buildAgentBindUpdate`'s own doc comment), wait for `session.ready`, THEN a second
+ *  `session.update` (`buildPostBindSessionUpdate`) carrying this call's token marker,
+ *  keyterms, and `input.transcription_mode: 'max_accuracy'`. Resolves once `session.ready`
+ *  arrives and the post-bind update has been sent (or rejects on `session.error` / a connect
+ *  failure / timeout) -- same resolve/reject contract as `connectAai` above.
+ *
+ *  Resume-on-drop is shared, unmodified, with the legacy path: the returned `AaiSocket` is
+ *  the SAME `RealAaiSocket` class `connectAai` constructs, and its
+ *  `handleUnexpectedClose`/resume logic only ever sends a bare `{type:'session.resume',
+ *  session_id}` on a fresh socket -- never re-sends either bind step, a stored-agent bind, or
+ *  any inline field -- so sharing one resume implementation between both connect paths is
+ *  safe by construction: AssemblyAI's own resumed session already remembers which stored
+ *  agent (if any) it was bound to. */
+export async function connectAaiEndpoint(cfg: AaiSessionConfig, bind: AaiEndpointBindOpts, deps: AaiConnectDeps): Promise<AaiSocket> {
+  const connectStartedAt = deps.now();
+  const { token } = await mintToken(cfg, deps.fetchImpl);
+  const ws = await openSocket(deps.WebSocketImpl, token, deps.openTimeoutMs ?? OPEN_TIMEOUT_MS);
+
+  ws.send(JSON.stringify(buildAgentBindUpdate(bind.agentId)));
+
+  return new Promise<AaiSocket>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('connectAaiEndpoint: timed out waiting for session.ready'));
+    }, READY_TIMEOUT_MS);
+    (timeout as unknown as { unref?: () => void }).unref?.();
+
+    let settled = false;
+    ws.on('message', function onFirstMessage(data) {
+      if (settled) return;
+      const msg = parseMessage(data);
+      if (!msg) return;
+      if (msg.type === 'session.ready' && typeof msg.session_id === 'string') {
+        settled = true;
+        clearTimeout(timeout);
+        // Second step of the bind handshake (plan §4, G0B PROVEN) -- sent the instant
+        // session.ready acks the bind, before this promise resolves, so no caller turn can
+        // ever reach AssemblyAI's automatic reply (and therefore our own endpoint) before
+        // the token marker is live in system_prompt.
+        ws.send(JSON.stringify(buildPostBindSessionUpdate({ token: bind.callToken, keyterms: bind.keyterms })));
+        // `greeting_configured: true` -- the greeting is set on the stored agent itself
+        // (aai/agent.ts), not on this connection's own session.update, but it IS configured
+        // for this call either way. `turn_detection_sent: null` -- endpoint mode's post-bind
+        // update never carries a turn_detection key at all (see
+        // `buildPostBindSessionUpdate`'s own doc comment).
+        deps.onReady?.(deps.now() - connectStartedAt, true, null);
+        resolve(new RealAaiSocket(ws, msg.session_id, cfg, deps));
+      } else if (msg.type === 'session.error') {
+        settled = true;
+        clearTimeout(timeout);
+        reject(new Error(`aai session.error before ready (endpoint bind): ${String(msg.code)} ${String(msg.message)}`));
       }
     });
   });

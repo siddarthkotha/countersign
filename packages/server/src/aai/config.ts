@@ -17,6 +17,13 @@
 // AMENDMENT (controller, 2026-09-02 11:35 AM CDT, from AssemblyAI's own coding-agent
 // instructions, docs/ASSEMBLYAI_AGENT_INSTRUCTIONS.md "Voices" section): the documented
 // default voice is `anna`. COUNTERSIGN_VOICE overrides it below.
+// ONE-BRAIN LIVE PATH (2026-09-22, docs/plans/2026-09-22-one-brain-live-path.md §4, Lane D).
+// `formatCallTokenMarker` is Lane B's own fixed marker format (brain/registry.ts) -- imported
+// here, not redefined, so the post-bind system_prompt built below and the endpoint's own
+// `extractCallToken` (brain/registry.ts, brain/endpoint.ts) can never drift apart on the
+// marker's exact shape.
+import { formatCallTokenMarker } from '../brain/registry.js';
+
 export const DEFAULT_VOICE = 'anna';
 
 // Bug fix (2026-09-03, founder-observed live run tonight, see
@@ -99,6 +106,48 @@ export function resolveVoice(voice: string): string {
 }
 export const LLM_GATEWAY_BASE_URL = 'https://llm-gateway.assemblyai.com/v1';
 const AUDIO_ENCODING = 'audio/pcm';
+
+/** Proper nouns only (PANEL doc Round 2, seat 6's caution) -- never the generic domain words
+ *  `seed.keyterms` (packages/engine/src/seed/meridian.ts) already carries for the legacy
+ *  path ("wire transfer", "escrow", "treasury", ...); those bias transcription toward the
+ *  DOMAIN, not toward any one caller's claim. Checked against the real seed
+ *  (packages/engine/src/seed/meridian.ts) and the real trap-decoy table
+ *  (packages/engine/src/challenges.ts's `TRAP_DECOYS`), 2026-09-22:
+ *   - Identity names (needed for ASR regardless of any trap question): `Robert Miller`,
+ *     `Dana Whitfield`, `Marcus Obi` (meridian.ts `identities[]`) -- included independent of
+ *     the trap pairs below (Marcus Obi is ALSO the seed's true `approver`, but that is not
+ *     why it is here).
+ *   - `Hartwell` -- the acquisition's own name (meridian.ts `knowledge[].topic`), needed to
+ *     recognize the topic itself, not any one answer to a question about it.
+ *   - `beneficiary` trap pair, SYMMETRIC (both sides, never one alone): `Meridian Supply`
+ *     (meridian.ts `payments[0].vendor`, the truth) and `Northgate Partners`
+ *     (challenges.ts `TRAP_DECOYS.beneficiary`, the decoy).
+ *   - `counsel` trap pair, SYMMETRIC: `Calder & Finch` (meridian.ts
+ *     `knowledge[].truth`, "Calder & Finch") and `Whitmore & Bass` (challenges.ts
+ *     `TRAP_DECOYS.counsel`).
+ *   - `escrow_institution` and `approver` trap pairs are deliberately excluded ENTIRELY (not
+ *     one side each) -- "symmetric trap pairs or none" (PANEL doc Round 2): neither
+ *     `First Meridian Trust`/`Harbor Fidelity Trust` nor `Priya Ramanathan` (the `approver`
+ *     decoy; `Marcus Obi`, its truth, is already present above as an identity name for an
+ *     unrelated reason) is added here, so transcription is never biased toward recognizing
+ *     one side of either pair better than the other. */
+export const BRAIN_KEYTERMS: readonly string[] = [
+  'Meridian Supply',
+  'Northgate Partners',
+  'Marcus Obi',
+  'Dana Whitfield',
+  'Robert Miller',
+  'Hartwell',
+  'Whitmore & Bass',
+  'Calder & Finch',
+];
+
+/** The one short neutral sentence appended after the token marker in the post-bind
+ *  `system_prompt` below -- deliberately generic (LAW 1: no detection language anywhere),
+ *  never read for meaning by anything (brain/endpoint.ts's `extractCallToken` only ever
+ *  regexes the marker out of this same string; the sentence itself is cosmetic, for a human
+ *  glancing at a raw AssemblyAI request log). */
+const BRAIN_NEUTRAL_SENTENCE = "This call is routed through Countersign's verification system.";
 
 // SONNET-JUSTIFIED lane fix (2026-09-18, founder's second live complaint: "does not let me
 // complete my sentence"). PROVEN from the founder's own recorded call
@@ -402,4 +451,61 @@ export function buildInitialSessionUpdate(cfg: AaiSessionConfig, turn_detection_
   }
 
   return { type: 'session.update', session };
+}
+
+// ONE-BRAIN LIVE PATH (2026-09-22, docs/plans/2026-09-22-one-brain-live-path.md §1/§4, Lane
+// D). Additive: neither function below is called by `buildInitialSessionUpdate` or anything
+// on the legacy path -- both are only ever used by `aai/session.ts`'s `connectAaiEndpoint`,
+// itself only reached when `COUNTERSIGN_BRAIN=endpoint` AND the boot-time stored-agent
+// bootstrap succeeded (index.ts). The legacy connect path (`connectAai`,
+// `buildInitialSessionUpdate` above) is byte-for-byte unchanged by this addition.
+
+/** The FIRST session.update sent on an endpoint-mode connection, right after the socket
+ *  opens -- PROVEN shape (gate-results.json G0): `{type:'session.update',
+ *  session:{agent_id}}`, mutually exclusive with any inline field (voice/greeting/tools/llm
+ *  are fixed on the stored agent itself instead, see aai/agent.ts). Resolves once
+ *  `session.ready` arrives, exactly like the legacy connect's own first-and-only update. */
+export function buildAgentBindUpdate(agentId: string): SessionUpdateMessage {
+  return { type: 'session.update', session: { agent_id: agentId } };
+}
+
+export interface PostBindSessionUpdateOpts {
+  /** This call's per-call correlation token (brain/registry.ts's `generateCallToken()`
+   *  output) -- embedded via `formatCallTokenMarker` so `/api/brain/chat/completions`
+   *  (brain/endpoint.ts) can parse it back out of `messages[0]` on every request AssemblyAI
+   *  sends for this call (plan §1's G1-proven "system_prompt arrives as messages[0],
+   *  verbatim"). */
+  token: string;
+  /** Proper-nouns-only list -- see `BRAIN_KEYTERMS`'s own doc comment above for exactly
+   *  which seed values are included/excluded and why. Not defaulted to `BRAIN_KEYTERMS`
+   *  here so a test can supply its own fixed list without importing the seed-derived one. */
+  keyterms: string[];
+}
+
+/** The SECOND session.update, sent only after `session.ready` acks the bind above -- PROVEN
+ *  shape (gate-results.json G0B: "second session.update ... -> session.updated"). Carries
+ *  ONLY `system_prompt` (this call's token marker plus one short neutral sentence -- see
+ *  `BRAIN_NEUTRAL_SENTENCE`'s own doc comment), `input.keyterms`, and
+ *  `input.transcription_mode: 'max_accuracy'` (PROVEN in G8: 1 request per utterance through
+ *  1.0-1.2s mid-sentence pauses, gate-results.json). Deliberately carries NO
+ *  `input.turn_detection` key at all -- neither `min_silence`/`max_silence` (the existing
+ *  Sep-18/19 finding already coded into `buildInitialSessionUpdate`'s own comment: setting
+ *  either disables adaptive pacing/entity-aware waiting for the rest of the session) NOR
+ *  `vad_threshold`/`interrupt_response` (plan §4's own bullet list for this update names only
+ *  `system_prompt`/`keyterms`/`input.transcription_mode` -- turn detection is left fully
+ *  adaptive in endpoint mode). `voice`/`output.format.encoding`/`greeting`/`tools`/`llm` are
+ *  NEVER sent here either -- all five are fixed on the stored agent itself (aai/agent.ts) or
+ *  immutable-once-set, same law `buildInitialSessionUpdate`'s own module comment states for
+ *  the legacy path. */
+export function buildPostBindSessionUpdate(opts: PostBindSessionUpdateOpts): SessionUpdateMessage {
+  return {
+    type: 'session.update',
+    session: {
+      system_prompt: `${formatCallTokenMarker(opts.token)}\n${BRAIN_NEUTRAL_SENTENCE}`,
+      input: {
+        keyterms: opts.keyterms.slice(0, 100),
+        transcription_mode: 'max_accuracy',
+      },
+    },
+  };
 }

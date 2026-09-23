@@ -36,6 +36,7 @@ import { createBundle, endBundle, recordServerEvent, summarizeBundle, populateBi
 import type { AaiSocket } from '../aai/types.js';
 import type { ServerConfig } from '../config.js';
 import { CallSession } from '../call/session.js';
+import { generateCallToken, type BrainCallRegistry } from '../brain/registry.js';
 import { isAllowedOrigin } from '../origin.js';
 import { callContextForPersona } from '../personas.js';
 import { defaultCorpusDir, loadCorpusFile, runReplay } from '../replay.js';
@@ -69,8 +70,11 @@ export interface BrowserWsDeps {
    *  (`seed`/`corpusDir`/`buildCallContext` above). */
   cfg: Pick<ServerConfig, 'allowed_origins' | 'trust_proxy'>;
   /** Creates the AAI connection for one call session. index.ts supplies a `FakeAaiSocket`
-   *  factory under `COUNTERSIGN_FAKE_AAI=1`; the real adapter (S3) plugs in here too. */
-  createAai: (session_id: string) => AaiSocket;
+   *  factory under `COUNTERSIGN_FAKE_AAI=1`; the real adapter (S3) plugs in here too.
+   *  ONE-BRAIN LIVE PATH (2026-09-22, Lane D): the optional second argument is this call's
+   *  per-call brain token (generated below, ONLY when `brainMode === 'endpoint'`) -- a
+   *  caller/test that never sets `brainMode` never passes it, and `createAai` ignores it. */
+  createAai: (session_id: string, brainToken?: string) => AaiSocket;
   /** Flight recorder (founder's ask, 2026-09-02): shared with http.ts (its GET/POST
    *  .../diagnostics routes) so both sides read/write the SAME in-memory bundles, the same
    *  way `caps` (CapsState) is shared today. A fresh bundle is created here, on the first
@@ -94,6 +98,21 @@ export interface BrowserWsDeps {
    *  seconds have passed, regardless of reconnects in between. Defaults to
    *  `DEFAULT_SESSION_CAP_SECONDS`; tests override it to keep the cap short. */
   session_cap_seconds?: number;
+  /** ONE-BRAIN LIVE PATH (2026-09-22, docs/plans/2026-09-22-one-brain-live-path.md §5, Lane
+   *  D): `'endpoint'` means every fresh `/ws/call/:id` attach below generates a per-call
+   *  token (brain/registry.ts's `generateCallToken()`), registers it (and the `CallSession`
+   *  it is about to construct) in `brainRegistry`, passes the token to `createAai` so the
+   *  connect handshake can embed it in the post-bind `system_prompt`
+   *  (aai/session.ts's `connectAaiEndpoint`), and constructs the `CallSession` with
+   *  `brainMode: 'endpoint'`. `undefined`/`'legacy'` (the default -- every existing caller,
+   *  including every test that predates this field) keeps today's exact path: no token
+   *  generated, no registry touched, `brainMode` never passed to `CallSession` at all. */
+  brainMode?: 'legacy' | 'endpoint';
+  /** The process-wide token->CallSession registry (`../brain/registry.js`), constructed once
+   *  in index.ts. Required alongside `brainMode: 'endpoint'` for a call to actually register
+   *  itself -- omitted (or `brainMode` omitted/'legacy') means no registration ever happens,
+   *  same as today. */
+  brainRegistry?: BrainCallRegistry;
 }
 
 /** One call session's life, independent of any single browser socket. Lives in
@@ -119,6 +138,13 @@ interface CallEntry {
   lastState: Extract<ServerEvent, { type: 'state' }> | null;
   /** Reply audio buffered while detached, oldest first, capped to `AUDIO_BUFFER_MS`. */
   audioBuffer: { data: string; t: number }[];
+  /** ONE-BRAIN LIVE PATH (2026-09-22, Lane D): this call's own brain token if it was
+   *  registered in `brainRegistry` at attach time (`brainMode === 'endpoint'`), `null`
+   *  otherwise (legacy mode, or endpoint mode without a registry configured). Read once, by
+   *  `makeEntrySink`'s `ended` branch, to unregister the token the instant the call actually
+   *  ends -- see `BrainCallRegistry.unregister`'s own doc comment for why this must happen
+   *  promptly (a stale token must never resolve to a dead session). */
+  brainToken: string | null;
 }
 
 /** Bug fix (2026-09-04): this used to hardcode `unverified_voip`/`unknown` for every live
@@ -194,6 +220,13 @@ function makeEntrySink(
       if (entry.capTimer) {
         clearTimeout(entry.capTimer);
         entry.capTimer = null;
+      }
+      // ONE-BRAIN LIVE PATH (2026-09-22, Lane D, §9 risk 3): unregister THIS call's token the
+      // instant it actually ends -- a captured or replayed old token must never resolve to a
+      // dead session's state. A no-op for legacy mode (entry.brainToken is null) or if this
+      // call never got as far as registering one.
+      if (entry.brainToken && deps.brainRegistry) {
+        deps.brainRegistry.unregister(entry.brainToken);
       }
       activeCalls.delete(session_id);
       endSession(deps.caps, session_id);
@@ -362,10 +395,17 @@ function handleCallSocket(
     origin_geo: call.origin_geo,
   });
 
+  // ONE-BRAIN LIVE PATH (2026-09-22, docs/plans/2026-09-22-one-brain-live-path.md §1/§5, Lane
+  // D): generated BEFORE `createAai` runs, only in endpoint mode -- `connectAaiEndpoint`
+  // (aai/session.ts) needs this call's token to embed in the post-bind system_prompt before
+  // the caller can say anything. `null` in legacy mode (or endpoint mode with no registry
+  // configured), same as `entry.brainToken`'s own doc comment describes.
+  const brainToken = deps.brainMode === 'endpoint' && deps.brainRegistry ? generateCallToken() : null;
+
   let aai: AaiSocket;
   recordServerEvent(deps.diagnostics, session_id, deps.now(), 'aai_connect_start', {});
   try {
-    aai = deps.createAai(session_id);
+    aai = brainToken !== null ? deps.createAai(session_id, brainToken) : deps.createAai(session_id);
   } catch (err) {
     recordServerEvent(deps.diagnostics, session_id, deps.now(), 'error', {
       message: err instanceof Error ? err.message : String(err),
@@ -387,6 +427,7 @@ function handleCallSocket(
     deliver: makeThrottledSender(ws),
     lastState: null,
     audioBuffer: [],
+    brainToken,
   } as unknown as CallEntry;
 
   const session = new CallSession({
@@ -405,9 +446,20 @@ function handleCallSocket(
     // terminal actions, AAI session.ready/error/ended, link changes, caught errors) lands in
     // THIS session's bundle -- created just above, before the AAI connect even started.
     onDiagnostic: (kind, detail) => recordServerEvent(deps.diagnostics, session_id, deps.now(), kind, detail),
+    // ONE-BRAIN LIVE PATH (2026-09-22, Lane D): only ever set when this attach actually
+    // generated and is about to register a brain token -- every existing/legacy caller of
+    // this class (brainToken always null here) sees no behavior change at all.
+    ...(brainToken !== null ? { brainMode: 'endpoint' as const } : {}),
   });
   entry.session = session;
   activeCalls.set(session_id, entry);
+  // ONE-BRAIN LIVE PATH (2026-09-22, Lane D, §9 risk 3): registered the instant the session
+  // exists, BEFORE any AAI event can possibly be dispatched to it -- a `/api/brain` request
+  // for this token must always find a live session from this point until `makeEntrySink`'s
+  // `ended` branch unregisters it, never before and never after.
+  if (brainToken !== null && deps.brainRegistry) {
+    deps.brainRegistry.register(brainToken, session);
+  }
 
   // CRITICAL 1 (final review): the per-session minute cap, started once on this first
   // attach (never reset by a later reattach -- it bounds the call's total lifetime, not any

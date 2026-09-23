@@ -10,8 +10,10 @@ import { newDiagnosticsState, recordServerEvent, recordTerminationEvent } from '
 import { attachWebSocketServer } from './ws/browser.js';
 import { FakeAaiSocket } from './aai/fake.js';
 import type { AaiEvent, AaiSocket } from './aai/types.js';
-import { connectAai, type WsLike } from './aai/session.js';
-import { loadAaiEnvDefaults, LIVE_SESSION_TOOLS, DEFAULT_GREETING, type AaiSessionConfig } from './aai/config.js';
+import { connectAai, connectAaiEndpoint, type WsLike } from './aai/session.js';
+import { loadAaiEnvDefaults, LIVE_SESSION_TOOLS, DEFAULT_GREETING, BRAIN_KEYTERMS, type AaiSessionConfig } from './aai/config.js';
+import { ensureBrainAgent } from './aai/agent.js';
+import { BrainCallRegistry } from './brain/registry.js';
 import { classifyMintFailure, isCreditsExhaustedError } from './live_calls.js';
 
 // Task D1: packages/server/src/index.ts -> packages/web/dist (siblings under packages/),
@@ -46,6 +48,64 @@ const cfg = useFakeAai && !loadedCfg.assemblyai_api_key
   ? { ...loadedCfg, assemblyai_api_key: 'fake-aai-dev-mode' }
   : loadedCfg;
 
+// ONE-BRAIN LIVE PATH (2026-09-22, docs/plans/2026-09-22-one-brain-live-path.md §4/§5, Lane
+// D). Inert unless COUNTERSIGN_BRAIN=endpoint (cfg.brain_mode, config.ts). Neither
+// COUNTERSIGN_BRAIN_API_KEY nor COUNTERSIGN_PUBLIC_URL has a home in config.ts yet (that file
+// is out of this lane's scope -- see docs/ONE-BRAIN-ENV.md) so both are read directly from
+// process.env here, the same way COUNTERSIGN_FAKE_AAI is read directly above rather than
+// through config.ts.
+const brainApiKeyEnv = process.env.COUNTERSIGN_BRAIN_API_KEY;
+const brainPublicUrlEnv = process.env.COUNTERSIGN_PUBLIC_URL;
+const brainApiKey = brainApiKeyEnv && brainApiKeyEnv.length > 0 ? brainApiKeyEnv : undefined;
+const brainPublicUrl = brainPublicUrlEnv && brainPublicUrlEnv.length > 0 ? brainPublicUrlEnv : undefined;
+// One process-wide registry, constructed once, only when endpoint mode is even configured --
+// harmless if never populated (http.ts's own route mount also requires `brainApiKey`, so the
+// route stays 404 either way unless both are present).
+const brainRegistry = cfg.brain_mode === 'endpoint' ? new BrainCallRegistry() : undefined;
+// Set once the boot-time bootstrap below resolves; `createAai`'s endpoint-mode branch reads
+// this at CALL time (a `let`, not a `const`), so a call that lands before bootstrap finishes
+// simply falls back to legacy -- see that branch's own comment.
+let brainAgentId: string | null = null;
+
+if (cfg.brain_mode === 'endpoint') {
+  if (!cfg.assemblyai_api_key) {
+    console.warn('countersign: COUNTERSIGN_BRAIN=endpoint but no ASSEMBLYAI_API_KEY is configured -- every call falls back to legacy.');
+  } else if (!brainApiKey || !brainPublicUrl) {
+    console.warn(
+      'countersign: COUNTERSIGN_BRAIN=endpoint requires COUNTERSIGN_BRAIN_API_KEY and COUNTERSIGN_PUBLIC_URL -- every call falls back to legacy until both are set (see docs/ONE-BRAIN-ENV.md).'
+    );
+  } else {
+    const bootEnvDefaults = loadAaiEnvDefaults(process.env);
+    // Fire-and-forget, deliberately NOT awaited (plan §4: "Failure to create the agent at
+    // boot must NOT crash the server" -- and must not hang server startup on an external
+    // network call either, if AssemblyAI is slow or unreachable). Any call that lands before
+    // this resolves falls back to legacy (createAai's own brainAgentId check); every call
+    // after it resolves gets endpoint mode.
+    ensureBrainAgent({
+      assemblyai_api_key: cfg.assemblyai_api_key,
+      publicUrl: brainPublicUrl,
+      brainApiKey,
+      voice: bootEnvDefaults.voice,
+      greeting: DEFAULT_GREETING,
+      fetchImpl: fetch,
+    })
+      .then((agent) => {
+        if (agent) {
+          brainAgentId = agent.id;
+          console.log(`countersign: brain agent ready (${agent.id}) -- COUNTERSIGN_BRAIN=endpoint calls will use it.`);
+        } else {
+          console.error('countersign: brain agent bootstrap failed -- every call falls back to legacy.');
+        }
+      })
+      .catch((err: unknown) => {
+        console.error(
+          'countersign: brain agent bootstrap threw -- every call falls back to legacy:',
+          err instanceof Error ? err.message : String(err)
+        );
+      });
+  }
+}
+
 // CRITICAL 1 (final review): http.ts's `/end`/`/reset` need `attachWebSocketServer`'s own
 // `endCall`, but `attachWebSocketServer` needs the `server` object `createHttpServer`
 // returns -- a real circular dependency. This holder breaks it: `createHttpServer` gets a
@@ -74,6 +134,11 @@ const { server, state } = createHttpServer(cfg, {
   // packages/web/dist, which keeps plain `dev:server` (no build) working exactly as before.
   staticServer: createStaticServer(webDistDir),
   diagnostics,
+  // ONE-BRAIN LIVE PATH (2026-09-22, Lane D): both undefined unless COUNTERSIGN_BRAIN=endpoint
+  // AND COUNTERSIGN_BRAIN_API_KEY is set -- http.ts's own route mount already 404s unless
+  // BOTH are present, so this stays inert by construction otherwise.
+  ...(brainRegistry !== undefined ? { brainRegistry } : {}),
+  ...(brainApiKey !== undefined ? { brainApiKey } : {}),
 });
 
 // COUNTERSIGN_FAKE_AAI=1 (founder ruling, Task S2): every call session gets a scripted
@@ -205,7 +270,7 @@ class PendingAaiSocket implements AaiSocket {
   }
 }
 
-function createAai(session_id: string): AaiSocket {
+function createAai(session_id: string, brainToken?: string): AaiSocket {
   if (useFakeAai) return new FakeAaiSocket();
 
   if (!cfg.assemblyai_api_key) {
@@ -220,6 +285,56 @@ function createAai(session_id: string): AaiSocket {
   }
 
   const envDefaults = loadAaiEnvDefaults(process.env);
+
+  // ONE-BRAIN LIVE PATH (2026-09-22, docs/plans/2026-09-22-one-brain-live-path.md §1/§4/§5,
+  // Lane D): only when the flag is on, the boot-time bootstrap above has actually resolved an
+  // agent id, AND this specific call was given a token (ws/browser.ts, brainMode==='endpoint')
+  // -- any gap (bootstrap not ready yet, flag off, or somehow no token) falls straight through
+  // to the existing legacy branch below, UNCHANGED, rather than ever throwing. Every line from
+  // here to the end of this function that existed before this lane is untouched.
+  if (cfg.brain_mode === 'endpoint' && brainAgentId && brainToken) {
+    const endpointCfg: AaiSessionConfig = {
+      assemblyai_api_key: cfg.assemblyai_api_key,
+      session_cap_seconds: cfg.session_cap_seconds,
+      voice: envDefaults.voice,
+      // Never sent on the wire by connectAaiEndpoint's own bind handshake (the post-bind
+      // update's system_prompt is always this call's token marker instead, aai/config.ts's
+      // buildPostBindSessionUpdate) -- present only to satisfy AaiSessionConfig's shape, and
+      // reused as-is by RealAaiSocket's own resume-on-drop token mint.
+      system_prompt: DEFAULT_INITIAL_PROMPT,
+      tools: LIVE_SESSION_TOOLS,
+      keyterms: [],
+    };
+    const connecting = connectAaiEndpoint(
+      endpointCfg,
+      { agentId: brainAgentId, callToken: brainToken, keyterms: [...BRAIN_KEYTERMS] },
+      {
+        fetchImpl: fetch,
+        WebSocketImpl: WebSocket as unknown as new (url: string) => WsLike,
+        now: () => Date.now(),
+        onReady: (ms, greeting_configured, turn_detection_sent) =>
+          recordServerEvent(diagnostics, session_id, Date.now(), 'aai_ready', {
+            ms_since_connect_start: ms,
+            greeting_configured,
+            turn_detection_sent,
+            brain_mode: 'endpoint',
+          }),
+        onCloseTimeout: () => recordServerEvent(diagnostics, session_id, Date.now(), 'aai_terminate_timeout', {}),
+        onSessionEnded: (msg) => {
+          const detail: Record<string, unknown> = { keys: Object.keys(msg) };
+          for (const key of Object.keys(msg)) {
+            if (typeof msg[key] === 'number') {
+              detail[key] = msg[key];
+            }
+          }
+          recordServerEvent(diagnostics, session_id, Date.now(), 'aai_session_ended_raw', detail);
+          recordTerminationEvent(diagnostics, session_id, Date.now(), msg);
+        },
+      }
+    );
+    return new PendingAaiSocket(connecting);
+  }
+
   const aaiCfg: AaiSessionConfig = {
     assemblyai_api_key: cfg.assemblyai_api_key,
     session_cap_seconds: cfg.session_cap_seconds,
@@ -328,6 +443,10 @@ const { endCall, dropAai } = attachWebSocketServer(server, {
   // CRITICAL 1 (final review): same class of bug as browser_grace_ms above -- the per-call
   // cap timer needs the real configured cap, not ws/browser.ts's own deps-level default.
   session_cap_seconds: cfg.session_cap_seconds,
+  // ONE-BRAIN LIVE PATH (2026-09-22, Lane D): both undefined unless COUNTERSIGN_BRAIN=endpoint
+  // -- ws/browser.ts's own per-call token generation/registration stays inert otherwise.
+  ...(cfg.brain_mode === 'endpoint' ? { brainMode: 'endpoint' as const } : {}),
+  ...(brainRegistry !== undefined ? { brainRegistry } : {}),
 });
 endCallImpl = endCall;
 dropAaiImpl = dropAai;

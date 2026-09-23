@@ -7,17 +7,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   buildInitialSessionUpdate,
+  buildAgentBindUpdate,
+  buildPostBindSessionUpdate,
   loadAaiEnvDefaults,
   DEFAULT_VOICE,
   DEFAULT_GREETING,
   LLM_GATEWAY_BASE_URL,
   KNOWN_VOICES,
   LIVE_SESSION_TOOLS,
+  BRAIN_KEYTERMS,
   resolveVoice,
   _resetVoiceWarning,
   type AaiSessionConfig,
 } from '../src/aai/config.js';
 import { allToolSchemas } from '../src/aai/schemas.js';
+import { extractCallToken } from '../src/brain/registry.js';
 
 function cfg(overrides: Partial<AaiSessionConfig> = {}): AaiSessionConfig {
   return {
@@ -523,5 +527,107 @@ describe('loadAaiEnvDefaults', () => {
       expect(warn).not.toHaveBeenCalled();
       warn.mockRestore();
     });
+  });
+});
+
+// ONE-BRAIN LIVE PATH (2026-09-22, docs/plans/2026-09-22-one-brain-live-path.md §1/§4, Lane
+// D). Additive -- neither function below is reachable from `buildInitialSessionUpdate` or
+// anything on the legacy connect path; every test above this point still exercises byte-for-
+// byte the same legacy payload it always has.
+describe('buildAgentBindUpdate', () => {
+  it('is exactly {type:"session.update", session:{agent_id}} -- mutually exclusive with any inline field (gate-results.json G0)', () => {
+    const msg = buildAgentBindUpdate('agent-123');
+    expect(msg).toEqual({ type: 'session.update', session: { agent_id: 'agent-123' } });
+  });
+});
+
+describe('buildPostBindSessionUpdate', () => {
+  it('carries the token marker as the FIRST line of system_prompt, parseable by extractCallToken (brain/registry.ts)', () => {
+    const token = 'a'.repeat(64);
+    const msg = buildPostBindSessionUpdate({ token, keyterms: ['Meridian Supply'] });
+    const systemPrompt = (msg.session as { system_prompt: string }).system_prompt;
+    expect(systemPrompt.startsWith(`[countersign-call:${token}]`)).toBe(true);
+    expect(extractCallToken([{ role: 'system', content: systemPrompt }])).toBe(token);
+  });
+
+  it('sends the given keyterms and input.transcription_mode: "max_accuracy"', () => {
+    const token = 'b'.repeat(64);
+    const msg = buildPostBindSessionUpdate({ token, keyterms: ['Meridian Supply', 'Northgate Partners'] });
+    const input = (msg.session as { input: Record<string, unknown> }).input;
+    expect(input.keyterms).toEqual(['Meridian Supply', 'Northgate Partners']);
+    expect(input.transcription_mode).toBe('max_accuracy');
+  });
+
+  it('caps keyterms at 100, same rule as buildInitialSessionUpdate', () => {
+    const token = 'c'.repeat(64);
+    const many = Array.from({ length: 150 }, (_, i) => `term-${i}`);
+    const msg = buildPostBindSessionUpdate({ token, keyterms: many });
+    const input = (msg.session as { input: { keyterms: string[] } }).input;
+    expect(input.keyterms).toHaveLength(100);
+  });
+
+  it('never sends min_silence, max_silence, vad_threshold, or interrupt_response -- turn detection stays fully adaptive in endpoint mode (plan §4)', () => {
+    const token = 'd'.repeat(64);
+    const msg = buildPostBindSessionUpdate({ token, keyterms: [] });
+    const input = (msg.session as { input: Record<string, unknown> }).input;
+    expect(input).not.toHaveProperty('turn_detection');
+    const session = msg.session as Record<string, unknown>;
+    expect(session).not.toHaveProperty('turn_detection');
+  });
+
+  it('never sends voice, output, greeting, tools, or llm -- all fixed on the stored agent itself, never resent here', () => {
+    const token = 'e'.repeat(64);
+    const msg = buildPostBindSessionUpdate({ token, keyterms: [] });
+    const session = msg.session as Record<string, unknown>;
+    expect(session).not.toHaveProperty('voice');
+    expect(session).not.toHaveProperty('output');
+    expect(session).not.toHaveProperty('greeting');
+    expect(session).not.toHaveProperty('tools');
+    expect(session).not.toHaveProperty('llm');
+  });
+
+  it('is a pure function -- two calls with the same token produce the identical system_prompt', () => {
+    const token = 'f'.repeat(64);
+    const a = buildPostBindSessionUpdate({ token, keyterms: ['Hartwell'] });
+    const b = buildPostBindSessionUpdate({ token, keyterms: ['Hartwell'] });
+    expect(a.session.system_prompt).toBe(b.session.system_prompt);
+  });
+});
+
+describe('BRAIN_KEYTERMS', () => {
+  it('is proper nouns only, matching the real seed and trap-decoy values exactly (packages/engine/src/seed/meridian.ts, packages/engine/src/challenges.ts TRAP_DECOYS)', () => {
+    expect(BRAIN_KEYTERMS).toEqual([
+      'Meridian Supply',
+      'Northgate Partners',
+      'Marcus Obi',
+      'Dana Whitfield',
+      'Robert Miller',
+      'Hartwell',
+      'Whitmore & Bass',
+      'Calder & Finch',
+    ]);
+  });
+
+  it('every symmetric trap pair present is complete -- the beneficiary pair (truth + decoy) and the counsel pair (truth + decoy) are both fully present, never one side alone', () => {
+    // beneficiary: truth "Meridian Supply" (meridian.ts payments[0].vendor) vs decoy
+    // "Northgate Partners" (challenges.ts TRAP_DECOYS.beneficiary).
+    expect(BRAIN_KEYTERMS).toContain('Meridian Supply');
+    expect(BRAIN_KEYTERMS).toContain('Northgate Partners');
+    // counsel: truth "Calder & Finch" (meridian.ts knowledge[].truth) vs decoy
+    // "Whitmore & Bass" (challenges.ts TRAP_DECOYS.counsel).
+    expect(BRAIN_KEYTERMS).toContain('Calder & Finch');
+    expect(BRAIN_KEYTERMS).toContain('Whitmore & Bass');
+  });
+
+  it('excludes the escrow_institution and approver trap pairs entirely -- neither side of either, never biased toward one', () => {
+    expect(BRAIN_KEYTERMS).not.toContain('First Meridian Trust');
+    expect(BRAIN_KEYTERMS).not.toContain('Harbor Fidelity Trust');
+    expect(BRAIN_KEYTERMS).not.toContain('Priya Ramanathan');
+  });
+
+  it('excludes the legacy path\'s generic domain words (seed.keyterms) -- proper nouns only', () => {
+    for (const generic of ['wire transfer', 'escrow', 'treasury', 'SSO', 'out-of-band', 'verification', 'VoIP', 'incident', 'second approval', 'beneficiary', 'routing number']) {
+      expect(BRAIN_KEYTERMS).not.toContain(generic);
+    }
   });
 });
