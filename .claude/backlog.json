@@ -3962,12 +3962,12 @@
       "files": [
         "scripts/spike/**"
       ],
-      "status": "held",
-      "held_because": "hard stop fired (2/2 failed on dana-patient); rerun scheduled Wed 6:47 AM after ONE-BRAIN-TOKEN-FIX",
-      "agent_id": "ae6c6d8118068bcc7",
-      "started_at": "2026-09-22T22:21-05:00",
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a373b244683ee7eb3",
+      "started_at": "2026-09-23T06:43-05:00",
       "priority": "P0",
-      "lane_note": "10:33 PM: both runs ESCALATE via idle timeout; agent silent after the greeting; PROVEN by proxy log: all 8 endpoint requests lacked the token marker because per-goal session.update system_prompt sends in session.ts overwrote the post-bind prompt; secondary: bootstrap left 2 duplicate agents; 5.56 live min; tunnel stopped (0 cloudflared procs), 0 stored agents (verified 10:35 PM)"
+      "lane_note": "10:33 PM: both runs ESCALATE via idle timeout; agent silent after the greeting; PROVEN by proxy log: all 8 endpoint requests lacked the token marker because per-goal session.update system_prompt sends in session.ts overwrote the post-bind prompt; secondary: bootstrap left 2 duplicate agents; 5.56 live min; tunnel stopped (0 cloudflared procs), 0 stored agents (verified 10:35 PM) | second trial launched 6:43 AM Wed (founder awake; scheduled 6:47 wake-up cancelled to avoid a duplicate run) | 6:58 AM second trial: dana-patient PASS STAGE (0 defects, 76 s), scenario-b-miller-fraud PASS FREEZE (0 defects, 60 s), single-wrong-answer ESCALATE x2 but close_line_not_spoken (idle-defer path has no endpoint-mode speech trigger); endpoint healthy (all requests token-carrying, non-empty, 3-44 ms); ~7.35 live min ESTIMATE; cleanup verified by the lane | third trial launched 7:19 AM (founder yes), single-wrong-answer first, 20-minute cap | 7:33 AM THIRD TRIAL GO: 7/7 PASS (verified by main from the reports), every case 3 consecutive clean (dana 06:46, 07:24, 07:29; miller 06:48, 07:25, 07:30; single-wrong-answer 07:22, 07:28, 07:32), zero repeated/merged/talk-over/holding, one goodbye each; 632.24 s PROVEN from AssemblyAI sessions; cleanup verified by the lane"
     },
     {
       "id": "ONE-BRAIN-LANE-A1-INTERIM",
@@ -4003,11 +4003,12 @@
       "files": [
         "docs/MORNING-2026-09-23.md"
       ],
-      "status": "held",
+      "status": "done",
       "held_because": "written after the overnight runs",
       "agent_id": "",
       "started_at": "",
-      "priority": "P0"
+      "priority": "P0",
+      "lane_note": "docs/MORNING-2026-09-23.md written 7:52 AM"
     },
     {
       "id": "ONE-BRAIN-TOKEN-FIX",
@@ -4034,6 +4035,56 @@
       "agent_id": "",
       "started_at": "",
       "priority": "P2"
+    },
+    {
+      "id": "ONE-BRAIN-IDLE-PATH-SPEECH",
+      "title": "endpoint mode: server-initiated speech (idle-defer CLOSE goodbye, NO_ACTION idle goodbye, any other) must trigger our endpoint via sendEndpointTrigger; defer idle end until the goodbye is heard",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/test/session-endpoint-mode.test.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a25e85af7de1db594",
+      "started_at": "2026-09-23T06:59-05:00",
+      "priority": "P0",
+      "lane_note": "built 7:13 AM; review CLEAN with the live root cause verified in bundles + proxy log; committed aa0f97e, pushed 7:18 AM (inert)"
+    },
+    {
+      "id": "ONE-BRAIN-JUDGE-SITE-SWITCH",
+      "title": "render.yaml: COUNTERSIGN_BRAIN=endpoint, COUNTERSIGN_BRAIN_API_KEY generateValue, COUNTERSIGN_PUBLIC_URL; push; verify deploy, stored agent on the live base_url, then one live harness call per case on the judge URL",
+      "files": [
+        "render.yaml"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "main",
+      "started_at": "2026-09-23T07:35-05:00",
+      "priority": "P0",
+      "lane_note": "review CLEAN 7:36 AM (generateValue verified valid; risk: Render proxy SSE path untested); committed e2c7bdb and pushed 7:37 AM; deploy watch running | 7:38 AM PROVEN: live e2c7bdb, /health 200, brain route 401 without auth (mounted, key present), stored agent countersign-brain created by the live boot; judge-URL harness check running (agent adb8b9650f7f0d164) | 7:44 AM real-site check: 3/3 PASS (STAGE, FREEZE, ESCALATE), endpoint mode PROVEN in every aai_ready (brain_mode endpoint, no turn thresholds); stopped on the median-gap rule in single-wrong-answer: the test caller repeated its line every 2-3 s and max_accuracy kept one caller turn open 34.3-58.1 s; reply.started 0.1 s after the merged transcript, so not Render buffering (PROVEN from the bundle). Kept live pending the founder noon decision."
+    },
+    {
+      "id": "FOUNDER-VOICE-CHECK-ONE-VOICE",
+      "title": "founder's 10-minute voice check of one-voice on the live site (Dana STAGED, CEO FROZEN; exact lines in the 2026-09-23 9:24 AM message); decides the video path",
+      "files": [],
+      "status": "held",
+      "held_because": "waits on the founder; not done as of 1:57 PM (no AssemblyAI session after 7:42 AM)",
+      "agent_id": "",
+      "started_at": "",
+      "priority": "P0"
+    },
+    {
+      "id": "BRAIN-AGENT-DUPLICATE-ON-RESTART",
+      "title": "a cold-start restart left a second countersign-brain stored agent (9:23 AM); make first-boot bootstrap robust (retry the list call, longer first timeout) and clean up duplicates safely",
+      "files": [
+        "packages/server/src/aai/agent.ts",
+        "packages/server/test/aai/agent.test.ts"
+      ],
+      "status": "held",
+      "held_because": "not while the founder may be calling; harmless to calls",
+      "agent_id": "",
+      "started_at": "",
+      "priority": "P1"
     }
   ]
 }

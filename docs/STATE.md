@@ -1,63 +1,58 @@
 # Countersign, session snapshot (overwritten at every close; never appended)
 
-Snapshot: Tuesday 2026-09-22, 10:57 PM CDT (Day 13 evening, same session continues overnight on
-autopilot). Founder asleep; his rulings tonight are below. Live: 5942159.
+Last close: Wednesday 2026-09-23, 1:58 PM CDT (Day 14; the session ran from Tuesday 6:28 PM
+through the night on autopilot). Live: e2c7bdb, "one voice" (endpoint) mode ON.
 
 ## The one-paragraph version
 
-The founder's three calls at 6:52 to 6:58 PM all failed (case 6 twice because my run sheet asked
-him to contradict an approver question the agent never asks; case 1 from a missed name-first
-payee, a dropped STT fragment, a double question and a four-times goodbye). He had two external
-AI panel rounds critique the plan (docs/PANEL-2026-09-22-LIVE-RELIABILITY.md). They converged:
-two voices per call (AssemblyAI's automatic reply plus our instructed replies) is the root of
-the repeat bugs, 9/10 on ten calls is not evidence, and the submission should lead with a
-recorded call. AssemblyAI's docs confirmed there is no switch to silence the automatic reply,
-that "connect your own LLM" lets our endpoint write every reply, and that my Day 13 min_silence
-setting switched off their adaptive pause handling. Tonight: the replay with his real voice was
-built and verified live; the "one voice" build (our deterministic engine writes every word via
-the own-LLM endpoint) was spiked, planned, red-teamed and built in reviewed pieces behind
-COUNTERSIGN_BRAIN (default legacy, inert on the live site). Its first live run (local server
-behind a tunnel) failed twice: a per-goal session.update erased the per-call token; fixed and
-audited at 5942159. Next live run: Wednesday 6:47 AM (scheduled wake-up).
+Tuesday evening the founder's three live calls all failed; two rounds of an external AI panel
+(docs/PANEL-2026-09-22-LIVE-RELIABILITY.md) converged that two voices per call (AssemblyAI's
+automatic reply plus our instructed replies) caused the repeat bugs. He ruled option (ii): the
+recorded call is the primary judge path. Overnight: the replay now plays his real recorded
+calls with both voices in step (Web Audio), and the "one voice" design was spiked, planned,
+red-teamed and built in reviewed pieces: AssemblyAI's "connect your own LLM" calls our
+/api/brain/chat/completions for every reply, and our deterministic engine writes every word.
+Live trials: the first failed (a per-goal session.update erased the per-call token), the second
+failed one case (no speech trigger on the idle-timeout verdict), the third passed 3 consecutive
+clean runs of all three demo scenarios. The judge site was switched at 7:37 AM and passed one
+run of each case there (zero repeats, zero talk-over, one goodbye). The founder has NOT yet
+tried one-voice with his own voice: no AssemblyAI session exists after 7:42 AM (PROVEN at
+1:57 PM), so the noon video decision is still open.
 
-## Founder rulings tonight
-- 7:43 PM option (ii): the recorded call is the primary judge path; live is a labeled
-  experimental bonus; three cases (STAGED, FROZEN, ESCALATED).
-- 8:00 PM his own voice may be public in the replay.
-- 8:22 PM landing option A: "Watch a recorded attack" opens his recorded fraud call with audio;
-  the live button reads "Try it live (experimental)".
-- 10:12 PM keep Thursday Sep 24 as the submit target; decide Wednesday noon on the one-brain
-  results.
+## Founder rulings (2026-09-22/23)
+- Option (ii): recorded call primary, live labeled "Try it live (experimental)" (landing A).
+- His own voice may be public in the replay.
+- Keep Thursday Sep 24 as the submit target; decide at noon Wednesday (not yet decided).
+- Yes to a third live trial on Wednesday morning (it passed).
 
-## PROVEN at this snapshot
-- Live 5942159 since 10:48 PM: /health 200; POST /api/brain/chat/completions 404 (absent);
-  replay audio 200. Real-Chrome walk on 43189e5 (9:15 PM): recorded calls play his real voice
-  in sync via Web Audio, WIRE FROZEN / STAGED verdicts, labels correct.
-- Gate on main at 5942159: typecheck clean, 2653/2653 tests, three consecutive runs.
-- "Ignored landing clicks" = automation artifact (unselected tab, document.hidden true), not a
-  product bug.
+## PROVEN at this close
+- Live e2c7bdb: /version 200 at 1:57 PM; brain route 401 without auth (mounted); stored agent
+  countersign-brain present. render.yaml: COUNTERSIGN_BRAIN=endpoint (+ generated key, public
+  URL). ROLLBACK = set COUNTERSIGN_BRAIN to "legacy" in render.yaml and push.
+- Gate on main: typecheck clean, 2656/2656 tests on 131 files.
+- Real-site check 7:41-7:44 AM: dana-patient STAGE, scenario-b-miller-fraud FREEZE,
+  single-wrong-answer ESCALATE, all PASS, zero experience defects, endpoint mode in every bundle.
+  It stopped early on a turn-gap rule: the test caller repeated itself every 2-3 s and
+  AssemblyAI's max_accuracy turn detection held one caller turn open; reply started 0.1 s after
+  that turn ended (not Render buffering).
+- Laptop-copy trials: 3 consecutive clean runs per case (reports 2026-09-23T06-46 .. 07-32).
 
-## One-brain status (plan: docs/plans/2026-09-22-one-brain-live-path.md)
-Built and reviewed: token registry + wait hook + two-writer gating (c73ae21), endpoint route
-(935bf12), close grace after a heard goodbye with the audio floor (1b682bf), stored-agent
-bootstrap and bind wiring (4630a8a), late-transcript catch-up with staleness guard (4a0c931),
-agent REST timeouts (c88352f), interim spoken lines (spokenLines.ts, plain desk-officer drafts),
-token-overwrite fix + no duplicate agents (5942159). Env needed to switch on:
-docs/ONE-BRAIN-ENV.md (not set anywhere yet).
-
-## Overnight rule
-The judge site switches to endpoint mode ONLY if each case (dana-patient STAGE,
-scenario-b-miller-fraud FREEZE, single-wrong-answer ESCALATE) reaches 3 consecutive clean
-harness runs and a review is clean. Otherwise legacy stays. Hard stop after two failed grades.
+## Known issues and risks
+- Only one real-site run per case; no human voice on one-voice yet.
+- The escalate case reaches its verdict only after ~30 s of caller silence (idle timer): slow on
+  camera; the recorded escalated call in the replay is the safer third outcome for the video.
+- Each server restart can leave a duplicate stored agent (two named countersign-brain at 9:23 AM;
+  the cold-start list call likely failed). Harmless to calls; do not delete one while the server
+  might be using it; fix the bootstrap (longer first-boot timeout or retry) and clean up after.
+- Spoken lines are interim plain drafts (brain/spokenLines.ts); founder reacts to real audio.
 
 ## Parked for the founder
-- WALKER-SELECTED-TAB-CHECK: add a selected-tab check to qa-walker / judge-sim definitions.
-- Branch deletes for worktree-agent-* branches (hook-blocked on autopilot; harmless).
-- .env.example lines for the turn-detection and brain env vars (pre-commit gate blocks it).
-- Spoken lines are interim drafts; he reacts to real audio.
+- WALKER-SELECTED-TAB-CHECK (edit qa-walker/judge-sim definitions); branch deletes for
+  worktree-agent-* (hook-blocked); .env.example lines for the turn-detection and brain vars.
 
 ## Next session
-"Resume: read docs/STATE.md and the AUTOPILOT_LOG tail from 2026-09-22 10:33 PM. At 6:47 AM
-Wednesday: rerun the live endpoint trial on a local server behind a tunnel (three cases, hard
-stop after two failed grades), switch the judge site only on 3 clean runs per case, then write
-docs/MORNING-2026-09-23.md and notify the founder. Noon Wednesday: his submit decision."
+"Resume: read docs/STATE.md and docs/MORNING-2026-09-23.md. First the founder's 10-minute voice
+check of one-voice on the live site (two calls, exact lines in the 9:24 AM message: Dana STAGED,
+CEO FROZEN; say each line once and wait). Pull his records from /api/admin/sessions right after.
+If both are clean by his ear: record the video on one-voice (escalate from the replay) and keep
+Thursday; if not: rollback to legacy with one render.yaml value and record on the recorded calls."
