@@ -2365,6 +2365,76 @@ export class CallSession {
     this.armCloseTranscriptWait(replyId, this.degradedTranscriptsMode, status);
   }
 
+  /** ONE-BRAIN LIVE PATH (2026-09-22, Lane B fix -- review finding on commit c73ae21):
+   *  `scheduleCloseIfNeeded`/`armCloseTranscriptWait`/`maybeArmCloseOnTranscript` above are
+   *  all gated off in endpoint mode (§2 delete-list) -- correctly, since AssemblyAI's own
+   *  automatic reply IS our `/api/brain` endpoint's words by construction, so there is no
+   *  second writer left to race. But those three are ALSO the only callers of
+   *  `beginCloseGrace`: with all three no-ops, an endpoint-mode call that reached its
+   *  terminal verdict and spoke the CLOSE line never hung up on its own -- it sat open until
+   *  the unconditional 45s `CLOSE_TOTAL_MS` hard cap (`armClose`, unaffected by this method)
+   *  finally ended it `close_timeout`, instead of the normal few-second `agent_closed`.
+   *
+   *  Round 2 fix (2026-09-22, review of the first cut -- BLOCKING): the first cut checked
+   *  ONLY `transcriptMatchesCloseSentence` and reasoned that `closeReplyHasEnoughAudio` was
+   *  legacy-only machinery for a two-writer artifact -- WRONG. Both PROVEN incidents
+   *  `closeReplyHasEnoughAudio`'s own doc comment (above, ~494-533) documents are SINGLE-
+   *  reply transcript/audio divergences, nothing to do with a second writer: a barge-in
+   *  cutting a reply's AUDIO short while its `transcript.agent` chunk already carried the
+   *  FULL sentence (AssemblyAI can finalize/echo text for a turn that was cut off before it
+   *  was fully spoken), and a `reply.done.status === 'completed'` reply that only ever
+   *  relayed ~42% of the expected audio bytes. `reply.audio`/`replyAudioBytes` accounting
+   *  (the `case 'reply.audio'` branch, above) is NOT gated by `brainMode` -- it runs
+   *  identically in both modes -- so endpoint mode is exactly as exposed to both incidents as
+   *  legacy is, and needs the SAME floor, unmodified: a transcript match alone is never
+   *  enough to conclude the caller actually HEARD the goodbye.
+   *
+   *  What endpoint mode's one-writer design DOES still buy (the true difference from legacy,
+   *  corrected from the first cut's claim): only the FLOOR check
+   *  (`closeReplyHasEnoughAudio`) is needed, never legacy's DEGRADED-TRANSCRIPTS audio-only
+   *  fallback (`armCloseTranscriptWait`'s own `degradedAtReplyDone` branch) -- that fallback
+   *  exists to tell "the transcript channel itself is down" apart from "the goodbye was
+   *  never spoken," a distinction endpoint mode does not need: with one writer, a below-floor
+   *  reply here always simply means not enough of the goodbye was confirmed yet, full stop.
+   *
+   *  Below-floor outcome (considered, deliberately NOT built -- reviewer's "list it rather
+   *  than build it if unsure"): legacy's own backstop in this exact situation
+   *  (`armCloseTranscriptWait`'s non-match branch) sends ONE more instructed `reply.create`
+   *  (`armCloseRetryTimer`, the "Say exactly this and nothing else" wrapper), spaced and
+   *  retried until CLOSE_TOTAL_MS. Endpoint mode does NOT mirror that: `sendReplyCreate`'s own
+   *  ONE-BRAIN guard (above) is unconditional for `brainMode === 'endpoint'` and its own
+   *  comment reserves the one narrow exception (the silent-caller nudge) for whichever lane
+   *  builds it -- never this lane, and never for the STAGE/FREEZE/ESCALATE cases this method
+   *  covers. Sending our own `reply.create` here would recreate exactly the two-writer race
+   *  the whole redesign removes, for a lane scoped to prove zero `reply.create`s (this file's
+   *  own first test). Two safe, already-available outcomes instead, both unchanged by this
+   *  method: (1) the caller says nothing more -- the unconditional 45s `CLOSE_TOTAL_MS` hard
+   *  cap (`armClose`) remains the backstop, exactly as it was before this whole fix existed;
+   *  (2) the caller speaks again -- AssemblyAI's own automatic reply calls our endpoint for
+   *  that new turn, `nextSpokenLine()` renders the SAME CLOSE sentence (the goal is sealed),
+   *  and that fresh reply's own `reply.done` gives this method another, independent chance to
+   *  confirm -- a natural retry with no new send of ours at all.
+   *
+   *  Called once, from `reply.done`, unconditionally (gated first thing below, a no-op for
+   *  legacy). `beginCloseGrace` is the SAME method legacy's own CLOSE hangup uses, already
+   *  idempotent, and reads `goodbyeConfirmedReplyId` (set here first) to size its own
+   *  audio-aware wait -- so an endpoint-mode call ends the exact same few seconds after a
+   *  heard goodbye that legacy's own CLOSE hangup always has, through the exact same `end()`
+   *  -> `aai.close()` path (which itself puts `session.end` on the wire before the socket
+   *  closes -- `aai/session.ts`'s own `RealAaiSocket.close()`, unchanged by this fix). */
+  private maybeEndCloseAfterEndpointReplyDone(replyId: string): void {
+    if (this.brainMode !== 'endpoint') return;
+    if (this.ended || this.goodbyeConfirmed) return;
+    if (this.last?.goal.code !== 'CLOSE') return;
+    const sentence = this.last.goal.hint;
+    const transcript = this.replyTranscripts.get(replyId) ?? '';
+    if (!transcriptMatchesCloseSentence(transcript, sentence)) return;
+    if (!this.closeReplyHasEnoughAudio(replyId, sentence)) return;
+    this.goodbyeConfirmed = true;
+    this.goodbyeConfirmedReplyId = replyId;
+    this.beginCloseGrace();
+  }
+
   /** HOLD-WITHOUT-FOLLOW-UP fix (2026-09-17, PROVEN live -- deploy 45, record
    *  scripts/rehearse/reports/2026-09-17T08-46-58-judge-out-of-scope, main checkout,
    *  gitignored): the standing rule (prompt.ts's `STANDING_RULES`) makes AssemblyAI's own
@@ -3335,6 +3405,12 @@ export class CallSession {
         // `evt.status`: an interrupted close still means nothing more is owed if the close
         // line was already heard (see `scheduleCloseIfNeeded`'s own doc comment).
         if (!this.replyCreateAwaitingStart) this.scheduleCloseIfNeeded(evt.reply_id, evt.status);
+        // ONE-BRAIN LIVE PATH (Lane B fix, review finding on c73ae21): the endpoint-mode
+        // counterpart to `scheduleCloseIfNeeded` just above -- a no-op in legacy mode (see
+        // its own doc comment). Unconditional (never behind `!this.replyCreateAwaitingStart`
+        // -- that flag is legacy's own two-writer bookkeeping; endpoint mode never sets it,
+        // `sendReplyCreate` returns before reaching that line for `brainMode === 'endpoint'`).
+        this.maybeEndCloseAfterEndpointReplyDone(evt.reply_id);
         // HOLD-WITHOUT-FOLLOW-UP fix: only when NOTHING else already sent (or is about to
         // send) a `reply.create` for this same event -- same `!this.replyCreateAwaitingStart`
         // guard `scheduleCloseIfNeeded` is already gated behind, just above -- does a

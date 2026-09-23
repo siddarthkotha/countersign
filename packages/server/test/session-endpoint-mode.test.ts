@@ -218,3 +218,318 @@ describe('CallSession#awaitCallerUtterance', () => {
     await expect(second).resolves.toBe(true);
   });
 });
+
+// ONE-BRAIN LIVE PATH, review finding on commit c73ae21: in endpoint mode every method that
+// manages the LEGACY two-writer race (`maybeArmCloseOnTranscript`, `armCloseTranscriptWait`,
+// `scheduleCloseIfNeeded`) early-returns -- correct, since endpoint mode has exactly one
+// writer (AssemblyAI's own automatic reply IS our `/api/brain` endpoint's words, by
+// construction) -- but those three are ALSO the only callers of `beginCloseGrace`. With
+// nothing left to call it, an endpoint-mode call that reaches its verdict, speaks the
+// verdict+goodbye line, never hangs up until the 45s `CLOSE_TOTAL_MS` hard cap
+// (`armClose`, unconditional -- fires regardless of `brainMode`, see `applyEvaluate`'s
+// goal-changed branch). This describe block proves the fix: once the goal is CLOSE and the
+// close line's OWN `reply.done` has arrived with a transcript that matches it
+// (`transcriptMatchesCloseSentence`, the existing DETECTOR, never a sender), the call ends a
+// few seconds later -- `CLOSE_GRACE_MS` (1500ms, session.ts), the exact same constant and
+// mechanism (`beginCloseGrace`) legacy mode's own heard-goodbye hangup already uses (see
+// session.test.ts's "ends the call reason 'agent_closed' a short grace period after the
+// CLOSE reply completes").
+describe('CallSession — endpoint mode: closes the call after the goodbye is heard (review finding on c73ae21)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Drives CALLER_LINES[0..3] (identity, switch, amount, account confirmations -- every
+   *  caller line in recorded-stage.json EXCEPT the final beneficiary confirmation) through
+   *  the exact echo pattern the top describe block's own first test uses: emit the caller's
+   *  real line, read `nextSpokenLine()` for the goal the REAL engine just rendered, echo it
+   *  back as the reply AssemblyAI's own automatic turn would have produced. Leaves the
+   *  session one caller turn away from the STAGE verdict's CLOSE goal, so each test below
+   *  drives that final turn itself and takes full control of the close line's own
+   *  transcript.agent/reply.done timing. */
+  function driveToOneTurnBeforeClose(session: CallSession, aai: FakeAaiSocket, clock: { now: number }): void {
+    let replyCounter = 0;
+    for (const line of CALLER_LINES.slice(0, -1)) {
+      clock.now += 3000;
+      aai.emit({ type: 'transcript.user', item_id: line.id, text: line.text });
+      const spoken = session.nextSpokenLine();
+      expect(spoken).not.toBeNull();
+      replyCounter += 1;
+      const replyId = `pre-close-reply-${replyCounter}`;
+      clock.now += 500;
+      aai.emit({ type: 'reply.started', reply_id: replyId });
+      aai.emit({ type: 'transcript.agent', item_id: `${replyId}-t`, text: spoken!, reply_id: replyId, interrupted: false });
+      aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });
+    }
+  }
+
+  // GOODBYE-CUT-BY-CALLER-PRESSURE, mirrored from legacy (2026-09-22 review of the first
+  // cut of the fix above -- BLOCKING): `closeReplyHasEnoughAudio`'s own floor formula
+  // (session.ts ~494-533), re-declared here the same way this file already re-declares
+  // other private statics as local consts (e.g. `REASK_GAP_MS` in session.test.ts).
+  const CLOSE_AUDIO_BYTES_PER_CHAR = 4_000; // CallSession.CLOSE_AUDIO_BYTES_PER_CHAR
+  const CLOSE_AUDIO_FLOOR_FRACTION = 0.5; // CallSession.CLOSE_AUDIO_FLOOR_FRACTION
+  const OUTPUT_AUDIO_BYTES_PER_SECOND = 48_000; // CallSession.OUTPUT_AUDIO_BYTES_PER_SECOND
+  function audioBytesFor(sentence: string, fraction: number): number {
+    return Math.round(sentence.length * CLOSE_AUDIO_BYTES_PER_CHAR * fraction);
+  }
+  /** How long `bytes` of relayed audio takes to play, in ms -- `beginCloseGrace`'s own
+   *  audio-aware deadline (session.ts) folds this into its wait, so a test that emits real
+   *  audio bytes for the close reply must let at least this much (simulated) clock.now time
+   *  pass before `reply.done` for the flat CLOSE_GRACE_MS to be the thing actually governing
+   *  the final wait -- exactly the reasoning session.test.ts's own CLOSE-hangup tests already
+   *  document inline (e.g. "audio-based deadline 7500+4000+1000=12500"). */
+  function audioPlaybackMs(bytes: number): number {
+    return (bytes / OUTPUT_AUDIO_BYTES_PER_SECOND) * 1000;
+  }
+
+  it("ends the call within CLOSE_GRACE_MS of the close line's own reply.done, not the 45s CLOSE_TOTAL_MS cap (c: full audio relayed)", () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint' });
+    session.start();
+    driveToOneTurnBeforeClose(session, aai, clock);
+
+    const lastLine = CALLER_LINES.at(-1)!;
+    clock.now += 3000;
+    aai.emit({ type: 'transcript.user', item_id: lastLine.id, text: lastLine.text });
+
+    // The real engine, driven by the real recorded-stage.json corpus, has reached the STAGE
+    // verdict's terminal CLOSE goal -- not a forced/synthetic state.
+    expect(session.last?.verdict).toBe('STAGE');
+    expect(session.last?.goal.code).toBe('CLOSE');
+    const closeSentence = session.nextSpokenLine();
+    expect(closeSentence).toBe(session.last!.goal.hint);
+
+    clock.now += 500;
+    aai.emit({ type: 'reply.started', reply_id: 'close-reply' });
+    // Full expected audio (100% of CLOSE_AUDIO_BYTES_PER_CHAR) -- comfortably clears
+    // closeReplyHasEnoughAudio's 50% floor, same margin session.test.ts's own CLOSE tests use.
+    const closeAudioBytes = audioBytesFor(closeSentence!, 1.0);
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(closeAudioBytes).toString('base64') });
+    aai.emit({ type: 'transcript.agent', item_id: 'close-t', text: closeSentence!, reply_id: 'close-reply', interrupted: false });
+
+    // One-brain invariant, unaffected by this fix: never a reply.create, in endpoint mode,
+    // for any turn including the close line itself.
+    expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(false);
+    expect(aai.isClosed).toBe(false);
+
+    // reply.done lands only after this audio would have finished streaming (same reasoning
+    // session.test.ts's own CLOSE-hangup tests use) -- so the flat CLOSE_GRACE_MS, not the
+    // audio-aware deadline, is what governs the final wait asserted below.
+    clock.now += Math.ceil(audioPlaybackMs(closeAudioBytes)) + 100;
+    aai.emit({ type: 'reply.done', reply_id: 'close-reply', status: 'completed' });
+
+    // Not ended the instant reply.done arrives -- the same short grace period legacy mode
+    // uses lets the goodbye's own audio finish reaching the wire before the socket closes.
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    expect(aai.isClosed).toBe(false);
+
+    // CLOSE_GRACE_MS = 1500 (session.ts, private static, reused here as a literal the same
+    // way session.test.ts's own CLOSE-hangup tests already do).
+    vi.advanceTimersByTime(1499);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    expect(aai.isClosed).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+    expect(aai.isClosed).toBe(true);
+
+    // Nowhere near the 45s CLOSE_TOTAL_MS hard cap this bug used to fall all the way through
+    // to -- advancing well past it must not produce a second 'ended' (idempotent either way,
+    // but this proves the hard cap was actually cancelled, not just masked).
+    const endedCountBefore = sent.filter((e) => e.type === 'ended').length;
+    vi.advanceTimersByTime(45_000);
+    expect(sent.filter((e) => e.type === 'ended').length).toBe(endedCountBefore);
+  });
+
+  // GOODBYE-CUT-BY-CALLER-PRESSURE, mirrored from legacy (2026-09-22 review, BLOCKING on the
+  // first cut of the fix above): a transcript match is never enough on its own -- two PROVEN
+  // live incidents (closeReplyHasEnoughAudio's own doc comment, session.ts ~494-533) are
+  // SINGLE-reply transcript/audio divergences, not two-writer artifacts, and reply.audio
+  // accounting is identical in both modes -- so endpoint mode needs the exact same floor.
+  it('(a) an interrupted close reply whose transcript is full but the relayed audio is below the floor never starts the close grace', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint' });
+    session.start();
+    driveToOneTurnBeforeClose(session, aai, clock);
+
+    const lastLine = CALLER_LINES.at(-1)!;
+    clock.now += 3000;
+    aai.emit({ type: 'transcript.user', item_id: lastLine.id, text: lastLine.text });
+    expect(session.last?.goal.code).toBe('CLOSE');
+    const closeSentence = session.nextSpokenLine()!;
+
+    clock.now += 500;
+    aai.emit({ type: 'reply.started', reply_id: 'close-reply' });
+    // ~11% of expected bytes -- mirrors the live incident where a caller barge-in cut a
+    // CLOSE reply to "This..." (37,920/86 chars, 11.0%) while its own transcript.agent chunk
+    // had already carried the FULL sentence.
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(audioBytesFor(closeSentence, 0.11)).toString('base64') });
+    aai.emit({ type: 'transcript.agent', item_id: 'close-t', text: closeSentence, reply_id: 'close-reply', interrupted: true });
+    clock.now += 100;
+    aai.emit({ type: 'reply.done', reply_id: 'close-reply', status: 'interrupted' });
+
+    // No close grace started -- well past CLOSE_GRACE_MS (1500ms), still not ended.
+    vi.advanceTimersByTime(5000);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    expect(aai.isClosed).toBe(false);
+
+    // The unconditional 45s CLOSE_TOTAL_MS hard cap remains the backstop, unchanged.
+    vi.advanceTimersByTime(40_000);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
+    expect(aai.isClosed).toBe(true);
+  });
+
+  it('(b) a completed close reply with only ~42% of the expected audio bytes never starts the close grace', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint' });
+    session.start();
+    driveToOneTurnBeforeClose(session, aai, clock);
+
+    const lastLine = CALLER_LINES.at(-1)!;
+    clock.now += 3000;
+    aai.emit({ type: 'transcript.user', item_id: lastLine.id, text: lastLine.text });
+    expect(session.last?.goal.code).toBe('CLOSE');
+    const closeSentence = session.nextSpokenLine()!;
+
+    clock.now += 500;
+    aai.emit({ type: 'reply.started', reply_id: 'close-reply' });
+    // ~42% of expected bytes, status completed -- mirrors the live incident where a folded
+    // reply reported reply.done COMPLETED with the full transcript but only its first
+    // segment's audio ever streamed (81,120/97 chars, 41.8%). Below the 50% floor.
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(audioBytesFor(closeSentence, 0.42)).toString('base64') });
+    aai.emit({ type: 'transcript.agent', item_id: 'close-t', text: closeSentence, reply_id: 'close-reply', interrupted: false });
+    clock.now += 100;
+    aai.emit({ type: 'reply.done', reply_id: 'close-reply', status: 'completed' });
+
+    vi.advanceTimersByTime(5000);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    expect(aai.isClosed).toBe(false);
+
+    vi.advanceTimersByTime(40_000);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
+    expect(aai.isClosed).toBe(true);
+  });
+
+  it('never starts the close grace before the close line\'s own reply.done arrives, even once its transcript already matches', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint' });
+    session.start();
+    driveToOneTurnBeforeClose(session, aai, clock);
+
+    const lastLine = CALLER_LINES.at(-1)!;
+    clock.now += 3000;
+    aai.emit({ type: 'transcript.user', item_id: lastLine.id, text: lastLine.text });
+    expect(session.last?.goal.code).toBe('CLOSE');
+    const closeSentence = session.nextSpokenLine();
+
+    clock.now += 500;
+    aai.emit({ type: 'reply.started', reply_id: 'close-reply' });
+    const closeAudioBytes = audioBytesFor(closeSentence!, 1.0);
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(closeAudioBytes).toString('base64') });
+    // The full close sentence has already arrived and matches -- but this reply's own
+    // reply.done has NOT fired yet.
+    aai.emit({ type: 'transcript.agent', item_id: 'close-t', text: closeSentence!, reply_id: 'close-reply', interrupted: false });
+
+    // Comfortably past CLOSE_GRACE_MS (1500ms) -- if the grace period had started from the
+    // transcript match alone (the way legacy's own maybeArmCloseOnTranscript would, were it
+    // not gated off in endpoint mode), the call would already have ended by now. It must
+    // not: endpoint mode has exactly one place that starts the grace, and it requires
+    // reply.done too.
+    vi.advanceTimersByTime(5000);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    expect(aai.isClosed).toBe(false);
+
+    // reply.done lands only after this audio would have finished streaming -- same reasoning
+    // as test (c) above, so the flat CLOSE_GRACE_MS is what governs the wait asserted below.
+    clock.now += Math.ceil(audioPlaybackMs(closeAudioBytes)) + 100;
+    // Now the reply.done arrives -- only now does the grace period begin.
+    aai.emit({ type: 'reply.done', reply_id: 'close-reply', status: 'completed' });
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    vi.advanceTimersByTime(1500);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+  });
+
+  it('the 45s CLOSE_TOTAL_MS hard cap still ends the call when the close line is never heard at all', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint' });
+    session.start();
+    driveToOneTurnBeforeClose(session, aai, clock);
+
+    const lastLine = CALLER_LINES.at(-1)!;
+    clock.now += 3000;
+    aai.emit({ type: 'transcript.user', item_id: lastLine.id, text: lastLine.text });
+    expect(session.last?.goal.code).toBe('CLOSE'); // armClose() has now armed the 45s cap
+
+    // No reply.started/transcript.agent/reply.done ever follows -- the audio was lost, or
+    // the caller hung up first. Unchanged behavior: CLOSE_TOTAL_MS (45s) is the absolute
+    // backstop regardless of brainMode.
+    vi.advanceTimersByTime(44_999);
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'close_timeout' });
+    expect(aai.isClosed).toBe(true);
+  });
+
+  // Legacy contrast (CLAUDE.md LANE-FILES rule: "Legacy mode must be byte-for-byte
+  // unchanged -- every new branch endpoint-only"). Direct-state construction -- the same
+  // technique session.test.ts's own CLOSE describe blocks already use (see e.g. its
+  // "reply.started labels a reply..." describe block's own doc comment) -- isolates the
+  // mechanism itself rather than re-deriving four AUTOMATIC_REPLY_SETTLE_MS-paced turns just
+  // to reach the same CLOSE goal legacy mode already has full live-drive coverage for
+  // elsewhere. `session.last` is forced directly and `scheduleCloseIfNeeded` (the pre-
+  // existing, UNTOUCHED-by-this-fix method) is called directly too, rather than through
+  // `aai.emit` -- an emitted `reply.started`/`reply.done` falls through to that event's own
+  // trailing `tick()`, which re-runs the REAL engine over the still-empty conversation log
+  // and would clobber the forced CLOSE goal right back to INTAKE (exactly the pitfall
+  // session.test.ts's own "pinning an unstable intermediate goal... does not survive a real
+  // tick()" comment names). Proves legacy still reaches 'ended' via its own pre-existing
+  // mechanism (`scheduleCloseIfNeeded` -> `beginCloseGrace`, its `brainMode === 'endpoint'`
+  // guard unchanged), on the exact same `CLOSE_GRACE_MS` timing as endpoint mode's new path
+  // above -- the two converge on the same observable behavior through entirely separate,
+  // mode-gated mechanisms.
+  it('legacy mode (brainMode omitted) still ends the call via its own pre-existing scheduleCloseIfNeeded/beginCloseGrace mechanism -- unaffected by the endpoint-mode fix above', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock }); // brainMode omitted -- legacy, the default
+    session.start();
+
+    const closeHint = 'Your request is staged for independent approval. The payment is not released. Goodbye.';
+    session.last = { ...session.last!, goal: { code: 'CLOSE', hint: closeHint, keyterms: [], turn_detection_hint: 'default' } };
+
+    const internals = session as unknown as {
+      replyTranscripts: Map<string, string>;
+      replyAudioBytes: Map<string, number>;
+      scheduleCloseIfNeeded: (replyId: string, status: string) => void;
+    };
+    const replyId = 'legacy-close-reply';
+    internals.replyTranscripts.set(replyId, closeHint);
+    // closeReplyHasEnoughAudio's own floor (CLOSE_AUDIO_BYTES_PER_CHAR * 0.5 per char) --
+    // comfortably clears it, same margin session.test.ts's own CLOSE tests use.
+    internals.replyAudioBytes.set(replyId, closeHint.length * 4_000);
+
+    clock.now = 5100;
+    internals.scheduleCloseIfNeeded(replyId, 'completed');
+
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+    vi.advanceTimersByTime(1500); // CLOSE_GRACE_MS -- same constant, same mechanism as always
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
+    expect(aai.isClosed).toBe(true);
+  });
+});
