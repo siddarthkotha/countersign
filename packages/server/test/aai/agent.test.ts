@@ -60,6 +60,25 @@ function fakeFetch(state: {
   return { fetchImpl: fetchImpl as unknown as typeof fetch, calls };
 }
 
+/** A fake fetch that never resolves until the AbortSignal fires -- used to test timeout behavior. */
+function neverResolvingFetch(): typeof fetch {
+  return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    return new Promise<Response>((resolve, reject) => {
+      const signal = init?.signal;
+      if (signal) {
+        if (signal.aborted) {
+          reject(new DOMException('The operation was aborted', 'AbortError'));
+          return;
+        }
+        signal.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted', 'AbortError'));
+        });
+      }
+      // Never resolve or reject unless aborted; will hang until aborted
+    });
+  }) as unknown as typeof fetch;
+}
+
 describe('ensureBrainAgent', () => {
   beforeEach(() => {
     _resetVoiceWarning();
@@ -186,4 +205,70 @@ describe('ensureBrainAgent', () => {
     expect((postCall.body as { voice: { voice_id: string } }).voice.voice_id).toBe('anna');
     warn.mockRestore();
   });
+
+  it(
+    'times out on GET /v1/agents (listAgents) and resolves null without throwing',
+    async () => {
+      const fetchImpl = neverResolvingFetch();
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const result = await ensureBrainAgent(opts({ fetchImpl, fetchTimeoutMs: 200 }));
+
+      expect(result).toBeNull();
+      expect(error).toHaveBeenCalled();
+      error.mockRestore();
+    },
+    { timeout: 2000 }
+  );
+
+  it(
+    'times out on POST /v1/agents (createAgent) and resolves null without throwing',
+    async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      // Seed a fake list response so it skips listAgents and goes straight to create
+      const wrappedFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'GET') {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        // createAgent will hang
+        return neverResolvingFetch()(input, init);
+      }) as unknown as typeof fetch;
+
+      const result = await ensureBrainAgent(opts({ fetchImpl: wrappedFetch, fetchTimeoutMs: 200 }));
+
+      expect(result).toBeNull();
+      expect(error).toHaveBeenCalled();
+      error.mockRestore();
+    },
+    { timeout: 2000 }
+  );
+
+  it(
+    'times out on PUT /v1/agents/{id} (updateAgent) and falls back to create, which also times out and resolves null',
+    async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const wrappedFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        // List returns an existing agent by name
+        if (method === 'GET') {
+          return new Response(JSON.stringify([{ id: 'existing-id', name: BRAIN_AGENT_NAME }]), { status: 200 });
+        }
+        // PUT and POST will hang forever
+        return neverResolvingFetch()(input, init);
+      }) as unknown as typeof fetch;
+
+      const result = await ensureBrainAgent(opts({ fetchImpl: wrappedFetch, fetchTimeoutMs: 200 }));
+
+      expect(result).toBeNull();
+      expect(warn).toHaveBeenCalled(); // reconcile failed warning
+      expect(error).toHaveBeenCalled(); // final error after create also failed
+      error.mockRestore();
+      warn.mockRestore();
+    },
+    { timeout: 3000 }
+  );
 });

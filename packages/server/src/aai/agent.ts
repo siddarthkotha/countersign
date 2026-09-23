@@ -53,6 +53,8 @@ export interface EnsureBrainAgentOpts {
   voice: string;
   greeting: string;
   fetchImpl: typeof fetch;
+  /** Timeout for AssemblyAI REST calls in milliseconds. Default 10000 ms. */
+  fetchTimeoutMs?: number;
 }
 
 export interface BrainAgent {
@@ -75,10 +77,15 @@ function buildLlmBaseUrl(publicUrl: string): string {
  *  proof no agent exists (which would otherwise leak a duplicate agent into AssemblyAI's
  *  account on every flaky boot). */
 async function listAgents(opts: EnsureBrainAgentOpts): Promise<AgentListItem[]> {
+  const controller = new AbortController();
+  const timeoutMs = opts.fetchTimeoutMs ?? 10000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  timer.unref();
   try {
     const res = await opts.fetchImpl(`${AGENTS_BASE}/agents`, {
       method: 'GET',
       headers: { Authorization: opts.assemblyai_api_key },
+      signal: controller.signal,
     });
     if (!res.ok) return [];
     const body: unknown = await res.json();
@@ -89,6 +96,8 @@ async function listAgents(opts: EnsureBrainAgentOpts): Promise<AgentListItem[]> 
     );
   } catch {
     return [];
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -111,15 +120,26 @@ function desiredAgentPayload(opts: EnsureBrainAgentOpts, voice: string): Record<
 }
 
 async function createAgent(opts: EnsureBrainAgentOpts, voice: string): Promise<BrainAgent | null> {
-  const res = await opts.fetchImpl(`${AGENTS_BASE}/agents`, {
-    method: 'POST',
-    headers: { Authorization: opts.assemblyai_api_key, 'Content-Type': 'application/json' },
-    body: JSON.stringify(desiredAgentPayload(opts, voice)),
-  });
-  if (!res.ok) return null;
-  const body = (await res.json()) as { id?: string; agent_id?: string };
-  const id = body.id ?? body.agent_id;
-  return id ? { id } : null;
+  const controller = new AbortController();
+  const timeoutMs = opts.fetchTimeoutMs ?? 10000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  timer.unref();
+  try {
+    const res = await opts.fetchImpl(`${AGENTS_BASE}/agents`, {
+      method: 'POST',
+      headers: { Authorization: opts.assemblyai_api_key, 'Content-Type': 'application/json' },
+      body: JSON.stringify(desiredAgentPayload(opts, voice)),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { id?: string; agent_id?: string };
+    const id = body.id ?? body.agent_id;
+    return id ? { id } : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** PUT /v1/agents/{id} -- PROVEN to exist (this lane's live docs re-check). Sends the full
@@ -127,15 +147,22 @@ async function createAgent(opts: EnsureBrainAgentOpts, voice: string): Promise<B
  *  converges the live agent onto exactly what it expects, without needing an unverified
  *  single-agent GET to compare against first. */
 async function updateAgent(opts: EnsureBrainAgentOpts, id: string, voice: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timeoutMs = opts.fetchTimeoutMs ?? 10000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  timer.unref();
   try {
     const res = await opts.fetchImpl(`${AGENTS_BASE}/agents/${id}`, {
       method: 'PUT',
       headers: { Authorization: opts.assemblyai_api_key, 'Content-Type': 'application/json' },
       body: JSON.stringify(desiredAgentPayload(opts, voice)),
+      signal: controller.signal,
     });
     return res.ok;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
