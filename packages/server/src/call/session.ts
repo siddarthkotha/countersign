@@ -403,6 +403,47 @@ export class CallSession {
    *  more than one waiter can legitimately be waiting on the SAME text at once (a test racing
    *  two assertions) or on DIFFERENT text simultaneously (a harness pipelining ahead). */
   private readonly callerUtteranceWaiters: { text: string; resolve: (matched: boolean) => void; timer: ReturnType<typeof setTimeout> }[] = [];
+  /** DEAD-AIR-ON-TIMEOUT fix (2026-09-22, endpoint mode only): trimmed caller-utterance texts
+   *  whose `awaitCallerUtterance` wait (above) timed out -- the endpoint had already returned
+   *  an EMPTY completion for that turn (brain/endpoint.ts's own CALLER_WAIT_TIMEOUT_MS branch,
+   *  never a stale line) by the time this fires. If the matching `transcript.user` lands
+   *  anyway, `dispatchAaiEvent`'s own `transcript.user` case removes the matching entry (so it
+   *  can never fire twice for the same timeout) and, once this event's own `tick()` has re-run
+   *  the engine for it, `sendEndpointTrigger` puts exactly ONE `reply.create` on the wire so
+   *  AssemblyAI asks our endpoint again -- this time for the NEW goal, not the stale one the
+   *  timeout escaped.
+   *
+   *  STALE-TRIGGER fix (2026-09-22 review, BLOCKING on the first cut): a bare Set was not
+   *  enough. If the caller hears the dead air, speaks AGAIN (a genuinely newer turn, "B")
+   *  before A's own late transcript ever lands, B gets its own normal render through the
+   *  ordinary caller-turn path -- firing a trigger for A's stale tick afterward would talk
+   *  over or supersede B's already-delivered render, exactly the repeated-question/talk-over
+   *  class this project has hit live repeatedly (see docs/AUTOPILOT_LOG.md's Day 4-13
+   *  entries). Each entry now carries the two markers snapshotted AT TIMEOUT (not at call
+   *  time -- see `awaitCallerUtterance`'s own timeout callback for why: a caller fragment that
+   *  raced ahead of A DURING the wait is already reflected in these counts by the time the
+   *  timeout fires, so only a turn/reply that happens strictly AFTER the timeout is what this
+   *  guards against): `callerTurnCountAtTimeout` (`this.callerTurnCount`, incremented once per
+   *  genuine, non-duplicate `transcript.user`) and `replyStartedSeqAtTimeout`
+   *  (`this.replyStartedSeq`, incremented once per `reply.started`). `sendEndpointTrigger`'s
+   *  caller (`dispatchAaiEvent`'s `transcript.user` case) fires the trigger ONLY when BOTH are
+   *  still unchanged at match time -- i.e. no newer caller turn was logged and no reply
+   *  started in between -- and drops it silently otherwise (the newer turn, B, already got its
+   *  own correct render; nothing owed for A's stale one).
+   *
+   *  A plain `Map<string, {...}>`, matching `callerUtteranceWaiters`'s own exact-text matching
+   *  convention. Legacy mode never populates or reads this (nothing ever calls
+   *  `awaitCallerUtterance` outside the endpoint-mode HTTP path). Cleared on `end()`. */
+  private readonly timedOutCallerUtterances = new Map<string, { callerTurnCountAtTimeout: number; replyStartedSeqAtTimeout: number }>();
+  /** STALE-TRIGGER fix (2026-09-22): incremented once per genuine (non-duplicate)
+   *  `transcript.user` processed -- see `timedOutCallerUtterances`'s own doc comment for why
+   *  this, not a raw `logs.conversation.length` (which also grows on `transcript.agent`
+   *  entries), is the right monotonic marker for "has a NEWER caller turn happened." */
+  private callerTurnCount = 0;
+  /** STALE-TRIGGER fix (2026-09-22): incremented once per `reply.started`, unconditionally
+   *  (cheap, mode-agnostic -- same convention `nextSpokenLine` documents for itself). The
+   *  second of the two markers `timedOutCallerUtterances` snapshots. */
+  private replyStartedSeq = 0;
   private readonly agentName: string;
   /** Fix round 1, finding 1: owned for the life of the call (not per-render) so consecutive
    *  STALL goals of the same kind actually get different holding lines instead of each
@@ -2435,6 +2476,45 @@ export class CallSession {
     this.beginCloseGrace();
   }
 
+  /** DEAD-AIR-ON-TIMEOUT fix (2026-09-22, endpoint mode only): the ONE way endpoint mode ever
+   *  puts a `reply.create` on the wire -- `sendReplyCreate` itself refuses this mode
+   *  unconditionally (see its own ONE-BRAIN guard, top of that method), so this is a separate,
+   *  dedicated, minimal method rather than un-gating the legacy one for a single narrow case.
+   *  Its only caller is `dispatchAaiEvent`'s own `transcript.user` case, and only when that
+   *  exact text matches an entry `awaitCallerUtterance`'s own timeout branch recorded in
+   *  `timedOutCallerUtterances` (see that field's doc comment) -- i.e. the endpoint already
+   *  gave up on this turn and answered AssemblyAI with an empty completion, so nothing else
+   *  will ever ask our endpoint again for it on its own. Called AFTER this event's `tick()`
+   *  has already re-run the engine, so `nextSpokenLine()` -- which is all the endpoint ever
+   *  reads (plan §1) -- reflects the NEW goal this late transcript just produced, not the
+   *  stale one the timeout escaped.
+   *
+   *  No `instructions`. Plan §1 says the endpoint treats a `reply.create`'s trailing system
+   *  message purely as a TRIGGER, never as engine input -- PROVEN by the spike (G3,
+   *  `g3-reply-create-request.json`) only for a `reply.create` sent WITH `instructions`;
+   *  whether a BARE `reply.create` (no `instructions`, as sent here) is relayed to our
+   *  endpoint as a trailing system message at all is ESTIMATE, unverified by that spike. It
+   *  does not matter which: `brain/endpoint.ts`'s own handling covers either shape -- if the
+   *  resulting request's last message is not `role: 'user'`, it renders `nextSpokenLine()`
+   *  immediately, no wait; if AssemblyAI instead happens to re-send the caller's own last
+   *  utterance as `role: 'user'`, `awaitCallerUtterance`'s `alreadySaid` fast path (that text
+   *  is already logged by now) resolves synchronously, same immediate render. Either path
+   *  reaches the caller with the new goal's line with no additional wait.
+   *
+   *  Guarded the same way every other terminal send in this class is
+   *  (`this.ended || this.goodbyeConfirmed`): a call that has already ended, or whose goodbye
+   *  is already confirmed (or in its close grace), never gets one more nudge it doesn't need
+   *  -- satisfies "never trigger if the call has reached CLOSE and the goodbye is already
+   *  confirmed or ending." A call that reaches CLOSE for the FIRST time on THIS late transcript
+   *  is not yet confirmed, so it still gets the trigger -- otherwise the caller would never
+   *  hear the goodbye either, the exact dead-air failure this fix exists to close. */
+  private sendEndpointTrigger(reason: string): void {
+    if (this.brainMode !== 'endpoint') return;
+    if (this.ended || this.goodbyeConfirmed) return;
+    this.opts.aai.send({ type: 'reply.create' });
+    this.diag('endpoint_trigger_sent', { reason });
+  }
+
   /** HOLD-WITHOUT-FOLLOW-UP fix (2026-09-17, PROVEN live -- deploy 45, record
    *  scripts/rehearse/reports/2026-09-17T08-46-58-judge-out-of-scope, main checkout,
    *  gitignored): the standing rule (prompt.ts's `STANDING_RULES`) makes AssemblyAI's own
@@ -2695,6 +2775,11 @@ export class CallSession {
     this.clearCloseTimers();
     this.clearDegradedStrikeTimers();
     this.clearHoldFollowupTimer();
+    // DEAD-AIR-ON-TIMEOUT fix (2026-09-22): a call that has ended can never usefully fire
+    // `sendEndpointTrigger` again anyway (it's guarded on `this.ended`), but clearing this
+    // here matches every other per-call record this method already clears on end, and stops a
+    // stale entry from outliving the call for no reason.
+    this.timedOutCallerUtterances.clear();
     // CLOSE-TAIL-AUDIO-SECONDS-UNDERCOUNT diagnostics (2026-09-19): whichever reply is still
     // `currentReplyId` right now (typically the confirmed goodbye, since nothing else started
     // after it) gets no further audio -- finalize its summary here. Covers both a call that
@@ -2980,6 +3065,12 @@ export class CallSession {
     // processes this fragment, never before or during it (comparing a fragment against itself
     // would always read a zero gap).
     let newCallerTranscriptAtMs: number | null = null;
+    // DEAD-AIR-ON-TIMEOUT fix (2026-09-22): set inside the `transcript.user` case below, read
+    // only after this event's own `tick()` (below) has already re-run the engine for it -- see
+    // `sendEndpointTrigger`'s own doc comment for why the send must happen strictly after that
+    // tick, never before or during it (rendering `nextSpokenLine()` off the stale pre-tick goal
+    // would just re-create the dead-air bug one tick later).
+    let lateTimedOutUtteranceMatched = false;
     switch (evt.type) {
       // PROVEN flight-recorder bug fix (2026-09-03): `tick()` re-runs the full engine
       // `evaluate(this.buildEngineInput())` and logs a diagnostics `evaluate` event -- worth
@@ -3054,6 +3145,35 @@ export class CallSession {
           // early return a few lines up (a duplicate is never logged, so it never resolves a
           // waiter either).
           this.resolveCallerUtteranceWaiters(evt.text);
+          // DEAD-AIR-ON-TIMEOUT fix (2026-09-22), STALE-TRIGGER hardening (same-day review,
+          // BLOCKING on the first cut): this exact text is one the endpoint already gave up
+          // waiting for and answered empty (`awaitCallerUtterance`'s own timeout branch
+          // recorded it in `timedOutCallerUtterances`, with the two markers it snapshotted at
+          // timeout). Read via `.get()` (not `.delete()` alone) BEFORE this turn's own
+          // `callerTurnCount` increment below, so the comparison is against counts as they
+          // stood strictly BEFORE this transcript -- then removed unconditionally either way,
+          // so a redelivery (or a second late arrival for the same text) can never re-check it
+          // -- see `timedOutCallerUtterances`'s own doc comment for the full reasoning. Only
+          // fires the trigger (after this event's own `tick()`, below -- see
+          // `lateTimedOutUtteranceMatched`'s own doc comment) when BOTH markers are still
+          // unchanged: no newer caller turn was logged, and no reply started, since the
+          // timeout. Otherwise dropped silently -- a newer turn already got its own correct
+          // render; a stale trigger for A now would talk over it.
+          const timedOutRecord = this.timedOutCallerUtterances.get(evt.text.trim());
+          if (timedOutRecord) {
+            this.timedOutCallerUtterances.delete(evt.text.trim());
+            const noNewerCallerTurn = this.callerTurnCount === timedOutRecord.callerTurnCountAtTimeout;
+            const noReplyStartedSince = this.replyStartedSeq === timedOutRecord.replyStartedSeqAtTimeout;
+            if (noNewerCallerTurn && noReplyStartedSince) {
+              lateTimedOutUtteranceMatched = true;
+            } else {
+              this.diag('endpoint_late_trigger_dropped_stale', {
+                newer_caller_turn: !noNewerCallerTurn,
+                reply_started_since: !noReplyStartedSince,
+              });
+            }
+          }
+          this.callerTurnCount += 1;
           this.opts.onActivity?.();
           // CLOSE-CATCHUP-OVER-CALLER-BARGE-IN fix, hardening (2026-09-19, coordinator review
           // of 9e16e75): `callerSpeaking` used to be cleared ONLY by `input.speech.stopped`.
@@ -3118,6 +3238,11 @@ export class CallSession {
       }
 
       case 'reply.started':
+        // STALE-TRIGGER fix (2026-09-22): unconditional, cheap, mode-agnostic -- the second of
+        // the two markers `timedOutCallerUtterances` snapshots (see its own doc comment). Every
+        // reply, ours or AssemblyAI's own automatic one, counts: a fresh render having already
+        // started for a newer turn is exactly what a late, stale trigger must never talk over.
+        this.replyStartedSeq += 1;
         // Doesn't touch EngineInput, but flips `this.speaking`, which `emitState()` (called
         // by `tick()`) pushes to the browser as the speaking indicator -- fires once per
         // agent turn (not per-frame), so ticking here costs nothing like `reply.audio` does.
@@ -3502,6 +3627,12 @@ export class CallSession {
         break;
     }
     this.tick();
+    // DEAD-AIR-ON-TIMEOUT fix (2026-09-22): only now, after the tick above has re-run the
+    // engine for this exact transcript, does the endpoint-mode trigger go out -- so whatever
+    // AssemblyAI's next request to our endpoint renders via `nextSpokenLine()` is the NEW
+    // goal this late transcript just produced. `sendEndpointTrigger` itself is a no-op outside
+    // endpoint mode and once ended/goodbye-confirmed.
+    if (lateTimedOutUtteranceMatched) this.sendEndpointTrigger('late_caller_utterance');
     // BRAKE (2026-09-15): only now -- after this event's own tick has already consulted
     // `previousCallerTranscriptAtMs` for whatever it was BEFORE this fragment -- does the
     // field advance to this fragment's own timestamp, ready for the NEXT one to compare
@@ -5262,6 +5393,18 @@ export class CallSession {
         timer: setTimeout(() => {
           const idx = this.callerUtteranceWaiters.indexOf(waiter);
           if (idx !== -1) this.callerUtteranceWaiters.splice(idx, 1);
+          // DEAD-AIR-ON-TIMEOUT fix (2026-09-22), STALE-TRIGGER hardening: record the exact
+          // text the endpoint gave up waiting for, snapshotting BOTH markers AT THIS MOMENT --
+          // the instant the timeout actually fires, not when this method was first called --
+          // see `timedOutCallerUtterances`'s own doc comment for why that timing matters (a
+          // caller fragment that raced ahead of this one DURING the wait is already folded
+          // into these counts by now) and for what reads this. Recorded unconditionally (this
+          // method itself stays mode-agnostic, same as `nextSpokenLine`) -- only
+          // `sendEndpointTrigger` gates on `brainMode`.
+          this.timedOutCallerUtterances.set(target, {
+            callerTurnCountAtTimeout: this.callerTurnCount,
+            replyStartedSeqAtTimeout: this.replyStartedSeq,
+          });
           resolve(false);
         }, timeoutMs),
       };

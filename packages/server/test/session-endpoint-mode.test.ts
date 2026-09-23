@@ -8,6 +8,7 @@ import { MERIDIAN, mockToolResult } from '@countersign/engine';
 import type { CallContext, GoalCode, PhrasingGoal, ServerEvent } from '@countersign/engine';
 import { CallSession, PLACEHOLDER_GOAL_LINES } from '../src/call/session.js';
 import { FakeAaiSocket } from '../src/aai/fake.js';
+import type { AaiEvent } from '../src/aai/types.js';
 import recordedStage from '../../engine/corpus/recorded-stage.json' with { type: 'json' };
 
 afterEach(() => {
@@ -216,6 +217,229 @@ describe('CallSession#awaitCallerUtterance', () => {
     aai.emit({ type: 'transcript.user', item_id: 'c1', text: 'Yes.' });
     await expect(first).resolves.toBe(true);
     await expect(second).resolves.toBe(true);
+  });
+});
+
+// DEAD-AIR-ON-TIMEOUT fix (2026-09-22): brain/endpoint.ts's own `awaitCallerUtterance` wait
+// (§1 of the one-brain plan) is bounded at 1500ms; on timeout it answers AssemblyAI with an
+// EMPTY completion so it never re-asks the previous question. If the matching `transcript.
+// user` then lands anyway, nothing else was ever going to ask our endpoint again for it --
+// the caller would hear dead air until they spoke again. This block proves the fix: a late-
+// arriving matching transcript, processed AFTER its own tick, gets exactly one `reply.create`
+// TRIGGER (`sendEndpointTrigger` -- see its own doc comment for why this is a dedicated
+// endpoint-only method, never `sendReplyCreate` itself, which refuses this mode
+// unconditionally).
+describe('CallSession — endpoint mode: dead-air-on-timeout fix (late transcript after a timed-out awaitCallerUtterance)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('a timed-out wait followed by the late matching transcript sends exactly one reply.create trigger, after the tick (nextSpokenLine reflects the NEW goal)', async () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint' });
+    session.start();
+
+    const beforeLine = session.nextSpokenLine();
+    const text = CALLER_LINES[0]!.text;
+    const waiting = session.awaitCallerUtterance(text, 1500);
+    await vi.advanceTimersByTimeAsync(1500);
+    await expect(waiting).resolves.toBe(false);
+
+    // The endpoint has already answered empty for this turn -- nothing sent yet.
+    expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(false);
+
+    // The matching transcript.user lands anyway (AssemblyAI's own delivery, independent of
+    // the HTTP request that timed out -- plan §1's "ordering race").
+    aai.emit({ type: 'transcript.user', item_id: 'late-1', text });
+
+    const replyCreates = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    expect(replyCreates.length).toBe(1);
+    // No instructions -- the endpoint renders `nextSpokenLine()` itself (plan §1: the trailing
+    // system message is a pure TRIGGER, never engine input).
+    expect(replyCreates[0]).toEqual({ type: 'reply.create' });
+
+    // Fired AFTER this event's own tick -- nextSpokenLine() now reflects the NEW goal the late
+    // transcript produced, not whatever it was before this turn landed.
+    expect(session.last).not.toBeNull();
+    const afterLine = session.nextSpokenLine();
+    expect(afterLine).not.toBe(beforeLine);
+    expect(afterLine).toBe(expectedLineFor(session.last!.goal) ?? null);
+  });
+
+  it('a normal in-time wait never sends a reply.create trigger', async () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint' });
+    session.start();
+
+    const text = CALLER_LINES[0]!.text;
+    const waiting = session.awaitCallerUtterance(text, 1500);
+    await vi.advanceTimersByTimeAsync(200); // comfortably within the 1500ms bound
+    aai.emit({ type: 'transcript.user', item_id: 'in-time-1', text });
+    await expect(waiting).resolves.toBe(true);
+
+    // Even once the original timeout would otherwise have elapsed, still nothing -- it never
+    // actually timed out, so nothing was ever recorded to trigger on.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(false);
+  });
+
+  it('two INDEPENDENT timed-out utterances -- each one\'s own timeout and late arrival, with nothing else happening in between -- each get their own trigger', async () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint' });
+    session.start();
+
+    const textA = CALLER_LINES[0]!.text;
+    const textB = CALLER_LINES[1]!.text;
+    expect(textA).not.toBe(textB);
+    const replyCreateCount = (): number => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+
+    // A: times out, then lands late, fully resolved (its own trigger fires) BEFORE B's own
+    // wait even starts -- each utterance's timeout/late-arrival pair is independent, nothing
+    // of B's is straddling A's window (that straddling case is its own test below).
+    const waitingA = session.awaitCallerUtterance(textA, 1500);
+    await vi.advanceTimersByTimeAsync(1500);
+    await expect(waitingA).resolves.toBe(false);
+    aai.emit({ type: 'transcript.user', item_id: 'late-a', text: textA });
+    expect(replyCreateCount()).toBe(1);
+
+    // B: its OWN wait starts only now (its `callerTurnCountAtTimeout`/`replyStartedSeqAtTimeout`
+    // snapshot is taken AFTER A has already fully resolved), times out, then lands late with
+    // nothing else in between -- its own, independent second trigger.
+    const waitingB = session.awaitCallerUtterance(textB, 1500);
+    await vi.advanceTimersByTimeAsync(1500);
+    await expect(waitingB).resolves.toBe(false);
+    aai.emit({ type: 'transcript.user', item_id: 'late-b', text: textB });
+    expect(replyCreateCount()).toBe(2);
+  });
+
+  it('the same utterance landing twice (a genuine repeat, fresh item_id) never gets a second trigger', async () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint' });
+    session.start();
+
+    const text = CALLER_LINES[0]!.text;
+    const replyCreateCount = (): number => aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').length;
+
+    const waiting = session.awaitCallerUtterance(text, 1500);
+    await vi.advanceTimersByTimeAsync(1500);
+    await expect(waiting).resolves.toBe(false);
+
+    aai.emit({ type: 'transcript.user', item_id: 'late-1', text });
+    expect(replyCreateCount()).toBe(1);
+
+    // The caller repeats the exact same words later (a fresh item_id) -- the timed-out record
+    // for this text was already consumed by the trigger above ("never trigger more than once
+    // per timed-out utterance"), so this must NOT add a second one.
+    aai.emit({ type: 'transcript.user', item_id: 'repeat-1', text });
+    expect(replyCreateCount()).toBe(1);
+  });
+
+  // STALE-TRIGGER fix (2026-09-22 review, BLOCKING on the first cut of this fix): the exact
+  // scenario review flagged. A's wait times out (empty completion); before A's own transcript
+  // ever lands, the caller -- hearing dead air -- speaks again (B), a genuinely NEWER turn
+  // that gets its own correct render through AssemblyAI's normal turn-driven flow (simulated
+  // below the same way the top describe block's own drive loop echoes AssemblyAI's automatic
+  // reply back). Only THEN does A's own transcript.user land late. Firing a trigger for A now
+  // would talk over or supersede B's already-delivered render -- the exact repeated-question/
+  // talk-over class this project has hit live repeatedly (docs/AUTOPILOT_LOG.md, Day 4-13).
+  // Must produce ZERO triggers.
+  it("a newer caller turn (B) landing after A's timeout but before A's late transcript suppresses A's trigger entirely (never talks over B's own render)", async () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint' });
+    session.start();
+
+    const textA = CALLER_LINES[0]!.text;
+    const textB = CALLER_LINES[1]!.text;
+    expect(textA).not.toBe(textB);
+
+    const waitingA = session.awaitCallerUtterance(textA, 1500);
+    await vi.advanceTimersByTimeAsync(1500);
+    await expect(waitingA).resolves.toBe(false);
+    expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(false);
+
+    // B lands and gets its own normal render (AssemblyAI's own automatic reply, echoed back
+    // exactly as the top describe block's drive loop does) -- NOT a trigger of ours; endpoint
+    // mode never sends reply.create for an ordinary turn.
+    aai.emit({ type: 'transcript.user', item_id: 'b-1', text: textB });
+    const bLine = session.nextSpokenLine();
+    expect(bLine).not.toBeNull();
+    aai.emit({ type: 'reply.started', reply_id: 'b-reply' });
+    aai.emit({ type: 'transcript.agent', item_id: 'b-reply-t', text: bLine!, reply_id: 'b-reply', interrupted: false });
+    aai.emit({ type: 'reply.done', reply_id: 'b-reply', status: 'completed' });
+    expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(false);
+
+    // A's own transcript.user now finally lands, stale -- must be dropped silently.
+    aai.emit({ type: 'transcript.user', item_id: 'a-late', text: textA });
+
+    expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(false);
+  });
+
+  it('a matching transcript that arrives after end() never sends a trigger', async () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint' });
+    session.start();
+
+    const text = CALLER_LINES[0]!.text;
+    const waiting = session.awaitCallerUtterance(text, 1500);
+    await vi.advanceTimersByTimeAsync(1500);
+    await expect(waiting).resolves.toBe(false);
+
+    session.end('test_dead_air_after_end');
+    const sentBefore = aai.sent.length;
+
+    // FakeAaiSocket.emit() itself no-ops once closed (aai.close() runs inside end()), matching
+    // how the real transport would behave -- so this reaches the private dispatch path
+    // directly (the same technique this file's legacy-mode CLOSE test already uses for
+    // `scheduleCloseIfNeeded`) purely to prove `sendEndpointTrigger`'s own `this.ended` guard
+    // and `timedOutCallerUtterances`'s clear-on-`end()`, not to claim this path is reachable
+    // live through an already-closed socket.
+    const internals = session as unknown as { dispatchAaiEvent: (evt: AaiEvent) => void };
+    internals.dispatchAaiEvent({ type: 'transcript.user', item_id: 'late-after-end', text });
+
+    expect(aai.sent.length).toBe(sentBefore);
+    expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(false);
+  });
+
+  it("legacy mode (brainMode omitted): a timed-out awaitCallerUtterance wait followed by the matching transcript adds no EXTRA reply.create beyond legacy's own unchanged flow", async () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock }); // brainMode omitted -- legacy, the default
+    session.start();
+
+    const text = CALLER_LINES[0]!.text;
+    const waiting = session.awaitCallerUtterance(text, 1500);
+    await vi.advanceTimersByTimeAsync(1500);
+    await expect(waiting).resolves.toBe(false);
+
+    aai.emit({ type: 'transcript.user', item_id: CALLER_LINES[0]!.id, text });
+    // AUTOMATIC_REPLY_SETTLE_MS covers legacy's own deferred send for a fresh question.
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // Legacy still sends exactly the ONE reply.create its own pre-existing machinery always
+    // sent for this turn -- `sendEndpointTrigger` is gated on `brainMode === 'endpoint'` and
+    // never fires here, so this proves the fix adds no second, extra send in legacy mode.
+    const replyCreates = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    expect(replyCreates.length).toBe(1);
   });
 });
 
