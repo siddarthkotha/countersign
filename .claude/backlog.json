@@ -3718,8 +3718,322 @@
       "status": "held",
       "held_because": "fix live (fb6106c, min_silence 1500) and harness-proven; founder-voice confirmation on case 6 pending",
       "agent_id": "",
-      "note": "Haiku lane: COUNTERSIGN_MIN_SILENCE_MS / MAX_SILENCE_MS / INTERRUPTION_DELAY_MS env in explicit mode; founder-voice A/B next (harness cannot pause like a person) | fb6106c live 3:10 PM: turn_detection_sent {vad 0.5, interrupt true, min_silence 1500}; harness pause-after-name: agent waited through the pause, full request as one turn, STAGE, grade clean; founder 3-call test pending",
+      "note": "Haiku lane: COUNTERSIGN_MIN_SILENCE_MS / MAX_SILENCE_MS / INTERRUPTION_DELAY_MS env in explicit mode; founder-voice A/B next (harness cannot pause like a person) | fb6106c live 3:10 PM: turn_detection_sent {vad 0.5, interrupt true, min_silence 1500}; harness pause-after-name: agent waited through the pause, full request as one turn, STAGE, grade clean; founder 3-call test pending | 2026-09-22 7:23 PM: AssemblyAI turn-detection doc says min_silence/max_silence turn off adaptive and entity-aware waiting, tune only as a last resort; superseded by SPIKE-ONE-BRAIN (transcription_mode max_accuracy, no thresholds)",
       "priority": "P0"
+    },
+    {
+      "id": "OPTION-II-RULING",
+      "title": "founder ruling 7:43 PM 2026-09-22: option (ii). The recorded call (replay) is the primary judge path, labeled 'Recorded call'; live calling is a labeled experimental bonus; cut to three cases (STAGED, FROZEN, ESCALATED). Panel record docs/PANEL-2026-09-22-LIVE-RELIABILITY.md",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-22T19:45-05:00",
+      "priority": "P0"
+    },
+    {
+      "id": "SPIKE-ONE-BRAIN",
+      "title": "3-hour spike in a sandbox, never live: AssemblyAI 'connect your own LLM' pointed at our deterministic engine so only our lines are spoken. Gates in the panel record: stored agent + our WS connection compatible; full request body logged; one endpoint call per turn; empty completion silent 10/10; reply.create routing; delivered-vs-generated trap text; two concurrent calls; single verdict+goodbye line then session.end; max_accuracy with no thresholds; proper-noun keyterms only",
+      "files": [
+        "scripts/spike/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a2c4946976d98e7ff",
+      "started_at": "2026-09-22T19:52-05:00",
+      "priority": "P0",
+      "lane_note": "founder said keep going 7:47 PM; Sonnet lane, scripts/spike/** only, cloudflared quick tunnel, 30 live-minute cap, gates G0-G8 | GO 8:13 PM: G0 G1 G3 G6 G7 G8 PASS; G2 empty completion speaks no words 10/10 but streams ~4 s of reply.audio (bytes not decoded: silence UNKNOWN); G4 request history does not equal heard text (use transcript.agent); G5 two concurrent sessions produced 2 requests per turn, only the second spoken, no call id anywhere: endpoint must be a pure function of (messages, model); 500 auto-retried once by the SDK; ~5.25 live min. Evidence scripts/spike/out + logs. Agents deleted, tunnel stopped."
+    },
+    {
+      "id": "REPLAY-WITH-AUDIO",
+      "title": "replay carries the real caller and agent audio of one recorded call, synced to the real engine and UI, labeled 'Recorded call'; three cases",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a1e4849f6b1c19feb",
+      "started_at": "2026-09-22T19:58-05:00",
+      "priority": "P0",
+      "lane_note": "recordings picked: STAGE 8f7fa2f2 (grader PASS), ESCALATE b674e6e8 (grader PASS), FREEZE cce6200f (no bundle; AAI timeline read clean, ESTIMATE); lane builds recorded-*.json corpus, gitignored audio serving, synced playback; no visual changes | 8:24 PM: lane done, re-gated on main 3x 2470/2470 + typecheck + web build; review found a process-crash on /api/replay-audio/% (fixed + test) and the same class pre-existing in ws/browser.ts upgrade (fixed + test); re-review running; not yet committed | committed and pushed (with option A) 8:31 PM, 4d4c672; deploy verification + real-browser playback check pending | 8:36 PM real-Chrome walk on 4d4c672: audio NEVER plays (readyState 0, currentTime 0, play() AbortError interrupted by pause()); server ignores Range, no Content-Length; debug lane running (Sonnet, systematic debugging, fix + test + local Chrome proof) | 9:07 PM: Web Audio fix + Range + offset fix committed 43189e5 and pushed; live verification + Chrome walk pending | code landed (43189e5); only the Chrome verification walk remains, no files claimed | 9:15 PM Chrome walk on 43189e5 PASS 6/6: recorded-freeze fetched 842,763 B in 407 ms, buffer source started ctx running at offset 0.528 s (the decode delay, so in step), 52.3 s buffer, ctx.currentTime 37.25 s vs 36.72 s wall; transcript in step within the polling tolerance; WIRE FROZEN; 4x stops the source and starts none; switching to recorded-stage stops the old source and starts a 74.1 s buffer, ends STAGED"
+    },
+    {
+      "id": "KEYTERMS-EMPTY",
+      "title": "server sends keyterms: [] (packages/server/src/index.ts:242); register proper nouns only (Meridian Supply, Northgate Partners, Marcus Obi, ...), trap pairs symmetric or not at all",
+      "files": [
+        "packages/server/src/index.ts"
+      ],
+      "status": "held",
+      "held_because": "folded into SPIKE-ONE-BRAIN config; no live change tonight",
+      "agent_id": "",
+      "started_at": "",
+      "priority": "P1"
+    },
+    {
+      "id": "MAC-MINI-HOST",
+      "title": "founder asked 7:55 PM whether overnight work can run on his new Mac mini instead of this laptop; needs a setup checklist (Claude Code, Node 24, repo clone, .env copied by hand, cloudflared, user-level ~/.claude config and memory)",
+      "files": [],
+      "status": "held",
+      "held_because": "lanes in flight tonight cannot move mid-run; setup takes founder minutes; do it tomorrow",
+      "agent_id": "",
+      "started_at": "",
+      "priority": "P2"
+    },
+    {
+      "id": "FOUNDER-VOICE-PUBLIC-RULING",
+      "title": "founder ruling 8:00 PM 2026-09-22: OK to use his own voice in the public replay (recordings of his calls 8f7fa2f2 STAGE, cce6200f FREEZE, b674e6e8 ESCALATE); audio may be committed in a tracked path for the deploy",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "2026-09-22T20:00-05:00",
+      "priority": "P0"
+    },
+    {
+      "id": "ONE-BRAIN-PLAN",
+      "title": "written implementation plan for the single-brain live path: endpoint = pure function of (messages, model) running the real engine; stored agent(s) + post-bind session.update for system prompt/keyterms/turn detection; server WS listener keeps UI, terminal actions, heard-text ledger from transcript.agent; delete reply.create sends except single-brain nudges; behind a flag, old path default until proven; first task decodes the empty-reply audio (G2 caveat)",
+      "files": [
+        "docs/plans/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "ad8935a5a36ab43c0",
+      "started_at": "2026-09-22T20:15-05:00",
+      "priority": "P0",
+      "lane_note": "docs/plans/2026-09-22-one-brain-live-path.md written 8:24 PM (443 lines): lanes F A B C D E G, critical path ~15 session-hours ESTIMATE; red-team running | revision running: single engine run via per-call system_prompt token, red-team changes 2-4 | revised 8:38 PM: single engine run (per-call token in post-bind system_prompt, endpoint renders the live session goal, bounded 1500 ms wait for the matching transcript.user); lanes A1 A2 B C D F G + G5-verify + G7-verify; critical path ~12 h ESTIMATE (red-team base rate 2-2.5x)"
+    },
+    {
+      "id": "LANDING-OPTION-A",
+      "title": "founder pick 8:22 PM: option A: keep 'Watch a recorded attack' (opens the recorded fraud call with audio by default); rename 'Try to break it' to 'Try it live (experimental)'",
+      "files": [
+        "packages/web/src/screens/Landing.tsx",
+        "packages/web/test/Landing.test.tsx",
+        "README.md",
+        "docs/PLAY-SHEET.md"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a7c5c51a524b9f5f1",
+      "started_at": "2026-09-22T20:24-05:00",
+      "priority": "P0",
+      "lane_note": "Haiku lane does the rename; the default recording switch to recorded-freeze is a one-line FLAGSHIP_RECORDING change in http.ts, main does it after the crash-fix re-review | committed 4d4c672, pushed 8:31 PM; SUBMISSION-DRAFT.md label fixed too; deploy verification pending | live 4d4c672 8:32 PM; Chrome walk PASS: both button labels exact, no old label, recorded-freeze auto-starts, verdict panels correct"
+    },
+    {
+      "id": "ONE-BRAIN-REDTEAM",
+      "title": "red-team kill attempt on the one-brain plan",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "acb5fc59805443196",
+      "started_at": "2026-09-22T20:26-05:00",
+      "priority": "P0",
+      "lane_note": "SURVIVES-WITH-CHANGES 8:29 PM; see AUTOPILOT_LOG 8:32 PM"
+    },
+    {
+      "id": "SPOKEN-LINES-DRAFT",
+      "title": "two candidate exact sentences per goal code + ASK_CHALLENGE trap templates + off-script set, for founder reaction (the product's whole voice once no LLM rephrases)",
+      "files": [
+        "docs/plans/2026-09-22-spoken-lines-draft.md"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a48f79350d19f3171",
+      "started_at": "2026-09-22T20:31-05:00",
+      "priority": "P0",
+      "lane_note": "docs/plans/2026-09-22-spoken-lines-draft.md 8:37 PM: 18 goal codes; ASK_CHALLENGE already composes challenge.speak (prompt.ts:202 routes the paraphrase field instead: one-line fix); ANNOUNCE_* never spoken live (coalesced into CLOSE); REFUSE_AUTHORITY dead code; plain + warm candidates for the rest; amounts spelled out for speech"
+    },
+    {
+      "id": "SPIKE-G5B-G7B",
+      "title": "verify per-call system_prompt token routing under real concurrency (two sessions, different tokens and scripts) and repeated HTTP 500 + heartbeat stall behavior",
+      "files": [
+        "scripts/spike/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a2c4946976d98e7ff",
+      "started_at": "2026-09-22T20:39-05:00",
+      "priority": "P0",
+      "lane_note": "8:48 PM PASS: 5/5 requests carried the right per-session token, 0 cross-talk, post-bind system_prompt replaces the stored one per connection only; duplicate requests intermittent; 3/3 HTTP 500s retried once and spoken, session kept working; 5 s stall with 1 s heartbeats spoken normally; 2.0 live min"
+    },
+    {
+      "id": "SUBMIT-DATE-DECISION",
+      "title": "founder decision: keep Thu Sep 24 submit (legacy live + replay) or move to Sun Sep 27 to allow the one-brain build behind its flag (buffer to Sep 30)",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "",
+      "started_at": "",
+      "priority": "P0",
+      "lane_note": "founder ruling 10:12 PM 2026-09-22: keep Thursday Sep 24; decide Wednesday noon on the one-brain test results"
+    },
+    {
+      "id": "ONE-BRAIN-LANE-B",
+      "title": "Lane B: per-call token registry + awaitCallerUtterance + endpoint-mode next-line method + gate reply.create/retry timers behind COUNTERSIGN_BRAIN (legacy default, unchanged)",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/src/brain/registry.ts",
+        "packages/server/src/config.ts",
+        "packages/server/test/session-endpoint-mode.test.ts",
+        "packages/server/test/brain/**"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a699d210e16d3da04",
+      "started_at": "2026-09-22T20:50-05:00",
+      "priority": "P0",
+      "lane_note": "worktree done 9:05 PM: registry, awaitCallerUtterance, nextSpokenLine (placeholders for 12 codes), 23 two-writer methods gated in endpoint mode; files brought into main, sandbox removed (branch left: delete is hook-blocked, parked); main gate 2500/2500 + typecheck; review running; not committed | review CLEAN 9:10 PM; committed locally (not pushed while the Chrome walk runs)"
+    },
+    {
+      "id": "ONE-BRAIN-LANE-C",
+      "title": "Lane C: POST /api/brain/chat/completions SSE endpoint (auth, token lookup, bounded wait with heartbeats, render nextSpokenLine, empty completion on unknown)",
+      "files": [
+        "packages/server/src/brain/endpoint.ts",
+        "packages/server/src/http.ts",
+        "packages/server/test/brain/endpoint.test.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a6c3bb3214e60f398",
+      "started_at": "2026-09-22T21:12-05:00",
+      "priority": "P0",
+      "lane_note": "relaunched 9:13 PM in the main checkout | done 9:22 PM: endpoint.ts + route, 14 tests; main gate 2514/2514 + typecheck; review next; uncommitted | review BLOCKING 9:26 PM: on wait timeout it rendered the stale previous goal (a repeated question); my own lane brief asked for that, the plan said empty completion; fixed by main: timeout -> empty completion, test updated to assert empty; 14/14 green | committed locally 9:38 PM (not pushed)"
+    },
+    {
+      "id": "ONE-BRAIN-CLOSE-PATH",
+      "title": "endpoint mode skips the close-grace path (maybeArmCloseOnTranscript/armCloseTranscriptWait/scheduleCloseIfNeeded -> beginCloseGrace unreachable), so a call hangs up only at the 45 s CLOSE_TOTAL_MS cap; re-open: after the verdict line's transcript.agent matches the close sentence and its reply.done, close gracefully and send session.end",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/test/session-endpoint-mode.test.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a656b5c57f9472c5d",
+      "started_at": "2026-09-22T21:24-05:00",
+      "priority": "P0",
+      "lane_note": "done 9:33 PM: maybeEndCloseAfterEndpointReplyDone -> beginCloseGrace (1500 ms) on the close line reply.done; 4 tests (2 red first); main gate 3x 2518/2518 + typecheck; review running; uncommitted | review BLOCKING 9:37 PM: missing closeReplyHasEnoughAudio floor (two proven live incidents 2026-09-19); fix sent to the same lane | floor added, re-review CLEAN, committed locally 9:47 PM"
+    },
+    {
+      "id": "LANDING-CLICK-IGNORED",
+      "title": "'Watch a recorded attack' ignored 3 real clicks on a fresh load before the 4th worked (qa-walker 9:15 PM on 43189e5; same symptom logged 2026-09-13 run 4); cause UNKNOWN (hydration race, disabled window, or automation-tab artifact)",
+      "files": [],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "aeb51aa839a46d71f",
+      "started_at": "2026-09-22T22:48-05:00",
+      "priority": "P1",
+      "lane_note": "10:55 PM PROVEN automation artifact: clicks on an unselected claude-in-chrome tab (document.hidden true) produce zero click events; on the selected tab 5/5 first-click success, zero layout shift, health 82 ms; no product change. Note: the lane used the pre-existing selected tab 374849982 for 5 loads (possibly a founder tab), disclosed."
+    },
+    {
+      "id": "ONE-BRAIN-LATE-TRANSCRIPT-CATCHUP",
+      "title": "endpoint mode: after a wait timeout returns an empty completion, if the matching transcript.user lands later nothing asks the endpoint again (dead air until the caller speaks); send ONE reply.create trigger (words still from the endpoint) when a caller utterance that timed out is finally processed",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/test/session-endpoint-mode.test.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "ab4f9505a1697e38a",
+      "started_at": "2026-09-22T21:48-05:00",
+      "priority": "P0",
+      "lane_note": "done 9:55 PM: timedOutCallerUtterances + sendEndpointTrigger after tick; 5 tests; review running; uncommitted | review BLOCKING 9:59 PM: no guard against a newer caller turn between timeout and late arrival (stale trigger = talk-over class); fix sent to the same lane | staleness guard added (callerTurnCount + replyStartedSeq snapshot at timeout); main gate 3x 2562/2562; re-review running | re-review CLEAN; committed 10:08 PM"
+    },
+    {
+      "id": "ONE-BRAIN-LANE-D",
+      "title": "Lane D: stored agent bootstrap, bind + post-bind session.update with the per-call token, registry wiring in index/ws, env doc; inert unless COUNTERSIGN_BRAIN=endpoint",
+      "files": [
+        "packages/server/src/index.ts",
+        "packages/server/src/aai/config.ts",
+        "packages/server/src/aai/session.ts",
+        "packages/server/src/aai/agent.ts",
+        "packages/server/src/ws/browser.ts",
+        "packages/server/test/aai-config.test.ts",
+        "packages/server/test/aai/**",
+        "packages/server/test/brain/wiring.test.ts",
+        "docs/ONE-BRAIN-ENV.md"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a106a3744131cbd5f",
+      "started_at": "2026-09-22T21:36-05:00",
+      "priority": "P0",
+      "lane_note": "done 9:50 PM: agent.ts (GET/PUT/POST /v1/agents, never throws), bind + post-bind updates, connectAaiEndpoint, registry wiring, BRAIN_KEYTERMS (8, symmetric trap pairs), docs/ONE-BRAIN-ENV.md; 32 tests; 2552/2552 + typecheck; review running; uncommitted | review CLEAN 9:54 PM; committed locally"
+    },
+    {
+      "id": "ONE-BRAIN-FIRST-LIVE",
+      "title": "first live endpoint-mode harness run, never on the judge site: local server with COUNTERSIGN_BRAIN=endpoint behind a cloudflared quick tunnel (PUBLIC_URL = tunnel), harness --url localhost; hard stop after two failed grades",
+      "files": [
+        "scripts/spike/**"
+      ],
+      "status": "held",
+      "held_because": "hard stop fired (2/2 failed on dana-patient); rerun scheduled Wed 6:47 AM after ONE-BRAIN-TOKEN-FIX",
+      "agent_id": "ae6c6d8118068bcc7",
+      "started_at": "2026-09-22T22:21-05:00",
+      "priority": "P0",
+      "lane_note": "10:33 PM: both runs ESCALATE via idle timeout; agent silent after the greeting; PROVEN by proxy log: all 8 endpoint requests lacked the token marker because per-goal session.update system_prompt sends in session.ts overwrote the post-bind prompt; secondary: bootstrap left 2 duplicate agents; 5.56 live min; tunnel stopped (0 cloudflared procs), 0 stored agents (verified 10:35 PM)"
+    },
+    {
+      "id": "ONE-BRAIN-LANE-A1-INTERIM",
+      "title": "replace session.ts PLACEHOLDER_GOAL_LINES with the plain desk-officer lines from docs/plans/2026-09-22-spoken-lines-draft.md (interim, reversible; founder reacts to real audio later) so the first live endpoint run never speaks a placeholder",
+      "files": [
+        "packages/server/src/brain/spokenLines.ts",
+        "packages/server/test/brain/spokenLines.test.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "ac8c74d574de9f499",
+      "started_at": "2026-09-22T22:05-05:00",
+      "priority": "P0",
+      "lane_note": "worktree lane builds spokenLines.ts only; merge order: catch-up commit first, then this module, then the orchestrator swaps nextSpokenLine to renderGoalLine in session.ts | 10:20 PM module landed in main (83 tests), nextSpokenLine swapped to renderGoalLine; gate 2645/2645 + typecheck; review running; uncommitted | LAW 2 fix; committed 10:25 PM"
+    },
+    {
+      "id": "BRAIN-AGENT-FETCH-TIMEOUTS",
+      "title": "bounded timeouts (AbortController) on aai/agent.ts's three AssemblyAI REST calls (review follow-up)",
+      "files": [
+        "packages/server/src/aai/agent.ts",
+        "packages/server/test/aai/agent.test.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a0e3e9c232117347e",
+      "started_at": "2026-09-22T22:00-05:00",
+      "priority": "P2",
+      "lane_note": "13 tests; review CLEAN; committed 10:08 PM"
+    },
+    {
+      "id": "MORNING-PAGE",
+      "title": "one plain page for the founder by Wednesday morning: what is live, one-brain harness numbers per case, whether endpoint mode was switched on (only if the bar was met), open risks, the noon decision",
+      "files": [
+        "docs/MORNING-2026-09-23.md"
+      ],
+      "status": "held",
+      "held_because": "written after the overnight runs",
+      "agent_id": "",
+      "started_at": "",
+      "priority": "P0"
+    },
+    {
+      "id": "ONE-BRAIN-TOKEN-FIX",
+      "title": "endpoint mode: gate every per-goal session.update that replaces system_prompt (it erased the per-call token after INTAKE); make ensureBrainAgent idempotent (no duplicate agents across restarts)",
+      "files": [
+        "packages/server/src/call/session.ts",
+        "packages/server/test/session-endpoint-mode.test.ts",
+        "packages/server/src/aai/agent.ts",
+        "packages/server/test/aai/agent.test.ts"
+      ],
+      "status": "done",
+      "held_because": "",
+      "agent_id": "a4cac7cf832bdf90b",
+      "started_at": "2026-09-22T22:34-05:00",
+      "priority": "P0",
+      "lane_note": "done 10:42 PM: applyEvaluate per-goal send and pushOutOfScopeGoodbyeInstruction gated in endpoint mode (tests red first: 7 and 3 leaked system_prompt updates); ensureBrainAgent never creates a duplicate (retry PUT once, reuse, clean duplicates by exact name); review next; uncommitted | audit + review CLEAN; committed 5942159 and pushed 10:47 PM (inert, flag off)"
+    },
+    {
+      "id": "WALKER-SELECTED-TAB-CHECK",
+      "title": "add to qa-walker and judge-sim definitions: require tabs_context_mcp selectedTabId === own tabId before trusting clicks or media readings; zero click events = hard failure",
+      "files": [],
+      "status": "held",
+      "held_because": "edits under ~/.claude/agents need the founder's approval",
+      "agent_id": "",
+      "started_at": "",
+      "priority": "P2"
     }
   ]
 }

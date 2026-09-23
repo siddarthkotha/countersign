@@ -37,190 +37,163 @@ One writer removes the race, not just one symptom of it.
 
 ## 1. The endpoint
 
-**Where it lives.** A new route inside the EXISTING Node server
-(`packages/server/src/index.ts` → `packages/server/src/http.ts`'s HTTP server), not a
-second process — Render already exposes this server's port publicly over HTTPS, which the
-`llm.base_url` requirement demands ("HTTPS + public host... rejected" if not — PROVEN,
-`connect-your-own-llm.md` "Requirements & behavior"). New module
-`packages/server/src/brain/endpoint.ts`, mounted as one more `path ===` branch in
-`http.ts`'s `handleRequest` (same pattern every other route there already uses), path
-`POST /api/brain/chat/completions`.
+**Revised 2026-09-22, post red-team (verdict SURVIVES-WITH-CHANGES).** The first draft of
+this section proposed a SECOND, stateless `evaluate()` run inside the endpoint,
+reconstructing conversation/tools/actions purely from AssemblyAI's `messages[]` history.
+Red-team's fastest-killing finding: that reconstruction cannot reproduce
+`recordGoalCompletionAction`'s own gate (`call/session.ts:3404-3473`, which only logs a
+`challenge_issued`/`readback_issued` action when `transcriptAsksQuestion` matches the HEARD
+text AND `noteQuestionAsked`'s cap allows it) — after an interruption, G4 already PROVES
+request history diverges from heard text (gate-results.json, G4: "neither exact match"), so
+a second, independent `evaluate()` could compute a DIFFERENT goal than the WS server's own
+and speak a line contradicting the evidence panel. Orchestrator ruling, checked against the
+code and adopted here: run the engine ONCE per call — the WS server's — and make the
+endpoint a thin, stateless RENDERER of that already-correct, already-gated state, never a
+second decision-maker.
 
-**Auth.** A single static bearer token, `COUNTERSIGN_BRAIN_API_KEY` (generated once, stored
-as a Render secret, set as the stored agent's `llm.api_key` at creation). Checked with the
-same constant-time comparison `http.ts` already has for the admin routes
-(`isBearerTokenValid`, http.ts:144). Why one shared token, not per-call: see the
-correlation decision below. The AssemblyAI BYO demo's own README says to "Treat your
-endpoint as public the moment it's live" (PROVEN, PANEL doc Round 2 citation check) — a
-static token is the minimum bar, matching what the demo itself does.
+**Where it lives, auth.** Unchanged from the first draft: a new route inside the existing
+Node server (`packages/server/src/brain/endpoint.ts`, mounted in `http.ts`, path
+`POST /api/brain/chat/completions`), guarded by a static bearer token
+`COUNTERSIGN_BRAIN_API_KEY` (same constant-time check `http.ts` already uses for admin
+routes, `isBearerTokenValid`, http.ts:144) — layered with the per-call token below.
 
-**Mapping (messages, model) → engine inputs — the central design decision.** The spike
-proved the endpoint must be a pure function with no reliable call identity: G5 showed no
-`session_id`/`call_id` in any header or body (PROVEN, gate-results G5), and the round-2
-panel disagreement over correlation (per-call api_key, call id in `base_url`, or none) was
-never resolved live. This plan resolves it by NOT needing correlation at all:
+**Per-call correlation, unguessable, no reconstruction needed.** G0B PROVEN: a second
+`session.update` after `agent_id` binding can set `system_prompt` (gate-results.json,
+"second session.update ... -> session.updated"). G1 PROVEN: our `system_prompt` arrives as
+`messages[0]` in every endpoint request, verbatim (g1-last-request.json). So at connect,
+`call/session.ts` mints a per-call cryptographically random token (e.g. `randomUUID()`) and
+sends it embedded in the post-bind `system_prompt` (`COUNTERSIGN_CALL_TOKEN:<token>\n...`),
+registering token → this `CallSession` in a process-wide `Map` (one Render process,
+concurrency capped 1-2, caps.ts unchanged) — new module `packages/server/src/brain/
+registry.ts`. This resolves G5's correlation question (two concurrent calls sharing one
+stored agent, PROVEN indistinguishable by message content alone in the spike,
+gate-results.json G5) by construction: two live calls carry two different tokens, no
+content heuristic needed.
 
-- `evaluate()` (packages/engine/src/evaluate.ts) is already a pure function of
-  `(conversation, tools, actions, call, seed)` — PROVEN by reading the file; it has no
-  clock or random source (its own doc comment says so, line 6).
-- There is only one seed in the whole system, `MERIDIAN` — PROVEN,
-  `packages/server/src/replay.ts`'s own comment: "there is only one synthetic world,
-  MERIDIAN."
-- Tool results are pure: `mockToolResult(name, args, seed, ctx)` (packages/engine/src/
-  mock/backend.ts) is a plain switch with no I/O, no `Date.now()`, no `Math.random()` —
-  PROVEN by reading the file in full (85 lines). `ctx.incident_index` only changes a
-  cosmetic `INC-` number, never verdict logic.
+**Rendering.** The endpoint parses the token out of `messages[0]`, looks it up, and asks
+the `CallSession` for its own CURRENT `goal` — the exact `PhrasingGoal`
+`applyEvaluate()` (session.ts:4034) already computed from the WS server's own
+transcript-derived engine run, the one path already gated by `recordGoalCompletionAction`.
+It renders that goal's exact sentence (Lane A) or an empty completion if nothing changed
+since the last turn. No `evaluate()` call in the endpoint, no actions-log reconstruction,
+no possibility of divergence: exactly one engine run per call — a STRICTER reading of LAW
+3's "a finite-state policy engine computes every verdict" (singular) than either the legacy
+two-writer design or the abandoned stateless one.
 
-So the endpoint needs nothing external per call except the `messages` array AssemblyAI
-already sends. It reconstructs engine input as follows:
+**Unknown/expired token.** Immediate empty completion, never an error — also covers the
+bootstrap race (the caller's first utterance could in principle complete before the
+post-bind `session.update` carrying the token lands); the session's own idle-nudge
+`reply.create` (§2) recovers it on the next tick.
 
-1. **Conversation.** Drop the leading `system` message (provider boilerplate + our
-   persona line — PROVEN present in every spike request body, e.g.
-   `scripts/spike/out/g1-last-request.json`) and any trailing `system` message (a
-   `reply.create`'s `instructions`, PROVEN as a literal trailing `{role:'system', content:
-   'spike G3 probe'}` in `scripts/spike/out/g3-reply-create-request.json`) — that trailing
-   message is a TRIGGER only, never engine input (see the silent-caller nudge below). Every
-   remaining `user` message → `Utterance{speaker:'caller', text: content}`; every remaining
-   non-empty `assistant` message → `Utterance{speaker:'agent', text: content.trim()}`.
-   `t_ms` is synthesized as a monotonically increasing index (e.g. `i * 1000`) — ESTIMATE
-   safe, since `evaluate()`'s only `t_ms`-sensitive logic is ordering
-   (`freezeAtSeal`, evaluate.ts:54) and diagnostics, not real elapsed time; VERIFY-AT-BUILD
-   by grepping `t_ms` usage across `packages/engine/src` before Lane B ships.
-2. **Tools log — "the replay-to-reconstruct algorithm."** `call/session.ts`'s
-   `runLookupsIfNeeded` (session.ts:3959) and `runTerminalActionsIfNeeded` (session.ts:
-   4879) already show tool-running is driven ENTIRELY by engine state (EVIDENCE/
-   CONSISTENCY_CHECK → run the three lookups; terminal verdict → run the terminal actions),
-   never by anything the model says (the model is offered zero tool schemas —
-   `allowedTools` always returns `[]`, fsm.ts:67-69, PROVEN by reading it). The endpoint
-   replicates this as a synchronous fixed-point loop, reusing the SAME `mockToolResult` +
-   `argsForTerminalTool` (packages/server/src/call/terminalActions.ts, already shared with
-   replay.ts) the live server uses: `evaluate()` → if state needs a lookup or owes a
-   terminal action, run it, append to a local tools array, re-`evaluate()`, repeat (bounded
-   to ~5 iterations). Because `mockToolResult` never throws in its current form, this
-   never needs the live server's retry/abandon machinery.
-3. **Actions log — the one genuinely new piece of engineering.** `evaluate()` needs
-   `actions` to know which challenge/readback is already pending
-   (`awaitingChallenge`, fsm.ts:358, reads `challenge_issued` actions) — the endpoint has no
-   stored actions log. Resolution: REPLAY the conversation prefix-by-prefix. For each
-   caller turn in order, run `evaluate()` on the conversation-so-far with the actions
-   log built SO FAR, take the resulting `goal`, and if that goal's code implies an action
-   (`challenge_issued`/`readback_issued`/`elicit_issued`), synthesize the same
-   `AgentAction` `call/session.ts`'s `recordGoalCompletionAction` (session.ts:3404) would
-   have written, then continue to the next turn. Because both sides are the same pure
-   function fed the same growing transcript, the reconstructed actions log is bit-identical
-   to what a live `CallSession` would have logged for that same transcript — this is an
-   ESTIMATE (needs the corpus test in Lane B, item 6, to prove it holds for all 128+3
-   fixtures), not yet proven. Cost: O(turns-so-far) `evaluate()` calls per request, each a
-   pure in-memory computation — ESTIMATE low single-digit ms per turn, needs measuring
-   (item 8/9, Lane G).
-4. **What the endpoint returns, per engine state:**
-   - Nothing changed since the last turn (a fragment like "Meridian." mid-name that didn't
-     complete a claim) → EMPTY completion (see the speak-or-silence rule below).
-   - A question is now owed (ELICIT_IDENTITY/ELICIT_REQUEST/ELICIT_MISSING_CRITICAL) or a
-     trap question (ASK_CHALLENGE) or a readback (READBACK) → the composed sentence,
-     verbatim, no paraphrasing.
-   - Terminal verdict reached (ANNOUNCE_*/CLOSE) → the composed verdict-and-goodbye
-     sentence, verbatim, as ONE reply (today's CLOSE sentence composition,
-     `closeSentence`, fsm.ts:278, is already exact and reusable unchanged).
-   - OUT_OF_SCOPE → the composed demo explanation, then (once explained) the composed
-     goodbye.
-   - STALL/CONTAIN → a rotated line from a small deterministic set (STALL already has this
-     via `stalls.ts`; CONTAIN needs the same treatment — see Lane A).
-   **Engine-side gap this surfaces:** `packages/server/src/call/prompt.ts`'s `nowSection`
-   shows only 5 of 17 `GoalCode`s (`READBACK`, `RE_ELICIT_AFTER_SWITCH`,
-   `ELICIT_MISSING_CRITICAL`, `ELICIT_REQUEST`, `CLOSE`) already carry an exact,
-   ready-to-speak sentence in `goal.hint` today — PROVEN by reading prompt.ts in full. The
-   other 12 (`GREET`, `ELICIT_IDENTITY`, `ASK_CHALLENGE`, `STALL`, `PROBE_CONSISTENCY`,
-   `REFUSE_AUTHORITY`, `ANNOUNCE_STAGED/FROZEN/ESCALATED`, `CONTAIN`/
-   `CONTAIN_NO_DISCLOSURE`, `EXPLAIN_OUT_OF_SCOPE`, `EXPLAIN_OPEN_REQUEST`) rely today on an
-   LLM paraphrasing a DIRECTION into natural speech — that LLM freedom is exactly what a
-   one-brain design removes (the task brief's own words: "no LLM anywhere in the reply
-   path"). This is Lane A below, and it is a genuine content-writing task, not plumbing.
-   `ASK_CHALLENGE` is the hardest case: `prompt.ts`'s own comment records a live incident
-   where wrapping the challenge's `ask` field in "say exactly this" made the agent read
-   its own stage directions aloud (prompt.ts:191-207) — so `challenges.ts`/seed data need
-   real natural-language trap questions authored, not just a template wrapper.
+**The ordering race, handled explicitly.** The endpoint's HTTP request and the WS server's
+own `transcript.user` event are two independent deliveries from AssemblyAI; nothing
+guarantees the HTTP POST arrives after the WS frame is processed. G1 PROVEN the request's
+last `user` message is the caller's utterance verbatim (`g1-last-request.json`: "last user
+msg matches transcript.user=true") — so the endpoint WAITS, bounded, rather than guessing.
+`CallSession` gets a new `awaitCallerUtterance(text, timeoutMs)` hook (same promise-based
+pattern `whenIdle()` already uses, session.ts:4997), resolved from inside
+`dispatchAaiEvent`'s existing `transcript.user` handling the instant that exact text has
+been folded into the conversation log and `applyEvaluate()` has run for it — matched by
+"the conversation log now contains this utterance," not "is the latest one" (a second
+caller fragment can race ahead of a slow HTTP delivery; its own test case, Lane B). Already
+processed → resolves synchronously. Bound: 1500ms, with a role-only heartbeat delta written
+to the SSE stream once per second while waiting (same keep-alive shape the BYO demo itself
+uses every 2000ms, PROVEN `server.mjs:1382`, PANEL doc citation check; ours is tighter since
+G7-delay only proved AssemblyAI tolerates up to 2.5s with NO heartbeat, gate-results.json).
+**On timeout: empty completion** — never speak off stale state; the caller hears nothing
+extra rather than a wrong line, and the next tick or idle-nudge catches up. Rejected
+alternative: handing the caller's text directly into `CallSession`'s own event pipeline
+instead of waiting for the real WS frame — rejected because AssemblyAI ALSO delivers that
+same `transcript.user` over the WS independently, so this would double-process the same
+utterance (no dedup precedent in this codebase) and would make the endpoint a second writer
+of conversation state, not just of words, blurring the §2 boundary.
+
+**`reply.create` nudges.** The trailing `system` message (`instructions`, PROVEN as a
+literal trailing message in `g3-reply-create-request.json`) is treated purely as a TRIGGER,
+never as engine input. On a nudge request there is no new caller utterance to wait for (the
+server sent the nudge because its own state already knows what to say) — the endpoint
+renders the session's current goal immediately, no wait.
+
+**Duplicates/retries.** The endpoint never mutates anything, so any repeated or retried
+request for the same token reads the same `CallSession` state and returns the same line —
+idempotent by construction.
+
+**What the endpoint returns, per engine state** (unchanged from the first draft's mapping,
+now read off the session's own goal instead of a second `evaluate()`): a question owed
+(ELICIT_IDENTITY/ELICIT_REQUEST/ELICIT_MISSING_CRITICAL), a trap question (ASK_CHALLENGE),
+a readback (READBACK), a terminal verdict-and-goodbye (ANNOUNCE_*/CLOSE, `closeSentence`,
+fsm.ts:278, already exact), the OUT_OF_SCOPE explanation/goodbye, a rotated STALL/CONTAIN
+line, or EMPTY when nothing changed. **Engine-side gap this still surfaces, unchanged by
+the redesign:** `prompt.ts`'s `nowSection` shows only 5 of 17 `GoalCode`s (`READBACK`,
+`RE_ELICIT_AFTER_SWITCH`, `ELICIT_MISSING_CRITICAL`, `ELICIT_REQUEST`, `CLOSE`) already
+carry an exact, ready-to-speak sentence in `goal.hint` — PROVEN by reading prompt.ts in
+full. The other 12 rely today on LLM paraphrasing a DIRECTION into speech, which one-brain
+removes entirely (Lane A, split into A1/A2 in §8). `ASK_CHALLENGE` is the hardest case:
+`prompt.ts`'s own comment records a live incident where wrapping the challenge's `ask` in
+"say exactly this" made the agent read its own stage directions aloud (prompt.ts:191-207).
 
 ## 2. The WS side (server)
 
-**Unchanged.** `packages/server/src/aai/session.ts` (`RealAaiSocket`, `connectAai`,
-`mapServerEvent`) is the transport layer — it does not care whether the automatic reply
-came from AssemblyAI's managed model or our endpoint. `call/session.ts`'s core
-responsibility — re-run `evaluate()` on every `transcript.user`/`transcript.agent`/
-`tool.call`/`session.*` event, drive `ScreenState`, own the conversation/tools/actions logs
-from the LIVE transcript (never from the endpoint's own internal reconstruction) — is
-UNCHANGED and stays the single LAW-3/LAW-4 authority. This is the critical compliance
-boundary, stated explicitly: **the endpoint's reconstructed engine run decides WORDS only;
-the WS server's own transcript-derived engine run is the ONLY thing that ever fires
-`runTerminalActionsIfNeeded` (freeze/stage/escalate/incident/seal) and builds the evidence
-export.** LAW 2 ("voice never releases the wire") holds exactly as it does today, because
-the wire-releasing code path (`runTerminalActionsIfNeeded`, session.ts:4879) never reads
-anything the endpoint computed — it only reads `this.last`, the server's own live
-`evaluate()` result.
+`packages/server/src/aai/session.ts` (`RealAaiSocket`, `connectAai`, `mapServerEvent`) is
+unchanged — the transport layer does not care who generates the automatic reply.
+`call/session.ts`'s conversation/tools/actions bookkeeping and `applyEvaluate()`
+(session.ts:4034) are now the ONE and ONLY engine-driving path in the system, shared
+identically by legacy and endpoint modes.
 
-**What gets deleted (endpoint mode only, behind the flag in §5).** Every method whose job
-is managing the two-writer race, listed in §0: `maybeSendReplyCreateForTick`,
+**Added, small:** the token registry entry (register on call start, unregister on `end()`
+so an expired token can never resurrect a dead session — see §9 risk 3); the
+`awaitCallerUtterance` waiter list, resolved from inside the existing `transcript.user`
+handling in `dispatchAaiEvent` — no new tick source, one more thing that path notifies.
+
+**Deleted (endpoint mode only, behind the flag in §5) — every method whose job is managing
+the two-writer race, listed in §0:** `maybeSendReplyCreateForTick`,
 `maybeSendReplyCreateAfterReplyDone`, `maybeSendOwedAfterCallerTurnEnds`, `sendReplyCreate`
-(for goal-changes — see the one exception below), `armReplyCreateLostTimer`,
+(for goal-changes — kept for the nudge case), `armReplyCreateLostTimer`,
 `scheduleCloseIfNeeded`, `armCloseRetryTimer`, `armCloseStuckWatchdog`,
 `checkCloseReplyStuck`, `armCloseTranscriptWait`, `maybeArmCloseOnTranscript`,
 `maybeReaskQuestion`, `armQuestionReaskTimer`, `armQuestionTranscriptWait`,
-`recordDegradedStrike`, `armDegradedStrikeCheck`, `armDegradedInflightStrikeCheck`,
-`checkDegradedInflightStrike`, `armDegradedMaxAudioOnlyCheck`, `maybeArmHoldFollowup`,
+`recordDegradedStrike` and its arming/checking siblings, `maybeArmHoldFollowup`,
 `armHoldFollowupTimer`, `mustForceSpeak`, `bareHoldAfterAlreadyAsked`. Under one-brain,
-AssemblyAI calls our endpoint once per completed caller turn (PROVEN, G1: 1 request, exact
-words match, gate-results.json) and the words ARE already correct by construction — nothing
-to detect, retry, or reconcile.
+AssemblyAI calls our endpoint once per completed caller turn (G1 PROVEN) and the words are
+already correct by construction (§1) — nothing left to detect, retry, or reconcile.
 
-**What is kept, simplified:**
-- The heard-text ledger from `transcript.agent` — UNCHANGED, and now MORE important: it is
-  the only authoritative record of what the caller actually heard (see §3).
-- `transcriptMatchesCloseSentence`/`closeMatch.ts` — kept as a DETECTOR (did the goodbye
-  arrive and get heard?), not a sender. Once detected, call `aai.close()` after that
-  reply's `reply.done` (G6 PROVEN: exactly-one-goodbye 3/3, clean close 3/3).
-- Idle/minute caps, kill switch, concurrency limits — UNCHANGED (ws/browser.ts, caps.ts),
-  orthogonal to which writer speaks.
-- **One kept exception: the silent-caller nudge.** When the engine's own state calls for
-  speech with no caller turn to trigger it (idle no-action goodbye, the out-of-scope timed
-  goodbye), the server still sends ONE `reply.create` — but its WORDS still come from the
-  SAME endpoint (G3 PROVEN: `reply.create` routes through our endpoint once, its
-  `instructions` arrive as a trailing system message we treat as a trigger flag, never as
-  engine input). This directly matches round-2 disagreement item "Silent-caller nudge":
-  seats 1/4/5/6 wanted exactly this design.
-- **A dead-man's switch, new and small.** G7-500's one data point is concerning: after our
-  endpoint returned HTTP 500, "session accepted a normal turn afterward=false" (PROVEN,
-  gate-results.json, G7-500). The endpoint itself must never throw (outermost handler
-  wraps everything, always returns 200 with a safe fallback — re-send the current goal's
-  own composed sentence rather than propagate an error) — belt-and-suspenders in case a
-  bug slips through, a single generous timer (e.g. 15s) that, if no `reply.done` ever
-  arrives after a caller turn, ends the call cleanly with the degraded-mode framing rather
-  than hanging silently. This replaces ~20 timers with 1.
+**Kept, unchanged:** the heard-text ledger from `transcript.agent` — still the ONLY record
+of what was asked, still what `recordGoalCompletionAction` and `challenges.ts`'s grading
+read (§3); `transcriptMatchesCloseSentence`/`closeMatch.ts` as a goodbye DETECTOR, not a
+sender, closing `aai.close()` after that reply's `reply.done` (G6 PROVEN: exactly-one-
+goodbye 3/3, clean close 3/3); idle/minute caps, kill switch, concurrency limits
+(unchanged, orthogonal); the silent-caller nudge (idle no-action goodbye, out-of-scope
+timed goodbye) via one `reply.create`, words rendered by the endpoint from the session's
+own current goal (§1's nudge handling).
 
-## 3. The consistency problem
+**Dead-man's switch, unchanged reasoning:** the endpoint must never throw (always 200, an
+empty completion on any internal failure); a single generous timer (~15s) that, if no
+`reply.done` ever arrives after a caller turn, ends the call cleanly rather than hanging.
+G7-500's one data point ("session accepted a normal turn afterward=false," gate-results.json)
+is now a dedicated verification lane (§8, G7-verify), not an assumption.
 
-Two independent `evaluate()` runs now exist per call: the endpoint's (fed AssemblyAI's own
-`messages` history) and the WS server's (fed its own `transcript.user`/`transcript.agent`
-events). Both are the SAME pure function; both are ultimately fed by the SAME underlying
-source — AssemblyAI's own STT — so on a clean turn they compute the same goal. They can
-diverge only in HOW the raw transcript text is turned into `Utterance[]` (trimming,
-ordering, whether an interrupted reply's FULL generated text or its ACTUAL heard text is
-used). To keep them provably in sync: the endpoint's message→Utterance conversion (§1,
-step 1) and the server's own `utteranceFromTranscript` (packages/server/src/call/events.ts,
-already used by `call/session.ts`) should be the SAME shared pure function, not two
-hand-written copies — a Lane B file-sharing task, not a new algorithm.
+## 3. The consistency problem — resolved by construction, one race remains
 
-**The G4 heard-vs-generated mismatch is already handled — by design, not by this plan.**
-G4 PROVEN: after an interruption, the next endpoint request's OWN history held neither the
-full generated text nor the exact heard text ("neither exact match," gate-results.json,
-G4). This matters for WORD CHOICE (the endpoint might reference something slightly off) but
-NOT for scoring: `challenges.ts`'s `gradeChallenges` — the thing that decides whether a trap
-was passed or failed — is fed the WS server's OWN conversation log, which is built from
-`transcript.agent` (LAW 4: exact-transcript evidence), never from the endpoint's internal
-reconstruction. This is UNCHANGED by one-brain. So item 3's scoring risk ("never score a
-missing correction unless the trap was heard") is already satisfied by the existing
-architecture and needs no new code — only a regression test proving the endpoint's own
-reconstruction is never wired into `gradeChallenges`/evidence building (Lane E, a
-never-cross-this-line assertion, cheap to write).
+The original consistency concern (two independent `evaluate()` runs disagreeing) no longer
+exists: §1's redesign means there is exactly ONE engine run per call, the WS server's, and
+the endpoint only ever reads its already-computed, already-gated `goal`. The G4 heard-vs-
+generated mismatch ("neither exact match," gate-results.json) that killed the first design
+is now irrelevant to word choice too, not just to scoring — the endpoint never
+reconstructs anything from `messages[]` beyond the token and (for the wait in §1) the
+literal last caller utterance to match against.
+
+**What LAW 4 (exact-transcript evidence) still guarantees, unchanged:** `challenges.ts`'s
+`gradeChallenges` and `evidence/fromTools.ts` are fed exclusively by the WS server's own
+conversation log, built from `transcript.agent`/`transcript.user` — never touched by
+anything in `packages/server/src/brain/`. A structural test (§6, "never-cross-this-line")
+asserts this, now trivially true: the brain module has no dependency on `evaluate`,
+`gradeChallenges`, or `mockToolResult` at all — it doesn't need them.
+
+**What remains a real risk, named plainly:** the ORDERING RACE in §1 — not a consistency
+problem between two engines, but a timing problem in one. Its cost is a bounded per-turn
+wait (up to 1500ms, usually far less) that existed in neither prior design, and, on
+timeout, a turn where the caller hears nothing rather than something wrong. §9 names this
+with its own measurement task (Lane G).
 
 ## 4. Stored-agent lifecycle
 
@@ -229,13 +202,12 @@ at server startup inside `index.ts` (mirrors today's synchronous `createAai` fac
 pattern): on boot, `GET /v1/agents` (list — UNKNOWN whether this exists; VERIFY-AT-BUILD
 against `manage-agents.txt`/`.html` in the saved docs before Lane D starts), look for one
 named `countersign-brain`, reuse its `id` if found, else `POST /v1/agents` to create it.
-Concurrency stays capped at 1-2 (existing caps.ts, unchanged) — G5's own result was
-UNKNOWN, not PASS: "bodies distinguishable purely by their own messages content: false"
-(gate-results.json, G5) — but that null result is a spike artifact (both sessions in that
-test spoke byte-identical scripted lines on purpose); it does not prove real concurrent
-calls (which will have different caller speech) collide. Flagged as a risk in §9, to be
-re-verified with two genuinely different scripted conversations before trusting it under
-concurrency 2.
+Concurrency stays capped at 1-2 (existing caps.ts, unchanged). The per-call token (§1)
+routes each request to its own `CallSession` regardless of what two calls happen to say —
+G5's own spike result ("bodies distinguishable purely by their own messages content:
+false," gate-results.json) is no longer the mechanism correctness depends on. What still
+needs live re-verification is the registry itself (Lane G5-verify, §8/§9 risk 7), not
+message-content disambiguation.
 
 **Voice/greeting config.** Move from `index.ts`'s inline `AaiSessionConfig`
 (`DEFAULT_VOICE`, `DEFAULT_GREETING`, aai/config.ts) into the stored agent's OWN creation
@@ -248,9 +220,9 @@ lines 91-118, is the proven shape to promote into real server code).
 **What goes in the post-bind `session.update`.** Two-step connect, PROVEN by G0/G0B: first
 `{type:'session.update', session:{agent_id}}`, wait for `session.ready`; then a SECOND
 `session.update` (G0B PROVEN: `session.updated` ack) carrying ONLY:
-- `system_prompt`: a short marker, unused by our own endpoint (which ignores it entirely,
-  matching the spike's own convention, `scripts/spike/run.ts:160`) — kept only because
-  AssemblyAI's schema still expects one.
+- `system_prompt`: NOW load-bearing (revised, §1) — carries `COUNTERSIGN_CALL_TOKEN:<token>`,
+  the per-call correlation token the endpoint parses out of `messages[0]` on every request.
+  Not a persona/boilerplate marker any more; the endpoint reads it, doesn't ignore it.
 - `keyterms`: proper nouns and domain words only (seat 6's caution, PANEL doc Round 2) —
   the seed's identity names (`Meridian Supply`, `Northgate Partners`, `Marcus Obi`, `Dana
   Whitfield` — already the exact spike list) — symmetric trap pairs or none, never biased
@@ -293,32 +265,36 @@ status) — natural fixtures for Lane G below; this plan only reads them, never 
 
 ## 6. Tests
 
-1. **Pure endpoint-logic tests**, importing the REAL engine (LAW: never a copy) — new
-   `packages/server/test/brain/reconstruct.test.ts` and `.../endpoint.test.ts`. Feed the
-   reconstruction function `messages[]` arrays built by converting
-   `packages/engine/corpus/*.json` (all 128+, plus the 3 new `recorded-*.json`) conversation
-   entries into OpenAI message shape; assert the reconstructed `{conversation, tools,
-   actions}` fed back through `evaluate()` reaches the SAME `state`/`verdict`/`goal.code` the
-   corpus's own `expected` field already asserts (reusing whatever `corpus.test.ts` already
-   checks). This is the single highest-value test in the whole plan — it is what actually
-   proves the replay-to-reconstruct algorithm (§1, step 3) is sound, not just plausible.
-2. **Concurrency/duplicate-request test** — two simultaneous requests with DIFFERENT
-   (not identical, unlike the spike's own G5) message histories hit the endpoint's Node
-   handler directly (no live AssemblyAI, no network) via `Promise.all`; assert each response
-   matches its OWN request body, never the other's. Closes the real gap the spike's G5 left
-   open (§4).
-3. **SSE framing conformance test** — role-only first delta, content chunk(s), a final
-   delta with `finish_reason: 'stop'`, then `data: [DONE]` — matching both the spike's own
-   proven shape and the BYO demo's (`server.mjs` lines ~475-486, ~1374-1464, PROVEN in the
-   panel's citation check).
-4. **Never-cross-this-line test** (§3) — a static/structural assertion (or a runtime spy in
-   a test) that the endpoint's reconstruction module is never imported by
-   `evidence/fromTools.ts`, `challenges.ts`'s grading path, or `buildEvidenceExport` — those
-   stay fed exclusively by the WS server's own transcript-derived logs.
-5. **Grader expectations** — the existing harness grader (already scoring goodbye/verdict/
-   talk-over per AUTOPILOT_LOG's Day 9-13 entries) runs unchanged against endpoint-mode live
-   calls for the three cases; no new grading logic, same bar as today (a clean run =
-   verdict correct, goodbye said once, no repeated question).
+1. **Render correctness** — a fake `CallSession` exposing a fixed `goal`; assert the
+   endpoint's render function returns Lane A's exact composed sentence (or empty, when the
+   goal is unchanged). No corpus replay needed — there is no reconstruction to prove (§1).
+2. **Ordering-race behavior** — a fake `CallSession` stub whose `awaitCallerUtterance`
+   resolves after an injectable, test-controlled delay (same fast/no-op-sleep-injection
+   pattern `aai/session.ts`'s own tests already use for its bounded resume backoff):
+   (a) already-processed utterance resolves synchronously, new goal rendered; (b) resolves
+   within 1500ms, new goal rendered; (c) never resolves, 1500ms timeout fires, empty
+   completion rendered; (d) heartbeat role-only deltas written at the specified interval
+   while waiting.
+3. **Unknown/expired token** → immediate empty completion, no wait, no error.
+4. **`reply.create` nudge** — trailing system message triggers an immediate render of the
+   session's current goal, no wait.
+5. **Idempotent retries** — the same token + same `messages[]` requested twice returns the
+   identical response both times.
+6. **Token-routing under concurrency** — two DIFFERENT fake `CallSession`s registered under
+   two DIFFERENT tokens, concurrent requests via `Promise.all`; assert no cross-talk. Unit-
+   level proof that complements the LIVE re-verification in Lane G5-verify (§8).
+7. **SSE framing conformance** — role-only first delta, content chunk(s), a final delta
+   with `finish_reason: 'stop'`, then `data: [DONE]` (matching the spike's own proven shape
+   and the BYO demo's, `server.mjs` lines ~475-486, ~1374-1464, PANEL doc citation check).
+8. **Never-cross-this-line** — a structural test asserting `packages/server/src/brain/**`
+   has no import of `evaluate`, `gradeChallenges`, or `mockToolResult` — the design
+   invariant from §3, cheap to keep true forever.
+9. **Token lifecycle** — registering, then ending a call unregisters its token; a request
+   against that now-unregistered token gets the "unknown token" empty-completion path, not
+   a stale render of a dead session.
+10. **Grader expectations** — the existing harness grader (already scoring goodbye/verdict/
+    talk-over per AUTOPILOT_LOG's Day 9-13 entries) runs unchanged against endpoint-mode
+    live calls for the three cases; no new grading logic, same bar as today.
 
 ## 7. First task: decode the G2 empty-reply audio
 
@@ -340,70 +316,89 @@ fallback, not an invented one). No dependency on any other lane; should run FIRS
 
 ## 8. Ordered tasks, sized for parallel lanes
 
-Lane naming follows this repo's `LANE-FILES` convention.
+Lane naming follows this repo's `LANE-FILES` convention. Smaller than the first draft's
+lane set — the single-engine-run redesign (§1) removes the reconstruction module entirely.
 
 - **Lane F — RMS decode** (§7). Files: `scripts/spike/decode-empty-audio.ts`,
-  `scripts/spike/out/g2-audio-rms.json`. No dependency. Gate: the script's own printed RMS
-  numbers + a manual listen-back of the saved audio. ESTIMATE 0.5-1 session-hour, ~2 live
-  minutes (~$0.15).
-- **Lane A — engine sentence composition** (§1 step 4's gap). Files:
-  `packages/engine/src/fsm.ts`, `packages/engine/src/challenges.ts`,
-  `packages/engine/test/fsm.test.ts`, `packages/engine/test/challenges.test.ts`. No
-  dependency on other lanes (touches engine only, which every lane already treats as a
-  fixed dependency). Gate: `npm test` + typecheck in `packages/engine`, PLUS the ambition
-  pass named in CLAUDE.md's THE RITUALS #3 (these composed lines are now the entire spoken
-  voice of the product with zero LLM polish left — read every one aloud, or through TTS,
-  before calling this lane done). ESTIMATE 2-3 session-hours — mechanical per-line but
-  there are 12 goal codes plus the challenge-question set.
-- **Lane B — reconstruction module** (§1 steps 1-3, §3's shared Utterance builder). Files:
-  new `packages/server/src/brain/reconstruct.ts`, `packages/server/test/brain/
-  reconstruct.test.ts`; touches `packages/server/src/call/events.ts` only to EXTRACT the
-  shared Utterance-builder (no behavior change to the legacy path). Can START in parallel
-  with Lane A (disjoint files) but its exact-text assertions (test 1 in §6) are only
-  meaningful once Lane A lands — write Lane B's tests against `goal.code`/`verdict` first,
-  tighten to exact text after Lane A merges. Gate: `npm test` (must pass against the FULL
-  128+3 corpus, not a subset — this is the algorithm's real proof), typecheck. ESTIMATE
-  2-3 session-hours.
-- **Lane C — endpoint HTTP handler + stored-agent REST helpers**. Files: new
-  `packages/server/src/brain/endpoint.ts`, `packages/server/src/brain/agent.ts` (promoting
-  `scripts/spike/lib.ts`'s proven REST shapes into real server code), a new route in
-  `packages/server/src/http.ts`. Depends on Lane B (needs `reconstruct()`). Gate: `npm
-  test` (§6 items 1-3), typecheck, a manual `curl` smoke test against a running `npm run
-  dev:server` (no live AssemblyAI call needed for this gate). ESTIMATE 3-4 session-hours.
-- **Lane D — index.ts/aai/config.ts wiring + feature flag** (§4, §5). Files:
-  `packages/server/src/index.ts`, `packages/server/src/aai/config.ts` (new
-  `buildAgentBindUpdate`/`buildPostBindSessionUpdate`, additive — `buildInitialSessionUpdate`
-  untouched), `packages/server/test/aai-config.test.ts`. Depends on Lane C (needs the
-  endpoint's route to exist to point `base_url` at; can be stubbed with a fake `base_url`
-  for unit tests before Lane C's route is live). Gate: `npm test`, typecheck. ESTIMATE 2
+  `scripts/spike/out/g2-audio-rms.json`. No dependency. ESTIMATE 0.5-1 session-hour, ~2
+  live minutes.
+- **Lane A1 — engine sentence composition, non-challenge goals.** The 11 remaining
+  `GoalCode`s besides `ASK_CHALLENGE` still relying on LLM paraphrasing today (`GREET`,
+  `ELICIT_IDENTITY`, `STALL`, `PROBE_CONSISTENCY`, `REFUSE_AUTHORITY`, `ANNOUNCE_STAGED/
+  FROZEN/ESCALATED`, `CONTAIN`/`CONTAIN_NO_DISCLOSURE`, `EXPLAIN_OUT_OF_SCOPE`,
+  `EXPLAIN_OPEN_REQUEST`). Files: `packages/engine/src/fsm.ts`,
+  `packages/engine/test/fsm.test.ts`. No dependency. Gate: `npm test` + typecheck in
+  `packages/engine`, plus the ambition pass (CLAUDE.md THE RITUALS #3). ESTIMATE 1.5-2
   session-hours.
-- **Lane E — call/session.ts endpoint-mode simplification** (§2, §5's recommended new
-  class). Files: new `packages/server/src/call/sessionEndpointMode.ts` (or a flag inside
-  the existing file — the founder/build call, not this plan's), a new
-  `packages/server/test/session-endpoint-mode.test.ts`. Depends on Lane D (needs the flag
-  to exist) and conceptually on Lane C (the endpoint must already be the sole word source
-  for the simplification to be correct). Highest-risk lane — this is where §2's "never
-  cross this line" test (§6 item 4) belongs. Gate: `npm test`, typecheck, AND the full
-  existing `session.test.ts`/`design-e-turn-order.test.ts` suite for the LEGACY path must
-  stay 100% green (regression proof the flag's off-path is untouched). ESTIMATE 3-4
-  session-hours.
-- **Lane G — harness/grader dual-mode**. Files: `scripts/rehearse/*` (parametrize
-  `COUNTERSIGN_BRAIN`), reads (never edits) `packages/engine/corpus/
-  recorded-{stage,freeze,escalate}.json`. Depends on Lanes C, D, E all merged (needs a real,
-  working endpoint-mode live call to grade). Gate: 3 consecutive clean runs of all three
-  cases in endpoint mode, zero resets — the SAME bar G2 already set for the legacy path
-  (docs/AUTOPILOT_LOG.md, G2 gate). ESTIMATE 1-2 session-hours.
+- **Lane A2 — `ASK_CHALLENGE` field x trap-value templates, scoped separately (red-team
+  ranked change #2).** The hardest content-authoring piece, not a small extension of A1:
+  every critical field (`amount_usd`/`account_last4`/`beneficiary`) times every trap-pair
+  variant in the seed needs a genuinely natural spoken question, with no LLM left to smooth
+  a bad template — exactly the failure mode `prompt.ts`'s own comment documents from a live
+  incident (prompt.ts:190-207: "say exactly this" made the agent read its own stage
+  directions aloud). Files: `packages/engine/src/challenges.ts` (the `ask` string
+  composition), `packages/engine/src/seed/meridian.ts` (trap-pair data, read not
+  necessarily changed), `packages/engine/test/challenges.test.ts`. No dependency. Gate:
+  `npm test` + typecheck, PLUS a listen-back (TTS or read aloud) of every composed question
+  before this lane is done — this content IS the trap. ESTIMATE 4-5 session-hours
+  (red-team's own estimate, adopted as-is).
+- **Lane B — token registry + `awaitCallerUtterance` hook + reply.create-machinery
+  removal** (§1, §2). Files: `packages/server/src/call/session.ts` (additive, behind
+  `COUNTERSIGN_BRAIN` — §5), new `packages/server/src/brain/registry.ts`, new
+  `packages/server/test/session-endpoint-mode.test.ts`. Can start alongside A1/A2 (disjoint
+  files); its own wait/timeout/routing tests (§6 items 2, 6, 9) don't need Lane A's exact
+  text, but the full "renders the RIGHT words" gate does — sequence that final check after
+  A1/A2 merge. Gate: `npm test`, typecheck, AND the full existing `session.test.ts`/
+  `design-e-turn-order.test.ts` suite for the LEGACY path stays 100% green (regression
+  proof the flag's off-path is untouched). ESTIMATE 3-4 session-hours.
+- **Lane C — endpoint HTTP handler** (§1's render/wait/heartbeat/timeout logic, SSE
+  framing, static-bearer auth). Files: new `packages/server/src/brain/endpoint.ts`,
+  `packages/server/test/brain/endpoint.test.ts`, a new route in `http.ts`. Depends on Lane
+  B (needs the registry + hook interfaces; can start against a stub before B merges for
+  real). Smaller than the first draft's Lane C — no reconstruction module to write against.
+  Gate: `npm test` (§6 items 1, 3, 4, 5, 7, 8), typecheck, a manual `curl` smoke test
+  against `npm run dev:server`. ESTIMATE 2-3 session-hours.
+- **Lane D — index.ts/aai/config.ts wiring + feature flag + per-call token generation**
+  (§4, §5). Files: `packages/server/src/index.ts`, `packages/server/src/aai/config.ts`
+  (new `buildAgentBindUpdate`/`buildPostBindSessionUpdate` carrying the token, additive).
+  Depends on Lane C (route must exist) and Lane B (token-generation function). Gate: `npm
+  test`, typecheck. ESTIMATE 2 session-hours.
+- **Lane G5-verify — live token-routing re-verification, hour-budgeted (red-team ranked
+  change #3).** Two REAL concurrent calls with genuinely DIFFERENT scripted conversations
+  (not the spike's identical lines, gate-results.json G5) against the live endpoint +
+  stored agent; assert each call's requests are routed to and answered from its own
+  token/session only. Files: an addendum under `scripts/spike/`. Depends on Lane D.
+  ESTIMATE 1 session-hour, ~2-3 live minutes.
+- **Lane G7-verify — live repeated-500 re-verification, hour-budgeted (red-team ranked
+  change #3).** Force the endpoint to HTTP 500 several times in a row (not once, like the
+  original spike) against a live session; confirm whether/when the dead-man's switch (§2)
+  recovers the call, and that legacy mode is unaffected. Depends on Lane C only (can run
+  parallel to D). ESTIMATE 1 session-hour, ~1-2 live minutes.
+- **Lane G — harness/grader dual-mode, with a hard stop gate (red-team ranked change #4).**
+  Files: `scripts/rehearse/*` (parametrize `COUNTERSIGN_BRAIN`), reads (never edits)
+  `packages/engine/corpus/recorded-{stage,freeze,escalate}.json`. Depends on Lane D and
+  both G5-verify and G7-verify (a live endpoint re-verified on its two named risks, before
+  spending a founder-facing grading run on it). **Hard stop:** if the FIRST live
+  endpoint-mode harness run fails its grade twice in a row, STOP — ship legacy + replay for
+  any founder or judge session, park endpoint mode with the failure recorded, and do not
+  attempt a third live run the same day (this repo's own batch-cadence rule, memory
+  "Batch cadence and session budget," applies the same way here). Gate on success: 3
+  consecutive clean runs of all three cases, zero resets — the same bar G2 already set for
+  the legacy path (docs/AUTOPILOT_LOG.md, G2). ESTIMATE 1-2 session-hours.
 
-**Merge order:** F any time, independent. A and B start together; B's exact-text assertions
-tighten after A merges. C after B. D after C (stubbed unit tests may start earlier). E after
-D. G after C+D+E. **Go/no-go before any founder session:** legacy-path test suite still
-100% green (regression check) AND Lane G's 3-consecutive-clean bar met in endpoint mode —
-only then does `COUNTERSIGN_BRAIN=endpoint` ever reach a live founder call; otherwise the
-flag's own default (`legacy`) is what he hears, unchanged from tonight.
+**Merge order:** F any time. A1, A2, and B all start together (disjoint files). C after B
+(stub-able earlier). D after C. G5-verify after D; G7-verify after C (parallel to D/
+G5-verify). G after D + G5-verify + G7-verify (and after A1/A2 have merged into B's final
+gate). **Go/no-go before any founder session:** legacy-path test suite still 100% green AND
+Lane G's 3-consecutive-clean bar met AND the hard stop above has not fired — only then does
+`COUNTERSIGN_BRAIN=endpoint` ever reach a live founder call; otherwise the flag's own
+default (`legacy`) is what he hears.
 
-**Critical path total:** B(3) + C(4) + D(2) + E(4) + G(2) ≈ 15 session-hours; F/A run
-alongside B without extending it. ESTIMATE (sum of each lane's own ESTIMATE above, not
-independently re-measured).
+**Critical path:** B(4) + C(3) + D(2) + max(G5-verify, G7-verify)(1) + G(2) ≈ 12
+session-hours. A1(2)/A2(5) run alongside B/C/D without extending the path (5h < the 9h
+elapsed before G needs them). ESTIMATE — about 3 session-hours less than the abandoned
+design's 15h critical path, since single-engine-run is genuinely smaller work, not just
+safer.
 
 ## 9. Risks and explicit non-scope
 
@@ -411,23 +406,32 @@ independently re-measured).
 1. G2's leaked ~4s `reply.audio` on empty completions is UNKNOWN silence — Lane F resolves
    this before Lane C ships the speak-or-silence rule; if not silent, the panel-sanctioned
    fallback (no audible nudge, UI-only "Listening") applies (§7).
-2. G7-500's one data point shows possible non-recovery after our endpoint errors (§2's
-   dead-man's switch mitigates, does not prove it can't happen) — needs a repeated-500
-   spike (2-3 reps) before Lane C is trusted, not assumed fixed by "never throw" alone.
-3. Lane B's replay-to-reconstruct algorithm for the actions log (§1 step 3) is genuinely
-   novel, no precedent elsewhere in this repo — must pass the FULL 128+3-fixture corpus
-   test, not a hand-picked subset, before Lane C depends on it.
-4. G5's "no call identity needed" design (§4) rests on an UNKNOWN spike result, not a
-   proven one, under REAL concurrency (both spike sessions spoke identical scripted lines,
-   so "bodies distinguishable" was a null result by construction) — Lane C/G must re-run G5
-   with two genuinely different conversations before trusting this at concurrency 2.
-5. No p50/p95 added-latency measurement exists yet for the extra HTTP hop (session → our
-   endpoint → AssemblyAI → back). CLAUDE.md's rule: never write "sub-second" without
-   measured numbers from the real stack — Lane G's harness must capture this first.
-6. Lane A is real content authoring (12 goal codes of natural spoken lines with zero LLM
-   polish left to smooth them), not plumbing — under-scoping risks stiff, repetitive
-   dialogue with no paraphrasing safety net; the ambition pass (THE RITUALS #3) is not
-   optional here.
+2. **The ordering-race wait is a new latency source** (§1, §3) that existed in neither the
+   legacy two-writer design nor the abandoned stateless one — even the common near-instant
+   case adds some per-turn delay, and a timeout costs a full silent turn. Lane G's harness
+   must measure actual wait-time p50/p95, not just total round-trip latency, before 1500ms
+   is trusted as well-calibrated (CLAUDE.md: never write "sub-second" without measured
+   numbers).
+3. **The per-call token is a capability, not a secret from the caller's ears** (never
+   spoken) but it DOES cross the public HTTPS endpoint boundary in every request body — it
+   must be cryptographically random, scoped to one call's lifetime, and removed from the
+   registry the instant the call ends (§2), so a captured or replayed old token can never
+   resurrect or impersonate a dead session's state.
+4. **The bootstrap race**: the caller's first utterance could in principle complete before
+   the post-bind `session.update` carrying the token lands (§1) — handled by the
+   unknown-token empty-completion fallback, not yet measured live; Lane D's gate should
+   include a first-turn-timing check.
+5. G7-500's one data point ("session accepted a normal turn afterward=false,"
+   gate-results.json) is a real, unresolved concern — now a dedicated lane (G7-verify, §8)
+   rather than an assumption the dead-man's switch alone fixes it.
+6. Lane A2 (`ASK_CHALLENGE` templates) is the highest content-risk piece of this plan — a
+   stiff or template-sounding trap question undermines the mechanism LAW 1 depends on, with
+   no LLM left to smooth it live. Scoped and estimated separately (4-5h) per red-team's own
+   ranked change #2, not folded into A1's smaller estimate.
+7. G5's live re-verification (Lane G5-verify) tests ROUTING correctness, now provable by
+   construction (distinct tokens, §1) — but the registry itself (a plain in-process `Map`)
+   still needs proving leak-free (risk 3) and collision-free under real concurrent connects,
+   not just asserted.
 
 **Explicitly out of scope** (per the founder's option (ii) ruling and CLAUDE.md's existing
 scope fence, both unchanged by this plan): only three live cases (STAGE/FREEZE/ESCALATE,
