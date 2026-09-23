@@ -48,7 +48,7 @@ describe('Landing', () => {
 
     const buttons = screen.getAllByRole('button').filter((b) => b.textContent !== 'Check microphone');
     expect(buttons[0]).toHaveTextContent('Watch a recorded attack');
-    expect(buttons[1]).toHaveTextContent('Try to break it');
+    expect(buttons[1]).toHaveTextContent('Try it live (experimental)');
 
     expect(screen.getByText('Dana Whitfield, treasury manager')).toBeInTheDocument();
     expect(screen.getByText('A caller claiming to be the CEO')).toBeInTheDocument();
@@ -79,18 +79,18 @@ describe('Landing', () => {
     }
   });
 
-  it('enables Try to break it once the mic check passes and a role is selected', async () => {
+  it('enables Try it live (experimental) once the mic check passes and a role is selected', async () => {
     mockGetUserMedia('resolve');
     const user = userEvent.setup();
     render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
-    const tryButton = screen.getByRole('button', { name: 'Try to break it' });
+    const tryButton = screen.getByRole('button', { name: 'Try it live (experimental)' });
     expect(tryButton).toBeDisabled();
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
     // Mic passes but no role selected yet, so button is still disabled
-    expect(await screen.findByText('Pick a role card above to unlock Try to break it')).toBeInTheDocument();
+    expect(await screen.findByText('Pick a role card above to unlock Try it live (experimental)')).toBeInTheDocument();
     expect(tryButton).toBeDisabled();
 
     // After selecting a role, button becomes enabled
@@ -115,7 +115,7 @@ describe('Landing', () => {
     // would now be ambiguous.
     await screen.findAllByText(/Microphone blocked/);
     expect(document.getElementById('try-break-helper')).toHaveTextContent(/Microphone blocked/);
-    expect(screen.getByRole('button', { name: 'Try to break it' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Try it live (experimental)' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Watch a recorded attack' })).toBeEnabled();
   });
 
@@ -126,7 +126,7 @@ describe('Landing', () => {
     render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-    await screen.findByText('Pick a role card above to unlock Try to break it');
+    await screen.findByText('Pick a role card above to unlock Try it live (experimental)');
 
     // Select a role card so button becomes enabled
     const firstRoleCard = document.querySelector('.role-cards section');
@@ -134,7 +134,7 @@ describe('Landing', () => {
       await user.click(firstRoleCard);
     }
 
-    await user.click(screen.getByRole('button', { name: 'Try to break it' }));
+    await user.click(screen.getByRole('button', { name: 'Try it live (experimental)' }));
 
     const banner = await screen.findByText(/today's call budget is used up/);
     expect(banner).toBeInTheDocument();
@@ -148,7 +148,7 @@ describe('Landing', () => {
   // GET /health's `live_calls` (packages/server/src/caps.ts's `computeLiveCallsStatus`)
   // drives this from the moment the page loads, before any click.
   describe('live calls unavailable (health check)', () => {
-    it('shows the credits-exhausted banner and hides Try to break it, leaving Watch as the only, primary action', async () => {
+    it('shows the credits-exhausted banner and hides Try it live (experimental), leaving Watch as the only, primary action', async () => {
       vi.mocked(getHealth).mockResolvedValue({
         ok: true,
         live_calls: { available: false, reason: 'credits_exhausted' }
@@ -160,7 +160,7 @@ describe('Landing', () => {
       );
       expect(banner).toHaveAttribute('role', 'alert');
 
-      expect(screen.queryByRole('button', { name: 'Try to break it' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Try it live (experimental)' })).not.toBeInTheDocument();
       const watchButton = screen.getByRole('button', { name: 'Watch a recorded attack' });
       expect(watchButton).toBeEnabled();
       expect(watchButton).toHaveClass('primary');
@@ -178,38 +178,38 @@ describe('Landing', () => {
       ).toBeInTheDocument();
     });
 
-    it('keeps Try to break it visible when live_calls says available', async () => {
+    it('keeps Try it live (experimental) visible when live_calls says available', async () => {
       vi.mocked(getHealth).mockResolvedValue({ ok: true, live_calls: { available: true, reason: null } });
       render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
-      expect(await screen.findByRole('button', { name: 'Try to break it' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Try it live (experimental)' })).toBeInTheDocument();
     });
 
-    it('fails open (keeps Try to break it visible, no banner) when the health check itself fails', async () => {
+    it('fails open (keeps Try it live (experimental) visible, no banner) when the health check itself fails', async () => {
       vi.mocked(getHealth).mockResolvedValue(null);
       render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
       // give the pending getHealth() promise a tick to resolve
       await Promise.resolve();
-      expect(screen.getByRole('button', { name: 'Try to break it' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Try it live (experimental)' })).toBeInTheDocument();
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
   });
 
-  // Task W6 (QA walk 2026-09-02, finding 1): "Try to break it" used to be disabled with zero
+  // Task W6 (QA walk 2026-09-02, finding 1): "Try it live (experimental)" used to be disabled with zero
   // on-page explanation. The helper text now always states the current condition, is wired
   // to the button via aria-describedby, and doubles as the button's title (hover) -- same
   // words, one source of truth.
-  it('always shows plain-words helper text explaining why Try to break it is locked, wired via aria-describedby and title', () => {
+  it('always shows plain-words helper text explaining why Try it live (experimental) is locked, wired via aria-describedby and title', () => {
     render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
-    const tryButton = screen.getByRole('button', { name: 'Try to break it' });
+    const tryButton = screen.getByRole('button', { name: 'Try it live (experimental)' });
     expect(tryButton).toBeDisabled();
 
-    const helper = screen.getByText('Try to break it unlocks after Check microphone passes');
+    const helper = screen.getByText('Try it live (experimental) unlocks after Check microphone passes');
     expect(helper).toHaveAttribute('id', 'try-break-helper');
     expect(tryButton).toHaveAttribute('aria-describedby', 'try-break-helper');
-    expect(tryButton).toHaveAttribute('title', 'Try to break it unlocks after Check microphone passes');
+    expect(tryButton).toHaveAttribute('title', 'Try it live (experimental) unlocks after Check microphone passes');
   });
 
   it('updates the helper text to "Pick a role card..." when mic passes but no role selected', async () => {
@@ -219,11 +219,11 @@ describe('Landing', () => {
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
 
-    const tryButton = await screen.findByRole('button', { name: 'Try to break it' });
-    expect(tryButton).toHaveAttribute('title', 'Pick a role card above to unlock Try to break it');
-    expect(document.getElementById('try-break-helper')).toHaveTextContent('Pick a role card above to unlock Try to break it');
+    const tryButton = await screen.findByRole('button', { name: 'Try it live (experimental)' });
+    expect(tryButton).toHaveAttribute('title', 'Pick a role card above to unlock Try it live (experimental)');
+    expect(document.getElementById('try-break-helper')).toHaveTextContent('Pick a role card above to unlock Try it live (experimental)');
     expect(
-      screen.queryByText('Try to break it unlocks after Check microphone passes')
+      screen.queryByText('Try it live (experimental) unlocks after Check microphone passes')
     ).not.toBeInTheDocument();
   });
 
@@ -233,7 +233,7 @@ describe('Landing', () => {
     render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-    await screen.findByText('Pick a role card above to unlock Try to break it');
+    await screen.findByText('Pick a role card above to unlock Try it live (experimental)');
 
     // Select a role card
     const firstRoleCard = document.querySelector('.role-cards section');
@@ -241,7 +241,7 @@ describe('Landing', () => {
       await user.click(firstRoleCard);
     }
 
-    const tryButton = screen.getByRole('button', { name: 'Try to break it' });
+    const tryButton = screen.getByRole('button', { name: 'Try it live (experimental)' });
     expect(tryButton).toHaveAttribute('title', 'Microphone ready');
     expect(document.getElementById('try-break-helper')).toHaveTextContent('Microphone ready');
   });
@@ -256,7 +256,7 @@ describe('Landing', () => {
     expect(
       await screen.findByText('No microphone found. The recorded attack works without one')
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Try to break it' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Try it live (experimental)' })).toHaveAttribute(
       'title',
       'No microphone found. The recorded attack works without one'
     );
@@ -279,7 +279,7 @@ describe('Landing', () => {
     render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-    await screen.findByText('Pick a role card above to unlock Try to break it');
+    await screen.findByText('Pick a role card above to unlock Try it live (experimental)');
 
     // Select a role card so button becomes enabled
     const firstRoleCard = document.querySelector('.role-cards section');
@@ -287,11 +287,11 @@ describe('Landing', () => {
       await user.click(firstRoleCard);
     }
 
-    await user.click(screen.getByRole('button', { name: 'Try to break it' }));
+    await user.click(screen.getByRole('button', { name: 'Try it live (experimental)' }));
 
     const COLD_START_TEXT = 'Waking the server. This can take up to a minute on the free plan';
     expect(await screen.findByText(COLD_START_TEXT)).toHaveAttribute('id', 'try-break-helper');
-    const tryButton = screen.getByRole('button', { name: 'Try to break it' });
+    const tryButton = screen.getByRole('button', { name: 'Try it live (experimental)' });
     expect(tryButton).toHaveAttribute('title', COLD_START_TEXT);
     expect(tryButton).toBeDisabled();
 
@@ -299,7 +299,7 @@ describe('Landing', () => {
 
     await screen.findByText('Microphone ready');
     expect(screen.queryByText(COLD_START_TEXT)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Try to break it' })).toHaveAttribute('title', 'Microphone ready');
+    expect(screen.getByRole('button', { name: 'Try it live (experimental)' })).toHaveAttribute('title', 'Microphone ready');
   });
 
   // Bug fix (2026-09-04): the role cards used to be decorative -- the server always built a
@@ -307,31 +307,31 @@ describe('Landing', () => {
   // changed nothing. Landing now tracks which card was picked and passes it through
   // `startSession` so the server can use the matching persona.
   describe('demo persona selection (bug fix 2026-09-04)', () => {
-    it('keeps Try to break it disabled when mic passes but no role card is selected', async () => {
+    it('keeps Try it live (experimental) disabled when mic passes but no role card is selected', async () => {
       mockGetUserMedia('resolve');
       const user = userEvent.setup();
       render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
       await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-      await screen.findByText('Pick a role card above to unlock Try to break it');
+      await screen.findByText('Pick a role card above to unlock Try it live (experimental)');
 
       // Button should still be disabled because no role card is selected
-      expect(screen.getByRole('button', { name: 'Try to break it' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Try it live (experimental)' })).toBeDisabled();
     });
 
-    it('shows exactly "Pick a role card above to unlock Try to break it" in helper text when mic passes but no role is selected', async () => {
+    it('shows exactly "Pick a role card above to unlock Try it live (experimental)" in helper text when mic passes but no role is selected', async () => {
       mockGetUserMedia('resolve');
       const user = userEvent.setup();
       render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
       await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-      await screen.findByText('Pick a role card above to unlock Try to break it');
+      await screen.findByText('Pick a role card above to unlock Try it live (experimental)');
 
       const helper = document.getElementById('try-break-helper');
-      expect(helper).toHaveTextContent('Pick a role card above to unlock Try to break it');
+      expect(helper).toHaveTextContent('Pick a role card above to unlock Try it live (experimental)');
     });
 
-    it('enables Try to break it once a role card is selected (after mic passes)', async () => {
+    it('enables Try it live (experimental) once a role card is selected (after mic passes)', async () => {
       mockGetUserMedia('resolve');
       vi.mocked(startSession).mockResolvedValue({ session_id: 's1', ws_path: '/ws/call/s1', cap_seconds: 300 });
       const user = userEvent.setup();
@@ -339,10 +339,10 @@ describe('Landing', () => {
 
       await user.click(screen.getByRole('button', { name: 'Check microphone' }));
       // Mic passes but no role selected yet
-      await screen.findByText('Pick a role card above to unlock Try to break it');
+      await screen.findByText('Pick a role card above to unlock Try it live (experimental)');
 
       // Button should be disabled initially
-      expect(screen.getByRole('button', { name: 'Try to break it' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Try it live (experimental)' })).toBeDisabled();
 
       // After picking a role card, button should be enabled
       // Click the first role card (Dana Whitfield)
@@ -352,7 +352,7 @@ describe('Landing', () => {
         await user.click(firstCard);
       }
 
-      expect(screen.getByRole('button', { name: 'Try to break it' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Try it live (experimental)' })).toBeEnabled();
       // And helper text should change to "Microphone ready"
       expect(await screen.findByText('Microphone ready')).toBeInTheDocument();
     });
@@ -367,7 +367,7 @@ describe('Landing', () => {
       await screen.findByText('Microphone ready');
 
       // Button should be enabled because role was restored from sessionStorage
-      expect(screen.getByRole('button', { name: 'Try to break it' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Try it live (experimental)' })).toBeEnabled();
     });
 
     it('passes the legitimate persona to startSession after the Dana Whitfield card is picked', async () => {
@@ -377,7 +377,7 @@ describe('Landing', () => {
       render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
       await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-      await screen.findByText('Pick a role card above to unlock Try to break it');
+      await screen.findByText('Pick a role card above to unlock Try it live (experimental)');
 
       // Click the first role card (Dana Whitfield)
       const roleCards = document.querySelectorAll('.role-cards section');
@@ -385,7 +385,7 @@ describe('Landing', () => {
       if (firstCard) {
         await user.click(firstCard);
       }
-      await user.click(screen.getByRole('button', { name: 'Try to break it' }));
+      await user.click(screen.getByRole('button', { name: 'Try it live (experimental)' }));
 
       expect(startSession).toHaveBeenCalledWith('legitimate');
     });
@@ -397,7 +397,7 @@ describe('Landing', () => {
       render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
 
       await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-      await screen.findByText('Pick a role card above to unlock Try to break it');
+      await screen.findByText('Pick a role card above to unlock Try it live (experimental)');
 
       // Click the second role card (CEO attacker)
       const roleCards = document.querySelectorAll('.role-cards section');
@@ -405,22 +405,22 @@ describe('Landing', () => {
       if (secondCard) {
         await user.click(secondCard);
       }
-      await user.click(screen.getByRole('button', { name: 'Try to break it' }));
+      await user.click(screen.getByRole('button', { name: 'Try it live (experimental)' }));
 
       expect(startSession).toHaveBeenCalledWith('attacker');
     });
 
-    it('does not call onCall when Try to break it is clicked without a role card selected', async () => {
+    it('does not call onCall when Try it live (experimental) is clicked without a role card selected', async () => {
       mockGetUserMedia('resolve');
       const onCall = vi.fn();
       const user = userEvent.setup();
       render(<Landing onWatch={vi.fn()} onCall={onCall} />);
 
       await user.click(screen.getByRole('button', { name: 'Check microphone' }));
-      await screen.findByText('Pick a role card above to unlock Try to break it');
+      await screen.findByText('Pick a role card above to unlock Try it live (experimental)');
 
       // Button should be disabled because no role card is selected
-      const tryButton = screen.getByRole('button', { name: 'Try to break it' });
+      const tryButton = screen.getByRole('button', { name: 'Try it live (experimental)' });
       expect(tryButton).toBeDisabled();
 
       // Trying to click the disabled button won't call onCall

@@ -19,7 +19,7 @@ Hackathon (lablab.ai, September 1–30, 2026).
 
 Live demo: https://countersign-bf8q.onrender.com. Desktop Chrome with a microphone, laptop
 speakers are fine. Pick one of the two role cards, an honest treasury manager or a caller
-claiming to be the CEO, click "Try to break it", then "Start Call", and talk. The card you
+claiming to be the CEO, click "Try it live (experimental)", then "Start Call", and talk. The card you
 picked is named on the call screen. Use your own words; the scenario cheat-sheet with every
 case, what to say, and what you should hear is [docs/PLAY-SHEET.md](docs/PLAY-SHEET.md). No
 microphone? "Watch a recorded attack" drives the full screen from a recorded call. Everyone

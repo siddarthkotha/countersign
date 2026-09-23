@@ -144,7 +144,7 @@ interrogation feeding an engine capped at staging for a second human.
    through the real decision engine so you see the whole story in under two minutes.
 3. Watch the split screen: the call on the left, the evidence record building card by
    card on the right, in step with what's said.
-4. Then click **Try to break it** and use your own microphone.
+4. Then click **Try it live (experimental)** and use your own microphone.
 5. Interrupt the agent mid-sentence. Watch it stop clean and resume calmly, not
    garbled.
 6. Change a dollar amount partway through your call. Watch it catch and name the

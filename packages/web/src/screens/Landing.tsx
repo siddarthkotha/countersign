@@ -12,14 +12,14 @@ export type LandingProps = {
   onCall: (result: StartedSession, persona: DemoPersona | null) => void;
 };
 
-// Task W6 (QA walk 2026-09-02, finding 1): "Try to break it" used to grey out with zero
+// Task W6 (QA walk 2026-09-02, finding 1): "Try it live (experimental)" used to grey out with zero
 // explanation -- a mic-less stranger had no way to tell broken from intentional. This text
 // always states the current condition in plain words, and doubles as both the button's
 // `title` (hover) and its `aria-describedby` target (screen readers) -- same words either
 // way, never a second, drifting copy of the same idea.
-const MIC_HELPER_DEFAULT = 'Try to break it unlocks after Check microphone passes';
+const MIC_HELPER_DEFAULT = 'Try it live (experimental) unlocks after Check microphone passes';
 const MIC_HELPER_PASSED = 'Microphone ready';
-const MIC_HELPER_ROLE_NEEDED = 'Pick a role card above to unlock Try to break it';
+const MIC_HELPER_ROLE_NEEDED = 'Pick a role card above to unlock Try it live (experimental)';
 const MIC_HELPER_BY_REASON: Record<Exclude<MicCheckReason, 'passed'>, string> = {
   'not-allowed': "Microphone blocked. Allow it in the browser's address bar, then check again",
   'not-found': 'No microphone found. The recorded attack works without one',
@@ -196,7 +196,7 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
             aria-describedby="try-break-helper"
             title={tryButtonHelperText(micResult, starting, !!role)}
           >
-            Try to break it
+            Try it live (experimental)
           </button>
         )}
       </div>

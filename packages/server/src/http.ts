@@ -168,7 +168,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // "Recommended", instead of moving it to be the pre-selected/auto-started recording (that
 // would change what the screen shows on mount before any judge click -- a visual/behaviour
 // decision parked for the founder, not made here).
-const FLAGSHIP_RECORDING = 'scenario-b-miller-fraud';
+// Founder ruling 2026-09-22 8:22 PM (option A): "Watch a recorded attack" now leads with the
+// founder's real recorded fraud call, with its audio (recorded-freeze), instead of the
+// synthetic scenario-b-miller-fraud script, which stays in the list.
+const FLAGSHIP_RECORDING = 'recorded-freeze';
 
 interface ReplayRecording {
   file: string;

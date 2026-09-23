@@ -468,14 +468,14 @@ describe('http server', () => {
     expect(body.recordings.map((rec) => rec.file).sort()).toEqual([...body.files].sort());
 
     // The flagship sorts first and is the only one marked recommended -- an honest label
-    // (its own corpus file's `title`, prefixed) rather than the raw filename. It carries no
-    // audio file (nothing under packages/server/replay-audio/ names it), so `has_audio` is
-    // false here regardless of whether this checkout has any recorded .ogg files at all.
+    // (its own corpus file's `title`, prefixed) rather than the raw filename. Founder ruling
+    // 2026-09-22 8:22 PM (option A): the flagship is the founder's real recorded fraud call,
+    // whose audio is committed under packages/server/replay-audio/, so `has_audio` is true.
     expect(body.recordings[0]).toEqual({
-      file: 'scenario-b-miller-fraud',
-      label: 'Recommended: Robert Miller: the fraudulent CEO-impersonation call',
+      file: 'recorded-freeze',
+      label: "Recommended: Recorded call: Robert Miller's fraud script, frozen",
       recommended: true,
-      has_audio: false,
+      has_audio: true,
     });
     expect(body.recordings.filter((rec) => rec.recommended)).toHaveLength(1);
 

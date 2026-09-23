@@ -8,7 +8,7 @@ Live demo: https://countersign-bf8q.onrender.com. Use desktop Chrome with a work
 
 1. Pick a role card. There are two: Dana Whitfield (corporate treasury manager) or a caller claiming to be the CEO. Each card shows a script, but you can improvise or deviate.
 
-2. Click "Try to break it" to load the call screen.
+2. Click "Try it live (experimental)" to load the call screen.
 
 3. Click "Start Call" and speak. The system listens and reads back what it understood.
 
