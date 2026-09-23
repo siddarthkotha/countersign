@@ -2472,12 +2472,20 @@ export class CallSession {
    *  audio-aware wait -- so an endpoint-mode call ends the exact same few seconds after a
    *  heard goodbye that legacy's own CLOSE hangup always has, through the exact same `end()`
    *  -> `aai.close()` path (which itself puts `session.end` on the wire before the socket
-   *  closes -- `aai/session.ts`'s own `RealAaiSocket.close()`, unchanged by this fix). */
+   *  closes -- `aai/session.ts`'s own `RealAaiSocket.close()`, unchanged by this fix).
+   *
+   *  SERVER-INITIATED-GOODBYE fix (2026-09-23): widened from "the engine's own CLOSE goal
+   *  only" to `currentCloseSentence()` -- the same method `nextSpokenLine()` now consults
+   *  first (see its own doc comment) -- so the idle-NO_ACTION override goodbye
+   *  ("Thank you for calling. Goodbye.", armed by `sendNoActionCloseGoodbye` while
+   *  `this.last.goal.code` stays EXPLAIN_OUT_OF_SCOPE; fsm.ts's `deriveState` never renders
+   *  CLOSE for NO_ACTION) gets the exact same confirm-then-hang-up treatment the engine's own
+   *  CLOSE goal already does, instead of never being recognized as owed at all. */
   private maybeEndCloseAfterEndpointReplyDone(replyId: string): void {
     if (this.brainMode !== 'endpoint') return;
     if (this.ended || this.goodbyeConfirmed) return;
-    if (this.last?.goal.code !== 'CLOSE') return;
-    const sentence = this.last.goal.hint;
+    const sentence = this.currentCloseSentence();
+    if (sentence === null) return;
     const transcript = this.replyTranscripts.get(replyId) ?? '';
     if (!transcriptMatchesCloseSentence(transcript, sentence)) return;
     if (!this.closeReplyHasEnoughAudio(replyId, sentence)) return;
@@ -2490,15 +2498,25 @@ export class CallSession {
    *  puts a `reply.create` on the wire -- `sendReplyCreate` itself refuses this mode
    *  unconditionally (see its own ONE-BRAIN guard, top of that method), so this is a separate,
    *  dedicated, minimal method rather than un-gating the legacy one for a single narrow case.
-   *  Its only caller is `dispatchAaiEvent`'s own `transcript.user` case, and only when that
-   *  exact text matches an entry `awaitCallerUtterance`'s own timeout branch recorded in
-   *  `timedOutCallerUtterances` (see that field's doc comment) -- i.e. the endpoint already
-   *  gave up on this turn and answered AssemblyAI with an empty completion, so nothing else
-   *  will ever ask our endpoint again for it on its own. Called AFTER this event's `tick()`
-   *  has already re-run the engine, so `nextSpokenLine()` -- which is all the endpoint ever
-   *  reads (plan §1) -- reflects the NEW goal this late transcript just produced, not the
-   *  stale one the timeout escaped.
    *
+   *  Three call sites, all sharing the same shape -- "the session reached a goal that must be
+   *  SPOKEN with no new caller turn for AssemblyAI's own automatic reply to react to":
+   *   1. `dispatchAaiEvent`'s own `transcript.user` case, when that exact text matches an entry
+   *      `awaitCallerUtterance`'s own timeout branch recorded in `timedOutCallerUtterances`
+   *      (see that field's doc comment) -- i.e. the endpoint already gave up on this turn and
+   *      answered AssemblyAI with an empty completion, so nothing else will ever ask our
+   *      endpoint again for it on its own. Called AFTER this event's `tick()` has already
+   *      re-run the engine, so `nextSpokenLine()` reflects the NEW goal this late transcript
+   *      just produced, not the stale one the timeout escaped.
+   *   2/3. SERVER-INITIATED-GOODBYE fix (2026-09-23, `end()`'s own idle-defer branch, both its
+   *      CLOSE and NO_ACTION-override sub-branches -- see that method's own doc comment): the
+   *      idle reaper fired because the caller said nothing more, so there is no caller turn at
+   *      all for AssemblyAI to react to, and the SAME gap applies. Called after that branch's
+   *      own `tick()` (for the CLOSE case) or after `beginIdleNoActionGoodbye` has armed the
+   *      override (for NO_ACTION), so `nextSpokenLine()` -- which is all the endpoint ever
+   *      reads (plan §1) -- already reflects what must be spoken.
+   *
+
    *  No `instructions`. Plan §1 says the endpoint treats a `reply.create`'s trailing system
    *  message purely as a TRIGGER, never as engine input -- PROVEN by the spike (G3,
    *  `g3-reply-create-request.json`) only for a `reply.create` sent WITH `instructions`;
@@ -2748,7 +2766,33 @@ export class CallSession {
    *  true and this whole branch is skipped, falling straight through to the immediate-end
    *  path below. If the tick above does NOT reach a CLOSE goal (nothing was ever at stake AND
    *  somehow still not terminal -- should not happen given row 15, but defensive), falls
-   *  through to ending immediately, same as before this fix. */
+   *  through to ending immediately, same as before this fix.
+   *
+   *  SERVER-INITIATED-GOODBYE fix (2026-09-23, endpoint mode only, PROVEN live: scripts/
+   *  rehearse/reports/2026-09-23T06-50-54-single-wrong-answer.md and .../06-56-09-single-
+   *  wrong-answer.md): this whole branch reaches its fresh CLOSE goal (or the NO_ACTION
+   *  override) with NO new caller turn -- the idle reaper fired precisely because the caller
+   *  said nothing more. In legacy mode that is fine: `tick()` above already ran
+   *  `maybeSendReplyCreateForTick`/`beginIdleNoActionGoodbye`'s own `sendReplyCreate`, which
+   *  puts the instructed `reply.create` on the wire. In endpoint mode BOTH of those are
+   *  unconditional no-ops (the ONE-BRAIN delete-list, `sendReplyCreate`'s own guard) --
+   *  correctly, since AssemblyAI's own automatic reply for a genuine caller turn IS our
+   *  endpoint's words by construction (plan §2) -- but there is no caller turn here for
+   *  AssemblyAI to react to, so live, nothing ever asked it to call our endpoint at all: the
+   *  goal became CLOSE, the 45s `CLOSE_TOTAL_MS` hard cap (armed inside `applyEvaluate`,
+   *  unaffected) was the only thing left running, and it simply ended the call once it
+   *  expired -- goodbye never spoken. `sendEndpointTrigger` (a bare `reply.create`, no
+   *  `instructions` -- our endpoint renders `nextSpokenLine()`, which now reads
+   *  `currentCloseSentence()` first, see that method's own doc comment) is the SAME nudge
+   *  mechanism `dispatchAaiEvent`'s own late-caller-utterance case already uses for the
+   *  sibling dead-air gap -- a no-op in legacy mode (its own `brainMode` guard) and a no-op if
+   *  this call has already ended or the goodbye is already confirmed, so calling it
+   *  unconditionally here is safe and changes nothing about legacy's own behavior. Each branch
+   *  below runs at most once per call (guarded by `idleDeferAttempted` above), so this can
+   *  never double-trigger from repeated idle timeouts; a caller who resumes speaking before
+   *  the goodbye is heard gets AssemblyAI's own ordinary automatic reply for that turn
+   *  instead (the ordinary caller-turn path, untouched by this fix) -- see
+   *  `sendEndpointTrigger`'s own doc comment for the shared staleness guard. */
   end(reason: string): void {
     if (this.ended) return;
     // Bug fix (2026-09-18 review, finding F1): a tick-end settle timer armed by an EARLIER
@@ -2770,6 +2814,9 @@ export class CallSession {
       if (this.ended) return;
       if (this.last?.goal.code === 'CLOSE') {
         this.idleEndReason = 'idle_timeout';
+        // SERVER-INITIATED-GOODBYE fix: endpoint mode's only way to ask AssemblyAI to speak
+        // this fresh, idle-triggered CLOSE -- see this method's own doc comment above.
+        this.sendEndpointTrigger('idle_defer_close');
         return;
       }
       // Requirement 9: NO_ACTION never reaches an engine-rendered CLOSE goal (fsm.ts's
@@ -2777,6 +2824,12 @@ export class CallSession {
       if (this.last?.verdict === 'NO_ACTION') {
         this.idleEndReason = 'idle_timeout';
         this.beginIdleNoActionGoodbye();
+        // SERVER-INITIATED-GOODBYE fix: `beginIdleNoActionGoodbye` arms `closeSentenceOverride`
+        // and (legacy only) sends the instructed reply.create -- endpoint mode needs this same
+        // nudge so AssemblyAI actually calls our endpoint, which now renders the override via
+        // `nextSpokenLine()`'s own `currentCloseSentence()` check (see that method's doc
+        // comment). See this method's own doc comment above for the full reasoning.
+        this.sendEndpointTrigger('idle_no_action_close');
         return;
       }
       // Nothing to say -- fall through to the immediate end below.
@@ -4873,13 +4926,13 @@ export class CallSession {
     // ONE-BRAIN (2026-09-22, Lane B, plan §2 delete-list): the single place that would
     // actually put a `reply.create` on the wire for an ordinary turn -- gated first, before
     // any of its bookkeeping (goodbyeConfirmed checks, closeReplySendCount, the lost-reply
-    // watchdog) runs, so nothing here has any side effect at all in endpoint mode. The plan's
-    // one KEPT exception -- a silent-caller nudge (idle no-action goodbye, the out-of-scope
-    // timed goodbye) still sending exactly one `reply.create` whose words come from the SAME
-    // endpoint -- is deliberately NOT wired back in by this lane: this task is scoped to the
-    // three ordinary-turn demo cases (STAGE/FREEZE/ESCALATE), which never reach that path.
-    // Whichever lane builds the real endpoint-mode nudge should re-open this guard for that
-    // one call site specifically, not remove it wholesale.
+    // watchdog) runs, so nothing here has any side effect at all in endpoint mode. The
+    // silent-caller nudge (idle no-action goodbye, the idle-defer CLOSE tick, the out-of-scope
+    // timed goodbye) is wired back in separately, in `sendEndpointTrigger`
+    // (2026-09-23 SERVER-INITIATED-GOODBYE fix) -- a bare, instructions-less `reply.create`
+    // whose words come from the SAME endpoint via `nextSpokenLine()`, never through this method
+    // (which stays byte-for-byte a no-op for endpoint mode; see that method's own doc comment
+    // for why a separate, minimal method was used instead of un-gating this one).
     if (this.brainMode === 'endpoint') return;
     if (this.ended) return;
     // Round 5: once the goodbye is transcript-confirmed, nothing more is ever owed -- not
@@ -5381,6 +5434,21 @@ export class CallSession {
    *  endpoint handler is the only intended real caller, in endpoint mode). */
   nextSpokenLine(): string | null {
     if (!this.last) return null;
+    // SERVER-INITIATED-GOODBYE fix (2026-09-23, PROVEN live: scripts/rehearse/reports/
+    // 2026-09-23T06-50-54-single-wrong-answer.md and .../06-56-09-single-wrong-answer.md):
+    // `currentCloseSentence()` is the ONE place that already unifies "what goodbye is owed
+    // right now" for legacy mode -- the engine's own CLOSE goal when one exists
+    // (STAGE/FREEZE/ESCALATE), or the server-side NO_ACTION override
+    // `sendNoActionCloseGoodbye` arms for the idle-no-request case (fsm.ts's `deriveState`
+    // never renders CLOSE for NO_ACTION -- see that method's own doc comment). Checking it
+    // FIRST here means endpoint mode's `nextSpokenLine()` -- which used to read
+    // `this.last.goal` directly and so could never see the override -- now speaks the exact
+    // same goodbye legacy does for the idle-NO_ACTION path, instead of the unrelated
+    // EXPLAIN_OUT_OF_SCOPE line the engine's own (still current) goal would otherwise render.
+    // A no-op for every other goal (`currentCloseSentence()` returns null whenever no goodbye
+    // is owed), so this never changes what any already-passing test asserts.
+    const closeSentence = this.currentCloseSentence();
+    if (closeSentence !== null) return closeSentence;
     const goal = this.last.goal;
     switch (goal.code) {
       case 'READBACK':

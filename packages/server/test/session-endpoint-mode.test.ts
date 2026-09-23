@@ -10,6 +10,7 @@ import { CallSession, PLACEHOLDER_GOAL_LINES } from '../src/call/session.js';
 import { FakeAaiSocket } from '../src/aai/fake.js';
 import type { AaiEvent } from '../src/aai/types.js';
 import recordedStage from '../../engine/corpus/recorded-stage.json' with { type: 'json' };
+import singleWrongAnswer from '../../engine/corpus/single-wrong-answer-escalates.json' with { type: 'json' };
 
 afterEach(() => {
   vi.useRealTimers();
@@ -78,6 +79,38 @@ function systemPromptSessionUpdatesOf(aai: FakeAaiSocket): { type?: string; sess
 }
 
 const CALLER_LINES = (recordedStage.conversation as { id: string; speaker: string; text: string }[]).filter((u) => u.speaker === 'caller');
+
+// DEAD-AIR-ON-TIMEOUT, server-initiated-goodbye fix (2026-09-23, PROVEN live: scripts/rehearse/
+// reports/2026-09-23T06-50-54-single-wrong-answer.md and .../06-56-09-single-wrong-answer.md --
+// both endpoint-mode trials reached ESCALATE via the idle-defer CLOSE tick in `end()` but the
+// call ended `idle_timeout` with the close line NEVER spoken, because nothing in endpoint mode
+// ever asked AssemblyAI to call our endpoint for a goal that appears with no new caller turn to
+// trigger it). The corpus's OWN first two caller turns (c1: identity/approval claim, c2: the
+// request itself, read-only source, per this repo's own corpus convention) -- verified
+// empirically (this lane's own debug drive) to be exactly enough to reach a still-PENDING,
+// request-on-record state (goal ASK_CHALLENGE, nothing answered yet) with no terminal verdict of
+// its own, the same shape session.test.ts's own "idle-timeout end() with a request stated
+// escalates" legacy test already proves row 15 converts on `end('idle_timeout')` alone. Driving
+// the corpus's FULL 8-turn script instead (verified, then discarded) reaches a terminal
+// FREEZE/ESCALATE through the engine's own challenge/contradiction machinery on an ordinary
+// caller turn well before idle ever fires -- a real, already-covered code path (AssemblyAI's own
+// automatic reply for that turn triggers our endpoint the normal way), not the dead-air gap this
+// fix exists to close, and not deterministic across runs (challenge selection).
+const WRONG_ANSWER_CALL = singleWrongAnswer.call as CallContext;
+const WRONG_ANSWER_CALLER_LINES = (singleWrongAnswer.conversation as { id: string; speaker: string; text: string }[])
+  .filter((u) => u.speaker === 'caller')
+  .slice(0, 2);
+const OUTPUT_AUDIO_BYTES_PER_SECOND_FOR_CLOSE = 48_000; // CallSession.OUTPUT_AUDIO_BYTES_PER_SECOND
+const CLOSE_AUDIO_BYTES_PER_CHAR_FOR_CLOSE = 4_000; // CallSession.CLOSE_AUDIO_BYTES_PER_CHAR
+/** Comfortably clears `closeReplyHasEnoughAudio`'s 50% floor (full, 100%-of-expected bytes) --
+ *  same convention the "closes the call after the goodbye is heard" describe block below uses,
+ *  duplicated locally (that block's own consts are scoped inside its own `describe`). */
+function fullCloseAudioBytesFor(sentence: string): number {
+  return sentence.length * CLOSE_AUDIO_BYTES_PER_CHAR_FOR_CLOSE;
+}
+function closeAudioPlaybackMs(bytes: number): number {
+  return (bytes / OUTPUT_AUDIO_BYTES_PER_SECOND_FOR_CLOSE) * 1000;
+}
 
 describe('CallSession — endpoint mode (COUNTERSIGN_BRAIN=endpoint), one-brain live path', () => {
   it('never sends reply.create across the full recorded-stage.json caller conversation, and nextSpokenLine() matches the engine at every step', () => {
@@ -880,5 +913,183 @@ describe('CallSession — endpoint mode: closes the call after the goodbye is he
     vi.advanceTimersByTime(1500); // CLOSE_GRACE_MS -- same constant, same mechanism as always
     expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'agent_closed' });
     expect(aai.isClosed).toBe(true);
+  });
+});
+
+// DEAD-AIR-ON-TIMEOUT, server-initiated-goodbye fix (2026-09-23). PROVEN live (see the corpus
+// doc comment above `WRONG_ANSWER_CALL`): two consecutive endpoint-mode trials reached ESCALATE
+// via `end()`'s own idle-defer tick, but the call ended `idle_timeout` with the close line NEVER
+// spoken -- `maybeSendReplyCreateForTick`/`sendReplyCreate` (the ONLY things that would ask
+// AssemblyAI to speak in legacy mode) are unconditional no-ops in endpoint mode (the ONE-BRAIN
+// delete-list), and nothing else fires for a goal that appears with no new caller turn to trigger
+// AssemblyAI's own automatic reply. These tests MUST fail on pre-fix code: the idle-defer branch
+// never calls `sendEndpointTrigger`, and `nextSpokenLine()` never consults the NO_ACTION
+// `closeSentenceOverride` at all (it would render the EXPLAIN_OUT_OF_SCOPE placeholder instead
+// of "Thank you for calling. Goodbye."), so the close-grace mechanism (`maybeEndCloseAfterEndpoint
+// ReplyDone`) never even gets a matching transcript to confirm.
+describe('CallSession — endpoint mode: server-initiated goodbye (no new caller turn to trigger AssemblyAI on its own)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('idle-defer CLOSE path (single-wrong-answer-escalates.json, the live-proven repro): sends exactly one bare reply.create trigger once the idle-defer tick converts the verdict, never ends before the goodbye is heard, and closes reason idle_timeout once it is', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint', call: WRONG_ANSWER_CALL });
+    session.start();
+
+    let replyCounter = 0;
+    for (const line of WRONG_ANSWER_CALLER_LINES) {
+      clock.now += 3000;
+      aai.emit({ type: 'transcript.user', item_id: line.id, text: line.text });
+      const spoken = session.nextSpokenLine();
+      if (spoken !== null) {
+        replyCounter += 1;
+        const replyId = `wrong-answer-reply-${replyCounter}`;
+        clock.now += 500;
+        aai.emit({ type: 'reply.started', reply_id: replyId });
+        aai.emit({ type: 'transcript.agent', item_id: `${replyId}-t`, text: spoken, reply_id: replyId, interrupted: false });
+        aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });
+      }
+    }
+
+    // The real engine, driven by the corpus's own c1/c2 caller turns alone (no synthetic
+    // call_ended fact yet), has NOT reached a terminal verdict on its own -- a request is on
+    // record and a challenge has been issued, but nothing has answered it -- exactly the live
+    // finding's shape: the caller's turns run out while the engine still reads PENDING.
+    expect(session.last?.state).not.toBe('SEALED');
+    expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(false);
+
+    // The idle reaper fires (ws/browser.ts, unchanged by this fix) -- `end()`'s own idle-defer
+    // branch logs `call_ended` and re-ticks, which (row 15) converts the still-pending verdict.
+    clock.now += 31_000;
+    session.end('idle_timeout');
+
+    expect(session.last?.verdict).toBe('ESCALATE'); // matches the corpus's own `expected.verdict`
+    expect(session.last?.goal.code).toBe('CLOSE');
+    expect(sent.some((e) => e.type === 'ended')).toBe(false); // goodbye owed -- never hang up before it is spoken
+
+    // Endpoint mode's ONE way to put a reply.create on the wire for a server-initiated goal: a
+    // bare trigger (no `instructions` -- that shape is legacy-only), sent exactly once,
+    // synchronously, inside `end()`.
+    const replyCreates = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]).toEqual({ type: 'reply.create' });
+
+    // What AssemblyAI's own automatic reply for that trigger would get from our endpoint.
+    const closeSentence = session.nextSpokenLine();
+    expect(closeSentence).toBe(session.last!.goal.hint);
+
+    // The unconditional 45s CLOSE_TOTAL_MS hard cap (armed by `applyEvaluate`, unaffected by
+    // this fix) is still the backstop -- the call must not end before the goodbye is heard, well
+    // short of it.
+    clock.now += 5000;
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+
+    // AssemblyAI actually calls our endpoint for the trigger and speaks the rendered close line.
+    clock.now += 500;
+    aai.emit({ type: 'reply.started', reply_id: 'idle-close-reply' });
+    const closeAudioBytes = fullCloseAudioBytesFor(closeSentence!);
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(closeAudioBytes).toString('base64') });
+    aai.emit({ type: 'transcript.agent', item_id: 'idle-close-t', text: closeSentence!, reply_id: 'idle-close-reply', interrupted: false });
+    clock.now += Math.ceil(closeAudioPlaybackMs(closeAudioBytes)) + 100;
+    aai.emit({ type: 'reply.done', reply_id: 'idle-close-reply', status: 'completed' });
+
+    expect(sent.some((e) => e.type === 'ended')).toBe(false); // close grace still running
+    vi.advanceTimersByTime(1500); // CLOSE_GRACE_MS
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'idle_timeout' });
+    expect(aai.isClosed).toBe(true);
+
+    // Never a second trigger, however much more time passes.
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+  });
+
+  it('NO_ACTION idle goodbye (nothing ever at stake): nextSpokenLine() renders the override goodbye (never the engine\'s own EXPLAIN_OUT_OF_SCOPE line), sends exactly one bare reply.create trigger, and closes reason idle_timeout once the goodbye is heard', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const call: CallContext = { session_id: 'sess-idle-no-action-endpoint', origin_kind: 'unverified_voip', origin_geo: 'unknown' };
+    const session = newSession({ aai, sent, clock, brainMode: 'endpoint', call });
+
+    session.start(); // INTAKE -- nothing ever said
+    clock.now = 30_000;
+    session.end('idle_timeout');
+
+    // The ENGINE's own goal stays EXPLAIN_OUT_OF_SCOPE (fsm.ts's deriveState always sends a
+    // NO_ACTION verdict to OUT_OF_SCOPE, never SEALED) -- the goodbye is a server-side override
+    // (`closeSentenceOverride`) layered on top, exactly as legacy mode already proves
+    // (session.test.ts's own "idle-timeout end() with NO request ever stated..." test).
+    expect(session.last?.verdict).toBe('NO_ACTION');
+    expect(session.last?.goal.code).toBe('EXPLAIN_OUT_OF_SCOPE');
+    expect(sent.some((e) => e.type === 'ended')).toBe(false);
+
+    const replyCreates = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create');
+    expect(replyCreates).toHaveLength(1);
+    expect(replyCreates[0]).toEqual({ type: 'reply.create' });
+
+    // THE core content fix: nextSpokenLine() must render the override goodbye, never the
+    // engine's own (unrelated) current goal -- pre-fix this returned the EXPLAIN_OUT_OF_SCOPE
+    // placeholder, which would have talked over the caller with the wrong words entirely.
+    expect(session.nextSpokenLine()).toBe('Thank you for calling. Goodbye.');
+
+    clock.now = 30_100;
+    aai.emit({ type: 'reply.started', reply_id: 'r1' });
+    aai.emit({ type: 'reply.audio', data: Buffer.alloc(192_000).toString('base64') });
+    aai.emit({ type: 'transcript.agent', item_id: 'a1', text: 'Thank you for calling. Goodbye.', reply_id: 'r1', interrupted: false });
+    clock.now = 35_200;
+    aai.emit({ type: 'reply.done', reply_id: 'r1', status: 'completed' });
+
+    expect(sent.some((e) => e.type === 'ended')).toBe(false); // close grace still running
+    vi.advanceTimersByTime(1500); // CLOSE_GRACE_MS
+    expect(sent.at(-1)).toEqual({ type: 'ended', reason: 'idle_timeout' });
+    expect(aai.isClosed).toBe(true);
+
+    expect(aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create')).toHaveLength(1);
+  });
+
+  it('legacy mode (brainMode omitted): the idle-defer CLOSE path is unaffected -- no bare reply.create trigger is ever sent (endpoint-only mechanism), legacy keeps sending its own instructed reply.create exactly as before', () => {
+    vi.useFakeTimers();
+    const clock = { now: 0 };
+    const aai = new FakeAaiSocket();
+    const sent: ServerEvent[] = [];
+    const session = newSession({ aai, sent, clock, call: WRONG_ANSWER_CALL }); // legacy (default)
+    session.start();
+
+    let replyCounter = 0;
+    for (const line of WRONG_ANSWER_CALLER_LINES) {
+      clock.now += 3000;
+      aai.emit({ type: 'transcript.user', item_id: line.id, text: line.text });
+      vi.advanceTimersByTime(1000); // clears any AUTOMATIC_REPLY_SETTLE_MS-deferred send
+      const lastReplyCreate = aai.sent.filter((m) => (m as { type?: string }).type === 'reply.create').at(-1) as
+        | { type: string; instructions?: string }
+        | undefined;
+      const spoken = lastReplyCreate?.instructions ?? session.last?.goal.hint ?? 'One moment.';
+      replyCounter += 1;
+      const replyId = `legacy-wrong-answer-reply-${replyCounter}`;
+      clock.now += 500;
+      aai.emit({ type: 'reply.started', reply_id: replyId });
+      aai.emit({ type: 'transcript.agent', item_id: `${replyId}-t`, text: spoken, reply_id: replyId, interrupted: false });
+      aai.emit({ type: 'reply.done', reply_id: replyId, status: 'completed' });
+    }
+
+    expect(session.last?.state).not.toBe('SEALED');
+
+    clock.now += 31_000;
+    session.end('idle_timeout');
+    vi.advanceTimersByTime(1000);
+
+    expect(session.last?.verdict).toBe('ESCALATE');
+    // A bare, instructions-less reply.create is the endpoint-only trigger shape -- legacy never
+    // sends one; every reply.create legacy sends carries `instructions` (the "say exactly this"
+    // wrapper or a goal's own instructed sentence).
+    const bareReplyCreates = aai.sent.filter((m) => {
+      const msg = m as { type?: string; instructions?: string };
+      return msg.type === 'reply.create' && msg.instructions === undefined;
+    });
+    expect(bareReplyCreates).toHaveLength(0);
+    expect(aai.sent.some((m) => (m as { type?: string }).type === 'reply.create')).toBe(true);
   });
 });
