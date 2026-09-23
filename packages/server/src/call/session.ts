@@ -36,6 +36,7 @@ import { validateToolArgs } from './validate.js';
 import { stallKindFor, stallLineFor, type StallKind } from './stalls.js';
 import { argsForTerminalTool } from './terminalActions.js';
 import { transcriptMatchesCloseSentence, normalizeForCloseMatch } from './closeMatch.js';
+import { renderGoalLine } from '../brain/spokenLines.js';
 import {
   QUESTION_GOALS,
   verbatimQuestionSentence,
@@ -5363,9 +5364,13 @@ export class CallSession {
         // the raw `ask` instruction string, which prompt.ts's own comment records a live
         // incident of the model reading aloud as stage directions) for the defensive case of
         // no challenge/no `speak` on it at all.
-        return goal.challenge?.speak ?? PLACEHOLDER_GOAL_LINES.STALL;
+        return goal.challenge?.speak ?? renderGoalLine({ ...goal, code: 'STALL' }) ?? PLACEHOLDER_GOAL_LINES.STALL;
       default:
-        return PLACEHOLDER_GOAL_LINES[goal.code];
+        // Interim spoken lines (2026-09-22 10:20 PM): the plain desk-officer drafts from
+        // docs/plans/2026-09-22-spoken-lines-draft.md, rendered by brain/spokenLines.ts from the
+        // goal's own data. The founder reacts to real audio and any line can be swapped there.
+        // The placeholder stays only as a never-expected fallback.
+        return renderGoalLine(goal) ?? PLACEHOLDER_GOAL_LINES[goal.code];
     }
   }
 
