@@ -63,3 +63,19 @@ services:
         value: "explicit"
       - key: COUNTERSIGN_MIN_SILENCE_MS
         value: "1500"
+      # One-brain live path (founder: build 2026-09-22 7:43 PM onward; third live trial
+      # 2026-09-23 7:22-7:32 AM passed 3 consecutive clean runs of each of the three demo
+      # scenarios (dana-patient, scenario-b-miller-fraud, single-wrong-answer), zero repeated
+      # questions, zero talk-over, one goodbye each). AssemblyAI's "connect your own LLM" calls
+      # our /api/brain/chat/completions for every reply, so only the deterministic engine's
+      # lines are spoken. docs/ONE-BRAIN-ENV.md. ROLLBACK: set COUNTERSIGN_BRAIN to "legacy"
+      # (the two turn-detection lines above still govern legacy calls). The brain key only
+      # authenticates AssemblyAI to our own endpoint; the server hands the same env value to
+      # the stored agent at boot, so a generated random value is all it needs. If any of the
+      # three is missing, every call falls back to legacy (index.ts), never fails.
+      - key: COUNTERSIGN_BRAIN
+        value: "endpoint"
+      - key: COUNTERSIGN_BRAIN_API_KEY
+        generateValue: true
+      - key: COUNTERSIGN_PUBLIC_URL
+        value: "https://countersign-bf8q.onrender.com"
