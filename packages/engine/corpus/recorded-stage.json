@@ -1,0 +1,188 @@
+{
+  "title": "Recorded call: Dana Whitfield's legitimate payment, staged",
+  "description": "PANEL-2026-09-22-LIVE-RELIABILITY.md round 2 convergence item ('the replay must carry audio... driven by the real engine'): a REAL founder call against the deployed agent (record 8f7fa2f2-761e-4e86-90b4-72bbdbc090d6, 2026-09-22 09:24 CDT, deploy f14fbcb), not a synthetic script. Conversation text and its t_ms are copied VERBATIM from AssemblyAI's own per-session timeline (GET /v1/sessions/{id}/... 'timeline.json', absolute unix-ms, started_at_unix_ms=1790087060083 -- this IS the .ogg recording's own clock, so t_ms here lines up exactly with the audio file packages/server/replay-audio/recorded-stage.ogg when one is present). Tool and action t_ms are NOT in the AssemblyAI timeline -- they come from our own diagnostics flight-recorder bundle for the same session, whose events are on a second clock (its own t_ms relative to its top-level 'started_at':1790087059684). MEASURED OFFSET = diagnostics.started_at - timeline.started_at_unix_ms = 1790087059684 - 1790087060083 = -399 ms; every tool/action t_ms below is (diagnostics event t_ms) + (-399), i.e. diagnostics_t_ms - 399. Cross-check: diagnostics' reply.audio.first for the greeting (t_ms=595, recording clock 196) lands exactly on the timeline's own agent_reply_started_at_ms for that turn (1790087060279 - 1790087060083 = 196) -- a 0ms match, so the offset is exact at that point; later agent lines whose start the AAI timeline never reports (trigger='reply_create') are placed from the SAME offset formula applied to diagnostics' reply.audio.first for that reply_id, which carries normal network/processing jitter of up to a few hundred ms relative to the audio -- immaterial to the engine's own verdict logic (challenge/readback windows are keyed off the ACTION t_ms, not the paired conversation line), and small enough not to be audible as mis-sync in the UI's turn-by-turn reveal. Tool call results (check_sso_context/get_request_history/verify_out_of_band) are copied verbatim from the diagnostics bundle's own server_lookup-adjacent evaluate() cards, which match Dana Whitfield's fixed MERIDIAN seed entry exactly (Austin TX Dell Latitude, oob confirmed, pay-4471 on file) -- same shape already proven in corpus/bare-name-challenge-answer-stages.json. `expected` below is pasted from a real run of packages/engine's `evaluate()` over this exact file (G3 evidence, same discipline as every other corpus file), then independently re-proven by packages/server/test/replay-recorded.test.ts replaying it through the incremental runReplay() path server.ts's Replay screen actually uses.",
+  "call": {
+    "session_id": "recorded-stage",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c-greet",
+      "speaker": "agent",
+      "text": "Meridian payments desk, verification line. How can I help you today?",
+      "t_ms": 196
+    },
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply, $84,500, account ending 4471, moving today instead of Friday, approved in yesterday's closed meeting.",
+      "t_ms": 7777
+    },
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "You are requesting a wire of eighty four thousand five hundred dollars to Northgate Partners...",
+      "t_ms": 19976
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "Just to confirm, this transfer goes to Northgate Partners. Is that correct?",
+      "t_ms": 25546
+    },
+    {
+      "id": "c2",
+      "speaker": "caller",
+      "text": "No, it is for Meridian Supply.",
+      "t_ms": 32577
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "One moment. Just to confirm, the amount is $84,500. Is that correct?",
+      "t_ms": 35966
+    },
+    {
+      "id": "c3",
+      "speaker": "caller",
+      "text": "Yes.",
+      "t_ms": 44876
+    },
+    {
+      "id": "a4",
+      "speaker": "agent",
+      "text": "Just to confirm, the account ends in 4 4 7 1. Is that correct?",
+      "t_ms": 45489
+    },
+    {
+      "id": "c4",
+      "speaker": "caller",
+      "text": "Yes.",
+      "t_ms": 54576
+    },
+    {
+      "id": "a5",
+      "speaker": "agent",
+      "text": "Just to confirm, the beneficiary is Meridian Supply. Is that correct?",
+      "t_ms": 55236
+    },
+    {
+      "id": "c5",
+      "speaker": "caller",
+      "text": "Yes.",
+      "t_ms": 64176
+    },
+    {
+      "id": "a6",
+      "speaker": "agent",
+      "text": "Your request is staged for independent approval. The payment is not released. Goodbye.",
+      "t_ms": 64691
+    }
+  ],
+  "tools": [
+    {
+      "id": "t1",
+      "name": "check_sso_context",
+      "t_ms": 35958,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "session_active": true,
+        "geo": "Austin, TX",
+        "device": "Dell Latitude (managed)",
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t2",
+      "name": "get_request_history",
+      "t_ms": 35958,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "known_vendors": ["Meridian Supply"],
+        "matches": [
+          {
+            "vendor": "Meridian Supply",
+            "amount_usd": 84500,
+            "account_last4": "4471",
+            "due": "2026-09-04"
+          }
+        ],
+        "request_version": 1
+      }
+    },
+    {
+      "id": "t3",
+      "name": "verify_out_of_band",
+      "t_ms": 35958,
+      "args": {
+        "identity_id": "dana-whitfield",
+        "request_version": 1
+      },
+      "result": {
+        "sent": true,
+        "devices": 1,
+        "response": "confirmed",
+        "latency_ms": 2500,
+        "request_version": 1
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "act1",
+      "kind": "challenge_issued",
+      "t_ms": 31414,
+      "challenge_id": "recorded-stage-1"
+    },
+    {
+      "id": "act2",
+      "kind": "readback_issued",
+      "t_ms": 43646,
+      "field": "amount_usd",
+      "value": "84500"
+    },
+    {
+      "id": "act3",
+      "kind": "readback_issued",
+      "t_ms": 53654,
+      "field": "account_last4",
+      "value": "4471"
+    },
+    {
+      "id": "act4",
+      "kind": "readback_issued",
+      "t_ms": 63025,
+      "field": "beneficiary",
+      "value": "Meridian Supply"
+    }
+  ],
+  "expected": {
+    "verdict": "STAGE",
+    "state": "ACTION",
+    "reasons": [],
+    "failure_tally": 0,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": true,
+      "oob_confirmed_current": true,
+      "context_pass_current": true,
+      "no_contradictions": true,
+      "critical_fields_confirmed": true,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": true,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": true,
+      "no_injection_attempt": true,
+      "no_failed_challenge": true
+    }
+  }
+}

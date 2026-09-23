@@ -2,12 +2,15 @@ import { describe, it, expect, afterEach } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import WebSocket from 'ws';
 import { attachWebSocketServer } from '../src/ws/browser.js';
 import { newCapsState } from '../src/caps.js';
 import { newDiagnosticsState } from '../src/diagnostics.js';
 import { FakeAaiSocket } from '../src/aai/fake.js';
-import { defaultCorpusDir, listCorpusFiles, loadCorpusFile } from '../src/replay.js';
+import { defaultCorpusDir, listCorpusFiles, listReplayAudioFiles, loadCorpusFile, loadReplayAudioPath } from '../src/replay.js';
 import type { ServerEvent } from '@countersign/engine';
 
 describe('replay.ts — corpus file whitelist', () => {
@@ -31,6 +34,50 @@ describe('replay.ts — corpus file whitelist', () => {
 
   it('rejects an unknown file name', () => {
     expect(loadCorpusFile(defaultCorpusDir(), 'not-a-real-corpus-file')).toBeNull();
+  });
+});
+
+// Founder ruling 2026-09-22 8:00 PM: the replay audio whitelist (packages/server/
+// replay-audio/, TRACKED -- the founder commits the real .ogg files himself). A temp
+// directory stands in so this proves the real filesystem behaviour (present, absent,
+// mismatched extension, name not in the corpus) without depending on which .ogg files
+// happen to be committed at test time.
+describe('replay.ts — audio whitelist', () => {
+  let audioDir: string;
+
+  afterEach(() => {
+    if (audioDir) rmSync(audioDir, { recursive: true, force: true });
+  });
+
+  it('lists only corpus names that have a matching .ogg file on disk', () => {
+    audioDir = mkdtempSync(join(tmpdir(), 'countersign-replay-audio-'));
+    writeFileSync(join(audioDir, 'recorded-stage.ogg'), 'fake-ogg-bytes');
+    // Wrong extension -- never listed even though the corpus file exists.
+    writeFileSync(join(audioDir, 'recorded-freeze.wav'), 'fake-wav-bytes');
+    // Real-looking name but not an actual corpus file -- never listed.
+    writeFileSync(join(audioDir, 'not-a-real-corpus-file.ogg'), 'fake-ogg-bytes');
+
+    const files = listReplayAudioFiles(defaultCorpusDir(), audioDir);
+    expect(files.has('recorded-stage')).toBe(true);
+    expect(files.has('recorded-freeze')).toBe(false);
+    expect(files.has('not-a-real-corpus-file')).toBe(false);
+  });
+
+  it('returns an empty set, never throws, when the audio directory does not exist', () => {
+    const files = listReplayAudioFiles(defaultCorpusDir(), join(tmpdir(), 'countersign-replay-audio-does-not-exist'));
+    expect(files.size).toBe(0);
+  });
+
+  it('resolves a real audio path only for a whitelisted name', () => {
+    audioDir = mkdtempSync(join(tmpdir(), 'countersign-replay-audio-'));
+    writeFileSync(join(audioDir, 'recorded-stage.ogg'), 'fake-ogg-bytes');
+
+    const path = loadReplayAudioPath(defaultCorpusDir(), audioDir, 'recorded-stage');
+    expect(path).toBe(join(audioDir, 'recorded-stage.ogg'));
+
+    expect(loadReplayAudioPath(defaultCorpusDir(), audioDir, 'recorded-freeze')).toBeNull();
+    expect(loadReplayAudioPath(defaultCorpusDir(), audioDir, '../../../etc/passwd')).toBeNull();
+    expect(loadReplayAudioPath(defaultCorpusDir(), audioDir, '..')).toBeNull();
   });
 });
 
@@ -148,6 +195,26 @@ describe('ws/browser — /ws/replay/:file', () => {
       ws.once('close', (code) => resolve(code));
     });
     expect(closeCode).toBe(4404);
+  });
+
+  // Review finding 2026-09-22 8:21 PM: a malformed percent-escape used to throw inside the
+  // 'upgrade' listener (uncaught: process exit). It must close 4404 and the server must live on.
+  it('a malformed percent-escape on /ws/replay/ or /ws/call/ closes 4404 and the server keeps serving', async () => {
+    const { wsBase } = await start();
+    for (const path of ['/ws/replay/%zz', '/ws/call/%', '/ws/replay/%E0%A4%A']) {
+      const ws = new WebSocket(`${wsBase}${path}`, { origin: selfOriginFor(wsBase) });
+      const closeCode = await new Promise<number>((resolve) => {
+        ws.once('close', (code) => resolve(code));
+        ws.once('error', () => resolve(-1));
+      });
+      expect(closeCode).toBe(4404);
+    }
+    const ok = new WebSocket(`${wsBase}/ws/replay/..`, { origin: selfOriginFor(wsBase) });
+    const stillServing = await new Promise<number>((resolve) => {
+      ok.once('close', (code) => resolve(code));
+      ok.once('error', () => resolve(-1));
+    });
+    expect(stillServing).toBe(4404);
   });
 
   it('rejects an unknown corpus file with close code 4404', async () => {

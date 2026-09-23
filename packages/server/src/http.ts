@@ -10,7 +10,8 @@ import {
   type CapsState,
   type CapDecisionReason,
 } from './caps.js';
-import { defaultCorpusDir, listCorpusFiles, loadCorpusFile } from './replay.js';
+import { createReadStream } from 'node:fs';
+import { defaultCorpusDir, defaultReplayAudioDir, listCorpusFiles, listReplayAudioFiles, loadCorpusFile, loadReplayAudioPath } from './replay.js';
 import type { StaticServer } from './static.js';
 import { isAllowedOrigin } from './origin.js';
 import { resolvePersona } from './personas.js';
@@ -173,6 +174,13 @@ interface ReplayRecording {
   file: string;
   label: string;
   recommended: boolean;
+  // Founder ruling 2026-09-22 8:00 PM: some recordings are real founder calls with a real
+  // .ogg alongside them (packages/server/replay-audio/<file>.ogg, listReplayAudioFiles'
+  // whitelist below) -- this tells the browser whether GET /api/replay-audio/<file> will
+  // return anything, so it never has to speculatively fetch to find out. A recording with
+  // no audio file (every synthetic-script corpus entry, and any recorded one before its
+  // .ogg is committed) always replays exactly as it always has -- text-only.
+  has_audio: boolean;
 }
 
 export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: Server; state: CapsState } {
@@ -236,18 +244,62 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
     // true` so the screen can mark it without a second source of truth for which one it is.
     if (req.method === 'GET' && path === '/api/replay') {
       const corpusDir = defaultCorpusDir();
+      const audioFiles = listReplayAudioFiles(corpusDir, defaultReplayAudioDir());
       const files = Array.from(listCorpusFiles(corpusDir)).sort();
       const recordings: ReplayRecording[] = files.map((file) => {
         const recommended = file === FLAGSHIP_RECORDING;
         const corpus = loadCorpusFile(corpusDir, file);
         const label = corpus ? (recommended ? `Recommended: ${corpus.title}` : corpus.title) : file;
-        return { file, label, recommended };
+        return { file, label, recommended, has_audio: audioFiles.has(file) };
       });
       recordings.sort((a, b) => {
         if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
         return a.file.localeCompare(b.file);
       });
       sendJson(res, 200, { files, recordings });
+      return;
+    }
+
+    // Founder ruling 2026-09-22 8:00 PM: streams a recorded call's real audio (stereo
+    // ogg/opus, caller left / agent right) alongside its text replay. Guarded exactly like
+    // `/api/replay` above: `loadReplayAudioPath` only ever resolves a name that's both a
+    // real corpus file AND has a same-named .ogg on disk (replay.ts's whitelist) -- a
+    // traversal attempt or an unknown/absent name gets the same plain 404 either way, never
+    // a distinguishing error that would let a client probe which corpus names exist.
+    if ((req.method === 'GET' || req.method === 'HEAD') && path.startsWith('/api/replay-audio/')) {
+      // Review finding 2026-09-22 8:21 PM (BLOCKING): a malformed escape such as '%' makes
+      // decodeURIComponent throw, and this handler runs unawaited, so an uncaught throw here
+      // took the whole process down. Same guard as static.ts's resolveSafe: a plain 404.
+      let file: string;
+      try {
+        file = decodeURIComponent(path.slice('/api/replay-audio/'.length));
+      } catch {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      const audioPath = loadReplayAudioPath(defaultCorpusDir(), defaultReplayAudioDir(), file);
+      if (audioPath === null) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      // static.ts's D1 fix-round-2 ordering: create the stream and attach its 'error'
+      // handler BEFORE any header goes out, so a file that vanishes between
+      // `loadReplayAudioPath`'s check and this read (or simply fails to open) still gets a
+      // clean 404 instead of a half-written response or a crash.
+      const stream = createReadStream(audioPath);
+      stream.on('error', () => {
+        if (!res.headersSent) sendJson(res, 404, { error: 'not_found' });
+        else res.destroy();
+      });
+      stream.on('open', () => {
+        res.writeHead(200, { 'Content-Type': 'audio/ogg', 'Cache-Control': 'no-cache' });
+        if (req.method === 'HEAD') {
+          res.end();
+          stream.destroy();
+          return;
+        }
+        stream.pipe(res);
+      });
       return;
     }
 

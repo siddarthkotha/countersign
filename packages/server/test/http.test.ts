@@ -468,11 +468,14 @@ describe('http server', () => {
     expect(body.recordings.map((rec) => rec.file).sort()).toEqual([...body.files].sort());
 
     // The flagship sorts first and is the only one marked recommended -- an honest label
-    // (its own corpus file's `title`, prefixed) rather than the raw filename.
+    // (its own corpus file's `title`, prefixed) rather than the raw filename. It carries no
+    // audio file (nothing under packages/server/replay-audio/ names it), so `has_audio` is
+    // false here regardless of whether this checkout has any recorded .ogg files at all.
     expect(body.recordings[0]).toEqual({
       file: 'scenario-b-miller-fraud',
       label: 'Recommended: Robert Miller: the fraudulent CEO-impersonation call',
       recommended: true,
+      has_audio: false,
     });
     expect(body.recordings.filter((rec) => rec.recommended)).toHaveLength(1);
 
@@ -481,6 +484,48 @@ describe('http server', () => {
       expect(rec.label.length).toBeGreaterThan(0);
       expect(rec.label).not.toBe(rec.file);
     }
+  });
+
+  // Founder ruling 2026-09-22 8:00 PM: `has_audio` is a real filesystem check against
+  // packages/server/replay-audio/ (TRACKED -- the founder commits the real .ogg files
+  // himself; local dev checkouts, including this one, may or may not have them on disk at
+  // test time). This deliberately never asserts on whether that directory is empty or
+  // populated right now (replay.test.ts's "audio whitelist" describe block already proves
+  // the whitelist logic itself against a controlled temp directory) -- it only asserts
+  // things true in EITHER state: a synthetic-script corpus file (never recorded, never
+  // gets a .ogg) always reads has_audio: false, and every 404 path (unknown name, path
+  // traversal) 404s cleanly rather than throwing.
+  describe('replay audio (packages/server/replay-audio/, founder ruling 2026-09-22)', () => {
+    it('a synthetic-script recording always reads has_audio: false, and unknown/traversal names 404 cleanly', async () => {
+      const { base } = await start();
+
+      const r = await fetch(`${base}/api/replay`);
+      const body = (await r.json()) as { recordings: Array<{ file: string; has_audio: boolean }> };
+      const flagship = body.recordings.find((rec) => rec.file === 'scenario-b-miller-fraud');
+      expect(flagship?.has_audio).toBe(false);
+
+      const rFlagship = await fetch(`${base}/api/replay-audio/scenario-b-miller-fraud`);
+      expect(rFlagship.status).toBe(404);
+
+      const rTraversal = await fetch(`${base}/api/replay-audio/${encodeURIComponent('../../../etc/passwd')}`);
+      expect(rTraversal.status).toBe(404);
+
+      const rUnknown = await fetch(`${base}/api/replay-audio/not-a-real-corpus-file`);
+      expect(rUnknown.status).toBe(404);
+    });
+
+    // Review finding (2026-09-22 8:21 PM, BLOCKING): a malformed percent-escape made
+    // decodeURIComponent throw inside the unawaited request handler, which crashed the whole
+    // process (live calls included). It must be a plain 404, and the server must keep serving.
+    it('a malformed percent-escape 404s and the server keeps serving', async () => {
+      const { base } = await start();
+      for (const bad of ['%', '%zz', 'recorded-stage%E0%A4%A']) {
+        const r = await fetch(`${base}/api/replay-audio/${bad}`);
+        expect(r.status).toBe(404);
+      }
+      const after = await fetch(`${base}/api/replay`);
+      expect(after.status).toBe(200);
+    });
   });
 
   // Bug fix (2026-09-04): the live CallContext used to be hardcoded to `unverified_voip`/

@@ -533,13 +533,27 @@ export function attachWebSocketServer(server: Server, deps: BrowserWsDeps): Brow
     const callMatch = /^\/ws\/call\/([^/]+)$/.exec(url.pathname);
     const replayMatch = /^\/ws\/replay\/([^/]+)$/.exec(url.pathname);
 
-    if (callMatch) {
-      const id = decodeURIComponent(callMatch[1]!);
+    // Review finding 2026-09-22 8:21 PM: decodeURIComponent throws on a malformed escape
+    // ('%', '%zz'), and a throw inside this 'upgrade' listener is an uncaught exception that
+    // takes the whole process down. A name that does not decode falls through to the 4404
+    // close below, exactly like any other unknown path.
+    const safeDecode = (raw: string): string | null => {
+      try {
+        return decodeURIComponent(raw);
+      } catch {
+        return null;
+      }
+    };
+    const callId = callMatch ? safeDecode(callMatch[1]!) : null;
+    const replayFile = replayMatch ? safeDecode(replayMatch[1]!) : null;
+
+    if (callId !== null) {
+      const id = callId;
       wss.handleUpgrade(req, socket, head, (ws) => handleCallSocket(ws, id, deps, activeCalls, endCall));
       return;
     }
-    if (replayMatch) {
-      const file = decodeURIComponent(replayMatch[1]!);
+    if (replayFile !== null) {
+      const file = replayFile;
       const speed = url.searchParams.get('speed');
       wss.handleUpgrade(req, socket, head, (ws) => handleReplaySocket(ws, file, speed, deps));
       return;

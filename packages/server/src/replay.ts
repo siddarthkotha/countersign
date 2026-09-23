@@ -35,6 +35,54 @@ export function defaultCorpusDir(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../engine/corpus');
 }
 
+/** Founder ruling 2026-09-22 8:00 PM: the recording behind a replay may carry its real
+ *  audio, played back alongside the same deterministic engine run -- packages/server/
+ *  replay-audio/, a TRACKED directory (the founder commits the .ogg files himself after
+ *  review; this module never writes to it). One file per corpus name, e.g.
+ *  `recorded-stage.ogg` for the `recorded-stage` corpus file. Missing entirely, or missing
+ *  just one file, is a normal state (a corpus recording with no audio replays exactly as
+ *  it always has -- text-only) -- callers must never treat an absent directory as an error. */
+export function defaultReplayAudioDir(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../replay-audio');
+}
+
+/** The audio whitelist, same shape and same reasoning as `listCorpusFiles`: only corpus
+ *  names that both (a) exist in `listCorpusFiles(corpusDir)` and (b) have a same-named
+ *  `.ogg` file in `audioDir` are ever served -- a stray file dropped in `audioDir` under a
+ *  name that isn't a real corpus file is never exposed, and a path-traversal attempt can
+ *  never appear in this set (it's built from a real directory listing, never from request
+ *  input). Returns an empty set (never throws) when `audioDir` doesn't exist yet -- the
+ *  common case for anyone who hasn't pulled the founder's tracked .ogg files locally. */
+export function listReplayAudioFiles(corpusDir: string, audioDir: string): Set<string> {
+  const corpusNames = listCorpusFiles(corpusDir);
+  let entries: string[];
+  try {
+    entries = readdirSync(audioDir);
+  } catch {
+    return new Set();
+  }
+  return new Set(
+    entries
+      .filter((f) => f.endsWith('.ogg'))
+      .map((f) => f.slice(0, -'.ogg'.length))
+      .filter((name) => corpusNames.has(name)),
+  );
+}
+
+/** Resolves `name` to its `.ogg` path inside `audioDir`, or null if `name` fails the same
+ *  guard `loadCorpusFile` uses, or isn't in `listReplayAudioFiles`'s whitelist. Never does
+ *  its own filesystem traversal check beyond that whitelist membership -- a name that
+ *  passed the guard but was never listed (wrong extension, no matching corpus file, no
+ *  file on disk at all) is rejected the same way an unknown one is. */
+export function loadReplayAudioPath(corpusDir: string, audioDir: string, name: string): string | null {
+  if (typeof name !== 'string' || name.length === 0 || name.includes('..') || name.includes('/') || name.includes('\\')) {
+    return null;
+  }
+  const files = listReplayAudioFiles(corpusDir, audioDir);
+  if (!files.has(name)) return null;
+  return path.join(audioDir, `${name}.ogg`);
+}
+
 /** The whitelist: only files that actually exist in the corpus directory can be served.
  *  A traversal attempt (`..`, an absolute path, a name AAI/URL-encoding tricks into
  *  something that isn't a plain filename) can never appear in this set, so it is rejected

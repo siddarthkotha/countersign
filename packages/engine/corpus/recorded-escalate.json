@@ -1,0 +1,78 @@
+{
+  "title": "Recorded call: Dana Whitfield goes silent after the trap question, escalated",
+  "description": "PANEL-2026-09-22-LIVE-RELIABILITY.md round 2 convergence item ('the replay must carry audio... driven by the real engine'): a REAL founder call against the deployed agent (record b674e6e8-73ed-4a23-a613-fa8955e784d2, 2026-09-21 19:43 CDT, deploy b62dc4b), not a synthetic script -- the caller stops answering right after the TRAP_FACT challenge and the call is idle-timed-out. Conversation text and its t_ms are copied VERBATIM from AssemblyAI's own per-session timeline (started_at_unix_ms=1790037838936 -- the .ogg recording's own clock; lines up with packages/server/replay-audio/recorded-escalate.ogg when present). Action t_ms are not in the AssemblyAI timeline; they come from our diagnostics flight-recorder bundle for the same session (top-level started_at=1790037838622). MEASURED OFFSET = diagnostics.started_at - timeline.started_at_unix_ms = 1790037838622 - 1790037838936 = -314 ms; every action t_ms below is (diagnostics event t_ms) - 314. Cross-check: diagnostics' reply.audio.first for the greeting (t_ms=513, recording clock 199) lands within 1ms of the timeline's own agent_reply_started_at_ms for that turn (1790037839136 - 1790037838936 = 200). No SSO/history/out-of-band tool calls appear: the real server only ever ran them once the TRAP_FACT challenge PASSED (see recorded-stage.json), and this caller's line went idle before answering it at all -- so this file correctly carries `tools: []`, matching the diagnostics bundle, which shows zero server_lookup events anywhere in the whole session. The call ends via `call_ended`/`idle_timeout` (diagnostics top-level end_reason='idle_timeout', its 'cap' event at diag t_ms=63030), which is the ONLY way rules.ts row 15 can turn an open, still-PENDING request into ESCALATE -- exactly the mechanism BRIEF LAW 3's deterministic core is supposed to prove reproducible. `expected` below is pasted from a real run of packages/engine's `evaluate()` over this exact file (G3 evidence), then independently re-proven by packages/server/test/replay-recorded.test.ts replaying it through the incremental runReplay() path the Replay screen actually uses.",
+  "call": {
+    "session_id": "recorded-escalate",
+    "origin_kind": "registered_device",
+    "origin_geo": "Austin, TX"
+  },
+  "conversation": [
+    {
+      "id": "c-greet",
+      "speaker": "agent",
+      "text": "Meridian payments desk, verification line. How can I help you today?",
+      "t_ms": 200
+    },
+    {
+      "id": "c1",
+      "speaker": "caller",
+      "text": "This is Dana Whitfield, corporate treasury. I need to wire it to Meridian Supply, $84,500, account ending 4471, moving today instead of Friday, approved in yesterday's closed meeting.",
+      "t_ms": 7980
+    },
+    {
+      "id": "a1",
+      "speaker": "agent",
+      "text": "You are requesting a wire of eighty four thousand five hundred dollars to Northgate Partners...",
+      "t_ms": 20734
+    },
+    {
+      "id": "a2",
+      "speaker": "agent",
+      "text": "Just to confirm, this transfer goes to Northgate Partners. Is that correct?",
+      "t_ms": 26299
+    },
+    {
+      "id": "a3",
+      "speaker": "agent",
+      "text": "This cannot be completed by voice. A callback on the registered number will follow. Goodbye.",
+      "t_ms": 62729
+    }
+  ],
+  "tools": [],
+  "actions": [
+    {
+      "id": "act1",
+      "kind": "challenge_issued",
+      "t_ms": 32158,
+      "challenge_id": "recorded-escalate-1"
+    },
+    {
+      "id": "act2",
+      "kind": "call_ended",
+      "t_ms": 62716,
+      "detail": "idle_timeout"
+    }
+  ],
+  "expected": {
+    "verdict": "ESCALATE",
+    "state": "ACTION",
+    "reasons": [],
+    "failure_tally": 0.5,
+    "request_version": 1,
+    "assurance": {
+      "identity_claimed": true,
+      "sso_pass_current": false,
+      "oob_confirmed_current": false,
+      "context_pass_current": false,
+      "no_contradictions": true,
+      "critical_fields_confirmed": false,
+      "exposure_within_limit": true,
+      "challenge_requirement_met": false,
+      "no_identity_switch": true,
+      "not_new_beneficiary": true,
+      "at_least_one_challenge_passed": false,
+      "no_injection_attempt": true,
+      "no_failed_challenge": true
+    }
+  }
+}
