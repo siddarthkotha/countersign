@@ -27,13 +27,13 @@ type Speed = (typeof SPEEDS)[number];
 const AUDIO_SPEEDS: ReadonlySet<Speed> = new Set([1]);
 
 // Exported so packages/web/src/screens/Replay.test.ts can drive this with a FAKE clock and a
-// fake audio element (jsdom's real <audio> never advances currentTime or lets .play()
-// resolve) -- the real risk here is never "does the browser's own audio clock drift" (it's
-// not ours to test), it's "does OUR start/stop/restart orchestration leave the audio element
-// pointed at the wrong moment" -- e.g. a stale `startedAtWall` surviving a restart, or a
-// pause that doesn't reset position so a later restart double-counts elapsed time. `clock`
-// is the thin adapter over a real `<audio>` element (see `audioClockFor` below); `now`
-// defaults to `Date.now` and is overridden by the test.
+// fake audio element (jsdom implements neither a real <audio> element's network/decode
+// pipeline nor a real AudioContext) -- the real risk here is never "does the browser's own
+// audio clock drift" (it's not ours to test), it's "does OUR start/stop/restart orchestration
+// leave the audio pointed at the wrong moment" -- e.g. a stale `startedAtWall` surviving a
+// restart, or a pause that doesn't reset position so a later restart double-counts elapsed
+// time. `clock` is the thin adapter over the real playback mechanism (see `webAudioClockFor`
+// below); `now` defaults to `Date.now` and is overridden by the test.
 export interface AudioSyncClock {
   play(): void;
   pause(): void;
@@ -76,24 +76,139 @@ export function createAudioSync(clock: AudioSyncClock, now: () => number = () =>
   };
 }
 
-/** The real adapter: wraps an `HTMLAudioElement` as an `AudioSyncClock`. `.play()`'s promise
- *  rejection (autoplay blocked, or the browser hasn't fetched enough to start yet) is
- *  swallowed the same way `startReplay`'s own WS-connect fallback already swallows a blocked
- *  automatic start below -- never surfaced as an error, the recording is still fully usable
- *  without its audio track. */
-function audioClockFor(el: HTMLAudioElement): AudioSyncClock {
+// Debugging session 2026-09-22 (Replay screen recorded-audio bug): a real-Chrome walk of the
+// deployed demo found the hidden `<audio src="/api/replay-audio/...">` element wired up below
+// stuck forever at readyState 0 / networkState 2 (LOADING) -- the recording's audio track
+// never played. Root-caused with evidence (event-listener instrumentation + a server request
+// log) against a LOCAL server running this same route: the browser's native `<audio>` element
+// never even issued the network request -- not a Range/Content-Length problem (packages/
+// server/src/http.ts's `/api/replay-audio/:file` route was ALSO fixed to answer real 206
+// Partial Content / Content-Length / Accept-Ranges, see http.test.ts's "replay audio" describe
+// block, but reproducing against the fixed route changed nothing). The one factor common to
+// every failing case -- our own endpoint, a well-known external CORS-enabled audio file, and
+// even a same-origin `blob:` URL with zero network involved -- was `document.hidden`: Chromium
+// suspends an `HTMLMediaElement`'s entire load/decode pipeline while its document isn't the
+// visible tab, independent of preload hints or server headers. `fetch()` and the Web Audio
+// API's `AudioContext.decodeAudioData` are NOT subject to that suspension (proven the same
+// way) -- so this fetches the recording's bytes itself and decodes/plays them through a raw
+// `AudioBufferSourceNode` instead of handing a `<audio src>` to the browser's native media
+// element, which sidesteps the suspension entirely regardless of which state caused it for any
+// given viewer (backgrounded tab, throttled window, or a real user's own tab-switch).
+
+/** One `AudioContext` for the whole Replay screen (recorded playback only, not the live
+ *  call's streamed PCM -- packages/web/src/audio/playback.ts's shared context is scoped to
+ *  Call.tsx and not reused here). Created lazily so importing this module never constructs
+ *  one under jsdom. Returns null when no `AudioContext` constructor exists at all (jsdom,
+ *  packages/web/test/Replay.test.tsx's full-component render) -- same graceful-fallback rule
+ *  as an autoplay-blocked `.play()` rejection: the recording is still fully usable without
+ *  its audio track, never a thrown error. */
+let sharedAudioContext: AudioContext | null = null;
+function getAudioContext(): AudioContext | null {
+  if (sharedAudioContext) return sharedAudioContext;
+  const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) return null;
+  sharedAudioContext = new Ctor();
+  return sharedAudioContext;
+}
+
+/** Decoded buffers cached by corpus filename -- a restart (Play again after Pause) or a
+ *  speed toggle back to 1x reuses the same decode instead of re-fetching/re-decoding the
+ *  recording every time. One in-flight promise per file collapses concurrent callers. */
+const decodedBufferCache = new Map<string, Promise<AudioBuffer>>();
+function loadDecodedBuffer(ctx: AudioContext, file: string): Promise<AudioBuffer> {
+  let pending = decodedBufferCache.get(file);
+  if (!pending) {
+    pending = fetch(`/api/replay-audio/${encodeURIComponent(file)}`)
+      .then((res) => res.arrayBuffer())
+      .then((bytes) => ctx.decodeAudioData(bytes));
+    // A failed fetch/decode must not poison the cache for a later retry (e.g. a transient
+    // network error) -- drop it so the next `startReplay` tries again from scratch.
+    pending.catch(() => decodedBufferCache.delete(file));
+    decodedBufferCache.set(file, pending);
+  }
+  return pending;
+}
+
+/** The real adapter: decodes `file`'s bytes once (cached) and plays them through a fresh
+ *  `AudioBufferSourceNode` each `play()` -- a source node is single-use by design (the Web
+ *  Audio API has no seek/resume on one), which is exactly the shape this screen already
+ *  needs: `createAudioSync`'s `stop()` always calls `seekToStart()` too, so every real
+ *  restart already begins the recording over from t=0 (see the `AudioSync.stop()` doc comment
+ *  above) -- there is never a "resume this same node" case to support.
+ *
+ *  `generation` guards the async decode against a `stop()`/`seekToStart()` that lands before
+ *  the fetch+decode promise settles (e.g. the judge switches speed away from 1x, or restarts,
+ *  within the first few hundred ms) -- without it, a stale decode could start playing a
+ *  recording the screen already asked to stop, audible after the fact with nothing on screen
+ *  to explain it.
+ *
+ *  `loadBuffer` defaults to the real `loadDecodedBuffer` (every real caller below); exported
+ *  and overridable so packages/web/src/screens/Replay.test.ts can drive this with a
+ *  controllable fake promise and a fake `AudioContext`-shaped object (jsdom has no real
+ *  `AudioContext`/`decodeAudioData` to test against) -- the risk this proves is never "does
+ *  the Web Audio API decode correctly" (not ours to test), it's "does the generation guard
+ *  actually stop a late-resolving decode from starting playback after a stop()/restart". */
+export function webAudioClockFor(
+  ctx: AudioContext,
+  getFile: () => string,
+  loadBuffer: (ctx: AudioContext, file: string) => Promise<AudioBuffer> = loadDecodedBuffer,
+): AudioSyncClock {
+  let source: AudioBufferSourceNode | null = null;
+  let startedAtCtxTime: number | null = null;
+  let generation = 0;
+
+  function stopSource(): void {
+    if (source) {
+      try {
+        source.stop();
+      } catch {
+        // Already stopped/ended -- fine, this is a normal race with natural playback end.
+      }
+      source.disconnect();
+    }
+    source = null;
+    startedAtCtxTime = null;
+  }
+
   return {
     play() {
-      void el.play().catch(() => {});
+      const myGeneration = ++generation;
+      // Autoplay-blocked contexts start 'suspended' until a real user gesture; same
+      // graceful-fallback rule as the old `<audio>.play()` rejection -- never surfaced as an
+      // error, the recording is still fully usable without its audio track.
+      void ctx.resume().catch(() => {});
+      // Orchestrator review 2026-09-22 9:05 PM: the transcript clock starts NOW, at play();
+      // the fetch + decode below can take most of a second on a cold load. Anchor to this
+      // instant and start the buffer that far in, so the voices never lag the transcript by
+      // the decode time (proven by Replay.test.ts's late-decode offset test).
+      const playCalledAtCtxTime = ctx.currentTime;
+      const file = getFile();
+      loadBuffer(ctx, file)
+        .then((buffer) => {
+          if (myGeneration !== generation) return; // superseded by a later stop()/restart
+          const offsetSeconds = Math.max(0, ctx.currentTime - playCalledAtCtxTime);
+          const node = ctx.createBufferSource();
+          node.buffer = buffer;
+          node.connect(ctx.destination);
+          node.start(0, offsetSeconds);
+          source = node;
+          startedAtCtxTime = playCalledAtCtxTime;
+        })
+        .catch(() => {
+          // Fetch or decode failed -- same graceful-fallback rule as above.
+        });
     },
     pause() {
-      el.pause();
+      generation++; // invalidate any in-flight decode so it can't start after this pause
+      stopSource();
     },
     seekToStart() {
-      el.currentTime = 0;
+      generation++;
+      stopSource();
     },
     currentTimeMs() {
-      return el.currentTime * 1000;
+      if (startedAtCtxTime === null) return 0;
+      return (ctx.currentTime - startedAtCtxTime) * 1000;
     },
   };
 }
@@ -148,16 +263,22 @@ export default function Replay() {
   // when paused, clarifying that resuming mid-call is not supported.
   const [hasPlayedBefore, setHasPlayedBefore] = useState(false);
   const clientRef = useRef<CallClient | null>(null);
-  // Founder ruling 2026-09-22 8:00 PM: the hidden <audio> element carrying a recording's
-  // real voices at speed 1 (AUDIO_SPEEDS above). `audioSyncRef` wraps it lazily -- the
-  // element doesn't exist yet on the render that creates `audioRef`, so the sync object is
-  // built the first time something actually needs to start or stop audio.
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Founder ruling 2026-09-22 8:00 PM: a recording's real voices at speed 1 (AUDIO_SPEEDS
+  // above), played via Web Audio (see `webAudioClockFor` above for why, not a native <audio>
+  // element). `pendingAudioFileRef` names the file `webAudioClockFor`'s `play()` should
+  // fetch/decode -- set immediately before every `audioSync()?.start()` call, so the closure
+  // it reads from always sees the file that call is actually starting, never a stale one from
+  // a previous selection. `audioSyncRef` is built lazily, once, the first time anything
+  // actually needs to start or stop audio.
+  const pendingAudioFileRef = useRef<string>('');
   const audioSyncRef = useRef<AudioSync | null>(null);
 
   function audioSync(): AudioSync | null {
-    if (!audioRef.current) return null;
-    if (!audioSyncRef.current) audioSyncRef.current = createAudioSync(audioClockFor(audioRef.current));
+    if (!audioSyncRef.current) {
+      const ctx = getAudioContext();
+      if (!ctx) return null;
+      audioSyncRef.current = createAudioSync(webAudioClockFor(ctx, () => pendingAudioFileRef.current));
+    }
     return audioSyncRef.current;
   }
 
@@ -199,9 +320,8 @@ export default function Replay() {
     // connect below so the audio track's own t=0 (the moment AssemblyAI began recording)
     // lines up with the replay clock's own t=0 -- both are "the instant this call began".
     const recording = recordings.find((r) => r.file === file);
-    if (recording?.has_audio && AUDIO_SPEEDS.has(atSpeed) && audioRef.current) {
-      audioRef.current.src = `/api/replay-audio/${encodeURIComponent(file)}`;
-      audioRef.current.load();
+    if (recording?.has_audio && AUDIO_SPEEDS.has(atSpeed)) {
+      pendingAudioFileRef.current = file;
       audioSync()?.start();
     }
 
@@ -265,13 +385,13 @@ export default function Replay() {
       <Masthead sessionId={screenState?.session_id ?? selected} status={screenState?.agent_status ?? null} />
 
       {/* Founder ruling 2026-09-22 8:00 PM: the recording's real audio, when it has one
-          (`has_audio`), played at speed 1 only (AUDIO_SPEEDS above). No `controls` attribute
-          -- this is not a visible player, no new button/label/layout, exactly the founder's
-          brief ("no visual design changes"); `startReplay`/`pausePlayback` above are the
-          only things that ever touch it. Absent entirely from any speed-4x/20x replay and
-          from any recording with no audio file -- the screen behaves exactly as it always
-          has in both of those cases. */}
-      <audio ref={audioRef} style={{ display: 'none' }} preload="auto" />
+          (`has_audio`), played at speed 1 only (AUDIO_SPEEDS above) -- no visible player, no
+          new button/label/layout, exactly the founder's brief ("no visual design changes");
+          `startReplay`/`pausePlayback` above are the only things that ever touch it. Played
+          via Web Audio (`webAudioClockFor` above), not a DOM `<audio>` element -- there is
+          nothing to render here. Absent entirely from any speed-4x/20x replay and from any
+          recording with no audio file -- the screen behaves exactly as it always has in both
+          of those cases. */}
 
       <h1>Watch a recorded attack</h1>
 

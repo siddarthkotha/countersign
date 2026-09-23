@@ -526,6 +526,72 @@ describe('http server', () => {
       const after = await fetch(`${base}/api/replay`);
       expect(after.status).toBe(200);
     });
+
+    // Debugging session 2026-09-22 (Replay screen recorded-audio bug): a real-Chrome walk of
+    // the deployed demo found this route always answered with Transfer-Encoding: chunked, NO
+    // Content-Length, NO Accept-Ranges, and ignored a `Range: bytes=0-` request (returned 200,
+    // not 206) -- confirmed by curl against both the live site and this same route running
+    // locally. These tests exercise the real route with a real `fetch()` (never a copy of the
+    // handler) against `recorded-freeze.ogg`, the one recording this checkout actually has
+    // committed (see the `has_audio: true` assertion above).
+    it('a plain GET (no Range) returns 200 with a real Content-Length and Accept-Ranges: bytes', async () => {
+      const { base } = await start();
+      const r = await fetch(`${base}/api/replay-audio/recorded-freeze`);
+      expect(r.status).toBe(200);
+      expect(r.headers.get('accept-ranges')).toBe('bytes');
+      const contentLength = Number(r.headers.get('content-length'));
+      expect(contentLength).toBeGreaterThan(0);
+      const body = await r.arrayBuffer();
+      expect(body.byteLength).toBe(contentLength);
+    });
+
+    it('a HEAD request reports Content-Length/Accept-Ranges with no body', async () => {
+      const { base } = await start();
+      const r = await fetch(`${base}/api/replay-audio/recorded-freeze`, { method: 'HEAD' });
+      expect(r.status).toBe(200);
+      expect(r.headers.get('accept-ranges')).toBe('bytes');
+      expect(Number(r.headers.get('content-length'))).toBeGreaterThan(0);
+      const body = await r.arrayBuffer();
+      expect(body.byteLength).toBe(0);
+    });
+
+    it('`Range: bytes=0-` returns 206 with a matching Content-Range and the full file', async () => {
+      const { base } = await start();
+      const full = await fetch(`${base}/api/replay-audio/recorded-freeze`);
+      const fullBytes = await full.arrayBuffer();
+
+      const r = await fetch(`${base}/api/replay-audio/recorded-freeze`, { headers: { Range: 'bytes=0-' } });
+      expect(r.status).toBe(206);
+      expect(r.headers.get('content-range')).toBe(`bytes 0-${fullBytes.byteLength - 1}/${fullBytes.byteLength}`);
+      expect(Number(r.headers.get('content-length'))).toBe(fullBytes.byteLength);
+      const body = await r.arrayBuffer();
+      expect(body.byteLength).toBe(fullBytes.byteLength);
+      expect(Buffer.from(body).equals(Buffer.from(fullBytes))).toBe(true);
+    });
+
+    it('a mid-file byte range returns exactly those bytes, matching the full file at the same offset', async () => {
+      const { base } = await start();
+      const full = await fetch(`${base}/api/replay-audio/recorded-freeze`);
+      const fullBytes = Buffer.from(await full.arrayBuffer());
+
+      const r = await fetch(`${base}/api/replay-audio/recorded-freeze`, { headers: { Range: 'bytes=100-199' } });
+      expect(r.status).toBe(206);
+      expect(r.headers.get('content-range')).toBe(`bytes 100-199/${fullBytes.byteLength}`);
+      expect(r.headers.get('content-length')).toBe('100');
+      const body = Buffer.from(await r.arrayBuffer());
+      expect(body.length).toBe(100);
+      expect(body.equals(fullBytes.subarray(100, 200))).toBe(true);
+    });
+
+    it('a range starting past the end of the file is a 416 with Content-Range: bytes */total', async () => {
+      const { base } = await start();
+      const full = await fetch(`${base}/api/replay-audio/recorded-freeze`);
+      const total = (await full.arrayBuffer()).byteLength;
+
+      const r = await fetch(`${base}/api/replay-audio/recorded-freeze`, { headers: { Range: `bytes=${total + 1000}-` } });
+      expect(r.status).toBe(416);
+      expect(r.headers.get('content-range')).toBe(`bytes */${total}`);
+    });
   });
 
   // Bug fix (2026-09-04): the live CallContext used to be hardcoded to `unverified_voip`/

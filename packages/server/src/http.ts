@@ -11,6 +11,7 @@ import {
   type CapDecisionReason,
 } from './caps.js';
 import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { defaultCorpusDir, defaultReplayAudioDir, listCorpusFiles, listReplayAudioFiles, loadCorpusFile, loadReplayAudioPath } from './replay.js';
 import type { StaticServer } from './static.js';
 import { isAllowedOrigin } from './origin.js';
@@ -137,6 +138,40 @@ function statusForDecisionReason(reason: CapDecisionReason): number {
   return reason === 'kill_switch' || reason === 'no_api_key' || reason === 'credits_exhausted' || reason === 'mint_error'
     ? 503
     : 429;
+}
+
+/** Debugging session 2026-09-22 (Replay screen recorded-audio bug): parses a single-range
+ *  `Range: bytes=<start>-<end>` request header (RFC 7233 §2.1) against a known `total` byte
+ *  count. Only the single-range forms browsers actually send for a `<audio>`/`<video>`
+ *  element are handled -- `bytes=0-`, `bytes=0-499`, `bytes=-500` (last 500 bytes) -- a
+ *  multi-range request (`bytes=0-99,200-299`) or anything else unparseable returns
+ *  `'unsatisfiable'` is never produced for THAT case (multi-range just isn't split; the whole
+ *  header is ignored and the caller falls back to a plain 200, same as before this fix --
+ *  none of our clients ever send one). Returns `null` for "no Range header at all" (serve the
+ *  whole file, 200), `{start, end}` for a satisfiable single range, or `'unsatisfiable'` for a
+ *  range that parses but names bytes outside `[0, total)` (start > end, or start >= total) --
+ *  RFC 7233 §4.4 requires a 416 for that case, not silently clamping it into something else. */
+export function parseRangeHeader(rangeHeader: string | undefined, total: number): { start: number; end: number } | 'unsatisfiable' | null {
+  if (typeof rangeHeader !== 'string') return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+  if (!match) return null; // unparseable or multi-range: ignore, serve 200 (unchanged behavior)
+  const [, startStr, endStr] = match;
+  if (startStr === '' && endStr === '') return null; // "bytes=-" has no meaning; ignore
+  let start: number;
+  let end: number;
+  if (startStr === '') {
+    // Suffix range "bytes=-N": the last N bytes.
+    const suffixLength = Number(endStr);
+    start = Math.max(0, total - suffixLength);
+    end = total - 1;
+  } else {
+    start = Number(startStr);
+    end = endStr === '' ? total - 1 : Number(endStr);
+  }
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start >= total || end < start) {
+    return 'unsatisfiable';
+  }
+  return { start, end: Math.min(end, total - 1) };
 }
 
 /** Safe bearer token comparison: returns false if lengths differ, uses timingSafeEqual
@@ -285,17 +320,49 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
         sendJson(res, 404, { error: 'not_found' });
         return;
       }
+      // Debugging session 2026-09-22 (Replay screen recorded-audio bug): the live walk found
+      // this route always sent Transfer-Encoding: chunked with NO Content-Length and NO
+      // Accept-Ranges, and answered a `Range: bytes=0-` request with a full 200 instead of a
+      // 206 -- real-Chrome reproduction against a local build (same evidence, same repro
+      // steps) confirmed this is genuinely spec-non-compliant (RFC 7233), independent of the
+      // separate page-visibility finding written up in the same session's notes. `statSync`'s
+      // exception path (file vanished between `loadReplayAudioPath`'s check and this stat)
+      // gets the same plain 404 as every other guard on this route, not a crash.
+      let fileStat: Awaited<ReturnType<typeof stat>>;
+      try {
+        fileStat = await stat(audioPath);
+      } catch {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      const total = fileStat.size;
+      const range = parseRangeHeader(req.headers.range, total);
+      if (range === 'unsatisfiable') {
+        res.writeHead(416, { 'Content-Range': `bytes */${total}` });
+        res.end();
+        return;
+      }
+      const start = range ? range.start : 0;
+      const end = range ? range.end : total - 1;
+      const statusCode = range ? 206 : 200;
       // static.ts's D1 fix-round-2 ordering: create the stream and attach its 'error'
-      // handler BEFORE any header goes out, so a file that vanishes between
-      // `loadReplayAudioPath`'s check and this read (or simply fails to open) still gets a
-      // clean 404 instead of a half-written response or a crash.
-      const stream = createReadStream(audioPath);
+      // handler BEFORE any header goes out, so a file that vanishes between the `stat` above
+      // and this read (or simply fails to open) still gets a clean 404 instead of a
+      // half-written response or a crash.
+      const stream = createReadStream(audioPath, { start, end });
       stream.on('error', () => {
         if (!res.headersSent) sendJson(res, 404, { error: 'not_found' });
         else res.destroy();
       });
       stream.on('open', () => {
-        res.writeHead(200, { 'Content-Type': 'audio/ogg', 'Cache-Control': 'no-cache' });
+        const headers: Record<string, string> = {
+          'Content-Type': 'audio/ogg',
+          'Cache-Control': 'no-cache',
+          'Accept-Ranges': 'bytes',
+          'Content-Length': String(end - start + 1),
+        };
+        if (range) headers['Content-Range'] = `bytes ${start}-${end}/${total}`;
+        res.writeHead(statusCode, headers);
         if (req.method === 'HEAD') {
           res.end();
           stream.destroy();
