@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import type { ServerConfig } from './config.js';
+import { handleBrainChatCompletions } from './brain/endpoint.js';
+import type { BrainCallRegistry } from './brain/registry.js';
 import {
   newCapsState,
   canStartSession,
@@ -59,6 +61,18 @@ export interface HttpDeps {
    *  real caller, including index.ts); tests override it to a short value to exercise the
    *  timeout path without a slow real wait. */
   diagnostics_post_timeout_ms?: number;
+  /** ONE-BRAIN LIVE PATH (2026-09-22, Lane C, docs/plans/2026-09-22-one-brain-live-path.md
+   *  §1/§5). The in-process token->CallSession registry (Lane B, ./brain/registry.ts) that
+   *  POST /api/brain/chat/completions reads from. Optional so every existing test/caller
+   *  keeps compiling and behaving unchanged -- omitted (or `brainApiKey` omitted) means the
+   *  route is completely ABSENT (404, not 401), same shape as the admin routes below.
+   *  index.ts (Lane D) is the only real caller that supplies both together, gated on
+   *  COUNTERSIGN_BRAIN=endpoint. */
+  brainRegistry?: BrainCallRegistry;
+  /** Static bearer/`x-api-key` credential AssemblyAI's stored-agent LLM config authenticates
+   *  with (Lane D wires this from the COUNTERSIGN_BRAIN_API_KEY env var). See
+   *  `brainRegistry`'s own doc comment for the 404-when-either-is-missing behavior. */
+  brainApiKey?: string;
 }
 
 // Origin fix round 1 (task-origin-review.md): `selfOrigin`/`isAllowedOrigin` used to live
@@ -100,7 +114,7 @@ const CLIENT_BODY_READ_TIMEOUT_MS = 10_000;
  *  which writes the 408 before ever touching the socket). On timeout, this function itself
  *  does NOT touch `req`/the socket at all -- it only resolves; the caller (which holds
  *  `res`) is responsible for responding first, then closing. */
-function readBodyLimited(
+export function readBodyLimited(
   req: IncomingMessage,
   maxBytes: number,
   timeoutMs: number = CLIENT_BODY_READ_TIMEOUT_MS,
@@ -636,6 +650,22 @@ export function createHttpServer(cfg: ServerConfig, deps: HttpDeps): { server: S
       resetLiveCallsOverride(state);
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    // ONE-BRAIN LIVE PATH (2026-09-22, Lane C, docs/plans/2026-09-22-one-brain-live-path.md
+    // §1/§5): AssemblyAI's stored agent calls this as its own OpenAI-compatible chat-
+    // completions LLM endpoint -- never a browser client, no CORS relevance. Same "route
+    // completely absent" shape as the admin routes above: 404 (not 401) unless BOTH
+    // `brainRegistry` and `brainApiKey` are configured (index.ts/Lane D supplies both
+    // together, gated on COUNTERSIGN_BRAIN=endpoint). All auth/body/framing logic lives in
+    // brain/endpoint.ts (Lane C) -- this route just guards config presence and delegates.
+    if (req.method === 'POST' && path === '/api/brain/chat/completions') {
+      if (!deps.brainRegistry || !deps.brainApiKey) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      await handleBrainChatCompletions(req, res, { registry: deps.brainRegistry, apiKey: deps.brainApiKey });
       return;
     }
 
