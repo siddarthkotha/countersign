@@ -4,6 +4,7 @@
 *.key
 *.key.local
 *.pem
+*-api-key.txt
 
 # Dependencies / build output
 node_modules/
@@ -36,3 +37,7 @@ scripts/rehearse/reports/
 
 # Multi-model critique runner: per-run reports
 scripts/critique/reports/
+
+# Spike runs: local logs and outputs
+scripts/spike/logs/
+scripts/spike/out/
