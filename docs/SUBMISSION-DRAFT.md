@@ -34,7 +34,7 @@ the AssemblyAI Voice Agent API, that runs a calm, adaptive security interview be
 any request can move, checking what the caller claims to know, asking cross-checking
 questions, and tracking whether their story holds up turn to turn. Every claim is
 checked against structured evidence, never a guess, and a deterministic engine, not the
-AI, decides. The AI asks the questions.
+AI, decides. The deterministic engine writes every word the agent speaks.
 
 Countersign never claims to detect a fake or cloned voice. It proves things
 behaviorally: what the caller knows, whether their story stays consistent, and what
@@ -59,8 +59,8 @@ sits alongside it.
 
 **Business value.** The scenario is a corporate payment desk. A caller claiming to be
 the CEO demands an urgent $1.8 million wire to an escrow account, then raises it to
-$2.1 million mid-call, a live inconsistency Countersign catches and names aloud, not
-scripted.
+$2.1 million mid-call, a live inconsistency Countersign catches and shows with the
+caller's exact words.
 <!-- source: docs/BRIEF.md §4, "Scenario B: THE INTERROGATION" -->
 This mirrors CEO-fraud and deepfake wire losses: a human alone under
 pressure, no second check. PROVEN by the FBI's 2025 Internet Crime Report (ic3.gov):
@@ -77,14 +77,12 @@ request a privileged action, it can never authorize one."
 A verified request needs an independent second human before money moves; a
 failed one freezes the rail and opens an incident.
 
-**Application of technology.** Countersign uses the AssemblyAI Voice Agent API
-throughout: server-created single-use temporary authentication tokens so the browser never touches the API
-key; 24 kHz PCM16 (16-bit mono audio at 24,000 samples per second) mic audio streamed through an AudioWorklet; a session.update sent
-at connect and on every goal change; growing key phrases the speech recognizer learns from (names, dollar amounts, and domain terms mentioned during the call);
-real turn-detection barge-in (detects when the caller interrupts and stops the agent mid-sentence) that catches an interruption and flushes playback
-within a frame; and tool results returned on AssemblyAI's exact reply.done timing,
-never early, never late. Built around realtime primitives, not a chatbot wrapped
-around a microphone.
+**Application of technology.** Countersign runs on the AssemblyAI Voice Agent API: a stored
+agent bound per call, with our own LLM endpoint so the deterministic engine writes every word
+the agent speaks; single-use server tokens; max-accuracy transcription with the call's
+proper nouns as key terms; adaptive turn detection with real barge-in; and AssemblyAI's own
+two-voice session recordings, which power the no-microphone replay of real calls. Realtime
+primitives, not a chat wrapper.
 
 **Originality.** Countersign is not a deepfake detector, an indefensible claim it never
 makes. Instead it verifies behaviorally: what the caller knows, whether their story
@@ -98,7 +96,7 @@ against a policy engine, across 879 attempts. What's new is the application: liv
 interrogation feeding an engine capped at staging for a second human.
 <!-- source: README.md "How a verdict is decided": STAGE ceiling, no RELEASE verdict -->
 <!-- source: docs/BRIEF.md §13 "Honesty constraint": APort Vault CTF figures cited verbatim -->
-<!-- word count, all four paragraphs combined: 400 (was 524), verified 2026-09-09 by a
+<!-- word count, all four paragraphs combined: 399 (was 524), verified 2026-09-25 by a
      script that strips this heading and every HTML comment before running `wc -w`.
      Trimmed to meet this section's 400-word target per founder ruling 2026-09-09:
      hedging, repetition, and adjectives cut first; every PROVEN claim (FBI IC3 figures,
@@ -108,12 +106,14 @@ interrogation feeding an engine capped at staging for a second human.
 
 ## 4. Technologies used
 
-- **AssemblyAI Voice Agent API**: realtime speech-to-text, text-to-speech, and tool
-  calling, used for server-created single-use temporary authentication tokens; 24 kHz PCM16 (16-bit mono audio at 24,000 samples per second) mic audio
-  via an AudioWorklet; `session.update` at connect and on every goal change; growing
-  `keyterms` boosted per call; turn detection and barge-in (detects when the caller interrupts and stops the agent mid-sentence) (`input.speech.started`,
-  `reply.done` with `status: 'interrupted'`); `tool.result` returned on `reply.done`
-  timing; bounded reconnect with `session.resume` inside the documented resumable
+- **AssemblyAI Voice Agent API**: realtime speech-to-text, text-to-speech, and stored agent
+  binding, used with a server-supplied custom LLM endpoint so the deterministic engine writes
+  every reply; server-created single-use temporary authentication tokens; 24 kHz PCM16 (16-bit mono audio at 24,000 samples per second) mic audio
+  via an AudioWorklet; one post-bind `session.update` carrying a per-call token, proper-noun
+  `keyterms` and `transcription_mode: max_accuracy`; session recordings and timelines
+  downloaded once from the sessions API for the recorded-call replay
+  (packages/engine/corpus/recorded-*.json, packages/server/replay-audio/); turn detection and barge-in (detects when the caller interrupts and stops the agent mid-sentence) (`input.speech.started`,
+  `reply.done` with `status: 'interrupted'`); bounded reconnect with `session.resume` inside the documented resumable
   window.
   <!-- source: README.md "How Countersign uses the AssemblyAI Voice Agent API" -->
 - **TypeScript**: end to end, shared evidence/FSM types across engine, server, and UI.

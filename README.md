@@ -26,13 +26,13 @@ microphone? "Watch a recorded attack" drives the full screen from a recorded cal
 and everything in the demo is synthetic; see Disclosure below.
 
 **How it is built, in one paragraph.** The browser captures your voice and plays the agent's
-replies. A small Node server mints a short-lived token, relays audio to and from the
-AssemblyAI Voice Agent API, and feeds every exact transcript line into a pure, dependency-free
-policy engine. That engine, a finite-state rule table, computes the verdict from structured
-evidence; the language model only phrases the conversation inside the state the engine
-allows and never decides. The server re-runs the same engine before any terminal action and
-acts only on a matching verdict. Voice can reach STAGED at most; a human second approval
-releases anything.
+replies. A small Node server mints a short-lived token, relays audio to and from a stored
+AssemblyAI Voice Agent ("countersign-brain"), and feeds every exact transcript line into a pure,
+dependency-free policy engine. The engine is a finite-state rule table that computes the verdict
+from structured evidence. For every reply the agent gives, the engine writes the exact words via
+a custom LLM endpoint the server provides; the language model inside AssemblyAI never composes
+sentences. The server re-runs the same engine before any terminal action and acts only on a
+matching verdict. Voice can reach STAGED at most; a human second approval releases anything.
 
 ## Business value
 
@@ -53,57 +53,77 @@ CEO impostor cases p50 46.7 s over 41 runs). PROVEN: docs/LATENCY.md section 4, 
 ## Status
 
 Countersign is built and deployed. PROVEN by `GET /health` and `GET /version` on the live demo
-at https://countersign-bf8q.onrender.com (2026-09-21, 10:30 PM CDT): the live site serves
-commit `8316ca3` and reports healthy. PROVEN by `npm test` on that commit: 2,387 tests pass
-across 121 files, typecheck is clean, the web bundle builds, and all 42 recorded call
-transcripts in `packages/engine/corpus/` replay exactly through the real policy engine. Every
-one of the eleven judge cases in docs/PLAY-SHEET.md has passed live on the deployed site
-through the synthetic-caller harness, and the founder has played cases 5, 7 and 11 live with
-his own voice on 2026-09-21 (records kept locally, gitignored). The harness grades each live
-call on experience as well as verdict: repeated questions, merged replies, the agent talking
-over the caller, holding-line spam, and the delay from verdict to spoken goodbye.
+at https://countersign-bf8q.onrender.com (2026-09-25): the live site is healthy and serves
+the one-voice design with AssemblyAI's Voice Agent API bound to a stored agent. PROVEN by
+`npm test` on the current build (2026-09-25, 8:01 PM): 2,689 tests pass across 132 files,
+typecheck is clean, the web bundle builds, and all 45 recorded call transcripts in
+`packages/engine/corpus/` replay exactly through the real policy engine
+(`packages/engine/test/corpus.test.ts` replays every file in that folder). On the current build,
+the synthetic-caller harness placed five live calls against the deployed site on 2026-09-25
+(an honest caller twice, the CEO impostor twice, and a caller who talks over the agent): every
+verdict was right and every call graded clean on experience. The harness grades repeated
+questions, merged replies, the agent talking over the caller, holding-line spam, and the delay
+from verdict to spoken goodbye. On the earlier two-voice design, all eleven judge cases in
+docs/PLAY-SHEET.md passed live through the same harness (2026-09-21).
 
 ## How Countersign uses the AssemblyAI Voice Agent API
 
-- **Server-minted, single-use tokens with a session cap.** The browser never talks to
+- **Server-minted, single-use tokens with a session cap, bound to a stored agent.** The browser never talks to
   AssemblyAI at all. It only ever opens Countersign's own `/ws/call/:id` socket
   (`packages/server/src/http.ts`). The server mints the AssemblyAI token itself, calling
   `GET https://agents.assemblyai.com/v1/token` with `expires_in_seconds` (the 60-second window
   the token must be redeemed in) and `max_session_duration_seconds` (the hard cap on how long
   the call itself can run), and uses that token exclusively server-side to open its own
-  connection to AssemblyAI. Neither the token nor the API key ever reaches the browser
-  (`packages/server/src/token.ts`, `packages/server/src/aai/session.ts`).
+  connection to AssemblyAI. At connect, the server binds the session to a stored Voice Agent
+  named "countersign-brain" and supplies its own LLM endpoint so the deterministic engine writes
+  every reply. Neither the token nor the API key ever reaches the browser
+  (`packages/server/src/token.ts`, `packages/server/src/aai/session.ts`, `packages/server/src/brain/endpoint.ts`).
 - **24 kHz PCM16 mic audio via an AudioWorklet.** The browser captures the mic with
   `getUserMedia`, downsamples whatever the browser's native sample rate is to 24,000 Hz mono
   16-bit PCM inside an `AudioWorkletProcessor` running on the audio-render thread (off the React
   thread), and posts 20 ms base64-encoded frames up to the server one at a time
   (`packages/web/src/audio/capture.worklet.ts`, `packages/web/src/audio/capture.ts`).
-- **`session.update` at connect, then again on every goal change.** The first `session.update`,
-  sent the instant the socket opens, sets `system_prompt`, `input.format.encoding`,
-  `output.voice`, `output.format.encoding`, an optional one-time `greeting`, the tool list (now
-  always empty, since the server runs every lookup itself), and
-  `keyterms` (`packages/server/src/aai/config.ts`). After that, every time the policy engine's
-  goal changes mid-call, the server sends a fresh `session.update`. However, that later update only
-  ever touches `system_prompt`, `tools`, `input.keyterms`, and `input.turn_detection.min_silence`.
-  Voice, output audio encoding, and the greeting are set once, at connect, and never resent,
-  because AssemblyAI fixes those three for the rest of the session once it starts
-  (`packages/server/src/call/session.ts`, the `applyEvaluate` method).
-- **Keyterms grow with the call.** `input.keyterms` starts from the seed's keyterms list (names,
+- **One voice: a stored agent plus our own LLM endpoint (the live mode since 2026-09-23).** The
+  voice, the greeting ("Meridian payments desk, verification line. Who am I speaking with?") and
+  the LLM endpoint live on a stored AssemblyAI agent, reconciled on every server boot
+  (`packages/server/src/aai/agent.ts`). Each call binds to it with `session.update {agent_id}`,
+  then sends one post-bind `session.update` carrying a per-call token in `system_prompt`, a fixed
+  list of proper-noun `keyterms`, and `transcription_mode: 'max_accuracy'`
+  (`packages/server/src/aai/config.ts`, `buildPostBindSessionUpdate`). Nothing is resent mid-call.
+  For every reply, AssemblyAI calls `POST /api/brain/chat/completions` on our server, which checks
+  the token and answers with the exact sentence the engine's current goal renders
+  (`packages/server/src/brain/endpoint.ts`, `packages/server/src/brain/spokenLines.ts`), so no
+  model composes the agent's words. The greeting asks for the caller's name first because, in
+  tests that streamed a recorded human voice into fresh sessions, a long request spoken as the
+  first turn was cut off early 13 times out of 13, and whole 3 times out of 3 after one short
+  name line (2026-09-25, `scripts/spike/turn-repro/results/`). If the stored agent cannot be set
+  up at boot, every call falls back to the earlier mode described in the next bullets.
+- **Earlier mode (still the automatic fallback): `session.update` at connect, then again on every
+  goal change.** The first `session.update` sets `system_prompt`, `input.format.encoding`,
+  `output.voice`, `output.format.encoding`, a one-time `greeting`, the tool list (always empty,
+  since the server runs every lookup itself), and `keyterms`. After that, every goal change sends
+  a fresh `session.update` touching only `system_prompt`, `tools`, `input.keyterms`, and the
+  closing turn's `turn_detection`. In this mode AssemblyAI's model phrases each line inside the
+  goal the engine sets and never decides (`packages/server/src/call/session.ts`, the
+  `applyEvaluate` method).
+- **Keyterms grow with the call (earlier mode).** `input.keyterms` starts from the seed's keyterms list (names,
   companies, and domain phrases such as wire transfer, escrow, SSO, out-of-band) and grows per
   state. The server adds every proper noun and dollar amount the caller has actually stated
   (both the caller's spoken form, e.g. "one point eight million", and the normalized display
   form, e.g. "$1,800,000") plus every evidence quote captured so far, so the transcriber is
   boosted toward the exact words this specific call needs, up to the 100-term cap
   (`packages/engine/src/fsm.ts`, the `buildKeyterms` function).
-- **Turn detection and barge-in.** The same `session.update` sets `turn_detection`
-  (`vad_threshold`, `min_silence`, `max_silence`, `interrupt_response: true`). When the caller
+- **Turn detection and barge-in.** The live mode sends no `turn_detection` settings, so
+  AssemblyAI's own adaptive turn detection applies (its docs say setting `min_silence` or
+  `max_silence` switches that adaptation off; tonight's tests found neither setting stopped the
+  first-turn cut-off, which is why the greeting asks for a name). When the caller
   talks over the agent, AssemblyAI sends `input.speech.started` and, once the turn resolves,
   `reply.done` with `status: 'interrupted'`. The server treats `input.speech.started` as the
   signal to flush playback immediately; on the browser side, the playback queue stops every
   scheduled audio source and clears itself within one frame, so nothing already queued keeps
   playing after the interrupt. The barge-in is won client-side, in the audio buffer
   (`packages/server/src/call/session.ts`, `packages/web/src/audio/playback.ts`).
-- **`tool.result` timing.** A tool result is computed and queued as soon as the tool call
+- **`tool.result` timing (earlier mode).** A tool result is computed and queued as soon as the tool call
   arrives, but only sent back to AssemblyAI once `reply.done` arrives for that turn. It is never
   sent earlier or later, per AssemblyAI's own timing rule. If that `reply.done` instead reports
   `status: 'interrupted'`, the queued result is never sent (a new turn has already started); the
@@ -141,9 +161,9 @@ over the caller, holding-line spam, and the delay from verdict to spoken goodbye
   connection, times connect → `session.ready`, then times `session.ready` → the first
   `reply.audio` byte. It's opt-in only (`--live` plus `ASSEMBLYAI_API_KEY`) and never runs in CI.
 
-**What we tried first, and why the model ended up with zero tools.** The build did not start
-this way. The first working version offered the voice model all eight tool schemas at connect
-time, including the three evidence lookups (`get_request_history`, `check_sso_context`,
+**What we tried first, and why the model ended up with zero agency.** The build did not start
+with a custom endpoint. The first working version offered the voice model all eight tool schemas
+at connect time, including the three evidence lookups (`get_request_history`, `check_sso_context`,
 `verify_out_of_band`), each of which requires an `identity_id` parameter so the mock backend
 knows which record to check. In a live rehearsal on 2026-09-03
 (`scripts/rehearse/reports/2026-09-03T23-04-42-scenario-a-dana-legitimate.md`), the model read
@@ -154,8 +174,11 @@ should have staged. The fix was not a better prompt; it was to stop showing the 
 at all. Since commit `42d720f`, the voice model is offered zero tools in every state
 (`allowedTools` in `packages/engine/src/fsm.ts` always returns `[]`); the server now runs every
 lookup and every terminal action itself, from the policy engine's own state machine, and a stray
-tool call from the model is rejected and logged as ignored. This makes the LAW 3 boundary
-stronger, not weaker: the model cannot act at all now, in any state. It can only speak.
+tool call from the model is rejected and logged as ignored. Since 2026-09-23 the live mode goes
+one step further: the engine writes every word the agent speaks through our own LLM endpoint, so
+in that mode no model decides, acts, or composes a sentence. If the stored agent cannot be set up
+at boot, calls fall back to the earlier mode, where the model phrases lines but still never
+decides or acts.
 
 ## How a verdict is decided
 
@@ -267,8 +290,10 @@ in this repository.
 ## Measured latency (live AssemblyAI Voice Agent API, deployed site)
 
 All rows are measured on the deployed demo across every scenario, 2026-09-09 to 2026-09-22,
-from the runs' own event timestamps. p50 and p95 use linear interpolation over the sorted
-sample; `n` is the exact sample size. Source and per-scenario breakdown: docs/LATENCY.md.
+from the runs' own event timestamps, during the earlier two-voice design phase. After 2026-09-23,
+the one-voice design with the stored agent and custom LLM endpoint became live. p50 and p95 use
+linear interpolation over the sorted sample; `n` is the exact sample size. Source and
+per-scenario breakdown: docs/LATENCY.md.
 
 | What is measured | n | p50 | p95 | Label |
 |---|---|---|---|---|
