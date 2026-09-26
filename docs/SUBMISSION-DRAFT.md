@@ -143,9 +143,10 @@ interrogation feeding an engine capped at staging for a second human.
    recorded call, both voices, through the real decision engine.
 3. Watch the split screen: the call on the left, the evidence record building card by
    card on the right, in step with what's said.
-4. Then pick a role card, click **Check microphone**, then **Try it live (experimental)** and
-   **Start Call**. The agent asks "Who am I speaking with?": give your name first, then your
-   request.
+4. Then pick a role card: it shows what to say first and the facts you need, and the same
+   cheat sheet stays on screen during the call. Click **Check microphone**, then **Try it live
+   (experimental)** and **Start Call**. The agent asks "Who am I speaking with?": give your
+   name first, then your request.
 5. Interrupt the agent mid-sentence. Watch it stop mid-word.
 6. As the CEO caller, change the dollar amount partway through. Watch the wire freeze and
    the amount check quote both figures in your own words.

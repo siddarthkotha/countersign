@@ -1,4 +1,5 @@
 import type { DemoPersona } from '../api';
+import RoleFacts from './RoleFacts';
 
 export type RoleCardsProps = {
   selected: DemoPersona | null;
@@ -34,6 +35,7 @@ export default function RoleCards({ selected, onSelect }: RoleCardsProps) {
       >
         <h2>Dana Whitfield, treasury manager{selected === 'legitimate' ? ' (chosen)' : ''}</h2>
         <p>Ask to move the scheduled Meridian Supply payment earlier than Friday. Use your own words.</p>
+        <RoleFacts persona="legitimate" />
       </section>
       <section
         className="role-card"
@@ -45,6 +47,7 @@ export default function RoleCards({ selected, onSelect }: RoleCardsProps) {
       >
         <h2>A caller claiming to be the CEO{selected === 'attacker' ? ' (chosen)' : ''}</h2>
         <p>Ask for a confidential escrow transfer for an acquisition. Improvise. The system will ask you questions.</p>
+        <RoleFacts persona="attacker" />
       </section>
     </div>
   );

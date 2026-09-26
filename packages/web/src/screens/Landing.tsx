@@ -217,6 +217,11 @@ export default function Landing({ onWatch, onCall }: LandingProps) {
 
       <RoleCards selected={role} onSelect={handleRoleSelect} />
 
+      <p className="replay-note">
+        To see the third outcome, escalated to a callback, open "Watch a recorded attack" and choose the recorded
+        escalated call.
+      </p>
+
       <RecentCalls />
 
       <p>Desktop Chrome recommended. Every system here is simulated; nothing moves real money.</p>

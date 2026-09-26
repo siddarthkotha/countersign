@@ -184,6 +184,28 @@ input {
   margin: 0 0 0.4rem;
 }
 
+.role-card ul {
+  margin: 0.4rem 0;
+  padding-left: 1.1rem;
+  font-size: 0.9rem;
+}
+
+.role-card li {
+  margin: 0.25rem 0;
+  color: var(--cs-fg);
+}
+
+.role-facts ul {
+  margin: 0.4rem 0;
+  padding-left: 1.1rem;
+  font-size: 0.9rem;
+}
+
+.role-facts li {
+  margin: 0.25rem 0;
+  color: var(--cs-fg);
+}
+
 /* Shared alert/status strip -- "simulated" banner, mic-blocked banner, replay-unavailable
    banner. Text-only signal; the accent left-rule is decoration, never the only cue. */
 .banner {

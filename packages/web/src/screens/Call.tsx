@@ -15,6 +15,7 @@ import CallControls, { type LinkState } from '../components/CallControls';
 import SimulatedBanner from '../components/SimulatedBanner';
 import Masthead from '../components/Masthead';
 import Footer from '../components/Footer';
+import RoleFacts from '../components/RoleFacts';
 import { connect, type CallClient } from '../ws/client';
 import type { StartResult, DemoPersona } from '../api';
 import {
@@ -435,7 +436,10 @@ export default function Call({ session, persona, onStartOver, onWatch }: CallPro
           This always renders (even before a state event) so the user knows immediately which
           persona context the checkpoint is using. */}
       {persona && (
-        <p>Role card: {personaToPlainWords(persona)}</p>
+        <>
+          <p>Role card: {personaToPlainWords(persona)}</p>
+          <RoleFacts persona={persona} />
+        </>
       )}
 
       <CallControls

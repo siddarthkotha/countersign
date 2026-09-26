@@ -428,4 +428,12 @@ describe('Landing', () => {
       expect(onCall).not.toHaveBeenCalled();
     });
   });
+
+  it('shows the escalated call line after the role cards', () => {
+    render(<Landing onWatch={vi.fn()} onCall={vi.fn()} />);
+
+    expect(
+      screen.getByText(/To see the third outcome, escalated to a callback, open "Watch a recorded attack"/)
+    ).toBeInTheDocument();
+  });
 });

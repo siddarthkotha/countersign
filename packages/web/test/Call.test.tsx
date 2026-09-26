@@ -500,5 +500,26 @@ describe('Call', () => {
       render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
       expect(screen.queryByText(/^Role card:/)).not.toBeInTheDocument();
     });
+
+    it('renders legitimate persona facts on the call screen', () => {
+      render(<Call session={SESSION} persona="legitimate" onStartOver={vi.fn()} onWatch={vi.fn()} />);
+      expect(screen.getByText(/Say first:/)).toBeInTheDocument();
+      expect(screen.getByText(/This is Dana Whitfield from corporate treasury/)).toBeInTheDocument();
+      expect(screen.getByText(/84,500/)).toBeInTheDocument();
+      expect(screen.getByText(/4471/)).toBeInTheDocument();
+    });
+
+    it('renders attacker persona facts on the call screen', () => {
+      render(<Call session={SESSION} persona="attacker" onStartOver={vi.fn()} onWatch={vi.fn()} />);
+      expect(screen.getByText(/Say first:/)).toBeInTheDocument();
+      expect(screen.getByText(/This is Robert Miller/)).toBeInTheDocument();
+      expect(screen.getByText(/Hartwell/)).toBeInTheDocument();
+      expect(screen.getByText(/1.8 million/)).toBeInTheDocument();
+    });
+
+    it('does not render role facts when persona is null', () => {
+      render(<Call session={SESSION} persona={null} onStartOver={vi.fn()} onWatch={vi.fn()} />);
+      expect(screen.queryByText(/Say first:/)).not.toBeInTheDocument();
+    });
   });
 });

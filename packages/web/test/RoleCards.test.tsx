@@ -21,6 +21,31 @@ describe('RoleCards', () => {
     ).toBeInTheDocument();
   });
 
+  it('Dana card renders the "Say first" and "Then" facts from RoleFacts', () => {
+    render(<RoleCards selected={null} onSelect={vi.fn()} />);
+    // Both cards have "Say first:" so use getAllByText and check the first one is present
+    expect(screen.getAllByText(/Say first:/)).toHaveLength(2);
+    expect(screen.getByText(/This is Dana Whitfield from corporate treasury/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Then:/)).toHaveLength(2);
+    expect(screen.getByText(/I need to wire a payment to Meridian Supply, \$84,500/)).toBeInTheDocument();
+    expect(screen.getByText(/84,500/)).toBeInTheDocument();
+    expect(screen.getByText(/4471/)).toBeInTheDocument();
+    expect(screen.getByText(/Marcus Obi/)).toBeInTheDocument();
+    expect(screen.getByText(/INV-7734/)).toBeInTheDocument();
+  });
+
+  it('CEO-claim card renders the "Say first" and "Then" facts from RoleFacts', () => {
+    render(<RoleCards selected={null} onSelect={vi.fn()} />);
+    // Both cards have "Say first:" so check that both are present
+    expect(screen.getAllByText(/Say first:/)).toHaveLength(2);
+    expect(screen.getByText(/This is Robert Miller/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Then:/)).toHaveLength(2);
+    expect(screen.getByText(/I'm closing the Hartwell acquisition/)).toBeInTheDocument();
+    expect(screen.getByText(/Hartwell/)).toBeInTheDocument();
+    expect(screen.getByText(/1.8 million/)).toBeInTheDocument();
+    expect(screen.getByText(/2.1 million/)).toBeInTheDocument();
+  });
+
   it('clicking the Dana Whitfield card selects the legitimate persona', async () => {
     const onSelect = vi.fn();
     const user = userEvent.setup();
