@@ -1,0 +1,1798 @@
+{
+  "design": [
+    {
+      "ts": "2026-09-26T00:20:28.563Z",
+      "runIndex": 1,
+      "turn1SpeechStartedMs": 1165,
+      "turn1SpeechStoppedMs": 2717,
+      "turn1Transcript": "Dana Whitfield, Corporate Treasury.",
+      "turn1ReplyDone": true,
+      "turn2SpeechStartedMs": 10122,
+      "turn2SpeechStoppedMs": 15020,
+      "turn2Transcript": "Moving today instead of Friday, approved in yesterday's closed meeting.",
+      "turn2Classification": "WHOLE",
+      "sessionDurationSecondsFromServer": 22.888373,
+      "wallClockSessionMs": 23636,
+      "error": null,
+      "errorClass": "none"
+    },
+    {
+      "ts": "2026-09-26T00:20:52.067Z",
+      "runIndex": 2,
+      "turn1SpeechStartedMs": 1062,
+      "turn1SpeechStoppedMs": 2691,
+      "turn1Transcript": "Now it feels corporate treasury.",
+      "turn1ReplyDone": false,
+      "turn2SpeechStartedMs": 10170,
+      "turn2SpeechStoppedMs": 14873,
+      "turn2Transcript": "Going today instead of— it's closed meeting.",
+      "turn2Classification": "WHOLE",
+      "sessionDurationSecondsFromServer": 22.951362,
+      "wallClockSessionMs": 23503,
+      "error": null,
+      "errorClass": "none"
+    },
+    {
+      "ts": "2026-09-26T00:21:15.675Z",
+      "runIndex": 3,
+      "turn1SpeechStartedMs": 956,
+      "turn1SpeechStoppedMs": 2658,
+      "turn1Transcript": "Now it feels corporate treasury.",
+      "turn1ReplyDone": false,
+      "turn2SpeechStartedMs": 9794,
+      "turn2SpeechStoppedMs": 14898,
+      "turn2Transcript": "Going today instead of Friday, approved in yesterday's closed meeting.",
+      "turn2Classification": "WHOLE",
+      "sessionDurationSecondsFromServer": 23.066813,
+      "wallClockSessionMs": 23607,
+      "error": null,
+      "errorClass": "none"
+    }
+  ],
+  "control": [
+    {
+      "ts": "2026-09-26T00:21:21.778Z",
+      "clip": "dana-restated",
+      "config": "baseline (no turn_detection key)",
+      "runIndex": 1,
+      "events": [
+        {
+          "tMs": -1,
+          "type": "session.updated"
+        },
+        {
+          "tMs": -1,
+          "type": "session.ready"
+        },
+        {
+          "tMs": 0,
+          "type": "audio.stream.start",
+          "detail": "bytes=801600 chunks=418"
+        },
+        {
+          "tMs": 908,
+          "type": "input.speech.started"
+        },
+        {
+          "tMs": 908,
+          "type": "transcript.user.delta"
+        },
+        {
+          "tMs": 2108,
+          "type": "transcript.user.delta"
+        },
+        {
+          "tMs": 3009,
+          "type": "input.speech.stopped",
+          "detail": "(first)"
+        },
+        {
+          "tMs": 3010,
+          "type": "transcript.user",
+          "detail": "\"Now it feels corporate treasury.\""
+        },
+        {
+          "tMs": 3010,
+          "type": "reply.started"
+        },
+        {
+          "tMs": 3665,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3665,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3666,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3667,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3667,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3669,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3669,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3669,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3735,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3735,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3736,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////AAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3736,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3736,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////AAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3736,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3736,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3736,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//8AAAAAAA"
+        },
+        {
+          "tMs": 3736,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////AA"
+        },
+        {
+          "tMs": 3736,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3736,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAA//8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3736,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3736,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3736,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD///////8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3737,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AQACAAIAAgADAAMAAgACAAIAAQACAAIAAQABAAIAAgAAAAAAAQD//wAAAAAAAAAAAAAAAAAAAQABAAEAAgACAAEAAQ"
+        },
+        {
+          "tMs": 3746,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"GgAYABoAHgAdAB4AGwAaAB8AIgAlACMAHwAjACIAHwAgAB0AGQAdABwAHQAhAB8AHgAeAB4AIAAdABoAGgAZABsAHA"
+        },
+        {
+          "tMs": 3759,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"IAAjACYAJAAjAB8AHAAaABUAFgAQAAsACQAIABEAFQAgACoAJwAmACIAGAAPAAkACgALAAkACAAPABkAHwAUAAgACA"
+        },
+        {
+          "tMs": 3766,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"KwAqACQAIgAhAA4AAgAEAAMACgANAAgAEgAPABEAFwANABAAEAANABQAGQAkACEAEgAOAAwADgAKAAwAEgATABUAEw"
+        },
+        {
+          "tMs": 3777,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"2P/Y/8//zv/W/9b/5f/u//j//v8AAPf/7f/n/9z/3//Y/9z/5P/u/wEADAAUABMADAAEAP3//v8CAPX/7//t//D/Cg"
+        },
+        {
+          "tMs": 3786,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"/P8EAAYABADy/+v/2P/F/7H/pP+n/7f/1P/p/wIACwD8//P/5f/P/8X/vP+8/8v/1//j//X/CQAeABkA9v/W/8b/zf"
+        },
+        {
+          "tMs": 3796,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"0v/b/+7/4//t////+P/y/9z/uv+q/6P/nf+s/7T/w//g/+v/5//x//r/6P/a/83/2v/9/wIAEQAaABsAMAAoAAoA8f"
+        },
+        {
+          "tMs": 3806,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"9P/6/wAA/P/g/9H/1//d//b/DgApAE0AUgBKAD8AQgAzACEACwD2//r/+v8NACgAPwBWAFQAKgANAAIA+v/6/+L/6f"
+        },
+        {
+          "tMs": 3818,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"4f/d/8v/zf/e//j/BAAAAA8AEAAKAAIA9P/8//r/7v/2/wMADAAGAAEABQAKABUADwD///T/2//R/+L/9P8HAB0AJw"
+        },
+        {
+          "tMs": 3828,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"HgAGAOv/3f/q/+7/6v/x/+j/2f/s//v/EwAhAAAA8P/x//L/CwAAAO7/7//D/7H/uP/D/+v//f/6//j/6P/v/wEA//"
+        },
+        {
+          "tMs": 3836,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"IwAfAAsA7v/K/43/Z/9r/5D/zf8KADEAOgA+ACkA+//W/6v/qv++/7z/3/8EABwAMQASAOL/2v/d/83/zP/N/+D/HQ"
+        },
+        {
+          "tMs": 3846,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"ov8FAB8AJwBfAHYAYgAiAKj/Pv/9/u3+Tv/6/4cAzQDJAL4AvQCMABsArv9i/0P/W/+E/8b//v8aACwAHgDr/6T/X/"
+        },
+        {
+          "tMs": 3856,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"DwAxAEcALgAjAB4AFQAjAA0A+v8JAAwAIQBGAFYAXwBhADQAAQDu/9n/zP/D/7f/y//g/9H/0v/S/9T/6v/d/8r/y/"
+        },
+        {
+          "tMs": 3866,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"Vv+q/+//8v+s/4j/rv/x/xYAtv9S/07/gf/n/zUASABNADsAGwA2AGcAZQBFABcACgA/AGAAMgDv/8z/3f8zAHcAdA"
+        },
+        {
+          "tMs": 3876,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"LgA5AEkAOAAKAOr/5v/Y/7T/iv+b/w0AhgDgAPAAkQATALz/mv+U/4f/ev+a/+r/bwARAVcBPAHiAHgATAAfAN//nf"
+        },
+        {
+          "tMs": 3886,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"6f9U/zz/iP8gAKcA0QCXAB4Aq/+l/8r/pv9P//f+Af+q/2kAvACiAC0A5//c/6X/Tf/D/mz+lv4P/6D///8yADwAGQ"
+        },
+        {
+          "tMs": 3896,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"uP/k/+//3v8AABEArv9c/y3/Ef80/z7/cf/4/0EAVwBkAE0AYQBzACIAtP9W/xv/GP8j/xr/Zv/c/xYAQwApAOb/zP"
+        },
+        {
+          "tMs": 3909,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"XgBgAEoATwArAPj/pf98/8z/9//3/+b/7P9SALMAsgBdAPv/vP+L/2//bP+U/97/8v/q/xcAXQCmAMYAiABWABUA0/"
+        },
+        {
+          "tMs": 3917,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"rf90/07/Mv9R/4D/t/8BAD4AXgBfAFcAOgAnABMA9//3/wEAHwBJAE4AVwBDAAIA1P+Q/z//+v7d/jb/DQC4AN4A7A"
+        },
+        {
+          "tMs": 3928,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"CQDj/8z/DwBEAGIALACt/0L/Pf+K//L/VgBzAHoAhwCFAHgAPQDx/97/1v/r/yoAVACdAM0A9AAuAQ4BzABFAKr/iv"
+        },
+        {
+          "tMs": 3937,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"jf/F/8v/hv9V/3D/1f9lAKoAhgAsAOP/4v8TADkAMgADALL/kP+p/+H/BQD0//j/0f+l/6P/n/++/+f/KABzAJwAhg"
+        },
+        {
+          "tMs": 3946,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"Y/+R//H/UwDEAOsADwHpAMMAogA6AAsAyv+1/93/9P8iAEoAWQBdAFkALADD/1b/Cf8B/zz/cv+c/9r/MQB1AJgAqw"
+        },
+        {
+          "tMs": 4018,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"gACmAIcAVAD7/8X/nf99/5X/uf/+/1UAgwCiAJkAUwAgAAwACwD2/5z/Q/82/57/JgB3AGcA+v+3/9P/OQB2AHoApQ"
+        },
+        {
+          "tMs": 4019,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"FwD1/9L/gv8c/8z+4P5X/8f/HgA3ADoATABCAEUAFgDc/6z/fv+w/wIAOgA7AAYAoP9F/1H/UP9L/2T/U/9Q/0n/Sv"
+        },
+        {
+          "tMs": 4019,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"NQByAKYAwgCkAFsA5v9z/xb/3/7//nT/7f86AGkAUwAwACUA7v+e/0b/C/8r/4X///9iALoAQAGlAYYBLAGSAI3/0/"
+        },
+        {
+          "tMs": 4019,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"UP/z/1EAkwDoADoBOQG/AEwA0P89/xT/Yf/H/xEAOABbAIUAqwDHAHIA4/91/xz/L/9b/3r/wv/i/zkA6wA5Af0Akg"
+        },
+        {
+          "tMs": 4020,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"xP+s/6D/zf/2/xsAHwDw/9r/4f8AADAAZgCIAHQAXgBOADEALAAKANf/rf+U/8v/OgDDACYBSwEKAaAAXAA0AEYAPQ"
+        },
+        {
+          "tMs": 4020,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AADL/8r/2v/P/6j/iv+J/7j//P8+AFwAVgA1ACYALQANAN7/lf93/4f/qf/T/8v/4f/8//3/9/+9/4z/gP+W/7D/0v"
+        },
+        {
+          "tMs": 4020,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"CABRAGoAigBtADIAJwAFAPT/u/9e/0P/Yv/U/1wAqgCoAHsAUAAoABYA9/+2/4j/f/+W/+b/KQA6AEQAMAAnAC8ALA"
+        },
+        {
+          "tMs": 4026,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"pwDLANcAmwA1AOr/jP+H/5f/qv8AABsAQgB4AIMAbQAxAAAA6P/X/87/7P8WAEsAgwCMAIsAjwBmADQAAgCi/27/ef"
+        },
+        {
+          "tMs": 4037,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"RABJAEsAKwAJANn/rP+Y/4H/gv+Z/7T/zf/1/xoAPgA7ABgA///X/7X/m/+I/4z/rv/Y//j/FAAVABgAFwDx/9P/vP"
+        },
+        {
+          "tMs": 4048,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"7//8/wkAEAARADoASQBGADwAJQAkACgALQA1AD0AMwAdAAEA0f/K/9n/x//L/9H/2P/z/+//4v/Q/7T/sv/L/8n/x/"
+        },
+        {
+          "tMs": 4060,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"7f8HAAkAGwASAAAA/P/e/9H/yv/K/9z/6f/y//j/EAAbADUASAA6ADUAIwAeACQAHAARABEAIwAsAEoAVwBUAF8AQQ"
+        },
+        {
+          "tMs": 4067,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"KQAnACEAEwAYAAwA8//4/wUADwAwAEYAQwA/ADgAQQBEACsAIQAkABUAIgA6AC4AIQAHAPf/CQAHABgAIAAMAAIA8/"
+        },
+        {
+          "tMs": 4077,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"KQAsACsAOwA2ACwAJAAfACoAMAAoACIAHwAcACoAKgAkAC4AKgAnAC8AKAAcAB0AFQAGAAEAAgADAAQABgAGAAYACg"
+        },
+        {
+          "tMs": 4086,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"9//6//3///8BAAgAEQAPAA8AEAAEAP/////8/wEAAAADAAoACgANAA8ACAAFAAgAAAD8//n/+f/6//P/9v/4//v//P"
+        },
+        {
+          "tMs": 4096,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"9P/x/+3/7v/l/+T/5v/p/+v/7f/t/+z/9P/3//P/8//w//D/8//w//D/8v/v//D/7f/u/+v/5f/r/+r/6f/o/+b/6P"
+        },
+        {
+          "tMs": 4106,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"DwAQABIAEgASAA8AEQANAAsADAAKAA8ADQALAA8ADAALAA8ADQANABQAEAAPABQADwAUABwAHAAcABkAGAAcABkAFg"
+        },
+        {
+          "tMs": 4116,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"5v/k/+P/4f/g/+b/5P/n/+f/4//o/+X/5v/m/+X/5v/k/+L/4//k/+b/6v/r/+z/7f/p/+r/8P/t/+7/7//q/+v/6/"
+        },
+        {
+          "tMs": 4127,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"4//j/+X/6P/n/+P/6P/n/+X/6v/l/+b/5f/i/+P/4//j/+X/6f/l/+j/5v/k/+b/5f/k/+X/5//j/+T/5P/g/+X/6P"
+        },
+        {
+          "tMs": 4138,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"7v/m/+P/5v/o/+f/5v/n/+f/5f/k/+X/5P/l/+n/4//j/+f/5P/n/+X/3//f/9//3v/h/+D/3//e/9n/3P/g/9//4v"
+        },
+        {
+          "tMs": 4147,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"9P/z//H/9f/0//T/9f/0//X/9f/3//j/+v/3//X/+f/2//T/+P/0//b/9//1//j/+P/5//v/+v/6//r/9v/3//j/9/"
+        },
+        {
+          "tMs": 4156,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"KgAqACwAKwApACkAKgApACYAKQAqACoAKQAlACkAKwAtADAAKwArADAALgApACwAKwArACwAKwAsAC0ALwAtACcAJQ"
+        },
+        {
+          "tMs": 4166,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"HQAcABsAGwAcABgAFgAXABQAFwAUAA8AFQAPABAAEwAOABIAEgASABYAEwAYABgAEQAUABQAEQAQABEAEwAPABAAEA"
+        },
+        {
+          "tMs": 4177,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"/v8DAAMAAwACAAEACwAGAAcACAAGAAUAAwABAPz/AAD9//7//////wkACQAHAAkABwAFAAYABwANAAgABAADAP7/Bg"
+        },
+        {
+          "tMs": 4186,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"r/+q/5T/fP9b/2D/d/9z/3H/fP91/2z/bv9o/2D/Zf9l/2P/aP9o/3H/c/9y/37/ff97/3T/cf99/3r/hP+J/4b/mP"
+        },
+        {
+          "tMs": 4197,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"cwB5AKAAcgB9AGYA+v9z/0z/QP+Q/lj+G/5L/q7+Pf6k/sb+gv6T/nH+wv7//h3/7P5g/wEAbwD2ANcALgFRAV8BRg"
+        },
+        {
+          "tMs": 4206,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"WAz3DLANYw7BDngP4g90EMsQLBFTESIRSxGOEQYSBxIvEicSexEuEVgQDw8jDhENqgsaCkQIUQYgBLwBvf+t/UX7H/"
+        },
+        {
+          "tMs": 4216,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"OPbH8T7sz+YS4kbdutid1W/SCc4AzCbLQsoTy//LWM3BztvPN9Ky05TVCdmA20/gKOfm62LwdPRq9wb7lP7tARYFog"
+        },
+        {
+          "tMs": 4226,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"bvQ7+Az7fP/KAwEHMQq6DBkPdhDIEaYTQBRpFLUTlBGXD+8NKwu5CDIH/gTNAk4AGf3K+Uv2CPNg8B/uuezq6uvore"
+        },
+        {
+          "tMs": 4236,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"gvYM9lz1AfX49L/0ZfXw9QT2wPay9wL6D/6EAQcEngY7CTgMtQ/hEiEWyhkNHe0gkyTDJtApvCzmLrExgzN+NFU1oD"
+        },
+        {
+          "tMs": 4248,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"4yl/KRcoviYxJEUhox7ZGnYXEBQ+ECMN4gnyBQwB0fxd+Xb1U/L47h3rz+dZ5arjoeE+4Dvfsd3s3CjcO9ub2sXax9"
+        },
+        {
+          "tMs": 4256,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"Be0J7DPq5uhy6cvoHugf6S/pj+m/6k7qr+ns6hjsmuw+7YzsE+3S7s3vbvFM8mjycvPU9DX1fPU79pT2MPch+P742P"
+        },
+        {
+          "tMs": 4266,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"C/4x+pj7DgF2/R/73/yK+VH5n/kk/vX51feFAJb4jPYn/Bn5qvsl+jH3z/wT/bX7u/sd/cX/B/5UAvICY//Y+6r6YQ"
+        },
+        {
+          "tMs": 4275,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"1QTT+8/6EAVp/un66wI3AGH8JP8P/xYDrAB1/BUDYgZG/RX+sAX2/af/0P/l/QcHiACI/VwFoASl/p8B3AHM/XEGzP"
+        },
+        {
+          "tMs": 4289,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"af4QAaMGaf2b+sYHgv//ANIBJP2IBdUAVvxKArYAZgCv/4D+vgMC/xb+Iv2kAQsF8venAesEtfxzAjgABgFbAYb7cA"
+        },
+        {
+          "tMs": 4296,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"jQJG+W0B2QJD/EkAyP+9/zz9DQAJ/8P9JwDp/ucB4vtQAgIH/vzRAN8CIv/m/OgBEwBb+BgCJAPa/eABBQAh/hIDgv"
+        },
+        {
+          "tMs": 4306,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AAQe/QkB9gJO/agDPwCH+ocLjPy++e8Nj/dwAFYJrfaGBmQDCf2RBBr+xwBMAQb//PysAQEE8PpdARsE2/uO/msBMf"
+        },
+        {
+          "tMs": 4316,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"pgABBHIBZ/4hBOcD8P+o/CUAXAUu/fv7lAKPAPL9zAHQAl7/f/3r/+v/pfxN/hf+EwLSAeH/BgUAANz9PwDI/yf/cf"
+        },
+        {
+          "tMs": 4326,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"6/5yALP++/ye/hv/rP+5/vABggH7/sb/nP6o/i0AGAD1/qL/VABt/oH9wv4u/lf/YP/P/3kBxP03/xUAcP5DANP+R/"
+        },
+        {
+          "tMs": 4336,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"QxNkEl8TCxTREx4VKRQFFUQWvxWoFLATJhMtEmcRNhDXDqgNrAvyCUsIEwYLBFwBV//U/WL8v/r89xH22PK98GPw2O"
+        },
+        {
+          "tMs": 4346,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"3wExA/8D0QRSBAYEVAUeCGYIVghdCmULPQ3nDzsQ0g/9EaMU8BULGAwaxRtuHQIgOSNOI7QiZCInImAidCDTH98eNR"
+        },
+        {
+          "tMs": 4359,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"Bt+U3+Lg6OFn4hzjKuTk5Sfnj+ns6xTtd+/88Jryv/RO9gv4FvkM+2z8y/w9/sP+dv/0ALABPAJ7AqYCuAKzAgsDnw"
+        },
+        {
+          "tMs": 4366,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"/RqXGhIaURmUGAsXXBWbFAETsxBqDjIMCArHBhUE6wEL/8T8uPpV+PT1l/Ok8XTvruwe69Dpyefh5vXluOTw4ybkrO"
+        },
+        {
+          "tMs": 4375,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"afj9+lL6Qvtx/bv9b/2h/tP97fz1AT4AUv11AawB1v//AOcBQQHiAZUCowKcBL8DmQMwB6cGWggXCm8KawwjDX0Pbh"
+        },
+        {
+          "tMs": 4386,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"mxIXFWIP9Q66FcUPEQv2ESsOOQl2DE4LIweEBVoI9ASlAKYCjwGB/aH7Yv2A+l33rfd/9aj18POW8f7xEfKN79bu0/"
+        },
+        {
+          "tMs": 4396,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"O/Jf87PzwPLv8wP20/N49WXzwfcV+SLxifoa+qTz3PmW+dP6vvln9v/62PyS+Z749PwP/UH74vsD/sj/gPvB/hkAz/"
+        },
+        {
+          "tMs": 4406,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"PgBLAh4ErgTVAVwErQjQBk4IggdNCuwNBApZDUwR3gxIDNoSYxGUDEsQ6xBsDXQQMhEfDDQQoxFOC0wMjA7mC8sIkA"
+        },
+        {
+          "tMs": 4416,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"Hfzk+DT4K/cj9GH05fOs8dvwLfGy8LXvie9Z8NvvZ+5l8Djw4O4f8vbylfMW9HvyzPSj9o71rfUn+Kv46/Zj+Xr7jv"
+        },
+        {
+          "tMs": 4426,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"O/tp+wT8Dvzj/CL9mv9hAVMBmARSBlYIeQuvDg4S2RNnF0YZDhrmGzQcpRzfHJkdnR4xHtIcKxzKHFUbiRlKGe4WyB"
+        },
+        {
+          "tMs": 4436,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"4dyW21zbvdsk3Crd3t4R4DXhLOPF5M7m7emt7IHv1vKd9ff38vq6/a3/wQEAAzsEIgZ6Bm8GowZ5BrEG6gYfBksEtQ"
+        },
+        {
+          "tMs": 4446,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"zu/38rf1IfnP/NcAyQaeCi4PyhRUGhkh2SUbKgssYywOLjgvtDAQMTww4y4yLY8sdCu3KBklHSH5HJIYnRN+DQwHbg"
+        },
+        {
+          "tMs": 4457,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"Z9Ji0mrSwNJO0/jUINgS25/dKeCC4rvls+m+7bXx6/Vx+r/+ZANEB7cJtgsyDRsPUBGIErASABJ2EQYRcBA/D+IMig"
+        },
+        {
+          "tMs": 4465,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"BPYT9TLzwPAa71LtKuyY6wfrDutj64vsnu4H8aHzFvbS+DH83v+eA34HtwuMDwgUoxkVHlMi9SX6JwQqiis5LBgsxi"
+        },
+        {
+          "tMs": 4475,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"mR04HCcbOBk7F6kWVRU0FNwRzA6CDDEKNQgEBaEBGwDt/jD9DPue+In2rPSv8vvwCvBz70Puw+zG6+rrI+yR65vr/u"
+        },
+        {
+          "tMs": 4485,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"8AG6AdwB1AF0AVkBEAFUAPf/NwAnALT/Tf/M/nf+IP7X/UT9wfwP/Sj92/zR/NT8d/xg/Kv8jPxS/Eb8OPxK/Eb8T/"
+        },
+        {
+          "tMs": 4496,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"ngCDAHgAcwBfAFsAWwBIADcAIwAMAPv/7f/p/+//6P/a/9T/2f/a/9j/1v/T/9z/5f/l/+j/6P/s//r/CQAOACAAKg"
+        },
+        {
+          "tMs": 4506,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"aQBqAGoAbwBoAGcAYwBYAFQAUABQAEgANgAnAB0AFAAGAO7/2f/R/8X/u/+z/6f/nf+b/57/mf+S/47/kP+L/4n/lP"
+        },
+        {
+          "tMs": 4516,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"CwAQABAAEwAfACcAKgAmACUALgA0ADMAKwAyADIAKgA3ADYAJQAjACUAHQAbABYACAADAPv/8f/w/+v/4P/f/97/1v"
+        },
+        {
+          "tMs": 4526,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"CAALAAsACAAGAAYACAAMAAsACgAOABAACgAHAAwADgAIAP///f8AAP7/+v/4//L/6//r/+//7v/s/+j/5v/p/+n/5P"
+        },
+        {
+          "tMs": 4536,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"+v/K/9L/4//c/wAA+v/s/+3/CQAxAAAA6P/w//H/HAAVAP7/6P/R//n/+f/l/9L/uv/i/93/3v/x/73/tf/G/9P/5/"
+        },
+        {
+          "tMs": 4546,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"VP88/08C7wQx/1b/fQW1ASYC7AO/Aun/Kf75BCoEk/s8+r4BYwbfAV78kv3kAagBmv/d/Ej/MAGP+439uQFrAaz+kf"
+        },
+        {
+          "tMs": 4559,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"xwA/AKAB+QEOAFT+Sv+FAvYCQP9p/d0AewO5AAD/BgIjA7L/7v0QAFIB4P/k/iAAIwJfAgkAfv5rADYCdQCS/k4ACw"
+        },
+        {
+          "tMs": 4565,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"Lv4T/mP+IQCVAvwCpwHdAKz/cP4+/8n/zP6W/pT/XQDAAFsB7gF1AawAcwDL/6z/XwDKAO8BCgPEAmgD4gQ7BHIBUv"
+        },
+        {
+          "tMs": 4576,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"0f+Q/9z/av6G/p///f+/AJ4BugL0A1ADugAi/qD8HfzP/GH+AgCyAekBEgFjAF7/1v76/i3/AADOAI4AtgC/AboBeA"
+        },
+        {
+          "tMs": 4586,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"jQElBDkFWAUDBKUBGwBq/VD6dfnG+6T/YgHYAFr/f/1C/Jn8jP3E/e79k/3O/Rf+2/zP/H39MP5w/3T/4f5m/pX+Tg"
+        },
+        {
+          "tMs": 4596,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"l/6C/Tv8R/vQ+2b8ofwc/dj7R/lN94r18fTV9Zv1gvTE9K31DPb19Y31/PQh9JTz7fMQ9fv2ovhq+DL3UPWU8aTu9O"
+        },
+        {
+          "tMs": 4607,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"7exM6sfnWuYr5sjlfeZP6Bfr6e2C74vxsvPv9Mf1z/WZ9fb19fXC9aP1DvUq9N/yKfIa8sXxFvF48IvwmvHe8lXzyf"
+        },
+        {
+          "tMs": 4616,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"ZAUzBWoEDQM3AbX+wvvB+Cf2X/O38PPujO1W7GnstO3/7qPwSPIp9L73SPx9ADYDVgQcBF0CYABw/nf8f/u3+9H7p/"
+        },
+        {
+          "tMs": 4629,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"8PFx73rstOnE53bnq+jI6untmvJE+GP+0AP1BvgHSgeHBRkDhACJ/jr9ofwh/MD7Cfsw+f/2ofQ381fz0vQT96z5vv"
+        },
+        {
+          "tMs": 4636,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"Suvv7Iju2fBN9CT5fv5SA1EHzQmXCi0KnQiMBQICof5l+574Q/bH9ID0cfWG9kj3L/dA9h32q/bd+ND88ADkBPMIAg"
+        },
+        {
+          "tMs": 4646,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"Ru2s7+HxuvSF+DL9KwJJBvAIRAlpCAcHMgWMAhn/bvz8+jD6HvkF+Gn3s/d9+I/4P/iP96n3gfnh/DkB9gTnBwAKtA"
+        },
+        {
+          "tMs": 4656,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"d+6r8MbzPffu+qv/LQRSB1gJpwmoCMsGGwRCARb/h/29/MP8vPvx+mT6MPl9+aj5v/mT+qb6IvtF/c4A6wS9CBALIw"
+        },
+        {
+          "tMs": 4667,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"lfGH9LP2CfhF+qv8g/9FAo8D7wPSA7wCrgD//ff7EPsD++r7b/w//DP8d/xM/cP9Jv5a/jb+yv7T/3sBBgR5B28Kgg"
+        },
+        {
+          "tMs": 4676,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"LvSM9Ev1Vvbk98P5tPsk/bf9Kf4J/zcAcQGgAcoAa//4/S/9sfxa/J/8Bv2x/Z/+5v40/77/cwBVAdEBrAJoA7kE7g"
+        },
+        {
+          "tMs": 4686,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"l/kX+PP2hPdW92f3K/cB9iv2a/bd9gb4oPgo+Uz5XPlX+uT6//qO+y/8h/0N/77/xwCLAesBVAICAhoC6wEvAQkBoQ"
+        },
+        {
+          "tMs": 4696,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"mfnv+aD6vPmU9wL12vLG8Unx+vEP9AL22vZ19nb1uPRc9Lf0Qfaf+Nn6lPsV+5H6Sfu0/Ev+iv8o/xT+A/0q/Db8q/"
+        },
+        {
+          "tMs": 4706,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"HP/U/8L/VP+q/sj9zv2N/cv81fzi/Cn90v2D/Xr9eP3j/CX9VP3A/LH6Tfey9Rz34fnc+3P8B/wy+oP3dPaA9wz5tf"
+        },
+        {
+          "tMs": 4716,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"rwCIAOkA0gGRA5EE6AO6AdD/LgDJAUcD3wL7AU4CFgTbBXEG5gRjAo0BgQAIAJT+VPwb/Uf/2wI6BGUC6P9i/nD+tv"
+        },
+        {
+          "tMs": 4728,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"LgD0/vD+T//b/rX+EABDAIMAAQLQATwBHAG5AMQAWABX/1MA+AFQAZIAHwBCAAsB4wCeABMAff9P/xEAvP+H/7oAQw"
+        },
+        {
+          "tMs": 4737,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"HwNQAYL/0QBOAc8Avf8ZAWsDtwFjAYACCgNqAnkAdwHYAVf/zf3x/ST/5wBbAJD+GADA/7D8Bv51/j39Dv/t/f3+mg"
+        },
+        {
+          "tMs": 4746,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"7wBrABkDBQACACUCgwDa/Gn/Rv9Z/1gA1P3J/WD9Rf8u/rX59f6sACL8cv+HAkIAdwDfAEQCIQOs/+UBBgKg/oYAav"
+        },
+        {
+          "tMs": 4755,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"yQDMAAkDc/ym/ioD3/4p/wn/3/6tAIwA2P53/7kC7gIR/97/6wSU/qn+tAFY/gwCsv8R/moACv+i/m/+NABrAYr9wf"
+        },
+        {
+          "tMs": 4766,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"AADb/mgAPQAc/5r+WQG1AJv9yf9uAVv+HwCFASQA7/7b/84Bxfr0ALYDG/sI/wcAJAAdATv/oP29AeEDuv+ZACYBsP"
+        },
+        {
+          "tMs": 4777,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"ZwAP/wD/wAHoAOT8mAL+AfL7WAPZANn7WgSmAJz78AKa/zH+6gOv+wMB1gTM+sT/lwO1/aL/YQQY/Yv+sAPi/mP+ww"
+        },
+        {
+          "tMs": 4786,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"WgE2/DUCs/9I/qUBGP/0Aif/V/7BA+n/9P5IAIH/oQAEAqD9aP78AqP+WAB1AJsAFwDv/TcCFv7u//IAef6mAe//6f"
+        },
+        {
+          "tMs": 4796,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"tAIuAgL8uQI4AKj8pgMg/gb8YgYM/9v79QFJARAA0v4pAjv+ZP9rBLf8dP9CAe/+hQK5/y39dgFoA1f+Av4jAccA2g"
+        },
+        {
+          "tMs": 4806,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"ZADn/8P/nP+NAPj/ZP/s/3IAYQDq/03/KgBoAKL/AgCz/48ASQCd/woAmv8SABwA2//k/1gAuv8PAMMAiP9/AAIA0P"
+        },
+        {
+          "tMs": 4816,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"v/+BAI//5f9OAIb/NQAAAJb/eQDt/7r/LQDr/0QA5f+m/0YAHADY/wwA5P/P/zwA3//v/xYAof8eACkAwv8UAPb/qv"
+        },
+        {
+          "tMs": 4827,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"+//0/+f/y/8WAOT/+v8uAOj/+v/X/+7/IADo/+3/CADk/9L/EQAGAN7/8f/m/+v/9v/4/wUA2v/4/wsAr//k/ycA7/"
+        },
+        {
+          "tMs": 4836,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"9v8BAAEA/P/7//f/BgALAP//9f/2/wMAAADy/+z//P8FANv/5/8RAOX/4f8SAPf/4P/2/+j/7v8AAPT/9v/r/+f/+v"
+        },
+        {
+          "tMs": 4845,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"BQATAAEA9v8KAN//kP/I/ycATgDr/3r/3P8aAAsAIwDT/8r/7//b/wEAFQAHAPr//v/V/73/tv/L/xoALADB/83//f"
+        },
+        {
+          "tMs": 4856,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"dwG4/xQAVQELA6IAvP08/QQApwEAAKP/Xv4kAewBFf+c/3UAgADc/eb+NQEpAAX/lv36//MAxP/I/pP9UwDbAWsBd/"
+        },
+        {
+          "tMs": 4866,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"NQE8AeIAJQBKADYB5QEQAn0BdgAzAKsAEQE1AXAAVv9O/zcA7wDbADUAa/9L/9z/6P/6/n3+4P4Q/0D/af/1/s7+W/"
+        },
+        {
+          "tMs": 4876,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"6wa0BckEigQhBDgDsgFw/4f9EPwN+nn4LPdS9QD09fId8u7x7/G58WnxcfGb8QHymfI58+Tz4fSr9rv4wvqC/Pr9x/"
+        },
+        {
+          "tMs": 4887,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"WP+z/0MAogAgAXQB2gFgArEC9QLzAtUCvgJlAr4B/QBeAAYA2P+P/yv/rf5f/lH+I/4C/tX9ff1W/Sj95fzF/Hz8Ev"
+        },
+        {
+          "tMs": 4896,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"jwsUClwJhQhaB6gFEwQaAzUCPQGU/5X97PvC+pb6jvo++mz5QPi099v3zPja+XP6svru+qP7e/xK/Z/9p/39/a/+ov"
+        },
+        {
+          "tMs": 4906,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"+BDlEXsS8RKLE6MTiRP6EuUR/hC3Dz0OgwxzCrgIHQewBWYE2gJcAdL/KP62/F37Svpn+Xf41vdP9wj3NPc69xb3Bf"
+        },
+        {
+          "tMs": 4916,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"XAySDb4O4Q/oECASXxNgFEMVlBVLFa4UkhNBEs0QbQ8/DhAN8wu1CkkJugdMBg0FzQPEAqcBaAAk/4z98vt6+jH5Sf"
+        },
+        {
+          "tMs": 4926,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"ZwagBjsH3wf8BxoIBAgTCJII/whuCcwJRwquCjcL8ws2DHAMsgzpDDANvg1XDrEOGA8ZDxwPGA+jDiEOdg2zDLQLnw"
+        },
+        {
+          "tMs": 4936,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"xf1J/pj+mv9iAEIAQACAAOcAXAFmAvMCxwKPA70DxQP9AwIESwQeBDsECwW0BY4FlQVQBkEGhgbnBssGNwdNB3kHlA"
+        },
+        {
+          "tMs": 4946,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"Xfly+Xf5uvma+Zf5DPob+k76Sfol+hv6Wfq++oj6wPr6+uT6O/s1+3r7qPu0+wz8Hvyp/P/8Nf2V/Xb91v3o/Vn+M/"
+        },
+        {
+          "tMs": 4956,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"nQGVANEBZQHH/2oBYwFaABQAJQFZAJb/Kf9k/vv/eQBEAKYA0P93/s3/nP81/p3++v2z/T794/3B/gb+Z/0B/mv9Mv"
+        },
+        {
+          "tMs": 4966,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"5wDbAR8BJgEmAiQBrAGlAWwB3QGCATIB/QFmAUQBfwKOABoBWgJIAFsBnwFKAQgCYAAGAY8BhwBGAQQBeAGbAfv/XQ"
+        },
+        {
+          "tMs": 4976,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"5//+/ykA4v8eAGEAhQBCADIAjwB+ACAAmwBhAAgAygDb/0gAjQCq/+gAXAAMAK0A+f95AGMA/v/yABoATgBTALX//Q"
+        },
+        {
+          "tMs": 4986,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"lv+0/zn/uf+O/4f/mv95/7//iv+O/2//ff/L/7j/5P/N/7n/uP/H/7z/pf/o/8z/pf/o//z/s/8JABoAyv8HALT/8f"
+        },
+        {
+          "tMs": 4997,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"sf80ABgAwf8aAPD//f8mACIADQDJ/wkACADZ/xgA+v/e/w0A6//2/w4A/P9IACwA8f/5/+P/GAD//+v/MAADAPr/HQ"
+        },
+        {
+          "tMs": 5006,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"2QBaAIEAhAGaACX/lv7//jb+U/7A/kD+Uf/r/9X/yv/P/5z/Qf8j/3P/Xv8s/+b/s/8PAc4BEAAp/5r+9P5n/zf/6v"
+        },
+        {
+          "tMs": 5016,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"/P9MAKQAqADEANUA+QBFAV8BZwFQARoBKAGZAfcB8AH/AQgC7AEBAvcBsgGrAcoBxQH/AQgC0QGjAbIB+gEuAi0C4Q"
+        },
+        {
+          "tMs": 5026,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"yBO+EBcOwQvpCvsKEwpbCJEE/v68+h34m/bQ9Rb07/HT71jtAutX6MflCeQb46rjzOPt4lziEOLR4vDjXeTj4wPkYe"
+        },
+        {
+          "tMs": 5037,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"1P5q/Bn5UvYc9OHyKPIf8Hnsb+kF6Mbncuhq6ILm3+SD5LLkP+VQ5SHloeUe50npGOpO6qrq6+qG7WvwTPLR8zz0P/"
+        },
+        {
+          "tMs": 5046,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"ZvHh7+ztLO3r7n7w8vDM8Cnvqe177kfwtPEq81PznvIR8+Pz3/Qi9mP3GPk7+mL7Ofyy++X70fzv/aP/HAG4AWgBSA"
+        },
+        {
+          "tMs": 5057,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"+fI58yf0qvQy9YT1wvXg9VD1X/R289rzv/X89+r5+vmn+HL33PbA9wb5QPpQ+9T7vvxi/S79R/zw+j76/vpX/an/YA"
+        },
+        {
+          "tMs": 5068,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"PAHcAJYAz/8s//b9jPyH+8L6//lw+SL5svio+Jf4O/i69wT35fYV9773mvjJ+Nz45fj1+E75Bfqh+gz7yvsr/Dr8h/"
+        },
+        {
+          "tMs": 5076,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"iQNRAygDfwL4ATkBZgDk/zb/3f6B/jr+JP7O/YT9Hf2i/H/8avxn/IL8Yfxr/I78qPzq/B79X/26/Qj+ef60/tD+Of"
+        },
+        {
+          "tMs": 5086,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"5P+I/wb/q/7m/WD9C/3L/ND8wvyh/Ir8aPxh/GT8aPxE/Df8WvxA/H/8e/yh/Pj8Hf21/RX+jf7W/gH/S/9r/9n/Hg"
+        },
+        {
+          "tMs": 5098,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"QgJaAegAegAYAKn/F//O/kn+x/12/RP9o/wl/Mv7YvvD+lP6Ofop+mL6mfq0+sr69PpN+5n7/vs6/K/8Sv3D/W3+2f"
+        },
+        {
+          "tMs": 5106,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"FQFAAVwBUAFgAVQBVQFBAQcB3QDGALsAuACMADsA7P+w/6H/of+C/0P/8v62/rL+5v4B/+D+vf6q/sf+N/+D/3//WP"
+        },
+        {
+          "tMs": 5117,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"Kv+m/nX+LP4n/iv+/P3v/b/94f0D/lH+df5q/oj+iP66/uD+0v6//rL+vP7N/tP+wf6//vL+H/+A/8D/8P9HAIQAyg"
+        },
+        {
+          "tMs": 5129,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"HQOcAikC4gHuAQcCCQLWAYsBLAHOAHoA+P9w/8D++f1r/cH8FPyB+7r6Efq2+Zf5rPnP+Sv6W/q2+ln79/vE/HL9Mv"
+        },
+        {
+          "tMs": 5136,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"af92/5X/lv+B/2T/Pf88/zL/Gv/1/qX+hv5n/lD+Qf4B/s79ef0v/Rv99/zs/Nz8qvyC/Hj8gPyu/NT84PwX/S/9iP"
+        },
+        {
+          "tMs": 5146,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0d721a28c9444c508da92c9255882cf8\",\"data\":\"SgOeAQAA9f0C/PH5R/hY9172iPUm9R/1HPUF9QP12PTG9Mj0dfQF9LnzlvNN8+nycvLG8YHxAfKx8krzJPQT9Tv2Kf"
+        },
+        {
+          "tMs": 5156,
+          "type": "session.ended",
+          "detail": "{\"session_duration_seconds\":5.552372,\"audio_duration_seconds\":null}"
+        }
+      ],
+      "firstSpeechStartedMs": 908,
+      "firstSpeechStoppedMs": 3009,
+      "firstTranscriptText": "Now it feels corporate treasury.",
+      "classification": "CUT",
+      "sessionDurationSecondsFromServer": 5.552372,
+      "wallClockSessionMs": 6102,
+      "error": null,
+      "errorClass": "none"
+    },
+    {
+      "ts": "2026-09-26T00:21:27.892Z",
+      "clip": "dana-restated",
+      "config": "baseline (no turn_detection key)",
+      "runIndex": 2,
+      "events": [
+        {
+          "tMs": -1,
+          "type": "session.updated"
+        },
+        {
+          "tMs": -1,
+          "type": "session.ready"
+        },
+        {
+          "tMs": 0,
+          "type": "audio.stream.start",
+          "detail": "bytes=801600 chunks=418"
+        },
+        {
+          "tMs": 952,
+          "type": "input.speech.started"
+        },
+        {
+          "tMs": 952,
+          "type": "transcript.user.delta"
+        },
+        {
+          "tMs": 2053,
+          "type": "transcript.user.delta"
+        },
+        {
+          "tMs": 3154,
+          "type": "input.speech.stopped",
+          "detail": "(first)"
+        },
+        {
+          "tMs": 3154,
+          "type": "transcript.user",
+          "detail": "\"Now it feels corporate treasury.\""
+        },
+        {
+          "tMs": 3156,
+          "type": "reply.started"
+        },
+        {
+          "tMs": 3809,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3810,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3810,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3810,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3811,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3811,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3813,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3813,
+          "type": "transcript.agent.delta"
+        },
+        {
+          "tMs": 3878,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3878,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3878,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3878,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAD//wAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3878,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAAAAAAAAAAAAD/////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3878,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAAAAD/////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3878,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3878,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3879,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAA//8AAAAAAAD/////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3879,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3879,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3879,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3879,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3879,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3879,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAA//8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3882,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAABAAEAAQABAAEAAQABAAEAAAAAAAAAAAD/////////////////////AAAAAAAAAAAAAAEAAQAAAAAAAAAAAAAA//"
+        },
+        {
+          "tMs": 3893,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAEAAQAAAAEAAQD//wAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "tMs": 3901,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"////////AAAAAP//////////AAD///////8AAAAA//8AAAAAAAAAAAAAAAABAAEAAQAAAAEAAgAAAAAAAQAAAAEAAQ"
+        },
+        {
+          "tMs": 3911,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AQAAAAAAAgABAAEAAQABAAEAAQABAAEAAQABAAAAAAAAAAAAAQAAAP////8BAAAA//////////8AAAAA///+/wAAAA"
+        },
+        {
+          "tMs": 3921,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"///+//7//v////7//f/+//7//v/+///////+//7//v///////f/+//7//f/9//7//v/8//3//f/8//z//P/8//z/+v"
+        },
+        {
+          "tMs": 3931,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AwACAAEAAQAAAP///////////v/8//v/+//8//z//P/8//z//P/7//v/+//6//r/+v/6//n/+f/4//j/+f/5//j/+P"
+        },
+        {
+          "tMs": 3941,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"BQAGAAYABQAFAAQABAAEAAQAAwADAAMAAwAEAAQABAAEAAQABAAEAAMAAgADAAMAAgAEAAMABAAEAAMAAwAEAAQABA"
+        },
+        {
+          "tMs": 3952,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AAADAAEAAQABAAIAAgACAAEAAAABAAIAAgABAAEAAAABAP//AAAAAPz//v/9//v/+//9//3//P/9//3/+//7//z/+/"
+        },
+        {
+          "tMs": 3961,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"7//u//H/8v/x//L/8v/z//P/9P/1//X/+f/5//f/9//4//n/+f/7//v/+//9//3//f/+////AgACAAAA//8AAAIAAg"
+        },
+        {
+          "tMs": 3972,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"5//o/+f/5v/n/+j/6v/o/+n/8//1//T/+v/8//z//P/8//3//P/3//L/+f8AAAAA///+/wIAAQD9//7/+/8CAA0ADw"
+        },
+        {
+          "tMs": 3983,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"wP9m/zz/L/8I/5n+M/4Z/gD+Sv7P/r3+2/2H+575T/vz/doABQFe/yACygLuAm0DLgJ9Ao0BLgGuAEL/7f/q/93/jw"
+        },
+        {
+          "tMs": 3991,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"jgHBAsYCEAIXArkB+gGHAi4BlwFVAmMBowK4AogBBgK5AAcA0gDI/2b/vv9q/0n/MP+h/pf+7f7P/s/+Wf7i/bz9W/"
+        },
+        {
+          "tMs": 4002,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"r/4A/qH+Ev+k/qH+L/4K/4X/2f9jAPb/ggADAAf/+v7Q/T79lP0t/or/Y//W/j3/5P4D/2T/o/6W/mr/6/47/30A3/"
+        },
+        {
+          "tMs": 4011,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"x/uX+/n69fsO/AL8afy6/OD8C/4A/wb/af9d/3P/4/9uACUBxgF2AlIDFQQsBYAF6ARjBdQFAwaQBp0GzQZtBwwI2Q"
+        },
+        {
+          "tMs": 4021,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"GwaeCGUKfwvVC7gMaA+EENoSrRXmFmIaYx23H9QhviLRIxwldCe/KWIq3CnaJ8IkUyAjG3YVYxDNDkMNQArpBoUBzP"
+        },
+        {
+          "tMs": 4031,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"igWo/7D6nvS970DpFuKm3v3ZP9Xr0R/OqstVzJTN+szVyhPHksQYxTrINs1k0XnUTNhD3KzfoeOE5s7pJO/g9Pz6kv"
+        },
+        {
+          "tMs": 4042,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"RQdGC98OJhPQFv8YtRkDGl4b4h3NIFgiViLYINMe8Rz0GQgX9BO9EM8OjgwNCjcHhwOgAIb9K/sY+XD26POU8b3w0P"
+        },
+        {
+          "tMs": 4051,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"ffub/Kb9j/7v/9wCvwaECV0NURAIE+MWrxmRHZ8gsCN+JuEmqSbjI3ggpx64HUUdqByaGgsWmBGADQEJCgVXAIz7of"
+        },
+        {
+          "tMs": 4062,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"ANSa0znTW9Pk0znUkNaP2Wfb19yS3vfgveNS55LrUe8B84L2pfrP/dD/AwOvBPEGBwpDC2YNVA8yEOoRrxIaEuYQMA"
+        },
+        {
+          "tMs": 4071,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"+wJOAnQEOwW3BccGxwcwCacKCAvfC6ANIg8DEiYTCxW3Fk0XShtzHbAdDR5XHIMbrBsmG1kalxdmFiYVrhH0DwANog"
+        },
+        {
+          "tMs": 4082,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"Eftl+fD35fWJ85PyFPFE8Ffv3u4z7oLsj+xm6yPq1ep/6hrqeOqK66TsSu1o72rwF/Da8ETxmvF58m70PfU69aD2SP"
+        },
+        {
+          "tMs": 4091,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"R/ug+kD6z/u3+lr5dfkz+sf5p/n++rD7LfxV/G/90/1o+5H7ifzA+8D+JQB+/j3/L/+pACAA8P/pAVH+9f1LAZ8Apf"
+        },
+        {
+          "tMs": 4101,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"4fmB/ekCG/9V+aQBOQcF+a//2gUa+83/SwDL/3/+KPzfAUT+ofsYAhoB4/uI/dsCQP5W+1gJnwO2+r0IrgAN/i0Hov"
+        },
+        {
+          "tMs": 4111,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"Vv2BA9oAGgD7A139dgIZAHgBov5E/ywCgfzSABX/KQCYAlP+a/8lA8r+0f7+AeX7SQNI/0f9/QIj+/cE3v+2+0MDRP"
+        },
+        {
+          "tMs": 4121,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"dQJd/cf9swMY/oP+RP8RARf+nvw4Bwb6gwAdBVP4Vwc7+7H7CgvI+VH/bAVt/OcA+ABfAMT/xP/WACH/iwEg/xH7xQ"
+        },
+        {
+          "tMs": 4131,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"pfonA4sDc/mmAywCOP9uAm7/2v8//5T/LAHF/gX8hgMzA7P8nQNrAZn7QQX9/xz8uwRd/AgCJgY2+EAD5QT1+MQCtv"
+        },
+        {
+          "tMs": 4142,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"+QI4+ZgBUAKD+S0ESQCRAKgD0v/GAIX9Xf/nAiIB6f/5/ngA/v+c/xkDKwBo/wMFLP0Z/rUDm/vE/xYFg/4r/4MBbv"
+        },
+        {
+          "tMs": 4151,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"YABGA8AB2vvVADcD+/kt/j0BvfwIApQB7/ytAhABK/6JAbX6NPtOAK79vfw5AfYB2P6dAW7+zgCXAqr5Mf8A/yv+HQ"
+        },
+        {
+          "tMs": 4162,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"vP8bA8kB4f8jAQ8CdAI0ANH/SwHz/x//UP92ACAAE/9YAXsAGv/2/9v+qf9fAO//YP+U/hMAcQA2/2v/SwDH/+z/ew"
+        },
+        {
+          "tMs": 4172,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"KgNUA+gC3gLMArUCOgKwAc8B5gDBAGsBUwFxAaAAo/9GAEsAwP6w/bb8bPyb/Mj75vr6+nD6hvnG+aH5Ifhk9zH3Af"
+        },
+        {
+          "tMs": 4181,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"hxFQEo8TlRQGFYAV3xT1Ey4UkBPHEpISwRAjEFEPzw1bDYYL+gkLCOsE0QK6AA/+G/zL+p/4efdk9jj0q/Jc8IvuPO"
+        },
+        {
+          "tMs": 4191,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"pgMZA2MDqwOXA70DHQVFBnMGBAePB/wIOAqvC8MNqQ7aD1ARWBMFFeQVpBbMFVYVqxU8FfQTYhPPE5MS0xFpEecODA"
+        },
+        {
+          "tMs": 4203,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"ZPbb+Gr6RfsK/Br9fP21/Qv+bP47/3z/CQCAAHIA2QAgAbQAoP9q/pv9fv08/k7/DQBEAa4CIQSUBcMFogYNCIsJLA"
+        },
+        {
+          "tMs": 4214,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"bvyN+iL4+fVN9BvyIvDj7h3sKOnK59jmWeZ25u3mseaw5mvn1+dc6Pbo9elb64Dszu347mXwhvIG9Sb3m/gC+ov66/"
+        },
+        {
+          "tMs": 4221,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"GQo7CiMM7w1HDtoOqA8vEOAQLhDaDxwRdxEVEYIQnRCLES8RJBDOD7MOzA0gDc4K1wn/CA4HmwZIBeUDhQItAF//J/"
+        },
+        {
+          "tMs": 4232,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"AvUc88r4NfYW9xz4Gvby+/z5wvkR/j78UP2n/rH9EACa//z/UwIbAmgEFwO6BKUH/AIJB6UKwwRICNYIjwfrC14F3A"
+        },
+        {
+          "tMs": 4242,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"8AeHAX8AMwXNA6z9TAXEAVP82wYL/xn72gI/ATT8G/zMAP/+qfvv/aX+Ev1H/IX88f/E+UT7bAAl+j/6fv1r/K/5SP"
+        },
+        {
+          "tMs": 4252,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"0QGAAEr84f9a/qj/ofxs/4j/gfsOAXf85f3qAw38EP5wAjz/i/wSAYIC9P2kAYQBEfwJBc0BkPmQCJYAUPm1CLP/7/"
+        },
+        {
+          "tMs": 4262,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"Of7+/xj/8AHv/Nn9+Qil+eD9IQf8+1gAEgEM/1L+U//MAH77nv9EA6D+Pv0x/vYD2P7H+bQHcQFw+qoG4f3e/BkHNf"
+        },
+        {
+          "tMs": 4272,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"qvy5AzgAfP4FBaf8FP9yAx///P1oAB0AZQG8/7b8XQTSAi/9K/8aAhMAAQGs/+X8hwWY/2H6FwRf/0cAVAFA/YkBRf"
+        },
+        {
+          "tMs": 4281,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"0P4eAFj+Tv8WACQAOf+q/Jn9nP+XAB39cP7WAg//lP4I/5r/qQIV/yb/mQPz/0b9QwHqALr/3wA+/8wAIgG6/g3/vf"
+        },
+        {
+          "tMs": 4291,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"9v/N/zMArwCfAAoBQAI7Ao0BRwI3AzID1QKRApQDZwQ+BAIETQMQA2EELwXGBRwFGATyBJIElwTsBFIEGgSnAtEC7A"
+        },
+        {
+          "tMs": 4302,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"svm9+q/6bvsI/Tv+0P/cACcBFwIrAgMCZQLlAfoBSAK0AmsDgAOjA2cEgQbZB8IIuQkTCrMLcA10DxERwhJeFkkZNR"
+        },
+        {
+          "tMs": 4311,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"heWO5H3ivd4Q29fYPdlt2yDd4dyg3HLd9N7H4MTheeJ45GzoIe0G8UTz/vT69+n7v/8jAnsCNwJSA18FfgcNCYIJ9w"
+        },
+        {
+          "tMs": 4323,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"0RemGHcYFRkWGoUbdxyOHGEekx8oIIAggx0CHeEc4xseGxgWahGJDBgJRwiRBXoCBP+Q/PL5SfY/8ZzrVOmR5+/lK+"
+        },
+        {
+          "tMs": 4332,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"WPgf+v77Gf4N/7P/KwDe/6z/ZwBjAQ0BygDbAK4A/AACAQsB+ADDABEBGAEJAXYBjgG+AZUC4QM/BVkF7wXGB/IIKw"
+        },
+        {
+          "tMs": 4342,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"9ATUBCIFxwXrBcAF8QUxBooG5Qa4BqcG2gbIBrcG2gbIBpQGjQZ/BpIGcwYEBgIGAwaOBU0FNQWvBEAE6gN3A0sDIQ"
+        },
+        {
+          "tMs": 4352,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"XgBAACAA+v/T/7v/oP+F/3v/av9p/3D/dv96/23/af94/57/nf+Y/7P/qf+9/+L/0P/Q/+D/1v/H/9T/0P/D/8j/sP"
+        },
+        {
+          "tMs": 4362,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"rv+y/7r/wv/K/9P/2//o//H/+v8JABcAJAAsAC8ALgA4AEkAQgA8AEAAOgA8ADMAKAAnABgACwAAAPH/6f/X/8P/wf"
+        },
+        {
+          "tMs": 4372,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"2v/k/+X/5//0//L/8P/7/wIABQAMAAsADQAbAB0AHQAkACcAJwAoACgALwAtACcALQAoACkAKAAiACQAHgAeAB0AFw"
+        },
+        {
+          "tMs": 4381,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"4//j/+X/5P/n/+n/6//s/+7/8f/z//v/AQAAAAMABgAIAAkAEAAPAAkAFwAWAA8AGAARAA0AFgARAA0ADwAKAAcABw"
+        },
+        {
+          "tMs": 4391,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"9f////z/AQABAP7/BwALAAoADgAOAAoAEwAWABIAFgARABAAEwAOAAwACwAJAAYABgAFAP/////8//v/9//x//D/7v"
+        },
+        {
+          "tMs": 4401,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"BQAKAA4ACAAOABIACwAOAA0ADAAZACQAKgArAB8AGAAWAAoA+v/y//D/9//6//7/DgARAAAA9P/9//v/8v/5//r/7v"
+        },
+        {
+          "tMs": 4411,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"2wD1AEABIADwAGYAqP1k/pb9nfwX/Wv9ov8v/NX4nfo6/Pf/Bf+D/RD/DP3g/hQCiABxAvkEswKUAGD+hgA6AbL+Xw"
+        },
+        {
+          "tMs": 4421,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"CQHFAbcBFAKnAEP/zgHSATP+kv2jAE8C5P8x/1wAewGZAYj+8P9eA+oAGf7y/qUBuQPgAVn97P/7BFICx/9eABwCSg"
+        },
+        {
+          "tMs": 4432,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"g/5s/rn/AgG9/0j9nv2R/1b/VP7v/kv/9P7l/zQBJwFUAJT/3P9LAaYBaAB4/zv/BQClAUQBHv8I/7YABAELADf/3P"
+        },
+        {
+          "tMs": 4441,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"YgAnAC8AOwBrAI8AaQGHAQoBNgCg/1UA3wDvAHMACQAZADkAhADyAI8B8AAZAFwAIQAtAKz/zv80AWIBvAEYApgBHQ"
+        },
+        {
+          "tMs": 4452,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"0gFnAdQA4QAHAYAA8P7P/cj93f3x/UP+TP9nAEQAff9l/4v/6v4t/rT+XQD6Ab8CwALDAu4CkQLBAd4ALQAE/3b9Ef"
+        },
+        {
+          "tMs": 4462,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"ofuW/OL9LP8tANgAawF/AQsBdgAEAGkAdAH3ASoCegKlApcC2QF5APH+1P37/a/+bP9ZAPQASQGLAXwB7wAeALn/yf"
+        },
+        {
+          "tMs": 4472,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"qgZPBw4HDgYNBbQE0ATsBL4EXgRCBJIEAQX3BL8EkwSjBBgFVAWUBWUGsQc8CScKMQrfCUYJdAjJB6oHewexBmQFyw"
+        },
+        {
+          "tMs": 4481,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"1xl2Gi0bZhzTHQIfsh/sH7Mf1x03GX0RSwjN/zT5NPQ28G7t6uug67/rCexy7GDtmO8F8xD3TvoS/G79zv9JA4gGQw"
+        },
+        {
+          "tMs": 4491,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"jCCjIfwhtSAcHTkW0Ay/AhL6sfMX76vrt+hr5wzozemC65bsnu7/8Wn2e/pz/er/hAI8BvcJAA2pDosODw1LCr8GBg"
+        },
+        {
+          "tMs": 4501,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"3xYuGOIZihtuHcweBx9mHWUZqRJHCtkBA/pb9KLvOexz6/rrH+077gHvn+8N8oP1L/hU+/394QCKBNsH2ArDDLcNxA"
+        },
+        {
+          "tMs": 4511,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"OguyDH8OIBBwEc4SqBTDFssYExt/HIwdJR8+IAkgFB2DFj4NiQS3/Lr1WPAJ7MLpyenY6sLrU+x67R/w+vNC+NX7cP"
+        },
+        {
+          "tMs": 4521,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"owpnCmMKBAqNCXEJPApHC3YMVQ0qDksPchDcETsTNRVHFxgZQhsaHrkgCSJtIusgWxy3FA0KTf6O9NDti+kP5z/m3e"
+        },
+        {
+          "tMs": 4533,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"HPyG/AH+tQCbA1AGaAiICUIKzwpdC64L8AvJC78L8AsfDAMMvwsVDHsN5Q9eEesRfBLBEyMVYxZ0F7MXuhjqGe0ZRB"
+        },
+        {
+          "tMs": 4542,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"XP9S/3P/pv/j/6v/lf+A/5r/eAAFAvUDqQUqB20IlQlnCqEKGgqZCUUJfAkNCskKKQzLDWcPWxAwES4RzBBXEUASlB"
+        },
+        {
+          "tMs": 4552,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"jgAk/z/+Wf3R/MD8mP3s/iIABQFfAcYBEQJMAhAC5AHrAhsEvgWdBxcJSwphCzMMXwxsDPALDgubCroKCAsKC7sLIQ"
+        },
+        {
+          "tMs": 4562,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"+flf+xf9MP+OAOgAbACF/1z+bP3b/JX8uf30/tX/sAAkAfsBhQNSBaYGSwfPB9oHsQftBxoIUAh8CSgLUQxaDUENMA"
+        },
+        {
+          "tMs": 4572,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"pfiH+CL5Sfnc+Lr4SvlL+Tr5g/nq+Yv7G/2I/Sr+p/7B/qr+Qf+bAAoCnAMBBdsFFgZ/BkQG5wUmBuwFGwXoBL0FcA"
+        },
+        {
+          "tMs": 4581,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"qvdj+O74NPkW+V75z/nq+cv5bvkg+fD4Ifmi+e/6fvyK/N38O/0u/WT9fP0L/uD+qv9+AHoBfwJeA8wDVgSlBJIErw"
+        },
+        {
+          "tMs": 4591,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"YPmB+QX6kfp7+v352/gP+In36/ZD9xr4nfhN+aH5gPnW+Yn5APkg+Tf5gvny+V76KPs1/P787f3D/hv/d/+l/6n/Bw"
+        },
+        {
+          "tMs": 4601,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"4v2H/A78ovus+8D77PpK+vP51/lQ+nr6C/qv+hj76voA+9D6R/so/ej+Tv9S/03+3/1o/cr7c/vo+lv6t/qX+uP55f"
+        },
+        {
+          "tMs": 4611,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"EQJtAUYCgwE5AToBaAAVAPn/1/9//0z/E/8X/z3/4P4Y/1P+ZP5L/u790/4//g//Mv/8/sz/4v+vAA0AQv9f/sT82/"
+        },
+        {
+          "tMs": 4621,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"vP7O/ZP9Lv70/9j+8v07/5//0f/X/q/+6f7Q/ysAwv93AeIBewIOArMBMQIIATAA8P+r/8/+zP/Y/3j/oQCM/6//OQ"
+        },
+        {
+          "tMs": 4631,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"pP85/+b/4P/H/uX+6P30/1QB8f/qAL4A1P98APX+M/5FAHv+A/99AH//7wD9AP4AzQCQACMBvwDaAAL/Pv5Y/p/+g/"
+        },
+        {
+          "tMs": 4643,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"TQM9AeP+gQLEAL7/xAH//hgCMgNg/rT+v//r/7r+4vyu/v4Ab/8E/tv/lQCv/8j/9v3q/rMB1P5F/sr+xv8OAAP+r/"
+        },
+        {
+          "tMs": 4652,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"bf1//3YBFP5o//L//P/E/bn7QgEjARn8Nv0rAWgBP/7J/7cC6AEYAZcAlv+tArgCX/4WA30AdP5IA93+VACdAYj+KQ"
+        },
+        {
+          "tMs": 4662,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"of9bAkX96v+TA/D+BfzPAb8AfvpRAwcBc/yHASIAMwASAC8AQAADAAsBPP8uAAcBNQEgAM39gQBKA9D+5v5mAYn+yQ"
+        },
+        {
+          "tMs": 4671,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"rgATAKD/pAHtAQn/4f/oARoAxQAmADX/UACHAYcAX/xGAjsCTv9PARj+of/CAHgAuf0b/7ACUP6Z/18AnP/RAWD/T/"
+        },
+        {
+          "tMs": 4681,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"gACw/J8ADQLx/u3/KP/4ADUAEP8oAm7+Rv7RA6v/6PzOAqoAC/6Z/+v+qwClAMn+Yf9uAdn/JwGQAFb9DAKLAfr99v"
+        },
+        {
+          "tMs": 4691,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"FwANAGQAtP/g/+QAAgEQ/zH//AAVAKT+N/+mAAQA8P5aAO3//P5vAO4AXv8p/wwBfgBt/0MAWABq/2b/7gDu/5f+Nw"
+        },
+        {
+          "tMs": 4701,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"4P/3/wwA5//2//v/8v/9/+z/+v8DAPz/4//y/w8A9P/4/+j/9P8QAPv/8//l/wQADwDp//X////7//3/4//1/w4A6/"
+        },
+        {
+          "tMs": 4711,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"2v8cAAcA4//2//f/AAABAOL///8NAOz/+P8LAAIA/f/v//v/HAAFAPD/CAD7/wMAGgD7//z/FAD3//7/FwD7//v/Cg"
+        },
+        {
+          "tMs": 4722,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"/P/y/+f/+f/5//T/8//r//P/+P/u//L/BgD9/97/5/8BAPv/1f/h/w8A7//L/+D/+f/5/+n/4f/o//X/8P/o/+P/5P"
+        },
+        {
+          "tMs": 4732,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"CwADAPn/9f/1//X/+f/2//P/BAAGAAgAEAAKAA8ADAAFAAkACwAAAPX/CwANAPb/BgAQAAkACQAEAA0ACwACAPj/9f"
+        },
+        {
+          "tMs": 4742,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"1f/2/xMAKgDp/w4AJgD8/xAA+f8KADcAIAD//x0AWwCOAKYABgDW/78AHAGaAJb/zP+7AHUADwAGACAASwBiALv/YP"
+        },
+        {
+          "tMs": 4752,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"TP79/Zf+AP/M/or+FP+v/63+sP+qAKr+J//K//b+TwB5AKr+CP8UAK8AVQEyAGr/KgCJAGkBUAIVAfD/8P9YASkDJA"
+        },
+        {
+          "tMs": 4762,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"BwQ5AyACFQETAEr/Ef+b/n39rvw6/Pj7zfsi+6D6T/qf+T35D/nh+Lj40Phx+U/6tPqA+jX6Mfq6+lb7OPsk+2X7kf"
+        },
+        {
+          "tMs": 4771,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"9xewFLURlw/EDaMKEgZMAYP+1P1h/Sr8M/pj+Kn2b/TG8dfuSuy06hbqU+qb6nzqserC6+HtVvCe8mb0LvWl9Rv2Lf"
+        },
+        {
+          "tMs": 4781,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"CRK8EigUOhbZGOYarBrLGNQVqhNAEccO1wtKCCcGqwNzAQD/mPyY+2f7pft++mH4K/Ug8mjw1u5F7s3tsO0v7hvve/"
+        },
+        {
+          "tMs": 4792,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"7ArKC6AMUA0WDtAOthC0EqsUrhWIFgIZBhwnHzIfPhxeGOAUCxO4ENwNBwrKBmwEFALFACP/nP6F/t39dv2G++r4b/"
+        },
+        {
+          "tMs": 4802,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"+QhbCdYJ3AlPCpEK5wq+C+MLYQzdDGQNUQ4SDzgQuhAzEbMRvRKdFLoVWhYSFqgVPhUeFG0S9w8CDscMjwsGCroHtw"
+        },
+        {
+          "tMs": 4812,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"9/+3AFwByQE5AtQCigNVBMMEHAVqBboFHwaTBjAH6AeWCAcJJgkZCUEJegn7CZAKKAvcCyoMfwwMDX8NGg6HDqgOBg"
+        },
+        {
+          "tMs": 4821,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"BfpN+of6OPt7+9b7ZPy4/E/96P1p/tz+Ov+x/xIAXADiABUBagEiAmsC9QJPA48DNQSWBCwFrAXJBTMGlAawBvYGNg"
+        },
+        {
+          "tMs": 4832,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"YfeM92L3YveH93b3ofe99+H3FPhY+Hv4wPgM+Tj5m/nZ+TD6iPrp+mr7vfsc/H38tPwk/Y/98f1u/rP+Lv+O/+L/ag"
+        },
+        {
+          "tMs": 4841,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"lvxQ/PT7r/tX+xX72fqV+k76L/oa+gn6+vmz+ZP5ovmD+Z75a/ld+Yr5dfnL+Zn5j/nT+aH52fnz+er5/fk0+j/6aP"
+        },
+        {
+          "tMs": 4853,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"HgIlAuMBsgGRAUMBOwEOAeEA4QCQAEYAKAAZAAEA5v+0/3f/b/9j/zb/IP8F/8z+2P6q/r7+sv5Y/mz+Wf5U/kH+PP"
+        },
+        {
+          "tMs": 4862,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"OQBOAFgAWQB1AIAAiACjAHYArwCrANEA6ADlAAIB6AD7AN8ADgECAaQAFQECAdQAEQHhAO4A7ADOANYAugDAAKUAug"
+        },
+        {
+          "tMs": 4871,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"hf8IAKz/of+e/2b/g/+q/4v/lP/A/5P/tf/b//D/8f/M/97/6P/P/6X/vP/W/8D/1//W/8n/CQDt/+z/GAD0/ycAHQ"
+        },
+        {
+          "tMs": 4881,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"//9WAPn/MACJAEsAFwA8ADkA8v9tAEAAjgDTAPf/IgBdAEIA6f9k/zcA/P+5/wwAzv9kAMr/xf8qAM///v/P/3X/Bg"
+        },
+        {
+          "tMs": 4891,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"LQFAAcsANwBG/zT+av7X/r3+ZP8jAIEAvQDPAIcA+v+J/23/pv8iAD8AOQD3AIQBPQHsABIBEQF8ABEA8v9gAL4Aig"
+        },
+        {
+          "tMs": 4901,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"3v/W/7v/w//c/7L/6P8PAOr/8//5/yQAVABmAB0A8v8qAEUADwAWAA0AGgChALgAjACDAIwApgAEASEB8QADATQBaQ"
+        },
+        {
+          "tMs": 4912,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"6AT5BE0F0QVxBv4GbgcfCMIIeAnrCVQKNwtHDCMObw80EOEQRxHQEmMU3xXmFpUXRBm+GlYcABzXGaYXNBUgFV8Wjx"
+        },
+        {
+          "tMs": 4922,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"QfZe+Fj6cvs//B38BPwm/JX98v+4AvsFAQjvCSILfgysDqoQyROQFsQZ9hzQHjkgfh/2HTYcWBv7HAwf1yGpIm8h2h"
+        },
+        {
+          "tMs": 4932,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"6fdT9732Y/Z49uf29vZR9or1SvUf9lD3N/hy+GT46/gj+qf7CP0G/u/+YQDsAQ4D/QPPBDsGHAkqDHsOLw+4Dq0OTw"
+        },
+        {
+          "tMs": 4942,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"JAAa/4z+5P09/db82PsQ+4767PnF+cn55/lC+o36x/pA+mz5Ivk3+YT6I/wo/b39kf2O/cz9R/77/pr/PgCqACUBnw"
+        },
+        {
+          "tMs": 4952,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"hQQbBAQEGwQfBM0DQQOJAroB/AA9AMz/nv9q/1z/9P4T/mb99Pye/I78Ifxy+x374PoB+wb74/ri+tn6afuE+zH74P"
+        },
+        {
+          "tMs": 4963,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"9/7G/o/+aP4O/qb9Sf0Q/Qr9Af0f/Sv9KP05/Tb9Vf16/b39G/5x/tP+F/9O/4L/xv8hAIYA7QA3AXoBqAHNAfMBEw"
+        },
+        {
+          "tMs": 4972,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"Rv8+/zv/M/85/0//Zf95/4j/lP+d/6r/uv/K//b/IQAvADgANAAyADcATwB5AHkAeQB8AGUAYABTAE8AUQBHAFAAPw"
+        },
+        {
+          "tMs": 4981,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"QgBNAFAAYABbAE0ARwA9ADoAPQA1ADQAPQA3ADEALAAcABQADwADAAIA+P/v/+7/0v/W/9X/x//U/8r/zP/K/7n/xP"
+        },
+        {
+          "tMs": 4992,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"LwAhAB0AFwAXAB8AFAAOAAoAAgD///v/9f/u/+X/3//a/9X/0//Y/93/5P/k/+D/4//e/9f/0f/O/+D/7v/u//H/7f"
+        },
+        {
+          "tMs": 5002,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"DwAIAA4AAgD9/wAA/P8OAAwABAD9//T/9//7/wEAAAD9/+//4f/i/+H/4f/l/+n/5f/k/93/0P/M/8v/2f/k/+7/9/"
+        },
+        {
+          "tMs": 5012,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"nv6o/q3+t/64/rD+tf6+/s/+2f7O/qf+iv6J/n/+hf5+/mf+Zf5w/pb+wP7c/gr/Of9k/6v/+P9UAKUA7AAtAYQB+w"
+        },
+        {
+          "tMs": 5022,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"s/kg+k36bPp1+kv6A/rb+cb5sfms+cP58fli+iL77vvT/Lj9mv6a/6IAwgGXAhADbwONA5QDfwNTA+YCLAJuAZIA2/"
+        },
+        {
+          "tMs": 5032,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"UP+8AUQEfAY5CLcJIwt9DGQNhQ0NDRgM4QprCZgHSQWuAikA5f0G/AT67/cC9lz0JfOM8lLyS/Ja8nTy4/If87fzbf"
+        },
+        {
+          "tMs": 5042,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"GvfM9yn4ZviV+F/4bPg8+NX3jveR9wz40/i8+dP6Ovzm/ef/3QHEA6oF0gfDCfMK5QtMDFcMAQwvC5wJkwe7BSsD5f"
+        },
+        {
+          "tMs": 5052,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"ge1x7NHr1+sZ7GPsJO3f7a/uuu+S8C7xtvFX8vLydvOk87Tz5PPy85L0OfW+9cL21vdT+eb6lfw//vX/9QG3A4UF2g"
+        },
+        {
+          "tMs": 5061,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"JwzJB5QDLf9D+0/3OvSn8Uzv+u3G7FbsEuxC7PDsTO1X7jnvwu+a8GPxjPHw8VDyG/In8hjyEfLx8VnyAPNG81v0hv"
+        },
+        {
+          "tMs": 5071,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"fSPUIs8hIiAmHjEbtRcpFPYPTQxTCFcEywD0/DP6l/c59XDz4PHS8DnwJ/DH74TvY+9l74Tvn++x7yrvAO/P7pruoe"
+        },
+        {
+          "tMs": 5081,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"fhdGGSIbPh2SHzEhoCIcI3Qj1SNnI8ki1iBaHmobRBjeFO4QIQ3oCC8FlAFH/m37zfgG9/70ofPF8gfyB/K38aDxRv"
+        },
+        {
+          "tMs": 5091,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"JwwcDfEN7Q4PEFQRvhIBFLUVMBfbGIMa9xvPHWwffSHIImMjAiTbI+QjRyP+IbkfsBwNGnQWFBOAD0kLtwcYBEgBUf"
+        },
+        {
+          "tMs": 5101,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"Vfvp/Nn+8QAiAygFaQeRCWkLTA3PDu4P9RAVEhQT7hP9FLYVXBabF8IY/RmjGzIdqB4mIMwhDyMTJJgk+CMhI8MhPC"
+        },
+        {
+          "tMs": 5111,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"menr6dLq0Ots7VTvr/E79HD2o/jc+jP9RP//AF8CfQM/BdkGKQhqCX0KBAz5DTwQ2xFZE+oUKBaqF78YzxmjGq0b1h"
+        },
+        {
+          "tMs": 5121,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"zfSl8gTx8e/w7njurO3T7BjsXusI63jqTupl6jfq4OqN6yTs3O1Y7x/xjvMz9Un3ivkh+3z9P/+5AM4CRwQzBjcIIg"
+        },
+        {
+          "tMs": 5132,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"bQU0Bq8GwwaLBv0FFQUOBC4DRwJLAV4A7/48/YP73vkv+LP2ffUu9BPz4PGM8DvvCe4f7XXsTOxh7MDsX+3K7YHuGO"
+        },
+        {
+          "tMs": 5142,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"VvNR81DzOfM982/ztfMB9J70APVh9cD14vUP9jr2fvap9t72Kvdq96D39/dC+Ev4gfip+LD41/gB+Qv5I/lT+YL54f"
+        },
+        {
+          "tMs": 5152,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"1wgtCHcHsgblBRYFQwR+A8EC8AErAVMAcf+r/tn9Ef1s/Nb7Qfu6+j76uPk/+cL4Rfje93v3KPfg9pr2TPYF9tT1pv"
+        },
+        {
+          "tMs": 5161,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"pQnYCRcKRApOCjgKBArQCeMJIwprCowKPQrDCV4JEgkACf4IyghsCPwHggceB8YGfgYqBp0FBgVbBKEDDQOBAvIBjQ"
+        },
+        {
+          "tMs": 5173,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"b/+fAPYBxQIQA2sC0wHqASIDrwREBaIEZgPOAj0DJQUnB4gHJQfcBfIEWgXoBd4GnQfGB9cHgwfGBwsIBAjxB48HYg"
+        },
+        {
+          "tMs": 5181,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"oPtL+z78LPxh/Mf9LP13/FL81Pwz/nD/O/80/bT8lf5O/78AuQEuACH/P/55/xICogNDA/oBtQGdAaoCfAOlAyEEFA"
+        },
+        {
+          "tMs": 5191,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"3vf+96H4IvkF+Xz59Pgl+bL5svm9+l/7oPvH+xH7dPrm+tL7EP0v/ZH8bfzC+wz8k/3o/QT+kf7F/dT9N/4X/lX/of"
+        },
+        {
+          "tMs": 5201,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"sfE78tfyrfOP9BX1TvXu9WL21PYK+PX4QPoW+xf7Bftz+vr6Ifzi/Kv9+v2w/Vr9SP00/ZH9/f07/mr+3v1x/aP9mP"
+        },
+        {
+          "tMs": 5212,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"GutQ60TrWOuF65Pre+uN67zrOexZ7Yvu9u8G8cvxsPJc81H0JfX+9YX31Pj8+Rr7tfuj/B39sv2z/s3+Wf+2/wQAsA"
+        },
+        {
+          "tMs": 5222,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"0/i79tL0JfOw8W/wd+8F7r/sOuvi6TnpYOjr57/nnucM6J3o4+h36frpnOp462Tsne3i7p3wXfI79A72afd4+AT57f"
+        },
+        {
+          "tMs": 5232,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"JBqWGBUXghWDFIETtRKxEVEPfwz7CK0FRwMWAb7/Nv5B/B36+fYs9LzxcO8D7nvs3uow6nnp/+iD6GDn6+ao5gXni+"
+        },
+        {
+          "tMs": 5243,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"swyWDv4PfRESEygU2xXZFhAZRBttHE0dNRw8G3UaTRoBG38bKRzuG/caOBnVFoIUQhJfELYOZg1iDF0LtgkLB+kDWw"
+        },
+        {
+          "tMs": 5251,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"vPK/8x71Z/bP9yv5APo9+0X8Uf3P/vr/iAFhAxoF1gYeCNYIrAmZCugLfw2eDskPYhBtEV0SEBOFFPMUfRZyGFUaWx"
+        },
+        {
+          "tMs": 5261,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"Fvde9XH0PPPl8ZfwJu+d7szu7u767sHume777onvavAB8W7xb/I284v0Xvbv9835Uvtg/I/9t/75/0ABPQIWAxoEPA"
+        },
+        {
+          "tMs": 5271,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"F/8CAa0CyQN6BP4EMwUsBesEPwTBAxcDdQKcAacAgP9O/sP8o/o2+b73w/b59UP0mfJi8YzwPvDM7z/vE+9F70Dwi/"
+        },
+        {
+          "tMs": 5283,
+          "type": "reply.audio",
+          "detail": "{\"reply_id\":\"resp_0b87fd2aa4564cbfbcf55f939a33c185\",\"data\":\"q/Mp82HyL/Es8HjvC++c7nruTO7U7rnvAvC/8JvxOPO99eb3zvl6+xL91f4cANYATwHvAQID1QNQBGgEWQRbBFoE/A"
+        },
+        {
+          "tMs": 5284,
+          "type": "session.ended",
+          "detail": "{\"session_duration_seconds\":5.513712,\"audio_duration_seconds\":null}"
+        }
+      ],
+      "firstSpeechStartedMs": 952,
+      "firstSpeechStoppedMs": 3154,
+      "firstTranscriptText": "Now it feels corporate treasury.",
+      "classification": "CUT",
+      "sessionDurationSecondsFromServer": 5.513712,
+      "wallClockSessionMs": 6112,
+      "error": null,
+      "errorClass": "none"
+    }
+  ]
+}

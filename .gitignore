@@ -41,3 +41,5 @@ scripts/critique/reports/
 # Spike runs: local logs and outputs
 scripts/spike/logs/
 scripts/spike/out/
+# Turn-repro audio clips cut from founder call recordings (raw voice, regenerable from the run script)
+scripts/spike/turn-repro/clips/
