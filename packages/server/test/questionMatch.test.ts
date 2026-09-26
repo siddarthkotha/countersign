@@ -8,7 +8,25 @@ import {
   transcriptContainsLoadBearingValue,
   loadBearingValueFor,
   replyCoversCurrentRendering,
+  QUESTION_GOALS,
 } from '../src/call/questionMatch.js';
+
+// GREET-GREETING-SWAP audit (2026-09-25, founder ruling: DEFAULT_GREETING now asks "Who am I
+// speaking with?" instead of "How can I help you today?", packages/server/src/aai/config.ts).
+// `call/session.ts` labels the AAI-automatic greeting reply's `replyGoalAtStart` as `GREET`
+// (the goal already in force from `start()`'s first `tick()`, before any caller speech has
+// landed) -- never `ELICIT_IDENTITY`, regardless of what the greeting's own audio text asks.
+// This is the one invariant that makes the rest of the greeting swap safe: as long as `GREET`
+// stays out of `QUESTION_GOALS`, the greeting can never register as an owed/asked identity
+// question in `maybeReaskQuestion`'s or `maybeSendReplyCreateAfterReplyDone`'s own bookkeeping
+// (both gate on `QUESTION_GOALS.has(goal.code)` before doing anything -- see each one's own
+// call site in session.ts), so it can never suppress the real `ELICIT_IDENTITY` ask that
+// follows once a caller states a request with no name.
+describe('QUESTION_GOALS excludes GREET (greeting-swap safety invariant, 2026-09-25)', () => {
+  it('does not include GREET', () => {
+    expect(QUESTION_GOALS.has('GREET')).toBe(false);
+  });
+});
 
 // Imperative-question false-negative fix (2026-09-14): unit tests for the matcher extension
 // that lets an imperative request ("Please state X.") count as asking, per

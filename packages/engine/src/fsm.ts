@@ -393,11 +393,15 @@ export function phrasingGoal(input: PhrasingGoalInput): PhrasingGoal {
 
   if (state === 'INTAKE') {
     // Fix (2026-09-11, composes with the sibling AAI-greeting lane, commit e200f20): the
-    // fixed connect-time audio greeting (AssemblyAI's `greeting` field, "Meridian payments
-    // desk, verification line. How can I help you today?") now speaks the desk name BEFORE
-    // this goal is ever rendered, so GREET must not name the desk or greet again -- it only
-    // asks the one open question. Kept as goal kind 'GREET' (stalls.ts's kindFromHint and
-    // anything else that keys off the goal code are unaffected; only the hint text changed).
+    // fixed connect-time audio greeting (AssemblyAI's `greeting` field, currently "Meridian
+    // payments desk, verification line. Who am I speaking with?" -- reworded 2026-09-25,
+    // founder ruling, see config.ts's DEFAULT_GREETING doc comment) now speaks the desk name
+    // BEFORE this goal is ever rendered, so GREET must not name the desk or greet again -- it
+    // only asks the one open question. This goal is reached only when NEITHER identity nor a
+    // request has landed yet (deriveState above), regardless of which one the greeting itself
+    // asked about, so its hint still asks for both. Kept as goal kind 'GREET' (stalls.ts's
+    // kindFromHint and anything else that keys off the goal code are unaffected; only the
+    // hint text changed).
     return goal(
       'GREET',
       'The desk has already greeted the caller; do not greet again or name the desk. Ask who is calling and what they need, in one short line.',

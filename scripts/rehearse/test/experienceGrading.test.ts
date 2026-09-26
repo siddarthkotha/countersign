@@ -250,6 +250,25 @@ describe('repeatedQuestion', () => {
     expect(repeatedQuestion(b).count).toBe(0);
   });
 
+  // GREET-GREETING-SWAP audit (2026-09-25, founder ruling: DEFAULT_GREETING now asks "Who am
+  // I speaking with?", packages/server/src/aai/config.ts). Real risk this test checks: a
+  // caller who states only a REQUEST (no name) after the new greeting hears ELICIT_IDENTITY's
+  // own spoken line next (packages/server/src/brain/spokenLines.ts, reworded the same day to
+  // "And could I get your name, please?" specifically so it never echoes the greeting's own
+  // wording) -- confirms this is never counted as a repeated question, both because the
+  // caller's request lands strictly between the two agent lines (transcript-based signal 2
+  // requires NO user transcript between) and because the two lines are not even
+  // normalized-identical text.
+  it('greeting swap (2026-09-25): greeting asks "Who am I speaking with?", caller states only a request, ELICIT_IDENTITY asks again in different words -- never a repeat', () => {
+    const b = bundle([
+      agentTranscript(0, 'Meridian payments desk, verification line. Who am I speaking with?'),
+      userTranscript(3000, 'I need to send a wire transfer today.'),
+      agentTranscript(6000, 'And could I get your name, please?'),
+    ]);
+    const result = repeatedQuestion(b);
+    expect(result.count).toBe(0);
+  });
+
   it('existing action-based tests remain green (account_last4 readback at 57.841s and 65.765s)', () => {
     const b = bundle([
       readbackIssued(57841, 'account_last4', 'r1'),

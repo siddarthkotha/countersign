@@ -114,8 +114,16 @@ function renderStall(): string {
 const RENDERERS: Record<SpokenLineGoalCode, (goal: PhrasingGoal) => string> = {
   // fsm.ts:403 -- no slots.
   GREET: () => "Who's calling, and what do you need today?",
-  // fsm.ts:426 -- no slots.
-  ELICIT_IDENTITY: () => 'Who am I speaking with, please?',
+  // fsm.ts:426 -- no slots. Reworded 2026-09-25 (founder ruling, DEFAULT_GREETING swap,
+  // packages/server/src/aai/config.ts): the connect-time greeting itself now asks "Who am I
+  // speaking with?" -- this line only renders AFTER that greeting, once the caller has stated
+  // a request with no name (state CLAIM, deriveState/fsm.ts), so it must ask again in
+  // different words rather than echo the greeting's own phrasing back at the caller one turn
+  // later. Never a repeated-question DEFECT either way (a caller turn always lands strictly
+  // between the two -- see DEFAULT_GREETING's own doc comment for the audit), but a
+  // near-identical echo reads as broken/repetitive to a human listener even when the grader
+  // stays clean, so it is worth the reword regardless.
+  ELICIT_IDENTITY: () => 'And could I get your name, please?',
   // fsm.ts:465/479/536 -- see renderStall's own doc comment.
   STALL: renderStall,
   PROBE_CONSISTENCY: renderProbeConsistency,

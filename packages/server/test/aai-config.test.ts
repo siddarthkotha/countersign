@@ -296,9 +296,17 @@ describe('DEFAULT_VOICE', () => {
 // payments-desk-voice, plain-English line -- no ids requested, no detection language
 // (LAW 1). index.ts's real connect wiring sets `greeting: DEFAULT_GREETING`; this proves
 // the constant's exact wording and that it flows into the connect payload unchanged.
+//
+// AMENDMENT (founder ruling 2026-09-25 7:35 PM, PROVEN tonight): AssemblyAI's voice agent
+// ends a caller's FIRST turn early during continuous speech (13/13 when a long request was
+// the first thing said in offline tests replaying the founder's recorded voice; 3/3 whole
+// when one short name line came first). A greeting that asks for the NAME makes the first
+// caller turn short by design instead of inviting a long open-ended answer -- the engine
+// already answers a name-only first turn with ELICIT_REQUEST ("What do you need today?",
+// proven live tonight), so nothing downstream needed to change for this swap alone.
 describe('DEFAULT_GREETING', () => {
-  it('is the founder-specified payments-desk greeting, with no ids requested and no detection language', () => {
-    expect(DEFAULT_GREETING).toBe('Meridian payments desk, verification line. How can I help you today?');
+  it('is the founder-specified payments-desk greeting, asking who is calling (not an open "how can I help"), with no ids requested and no detection language', () => {
+    expect(DEFAULT_GREETING).toBe('Meridian payments desk, verification line. Who am I speaking with?');
   });
 
   it('is carried onto the FIRST connect config\'s session.greeting unchanged', () => {

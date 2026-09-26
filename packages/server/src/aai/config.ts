@@ -54,7 +54,25 @@ export const LIVE_SESSION_TOOLS: object[] = [];
 // here, not in `index.ts`, so it's a single named constant a test can import directly --
 // `index.ts` has no exports and is the process entrypoint (importing it would run
 // `server.listen`, see aai/session.ts's own doc comment on why tests never do that).
-export const DEFAULT_GREETING = 'Meridian payments desk, verification line. How can I help you today?';
+//
+// AMENDMENT (founder ruling 2026-09-25 7:35 PM, PROVEN tonight -- offline tests streaming
+// the founder's recorded voice): AssemblyAI's voice agent ends a caller's FIRST turn early
+// during continuous speech (13/13 when a long request was the first thing said; 3/3 whole
+// when one short name line came first). The old open-ended "How can I help you today?"
+// invited exactly the long first turn that gets cut; asking for the NAME instead makes the
+// first turn short by design. Downstream, the engine already answers a name-only first turn
+// with ELICIT_REQUEST ("What do you need today?", proven live tonight) and a request-only
+// first turn with ELICIT_IDENTITY -- see `packages/engine/src/fsm.ts`'s `INTAKE`/`CLAIM`
+// branches, unchanged by this swap. Audited (SONNET-JUSTIFIED lane, 2026-09-25):
+// `QUESTION_GOALS` (`packages/server/src/call/questionMatch.ts`) never includes `GREET`, and
+// `call/session.ts` labels the automatic greeting reply's `replyGoalAtStart` as `GREET` (the
+// goal already in force from `start()`'s first `tick()`, before any caller speech) -- so this
+// greeting can never register as an owed/asked identity question, never suppress the real
+// `ELICIT_IDENTITY` ask, and the experience grader's `repeatedQuestion` transcript signal
+// (`scripts/rehearse/experienceGrading.ts`) requires an EXACT normalized match with NO caller
+// speech between two agent question lines, which a caller stating only a request (no name)
+// between the greeting and the following `ELICIT_IDENTITY` ask never satisfies either way.
+export const DEFAULT_GREETING = 'Meridian payments desk, verification line. Who am I speaking with?';
 
 // AMENDMENT round 3 (controller, verified live 2026-09-02 11:49 AM CDT + docs check --
 // see docs/aai-voices-endpoint-2026-09-02.md, and the CORRECTION line in
