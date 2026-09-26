@@ -60,6 +60,56 @@ export function extractDeadline(text: string): DeadlineHit | null {
   return null;
 }
 
+// FIX (founder live defect, 2026-09-25, PROVEN: scripts/rehearse/reports/founder-2026-09-25/
+// 140b3584-b8c7-4f09-a1c5-1c930ba44859.diagnostics.json): a caller answering a LIVE_COMMITMENT
+// deadline challenge with a plain immediate-time phrase -- "Right now.", "Immediately.",
+// "ASAP." -- matched neither DEADLINE_RELATIVE_RE ("in/within ... minutes/hours") nor
+// DEADLINE_ABSOLUTE_RE (today/tonight/eod/weekday), so `extractDeadline` returned null.
+// `hasFieldSignal`'s own 'deadline' branch (challenges.ts) then found no digit and no weekday
+// name either, `isAnswerShapedFor` graded the reply NOT answer-shaped, and `gradeChallenges`
+// left the challenge AWAITING forever -- the caller's real answer was silently discarded, the
+// engine's own evaluate() output never changed (same verdict/state/goal/evidence), and the
+// server (call/session.ts's one-brain `nextSpokenLine()`) re-rendered the byte-identical
+// challenge question the next time AssemblyAI called our endpoint (49.08s ask, 54.48s "Right
+// now.", 58.74s identical re-ask -- founder's own top complaint, "keeps asking the same
+// questions").
+//
+// REVIEW FIX (2026-09-25, BLOCKING finding on the first cut of this fix): the first cut put
+// this recognition INSIDE `extractDeadline` itself -- but `extractDeadline` is also called by
+// `ledger.ts`'s general claim-building pass (line ~479), which runs over EVERY caller
+// utterance, not just a challenge answer. An honest caller saying "right now"/"immediately"/
+// "asap" in ordinary urgency speech (never as a restated challenge answer) would then create a
+// brand-new STATED deadline claim that did not exist on main's HEAD; a later REAL deadline
+// ("in the next 10 minutes", "today") with no correction-lexicon word nearby would read as a
+// SECOND, different value for the same field -- `classifyDifferentValue`'s default ->
+// CONTRADICTED -> a `consistency_flag` FAIL card (compose.ts) feeding the freeze/escalate
+// tally, on a caller who never actually contradicted anything. `extractDeadline` above is now
+// byte-identical to main's HEAD (immediate-time phrases removed from it entirely -- see
+// packages/engine/test/ledger.test.ts's own "REVIEW FIX" tests) -- `ledger.ts` never sees this
+// recognition at all. `extractDeadlineAnswer` below is a SEPARATE function, used ONLY at the
+// two challenge-answer call sites (`challenges.ts`'s `hasFieldSignal`/`gradeLiveCommitment`),
+// where "was this specific reply an attempt to restate the committed deadline" is exactly the
+// question being asked -- never in the general ledger pass. It never decides PASS/FAIL/
+// AMBIGUOUS (LAW 3): `gradeLiveCommitment`'s own literal-value comparison still grades it on
+// its actual content, exactly like a normal wrong-value restatement would (here: FAIL, "right
+// now" != the committed relative/absolute deadline). Deliberately does NOT match bare "now"
+// alone (a common filler word elsewhere in this codebase -- see packages/server/src/call/
+// questionMatch.ts's own ANSWER_ATTEMPT_LEAD_WORDS, which excludes it for the same reason) --
+// only these named, unambiguous immediate-time phrases.
+const DEADLINE_IMMEDIATE_RE = /\b(?:right\s+now|right\s+away|immediately|immediate|asap|as\s+soon\s+as\s+possible)\b/i;
+
+export function extractDeadlineAnswer(text: string): DeadlineHit | null {
+  const base = extractDeadline(text);
+  if (base) return base;
+  const immediate = DEADLINE_IMMEDIATE_RE.exec(text);
+  if (immediate) {
+    const start = immediate.index;
+    const quote = text.slice(start, start + immediate[0].length);
+    return { value: immediate[0].toLowerCase(), quote };
+  }
+  return null;
+}
+
 export type CuedNameField = 'approver' | 'counsel' | 'escrow_institution' | 'beneficiary';
 
 export interface CuedNameHit {

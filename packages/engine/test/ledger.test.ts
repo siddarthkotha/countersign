@@ -604,4 +604,44 @@ describe('buildLedger', () => {
     // we just verify that no false identity switch occurred.
     expect(currentClaim(claims, 'identity')?.value).toBe('dana-whitfield');
   });
+
+  // REVIEW FINDING (2026-09-25, BLOCKING on the founder-2026-09-25 deadline-answer fix):
+  // extractDeadline (extract/claims.ts) is called from TWO places -- this ledger's own
+  // general claim-building pass (line ~479, over EVERY caller utterance) and the
+  // LIVE_COMMITMENT challenge-answer path (challenges.ts's hasFieldSignal/gradeLiveCommitment).
+  // Recognizing immediate-time phrases ("right now"/"immediately"/"asap") INSIDE
+  // extractDeadline itself (the first cut of that fix) meant an honest caller using one of
+  // these phrases in ordinary urgency/small-talk speech -- never as a restated challenge
+  // answer -- created a brand-new STATED deadline claim that did not exist on main before the
+  // fix. A later REAL deadline ("in the next 10 minutes", "today") then read as a second,
+  // different claim for the same field with no correction-lexicon word nearby ->
+  // `classifyDifferentValue`'s default -> CONTRADICTED -> a `consistency_flag` FAIL card
+  // feeding the freeze/escalate tally, on a caller who never actually contradicted anything.
+  // Fixed by scoping immediate-time recognition to a SEPARATE `extractDeadlineAnswer`
+  // (extract/claims.ts), used only at the two challenge-answer call sites -- `extractDeadline`
+  // itself (used here, by the general ledger pass) is unchanged from main's HEAD.
+  it('REVIEW FIX: an immediate-time phrase spoken in ordinary speech ("right away") creates no deadline claim, so a later REAL deadline ("today") is not falsely CONTRADICTED against it', () => {
+    const conversation = [u('u1', 'I need this moved right away.', 0), u('u2', 'It needs to go out today.', 30_000)];
+    const { claims } = buildLedger(conversation, [], MERIDIAN);
+    const deadlineClaims = claims.filter((c) => c.field === 'deadline');
+    expect(deadlineClaims).toHaveLength(1);
+    expect(deadlineClaims[0]).toMatchObject({ kind: 'STATED', value: 'today' });
+  });
+
+  it('REVIEW FIX: same shape for "Release it right now" followed by a real relative deadline ("in the next 10 minutes") -- one STATED claim, never CONTRADICTED', () => {
+    const conversation = [u('u1', 'Release it right now.', 0), u('u2', 'I need it in the next 10 minutes.', 30_000)];
+    const { claims } = buildLedger(conversation, [], MERIDIAN);
+    const deadlineClaims = claims.filter((c) => c.field === 'deadline');
+    expect(deadlineClaims).toHaveLength(1);
+    expect(deadlineClaims[0]).toMatchObject({ kind: 'STATED', value: '10 minutes' });
+  });
+
+  it.each(['Right now.', 'Immediately.', 'ASAP', 'We need it right away.'])(
+    'REVIEW FIX: "%s" alone creates NO deadline claim at all (same as main\'s HEAD, before the founder-2026-09-25 fix)',
+    (text) => {
+      const conversation = [u('u1', text, 0)];
+      const { claims } = buildLedger(conversation, [], MERIDIAN);
+      expect(claims.filter((c) => c.field === 'deadline')).toHaveLength(0);
+    }
+  );
 });

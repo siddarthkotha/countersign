@@ -152,3 +152,15 @@ export function renderGoalLine(goal: PhrasingGoal): string | null {
   if (!(goal.code in RENDERERS)) return null;
   return RENDERERS[goal.code as SpokenLineGoalCode](goal);
 }
+
+/** SAFETY NET (2026-09-25, founder live defect -- see `CallSession.nextSpokenLine`'s own doc
+ *  comment in session.ts for the full incident and why this exists as a defense-in-depth on
+ *  TOP of the root-cause engine fix, not instead of it): the one line `nextSpokenLine()` speaks
+ *  in place of a challenge question it would otherwise render byte-identical to the agent's own
+ *  immediately-preceding turn, with a caller turn in between. Deliberately generic -- names
+ *  neither the field nor the expected value (LAW 3: the LLM/server never leaks what answer would
+ *  pass) -- and deliberately ends in "?" so `questionMatch.ts`'s own `transcriptAsksQuestion`
+ *  bare-"?" branch still recognizes it as asking a real question, so the server still logs a
+ *  fresh `challenge_issued` action for this re-ask (LAW 4: the evidence record must reflect what
+ *  was actually said) instead of silently dropping it the way an un-asked rendering does. */
+export const CHALLENGE_REASK_REWORD_LINE = "I still need an answer to that one -- can you say it a different way?";

@@ -3,7 +3,7 @@ import { extractAmounts } from '../src/extract/amounts';
 import { extractIdentityClaim } from '../src/extract/identity';
 import { extractPressure } from '../src/extract/pressure';
 import { extractOutOfScope } from '../src/extract/outOfScope';
-import { extractAccountLast4, extractDeadline, extractCuedNames } from '../src/extract/claims';
+import { extractAccountLast4, extractDeadline, extractDeadlineAnswer, extractCuedNames } from '../src/extract/claims';
 import { MERIDIAN } from '../src/seed/meridian';
 
 describe('extractAmounts', () => {
@@ -200,6 +200,63 @@ describe('extractDeadline', () => {
     const hit = extractDeadline(text);
     expect(hit).toEqual({ value, quote });
     expect(text.includes(hit!.quote)).toBe(true);
+  });
+
+  // REVIEW FIX (2026-09-25, BLOCKING finding): immediate-time phrases ("right now"/
+  // "immediately"/"asap") are NEVER recognized by the bare `extractDeadline` -- that would let
+  // an honest caller's ordinary urgency speech (never a restated challenge answer) create a
+  // brand-new deadline claim in ledger.ts's general pass, falsely CONTRADICTING a later real
+  // deadline. `extractDeadline` here is byte-identical to main's HEAD before the founder-
+  // 2026-09-25 fix -- see `extractDeadlineAnswer`'s own describe block below for where this
+  // recognition actually lives (challenge-answer call sites only), and
+  // packages/engine/test/ledger.test.ts's own "REVIEW FIX" tests for the ledger-level proof.
+  it.each(['Right now.', 'Immediately.', 'ASAP', 'We need it right away.'])(
+    'does not match "%s" -- immediate-time phrases are scoped to extractDeadlineAnswer, never the general-purpose extractDeadline',
+    (text) => {
+      expect(extractDeadline(text)).toBeNull();
+    }
+  );
+
+  // Regression guard: bare "now" alone (common filler, e.g. "well, now, about the account...")
+  // must never be read as a deadline claim -- only the named, unambiguous phrases above.
+  it('does not match bare "now" alone', () => {
+    expect(extractDeadline('Well, now, about the account.')).toBeNull();
+  });
+});
+
+describe('extractDeadlineAnswer', () => {
+  // FIX (founder live defect, 2026-09-25, PROVEN: scripts/rehearse/reports/
+  // founder-2026-09-25/140b3584-b8c7-4f09-a1c5-1c930ba44859.diagnostics.json): a plain
+  // immediate-time answer to a LIVE_COMMITMENT deadline challenge used to extract nothing at
+  // all, leaving the challenge silently AWAITING forever and the agent re-asking the
+  // byte-identical question. Used ONLY at challenges.ts's two challenge-answer call sites
+  // (hasFieldSignal/gradeLiveCommitment) -- never by ledger.ts's general claim-building pass,
+  // which still calls the unmodified `extractDeadline` above. See extract/claims.ts's own doc
+  // comment on DEADLINE_IMMEDIATE_RE for the full incident and the review finding that moved
+  // this recognition out of `extractDeadline` itself.
+  it.each([
+    ['Right now.', 'right now', 'Right now'],
+    ['Immediately.', 'immediately', 'Immediately'],
+    ['ASAP', 'asap', 'ASAP'],
+    ['We need it right away.', 'right away', 'right away'],
+  ])('%s → %s (immediate-time)', (text, value, quote) => {
+    const hit = extractDeadlineAnswer(text);
+    expect(hit).toEqual({ value, quote });
+    expect(text.includes(hit!.quote)).toBe(true);
+  });
+
+  // Falls back to the exact same relative/absolute matching extractDeadline itself does --
+  // never a second, independent implementation of those branches.
+  it('still matches everything the base extractDeadline matches (relative/absolute), unchanged', () => {
+    expect(extractDeadlineAnswer('I need this in the next ten minutes, no exceptions')).toEqual({
+      value: 'ten minutes',
+      quote: 'in the next ten minutes',
+    });
+    expect(extractDeadlineAnswer('This needs to close today')).toEqual({ value: 'today', quote: 'today' });
+  });
+
+  it('does not match bare "now" alone', () => {
+    expect(extractDeadlineAnswer('Well, now, about the account.')).toBeNull();
   });
 });
 

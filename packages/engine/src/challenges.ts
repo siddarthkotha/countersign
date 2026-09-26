@@ -25,7 +25,7 @@ import type {
 import { hasLexiconHit, normalizeSpokenDigits, normalizeText } from './normalize.js';
 import { currentClaim } from './ledger.js';
 import { extractAmounts } from './extract/amounts.js';
-import { extractAccountLast4, extractCuedNames, extractDeadline } from './extract/claims.js';
+import { extractAccountLast4, extractCuedNames, extractDeadlineAnswer } from './extract/claims.js';
 import { fnv1a } from './hash.js';
 import { escapeRegExp } from './util.js';
 
@@ -667,7 +667,13 @@ function hasFieldSignal(field: ClaimField, rawText: string): boolean {
     return /\b\d+\b/.test(rawText);
   }
   if (field === 'deadline') {
-    if (extractDeadline(rawText)) return true;
+    // REVIEW FIX (2026-09-25): `extractDeadlineAnswer`, not the bare `extractDeadline` --
+    // this call site decides whether a CHALLENGE ANSWER is answer-shaped, so it must also
+    // recognize an immediate-time restatement ("Right now."/"Immediately."/"ASAP") -- see that
+    // function's own doc comment (extract/claims.ts) for the full incident and why this
+    // recognition must never live inside `extractDeadline` itself (ledger.ts's general pass
+    // would otherwise misread ordinary urgency speech as a new deadline claim).
+    if (extractDeadlineAnswer(rawText)) return true;
     if (/\b\d+\b/.test(rawText)) return true;
     return /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|tonight|eod|end\s+of\s+day)\b/i.test(rawText);
   }
@@ -922,7 +928,9 @@ function gradeLiveCommitment(
     return hit.value === String(claim.value) ? 'PASS' : 'FAIL';
   }
   if (field === 'deadline') {
-    const hit = extractDeadline(rawText);
+    // REVIEW FIX (2026-09-25): `extractDeadlineAnswer`, same reasoning as `hasFieldSignal`'s
+    // own 'deadline' branch just above -- see extract/claims.ts's doc comment.
+    const hit = extractDeadlineAnswer(rawText);
     if (!hit) return 'AMBIGUOUS';
     return normalizeText(hit.value) === committedNorm ? 'PASS' : 'FAIL';
   }

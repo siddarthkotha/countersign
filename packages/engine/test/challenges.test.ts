@@ -1969,6 +1969,53 @@ describe('LIVE_COMMITMENT — a denial that still names the committed value is g
     });
   });
 
+  // FOUNDER LIVE DEFECT (2026-09-25, P0 -- PROVEN: scripts/rehearse/reports/
+  // founder-2026-09-25/140b3584-b8c7-4f09-a1c5-1c930ba44859.diagnostics.json). Timeline
+  // (server clock): 45.98s caller restates the amount ("$2.1 million") -> a CONSISTENCY
+  // contradiction fires; 49.08s agent asks the LIVE_COMMITMENT deadline challenge "Can you
+  // restate the deadline you gave me earlier?" (challenge_id "...-2", committed value "10
+  // minutes" from the caller's own earlier "...in the next 10 minutes..."); 54.48s caller
+  // answers "Right now." -- a real, on-topic (if literally different) restatement of urgency;
+  // NO evaluate event follows at all; 58.74s the agent speaks the BYTE-IDENTICAL question
+  // again (same challenge_id, re-issued) -- the founder's own top complaint, "keeps asking
+  // the same questions". Root cause: `extractDeadline` (extract/claims.ts) recognized neither
+  // "in X minutes/hours" nor an absolute day-name for "Right now.", so `hasFieldSignal`'s
+  // 'deadline' branch (challenges.ts) found no signal either, `isAnswerShapedFor` graded the
+  // reply NOT answer-shaped, and this challenge was left AWAITING (no entry at all) instead of
+  // reaching `gradeLiveCommitment` -- the engine's own evaluate() output never changed, so the
+  // server never advanced off this challenge and re-rendered the identical question the next
+  // time AssemblyAI called the one-brain endpoint. Fixed by DEADLINE_IMMEDIATE_RE
+  // (extract/claims.ts): "Right now."/"Immediately."/"ASAP" are now extractable, so the reply
+  // reaches `gradeLiveCommitment`'s own literal-value comparison and grades on its actual
+  // content -- FAIL here, since "right now" is not the committed "10 minutes" (the engine
+  // decides consistency, never this fix) -- instead of being silently discarded.
+  describe('FOUNDER LIVE DEFECT (2026-09-25): a plain immediate-time deadline answer ("Right now."/"Immediately."/"ASAP") reaches grading instead of being left AWAITING forever', () => {
+    const deadlineClaim = claim('c-dl-founder', 'deadline', 'STATED', '10 minutes', 30_000, 'in the next 10 minutes');
+    const deadlineSpec: ChallengeSpec = {
+      challenge_id: 'founder-2026-09-25-2',
+      kind: 'LIVE_COMMITMENT',
+      field: 'deadline',
+      ask: 'Ask the caller to restate the deadline they gave earlier. Do not say the value yourself.',
+      speak: 'Can you restate the deadline you gave me earlier?',
+      expect: { commitment_claim_id: 'c-dl-founder' },
+    };
+    const actions: AgentAction[] = [issuedAction('a1', 'founder-2026-09-25-2', 49_082)];
+
+    it.each(['Right now.', 'Immediately.', 'ASAP'])(
+      '%s is answer-shaped for the LIVE_COMMITMENT deadline challenge (was previously left AWAITING)',
+      (text) => {
+        expect(isAnswerShapedFor(deadlineSpec, text, SEED, [deadlineClaim])).toBe(true);
+      }
+    );
+
+    it('the live PROVEN record ("Right now.") reaches grading -- FAIL, since it does not match the committed "10 minutes" -- instead of being left AWAITING (no entry at all) and re-asked forever', () => {
+      const conversation = [utt('u1', 54_485, 'Right now.')];
+      const result = gradeChallenges(conversation, actions, [deadlineSpec], SEED, [deadlineClaim]);
+      expect(result['founder-2026-09-25-2']).toBeDefined();
+      expect(result['founder-2026-09-25-2']?.result).toBe('FAIL');
+    });
+  });
+
   // P1 REVIEW FINDING (2026-09-18, mirror of DEFECT A/89a2576): `gradeLiveCommitment`'s
   // whole-reply `hasAssertedOccurrence` check only ever looks for a negation attached
   // IMMEDIATELY BEFORE a value's own span, never after -- so a same-breath self-correction

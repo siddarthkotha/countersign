@@ -36,7 +36,7 @@ import { validateToolArgs } from './validate.js';
 import { stallKindFor, stallLineFor, type StallKind } from './stalls.js';
 import { argsForTerminalTool } from './terminalActions.js';
 import { transcriptMatchesCloseSentence, normalizeForCloseMatch } from './closeMatch.js';
-import { renderGoalLine } from '../brain/spokenLines.js';
+import { renderGoalLine, CHALLENGE_REASK_REWORD_LINE } from '../brain/spokenLines.js';
 import {
   QUESTION_GOALS,
   verbatimQuestionSentence,
@@ -5431,7 +5431,29 @@ export class CallSession {
    *  state, never sends anything over `this.opts.aai`, never logs -- safe to call as many
    *  times as needed without side effects, and safe to call in EITHER `brainMode` (it is not
    *  gated, unlike §2's send/timer methods, because it never sends anything itself; Lane C's
-   *  endpoint handler is the only intended real caller, in endpoint mode). */
+   *  endpoint handler is the only intended real caller, in endpoint mode).
+   *
+   *  NEVER-BYTE-IDENTICAL-REASK safety net (2026-09-25, founder live defect P0 -- PROVEN:
+   *  scripts/rehearse/reports/founder-2026-09-25/140b3584-b8c7-4f09-a1c5-1c930ba44859
+   *  .diagnostics.json): "Right now." answered a LIVE_COMMITMENT deadline challenge but wasn't
+   *  extractable (fixed at the root in `packages/engine/src/extract/claims.ts` --
+   *  `DEADLINE_IMMEDIATE_RE` -- see that file's own doc comment), so the engine's own goal never
+   *  advanced and this method re-rendered the byte-identical `goal.challenge.speak` sentence the
+   *  next time AssemblyAI called the endpoint -- the founder's own top complaint, "keeps asking
+   *  the same questions". The engine fix closes THIS specific gap, but the ASK_CHALLENGE branch
+   *  below is a defense-in-depth net for whatever the NEXT unforeseen extraction/grading gap
+   *  turns out to be: it never speaks a challenge sentence that byte-for-byte matches the most
+   *  recent AGENT turn already logged in `logs.conversation` once a CALLER turn has landed in
+   *  between (this method is still read-only -- it only ever reads `logs.conversation`, already
+   *  written by real dispatched events, never anything this method itself would write, so
+   *  repeated calls with no new event in between still agree, exactly as documented above).
+   *  Falls back to `CHALLENGE_REASK_REWORD_LINE` (brain/spokenLines.ts) -- generic, never names
+   *  the field or the expected value (LAW 3) -- see `avoidByteIdenticalChallengeReask`'s own doc
+   *  comment. Scoped to ASK_CHALLENGE only: READBACK/ELICIT_MISSING_CRITICAL/
+   *  RE_ELICIT_AFTER_SWITCH already have their own tuned re-ask/exhaustion caps
+   *  (`computeReadbackReaskExhausted`, compose.ts) and a legitimate reason to repeat the same
+   *  confirmation wording across turns (e.g. "Is that correct?"); this net only ever touches the
+   *  one goal code the founder's own record proves it for. */
   nextSpokenLine(): string | null {
     if (!this.last) return null;
     // SERVER-INITIATED-GOODBYE fix (2026-09-23, PROVEN live: scripts/rehearse/reports/
@@ -5457,13 +5479,15 @@ export class CallSession {
       case 'ELICIT_REQUEST':
       case 'CLOSE':
         return goal.hint;
-      case 'ASK_CHALLENGE':
+      case 'ASK_CHALLENGE': {
         // CHALLENGE-SPEAKABLE (fsm.ts, 2026-09-11): `goal.challenge.speak` is the exact,
         // ready-to-speak sentence for this challenge. Falls back to the placeholder (never to
         // the raw `ask` instruction string, which prompt.ts's own comment records a live
         // incident of the model reading aloud as stage directions) for the defensive case of
         // no challenge/no `speak` on it at all.
-        return goal.challenge?.speak ?? renderGoalLine({ ...goal, code: 'STALL' }) ?? PLACEHOLDER_GOAL_LINES.STALL;
+        const challengeLine = goal.challenge?.speak ?? renderGoalLine({ ...goal, code: 'STALL' }) ?? PLACEHOLDER_GOAL_LINES.STALL;
+        return this.avoidByteIdenticalChallengeReask(challengeLine);
+      }
       default:
         // Interim spoken lines (2026-09-22 10:20 PM): the plain desk-officer drafts from
         // docs/plans/2026-09-22-spoken-lines-draft.md, rendered by brain/spokenLines.ts from the
@@ -5471,6 +5495,38 @@ export class CallSession {
         // The placeholder stays only as a never-expected fallback.
         return renderGoalLine(goal) ?? PLACEHOLDER_GOAL_LINES[goal.code];
     }
+  }
+
+  /** NEVER-BYTE-IDENTICAL-REASK safety net (2026-09-25) -- see `nextSpokenLine`'s own doc
+   *  comment for the full incident. `candidate` is the challenge sentence `nextSpokenLine`
+   *  would otherwise return for the CURRENT goal; returns it unchanged UNLESS both:
+   *   (a) the most recent AGENT utterance already logged in `logs.conversation` is
+   *       byte-for-byte this exact same text (a genuine repeat, not merely a similar-sounding
+   *       different challenge), AND
+   *   (b) at least one CALLER utterance has landed strictly after that agent turn (the exact
+   *       "identical agent question spoken twice with only a caller turn between" shape --
+   *       never fires for two consecutive renders of the SAME still-unspoken goal with no
+   *       intervening turn at all, which is not a repeat, just not yet spoken).
+   *  Both conditions read `logs.conversation` only -- already-written state from real dispatched
+   *  events, never anything this method itself mutates -- so `nextSpokenLine`'s own read-only,
+   *  call-idempotent contract (its class doc comment, and
+   *  session-endpoint-mode.test.ts's "read-only: repeated calls never mutate state" test) is
+   *  unaffected: calling this twice in a row with nothing new dispatched in between still
+   *  returns the same thing both times. */
+  private avoidByteIdenticalChallengeReask(candidate: string): string {
+    let lastAgentText: string | null = null;
+    let lastAgentAtMs = -Infinity;
+    for (const u of this.logs.conversation) {
+      if (u.speaker !== 'agent') continue;
+      if (lastAgentText === null || u.t_ms >= lastAgentAtMs) {
+        lastAgentText = u.text;
+        lastAgentAtMs = u.t_ms;
+      }
+    }
+    if (lastAgentText !== candidate) return candidate;
+    const callerSpokeSince = this.logs.conversation.some((u) => u.speaker === 'caller' && u.t_ms > lastAgentAtMs);
+    if (!callerSpokeSince) return candidate;
+    return CHALLENGE_REASK_REWORD_LINE;
   }
 
   /** ONE-BRAIN LIVE PATH (2026-09-22, Lane B, additive): resolves `true` once this session
