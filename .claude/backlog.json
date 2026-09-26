@@ -3519,10 +3519,10 @@
       "id": "TURN-ENDS-ON-NAME-PAUSE",
       "title": "live: a 1 s pause after 'This is Dana Whitfield, corporate treasury.' ends the caller turn (adaptive turn-taking, turn_detection omitted); tolerable once the double ask is gone, the agent asks once and the caller continues",
       "files": [],
-      "status": "held",
+      "status": "done",
       "held_because": "AssemblyAI-side turn-taking; revisit only if the pause-after-name scenario fails on d813717",
       "agent_id": "",
-      "note": "",
+      "note": "2026-09-25: greeting asks for the name (738cd97); offline repro 13/13 vs 3/3",
       "priority": "P2"
     },
     {
@@ -3715,10 +3715,10 @@
       "files": [
         "packages/server/src/aai/config.ts"
       ],
-      "status": "held",
+      "status": "done",
       "held_because": "fix live (fb6106c, min_silence 1500) and harness-proven; founder-voice confirmation on case 6 pending",
       "agent_id": "",
-      "note": "Haiku lane: COUNTERSIGN_MIN_SILENCE_MS / MAX_SILENCE_MS / INTERRUPTION_DELAY_MS env in explicit mode; founder-voice A/B next (harness cannot pause like a person) | fb6106c live 3:10 PM: turn_detection_sent {vad 0.5, interrupt true, min_silence 1500}; harness pause-after-name: agent waited through the pause, full request as one turn, STAGE, grade clean; founder 3-call test pending | 2026-09-22 7:23 PM: AssemblyAI turn-detection doc says min_silence/max_silence turn off adaptive and entity-aware waiting, tune only as a last resort; superseded by SPIKE-ONE-BRAIN (transcription_mode max_accuracy, no thresholds)",
+      "note": "Haiku lane: COUNTERSIGN_MIN_SILENCE_MS / MAX_SILENCE_MS / INTERRUPTION_DELAY_MS env in explicit mode; founder-voice A/B next (harness cannot pause like a person) | fb6106c live 3:10 PM: turn_detection_sent {vad 0.5, interrupt true, min_silence 1500}; harness pause-after-name: agent waited through the pause, full request as one turn, STAGE, grade clean; founder 3-call test pending | 2026-09-22 7:23 PM: AssemblyAI turn-detection doc says min_silence/max_silence turn off adaptive and entity-aware waiting, tune only as a last resort; superseded by SPIKE-ONE-BRAIN (transcription_mode max_accuracy, no thresholds) | 2026-09-25: first-turn cut is not a silence issue (recordings); fixed by the name-first greeting",
       "priority": "P0"
     },
     {
@@ -3761,11 +3761,12 @@
       "files": [
         "packages/server/src/index.ts"
       ],
-      "status": "held",
+      "status": "done",
       "held_because": "folded into SPIKE-ONE-BRAIN config; no live change tonight",
       "agent_id": "",
       "started_at": "",
-      "priority": "P1"
+      "priority": "P1",
+      "note": "one-voice post-bind sends BRAIN_KEYTERMS"
     },
     {
       "id": "MAC-MINI-HOST",
@@ -4067,11 +4068,12 @@
       "id": "FOUNDER-VOICE-CHECK-ONE-VOICE",
       "title": "founder's 10-minute voice check of one-voice on the live site (Dana STAGED, CEO FROZEN; exact lines in the 2026-09-23 9:24 AM message); decides the video path",
       "files": [],
-      "status": "held",
+      "status": "done",
       "held_because": "waits on the founder; not done as of 1:57 PM (no AssemblyAI session after 7:42 AM)",
       "agent_id": "",
       "started_at": "",
-      "priority": "P0"
+      "priority": "P0",
+      "note": "2026-09-25: founder voice check done (both verdicts right); video recorded first take"
     },
     {
       "id": "BRAIN-AGENT-DUPLICATE-ON-RESTART",
@@ -4080,11 +4082,30 @@
         "packages/server/src/aai/agent.ts",
         "packages/server/test/aai/agent.test.ts"
       ],
-      "status": "held",
+      "status": "done",
       "held_because": "not while the founder may be calling; harmless to calls",
       "agent_id": "",
       "started_at": "",
-      "priority": "P1"
+      "priority": "P1",
+      "note": "2026-09-25: 9ba1ced/6c0934b listAgents reads {agents:[...]}; one stored agent PROVEN"
+    },
+    {
+      "id": "HARNESS-STALL-AFTER-FIRST-INTERRUPT",
+      "title": "harness: a non-patient caller that barges into the first reply loses its event stream (report 2026-09-25T19-12-03-miller-video); ESTIMATE harness-only",
+      "files": [],
+      "status": "held",
+      "held_because": "not judge-facing; post-submission",
+      "priority": "P3"
+    },
+    {
+      "id": "QUESTION-ASKED-MAX-LOGGING",
+      "title": "session.ts ~964: QUESTION_ASKED_MAX=2 stops logging identical question actions, so compose.ts readback re-ask cap never fires live",
+      "files": [
+        "packages/server/src/call/session.ts"
+      ],
+      "status": "held",
+      "held_because": "post-submission; masked by the elicit answer window",
+      "priority": "P3"
     }
   ]
 }

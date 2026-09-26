@@ -1,3 +1,6 @@
+# Founder's local-only archive (video, recordings, submission files, notes); never published
+_local/
+
 # Secrets — never committed, from the first commit onward
 .env
 .env.*
