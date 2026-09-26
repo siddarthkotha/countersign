@@ -117,3 +117,70 @@ describe('CallSession#nextSpokenLine — NEVER-BYTE-IDENTICAL-REASK safety net (
     expect(session.nextSpokenLine()).toBe(nextChallenge.speak);
   });
 });
+
+// EXTENDED (2026-09-25, judge-dana defect -- PROVEN: scripts/rehearse/reports/
+// 2026-09-25T22-31-41-judge-dana.diagnostics.json/.md): "Who is the beneficiary of this
+// payment?" (ELICIT_MISSING_CRITICAL) was spoken byte-identically six times in a row while
+// the caller answered "Meridian Supply." every time (the root cause -- the answer never
+// becoming a claim -- is fixed separately in packages/engine/src/extract/claims.ts's
+// `extractElicitAnswerName` and ledger.ts's `activePersonElicit`, which stops the FIELD
+// from staying missing after the caller's first bare-name answer). This is the
+// defense-in-depth net for ELICIT_MISSING_CRITICAL specifically (the founder's own
+// question 3: "why did the byte-identical re-ask guard not reword it -- does it cover
+// ASK_CHALLENGE only?" -- yes, it did, and still does for READBACK/RE_ELICIT_AFTER_SWITCH,
+// which keep their own tuned re-ask/exhaustion caps and a legitimate reason to repeat exact
+// confirmation wording; ELICIT_MISSING_CRITICAL has neither -- a missing field is either
+// claimed, engine-side stopping the elicit, or it is not, so a THIRD byte-identical render
+// is never legitimate): whatever future gap leaves a field looking missing despite a real
+// answer, this net still guarantees the caller is never asked the identical question a
+// third time running.
+function forceElicitSpokenAt(session: CallSession, field: 'beneficiary', text: string, t_ms: number): void {
+  session.last = {
+    ...session.last!,
+    goal: { code: 'ELICIT_MISSING_CRITICAL', hint: text, keyterms: [], turn_detection_hint: 'patient', elicit: { field } },
+  };
+  const internals = session as unknown as { logs: { conversation: { id: string; speaker: string; text: string; t_ms: number }[] } };
+  internals.logs.conversation.push({ id: `agent-${t_ms}`, speaker: 'agent', text, t_ms });
+}
+
+const BENEFICIARY_ELICIT_HINT = 'Who is the beneficiary of this payment?';
+
+describe('CallSession#nextSpokenLine — NEVER-BYTE-IDENTICAL-REASK safety net (ELICIT_MISSING_CRITICAL)', () => {
+  it('the judge-dana shape: elicit spoken, caller answers, the field never advances -- the SECOND identical render is reworded, never byte-identical', () => {
+    const { session } = newSession();
+    forceElicitSpokenAt(session, 'beneficiary', BENEFICIARY_ELICIT_HINT, 75_338);
+    expect(session.nextSpokenLine()).toBe(BENEFICIARY_ELICIT_HINT);
+
+    forceCallerTurnAt(session, 'Meridian Supply.', 89_397);
+
+    const secondLine = session.nextSpokenLine();
+    expect(secondLine).not.toBe(BENEFICIARY_ELICIT_HINT);
+    expect(secondLine).toBe(CHALLENGE_REASK_REWORD_LINE);
+  });
+
+  it('never fires with NO caller turn in between', () => {
+    const { session } = newSession();
+    forceElicitSpokenAt(session, 'beneficiary', BENEFICIARY_ELICIT_HINT, 75_338);
+    expect(session.nextSpokenLine()).toBe(BENEFICIARY_ELICIT_HINT);
+    expect(session.nextSpokenLine()).toBe(BENEFICIARY_ELICIT_HINT);
+  });
+
+  it('a DIFFERENT elicit (the goal genuinely moved on to a new field) is spoken normally, never reworded', () => {
+    const { session } = newSession();
+    forceElicitSpokenAt(session, 'beneficiary', BENEFICIARY_ELICIT_HINT, 75_338);
+    forceCallerTurnAt(session, 'Meridian Supply.', 89_397);
+    expect(session.nextSpokenLine()).toBe(CHALLENGE_REASK_REWORD_LINE);
+
+    session.last = {
+      ...session.last!,
+      goal: {
+        code: 'ELICIT_MISSING_CRITICAL',
+        hint: 'What is the exact amount for this payment?',
+        keyterms: [],
+        turn_detection_hint: 'patient',
+        elicit: { field: 'amount_usd' },
+      },
+    };
+    expect(session.nextSpokenLine()).toBe('What is the exact amount for this payment?');
+  });
+});

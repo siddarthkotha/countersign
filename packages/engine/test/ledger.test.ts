@@ -644,4 +644,56 @@ describe('buildLedger', () => {
       expect(claims.filter((c) => c.field === 'deadline')).toHaveLength(0);
     }
   );
+
+  // PROVEN gap (2026-09-25, judge-dana defect, scripts/rehearse/reports/
+  // 2026-09-25T22-31-41-judge-dana.diagnostics.json/.md): the engine asked "Who is the
+  // beneficiary of this payment?" (an ELICIT_MISSING_CRITICAL `elicit_issued` action, no
+  // expected value to restate against, unlike a readback) and the caller answered "Meridian
+  // Supply." six times in a row -- the answer never became a claim because
+  // `extractCuedNames` requires a cue phrase (verb/is/amount) that a bare name answer never
+  // carries, and `elicit_issued` (unlike `readback_issued`) was never wired into any
+  // pending-answer resolution at all. `buildLedger` must accept a bare name directly
+  // answering a pending person-field elicit as a STATED claim for that field.
+  it('a bare name answering a pending beneficiary elicit_issued becomes a STATED beneficiary claim', () => {
+    const conversation: Utterance[] = [
+      { id: 'a1', speaker: 'agent', text: 'Who is the beneficiary of this payment?', t_ms: 75_338 },
+      u('u1', 'Meridian Supply.', 89_397),
+    ];
+    const actions: AgentAction[] = [{ id: 'e1', kind: 'elicit_issued', t_ms: 75_338, field: 'beneficiary' }];
+    const { claims } = buildLedger(conversation, actions, MERIDIAN);
+    const beneficiaryClaims = claims.filter((c) => c.field === 'beneficiary');
+    expect(beneficiaryClaims).toHaveLength(1);
+    expect(beneficiaryClaims[0]).toMatchObject({ kind: 'STATED', value: 'meridian supply', quote: { text: 'Meridian Supply' } });
+    expect(currentClaim(claims, 'beneficiary')?.value).toBe('meridian supply');
+  });
+
+  // Same shape, re-asked (mirrors the live record exactly: the elicit is logged again each
+  // time the field is still missing) -- the bare answer to whichever occurrence is issued
+  // must still be captured.
+  it('a bare name answer after a RE-ASKED elicit_issued (same field, later timestamp) still becomes a claim', () => {
+    const conversation: Utterance[] = [
+      { id: 'a1', speaker: 'agent', text: 'Who is the beneficiary of this payment?', t_ms: 75_338 },
+      u('u1', 'Yes, that\'s right. This is Dana Whitfield.', 82_689),
+      { id: 'a2', speaker: 'agent', text: 'Who is the beneficiary of this payment?', t_ms: 85_814 },
+      u('u2', 'Meridian Supply.', 89_397),
+    ];
+    const actions: AgentAction[] = [
+      { id: 'e1', kind: 'elicit_issued', t_ms: 75_338, field: 'beneficiary' },
+      { id: 'e2', kind: 'elicit_issued', t_ms: 85_814, field: 'beneficiary' },
+    ];
+    const { claims } = buildLedger(conversation, actions, MERIDIAN);
+    expect(currentClaim(claims, 'beneficiary')?.value).toBe('meridian supply');
+  });
+
+  // Negative: a caller utterance that is NOT a bare name (an off-topic dodge, or a genuine
+  // restatement of who is calling) must not be mistaken for the elicited beneficiary.
+  it('does not create a beneficiary claim from a non-answer reply to the elicit', () => {
+    const conversation: Utterance[] = [
+      { id: 'a1', speaker: 'agent', text: 'Who is the beneficiary of this payment?', t_ms: 75_338 },
+      u('u1', "Yes, that's right. This is Dana Whitfield.", 82_689),
+    ];
+    const actions: AgentAction[] = [{ id: 'e1', kind: 'elicit_issued', t_ms: 75_338, field: 'beneficiary' }];
+    const { claims } = buildLedger(conversation, actions, MERIDIAN);
+    expect(claims.filter((c) => c.field === 'beneficiary')).toHaveLength(0);
+  });
 });

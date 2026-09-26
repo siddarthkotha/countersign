@@ -5448,12 +5448,12 @@ export class CallSession {
    *  written by real dispatched events, never anything this method itself would write, so
    *  repeated calls with no new event in between still agree, exactly as documented above).
    *  Falls back to `CHALLENGE_REASK_REWORD_LINE` (brain/spokenLines.ts) -- generic, never names
-   *  the field or the expected value (LAW 3) -- see `avoidByteIdenticalChallengeReask`'s own doc
-   *  comment. Scoped to ASK_CHALLENGE only: READBACK/ELICIT_MISSING_CRITICAL/
-   *  RE_ELICIT_AFTER_SWITCH already have their own tuned re-ask/exhaustion caps
+   *  the field or the expected value (LAW 3) -- see `avoidByteIdenticalReask`'s own doc
+   *  comment. Scoped to ASK_CHALLENGE and (2026-09-25, judge-dana defect) ELICIT_MISSING_
+   *  CRITICAL: READBACK/RE_ELICIT_AFTER_SWITCH keep their own tuned re-ask/exhaustion cap
    *  (`computeReadbackReaskExhausted`, compose.ts) and a legitimate reason to repeat the same
-   *  confirmation wording across turns (e.g. "Is that correct?"); this net only ever touches the
-   *  one goal code the founder's own record proves it for. */
+   *  confirmation wording across turns (e.g. "Is that correct?") -- this net only ever touches
+   *  the goal codes that have no such legitimate reason to repeat verbatim a third time. */
   nextSpokenLine(): string | null {
     if (!this.last) return null;
     // SERVER-INITIATED-GOODBYE fix (2026-09-23, PROVEN live: scripts/rehearse/reports/
@@ -5475,10 +5475,25 @@ export class CallSession {
     switch (goal.code) {
       case 'READBACK':
       case 'RE_ELICIT_AFTER_SWITCH':
-      case 'ELICIT_MISSING_CRITICAL':
       case 'ELICIT_REQUEST':
       case 'CLOSE':
         return goal.hint;
+      // FIX (2026-09-25, judge-dana defect, PROVEN: scripts/rehearse/reports/
+      // 2026-09-25T22-31-41-judge-dana.diagnostics.json): moved out of the direct-`goal.hint`
+      // group above and into the same never-byte-identical net ASK_CHALLENGE already gets.
+      // Unlike READBACK/RE_ELICIT_AFTER_SWITCH (a legitimate reason to repeat exact
+      // confirmation wording -- "Is that correct?" -- across turns, and their own tuned
+      // re-ask/exhaustion cap, `computeReadbackReaskExhausted`), a missing critical field is
+      // either claimed (the elicit stops being issued at all, engine-side) or it is not --
+      // there is no legitimate reason for this exact sentence to be spoken a third time
+      // running. The live record: "Who is the beneficiary of this payment?" was spoken
+      // byte-identically six times while the caller answered "Meridian Supply." every time
+      // (fixed at the root separately -- engine/extract/claims.ts's `extractElicitAnswerName`
+      // + ledger.ts's `activePersonElicit` -- so the field stops looking missing after the
+      // caller's first bare-name answer); this is the defense-in-depth net for whatever future
+      // gap leaves a field looking missing despite a real answer.
+      case 'ELICIT_MISSING_CRITICAL':
+        return this.avoidByteIdenticalReask(goal.hint);
       case 'ASK_CHALLENGE': {
         // CHALLENGE-SPEAKABLE (fsm.ts, 2026-09-11): `goal.challenge.speak` is the exact,
         // ready-to-speak sentence for this challenge. Falls back to the placeholder (never to
@@ -5486,7 +5501,7 @@ export class CallSession {
         // incident of the model reading aloud as stage directions) for the defensive case of
         // no challenge/no `speak` on it at all.
         const challengeLine = goal.challenge?.speak ?? renderGoalLine({ ...goal, code: 'STALL' }) ?? PLACEHOLDER_GOAL_LINES.STALL;
-        return this.avoidByteIdenticalChallengeReask(challengeLine);
+        return this.avoidByteIdenticalReask(challengeLine);
       }
       default:
         // Interim spoken lines (2026-09-22 10:20 PM): the plain desk-officer drafts from
@@ -5497,9 +5512,10 @@ export class CallSession {
     }
   }
 
-  /** NEVER-BYTE-IDENTICAL-REASK safety net (2026-09-25) -- see `nextSpokenLine`'s own doc
-   *  comment for the full incident. `candidate` is the challenge sentence `nextSpokenLine`
-   *  would otherwise return for the CURRENT goal; returns it unchanged UNLESS both:
+  /** NEVER-BYTE-IDENTICAL-REASK safety net (2026-09-25, extended to ELICIT_MISSING_CRITICAL
+   *  the same day for the judge-dana defect) -- see `nextSpokenLine`'s own doc comment for the
+   *  full incident. `candidate` is the challenge/elicit sentence `nextSpokenLine` would
+   *  otherwise return for the CURRENT goal; returns it unchanged UNLESS both:
    *   (a) the most recent AGENT utterance already logged in `logs.conversation` is
    *       byte-for-byte this exact same text (a genuine repeat, not merely a similar-sounding
    *       different challenge), AND
@@ -5513,7 +5529,7 @@ export class CallSession {
    *  session-endpoint-mode.test.ts's "read-only: repeated calls never mutate state" test) is
    *  unaffected: calling this twice in a row with nothing new dispatched in between still
    *  returns the same thing both times. */
-  private avoidByteIdenticalChallengeReask(candidate: string): string {
+  private avoidByteIdenticalReask(candidate: string): string {
     let lastAgentText: string | null = null;
     let lastAgentAtMs = -Infinity;
     for (const u of this.logs.conversation) {

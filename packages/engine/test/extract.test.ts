@@ -3,7 +3,13 @@ import { extractAmounts } from '../src/extract/amounts';
 import { extractIdentityClaim } from '../src/extract/identity';
 import { extractPressure } from '../src/extract/pressure';
 import { extractOutOfScope } from '../src/extract/outOfScope';
-import { extractAccountLast4, extractDeadline, extractDeadlineAnswer, extractCuedNames } from '../src/extract/claims';
+import {
+  extractAccountLast4,
+  extractDeadline,
+  extractDeadlineAnswer,
+  extractCuedNames,
+  extractElicitAnswerName,
+} from '../src/extract/claims';
 import { MERIDIAN } from '../src/seed/meridian';
 
 describe('extractAmounts', () => {
@@ -549,4 +555,111 @@ describe('extractCuedNames', () => {
   ])('still does not read a non-beneficiary "to NAME" as a beneficiary claim: %s', (text) => {
     expect(extractCuedNames(text)).toEqual([]);
   });
+
+  // PROVEN gap (2026-09-25, judge-dana defect, scripts/rehearse/reports/
+  // 2026-09-25T22-31-41-judge-dana.diagnostics.json): the caller's exact first-turn line --
+  // "I need to move the $84,500 payment to Meridian Supply, account ending 4471, to today
+  // instead of Friday." -- never matched any beneficiary cue. The verb cue's verb list
+  // (pay|wire|send|transfer) never included "move", and the amount-led cue
+  // (`\$[\d,]+\s+to\s+NAME`) requires the amount to be followed IMMEDIATELY by "to" -- here
+  // the word "payment" sits between the amount and "to", breaking it too. Both gaps are on
+  // the same caller line: "move" needs to join the verb list, since the amount-led cue can
+  // never cover this shape (the filler word "payment" is not itself a dollar amount).
+  it('matches "move the $84,500 payment to Meridian Supply" (the judge-dana verbatim line)', () => {
+    const text =
+      "I need to move the $84,500 payment to Meridian Supply, account ending 4471, to today instead of Friday.";
+    const hits = extractCuedNames(text);
+    expect(hits).toEqual([{ field: 'beneficiary', value: 'Meridian Supply', quote: 'Meridian Supply' }]);
+  });
+
+  it('matches other "move ... to NAME" phrasings', () => {
+    expect(extractCuedNames('move $84,500 to Meridian Supply')).toEqual([
+      { field: 'beneficiary', value: 'Meridian Supply', quote: 'Meridian Supply' },
+    ]);
+  });
+
+  // REVIEW FINDING (2026-09-25, blocking on the "move" verb fix above, PROVEN by the
+  // reviewer against the real extractCuedNames): adding "move" to the verb list makes a
+  // date/time rescheduling phrase -- "move the payment to Friday", "move it to Friday
+  // please" -- read as a beneficiary claim of "Friday", since judges reschedule with
+  // exactly this phrasing ("move ... to <day>"). Pre-existing for "wire"/"send"/"transfer"
+  // too, just less likely to come up in practice. A date/time token (weekday, today/
+  // tonight/tomorrow/yesterday/now/noon/midnight, a day part, a month name, "next week",
+  // "end of day"/EOD, or a numeric date/time) is never a person/company name, whichever
+  // field or cue pattern captured it.
+  it.each([
+    'move the payment to Friday',
+    'move it to Friday please',
+    'move it to today',
+    'wire the payment to tomorrow',
+    'send the payment to Monday',
+    'transfer it to next week',
+    'move the payment to EOD',
+    'move the payment to December',
+  ])('never reads a date/time token as a beneficiary claim: %s', (text) => {
+    expect(extractCuedNames(text)).toEqual([]);
+  });
+
+  it('still captures Meridian Supply (never Friday/today) from the full judge-dana line with a trailing reschedule clause', () => {
+    const text =
+      'I need to move the $84,500 payment to Meridian Supply, account ending 4471, to today instead of Friday.';
+    expect(extractCuedNames(text)).toEqual([{ field: 'beneficiary', value: 'Meridian Supply', quote: 'Meridian Supply' }]);
+  });
+
+  it('the deadline extractor is unaffected: still captures "today" from that same line', () => {
+    const text =
+      'I need to move the $84,500 payment to Meridian Supply, account ending 4471, to today instead of Friday.';
+    expect(extractDeadline(text)).toEqual({ value: 'today', quote: 'today' });
+  });
+});
+
+// PROVEN gap (2026-09-25, judge-dana defect): an ELICIT_MISSING_CRITICAL question ("Who is
+// the beneficiary of this payment?") has no expected value to restate (unlike a readback),
+// so a caller who directly answers it with a bare name -- "Meridian Supply." -- carries no
+// cue phrase (no verb, no "is"/"will be", no amount) that `extractCuedNames` can ever match.
+// The engine asked the identical question six times while the caller answered "Meridian
+// Supply." every time (report 2026-09-25T22-31-41-judge-dana.md, turns c7-c10), because the
+// answer never became a claim. `extractElicitAnswerName` recognizes a bare, direct name
+// answer -- the entire utterance (after stripping a short lead-in like "it's"/"that's"/"this
+// is" and trailing punctuation) is nothing but a 1-4 word capitalized name -- so ledger.ts
+// can accept it as the answer to a pending person-field elicit, without weakening
+// `extractCuedNames`'s own cue-phrase discipline (this is a SEPARATE, narrowly-scoped
+// function, only ever consulted for the caller utterance directly answering an elicit).
+describe('extractElicitAnswerName', () => {
+  it('reads a bare name answer with trailing period', () => {
+    expect(extractElicitAnswerName('Meridian Supply.')).toBe('Meridian Supply');
+  });
+
+  it('reads a bare name answer with no punctuation', () => {
+    expect(extractElicitAnswerName('Meridian Supply')).toBe('Meridian Supply');
+  });
+
+  it('strips a short lead-in phrase', () => {
+    expect(extractElicitAnswerName("It's Meridian Supply.")).toBe('Meridian Supply');
+    expect(extractElicitAnswerName('That would be Meridian Supply.')).toBe('Meridian Supply');
+    expect(extractElicitAnswerName('This is Elena Park.')).toBe('Elena Park');
+  });
+
+  it('returns null for a non-answer / off-topic reply', () => {
+    expect(extractElicitAnswerName("Yes, that's right.")).toBeNull();
+    expect(extractElicitAnswerName('Yes, that\'s right. This is Dana Whitfield.')).toBeNull();
+  });
+
+  it('returns null for a closed-class function word', () => {
+    expect(extractElicitAnswerName("It's approved.")).toBeNull();
+  });
+
+  it('returns null for a department name', () => {
+    expect(extractElicitAnswerName('Corporate Treasury.')).toBeNull();
+  });
+
+  // REVIEW FINDING (2026-09-25): a caller/judge answering an ELICIT_MISSING_CRITICAL
+  // beneficiary question with a bare date/time word ("Friday.") must never be accepted as
+  // the beneficiary either -- same reasoning as `extractCuedNames`'s own date/time guard.
+  it.each(['Friday.', 'Today.', 'Tomorrow', 'December.', 'EOD.'])(
+    'returns null for a bare date/time token: %s',
+    (text) => {
+      expect(extractElicitAnswerName(text)).toBeNull();
+    },
+  );
 });

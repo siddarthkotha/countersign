@@ -182,6 +182,32 @@ function isNonNameWord(name: string): boolean {
   return NON_NAME_WORD_STOPLIST.has(bare);
 }
 
+// REVIEW FINDING (2026-09-25, blocking on the "move" verb fix, PROVEN by the reviewer
+// against the real extractCuedNames): "move the payment to Friday" and "move it to Friday
+// please" captured {field:'beneficiary', value:'Friday'} -- pre-existing for
+// "wire"/"send"/"transfer" too, but "move" makes it common (judges reschedule with exactly
+// "move ... to <day>"). A date/time token is never a person/company name, whichever field
+// or cue pattern captured it (beneficiary/approver/counsel/escrow_institution alike), and
+// never a valid direct answer to a person-field elicit either. Checked as a WHOLE-NAME
+// match (case-insensitive), same convention as `isNonNameWord` above -- a multi-word name
+// that merely CONTAINS one of these words is unaffected (only "Friday" alone is rejected,
+// never e.g. "Friday Holdings").
+const DATE_TIME_WORD_RE =
+  /^(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|today|tonight|tomorrow|yesterday|now|noon|midnight|morning|afternoon|evening|eod|january|february|march|april|may|june|july|august|september|october|november|december)$/i;
+const DATE_TIME_PHRASE_RE = /^(?:next\s+week|end\s+of\s+(?:the\s+)?day)$/i;
+const NUMERIC_DATE_RE = /^\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?$/;
+const NUMERIC_TIME_RE = /^\d{1,2}(?::\d{2})?\s*(?:am|pm)$/i;
+
+function isDateTimeToken(name: string): boolean {
+  const trimmed = name.trim();
+  return (
+    DATE_TIME_WORD_RE.test(trimmed) ||
+    DATE_TIME_PHRASE_RE.test(trimmed) ||
+    NUMERIC_DATE_RE.test(trimmed) ||
+    NUMERIC_TIME_RE.test(trimmed)
+  );
+}
+
 // Check if a name looks like a department name rather than a person name. A department
 // name is one or more words from the stoplist, optionally with "department" or "management".
 function isDepartmentName(name: string): boolean {
@@ -305,9 +331,15 @@ const CUE_PATTERNS: { field: CuedNameField; re: RegExp; validate?: (m: RegExpExe
   // still finds the nearest "to NAME" rather than swallowing an entire unrelated sentence;
   // each filler word is also barred from itself starting with "." so the run can't cross a
   // full stop into a later, unrelated sentence in the same utterance.
+  // FIX (2026-09-25, judge-dana defect, PROVEN: scripts/rehearse/reports/
+  // 2026-09-25T22-31-41-judge-dana.diagnostics.json): the caller's exact words "I need to
+  // move the $84,500 payment to Meridian Supply..." never matched -- "move" was missing from
+  // the verb list. Added alongside pay/wire/send/transfer; the existing bounded filler
+  // already covers "the $84,500 payment" between "move" and "to NAME" with no further
+  // changes needed.
   {
     field: 'beneficiary',
-    re: new RegExp(`\\b(?:pay|wire|send|transfer)\\b(?<filler>(?:\\s+(?!\\.)\\S+){0,10}?)\\s+to\\s+(?<name>${NAME})`, 'g'),
+    re: new RegExp(`\\b(?:pay|wire|send|transfer|move)\\b(?<filler>(?:\\s+(?!\\.)\\S+){0,10}?)\\s+to\\s+(?<name>${NAME})`, 'g'),
     validate: validateBeneficiaryVerbToName,
   },
   { field: 'beneficiary', re: new RegExp(`\\bbeneficiary\\b (?:is|will be)\\s+(${NAME})`, 'g') },
@@ -389,6 +421,9 @@ function collectCuedNameMatches(text: string): RawCuedNameMatch[] {
       // name, whichever cue pattern captured it (2026-09-18 founder live defect, "It's
       // approved" -- see NON_NAME_WORD_STOPLIST's own doc comment above).
       if (isNonNameWord(name)) continue;
+      // REVIEW FINDING (2026-09-25): a date/time token ("Friday", "Today", "December", ...)
+      // is never a person/company name -- see `isDateTimeToken`'s own doc comment above.
+      if (isDateTimeToken(name)) continue;
       // For the reversed approver pattern "(NAME) approved", exclude department names.
       if (isReversedApproverPattern && isDepartmentName(name)) continue;
       const nameStart = m.index + m[0].indexOf(rawName);
@@ -417,4 +452,45 @@ export function extractCuedNames(text: string): CuedNameHit[] {
  *  escrow institution, or beneficiary is never the caller's own identity claim. */
 export function cuedNameSpans(text: string): { start: number; end: number }[] {
   return collectCuedNameMatches(text).map(({ index, name }) => ({ start: index, end: index + name.length }));
+}
+
+// FIX (2026-09-25, judge-dana defect, PROVEN: scripts/rehearse/reports/
+// 2026-09-25T22-31-41-judge-dana.diagnostics.json): an ELICIT_MISSING_CRITICAL question
+// ("Who is the beneficiary of this payment?") has no expected value to restate against
+// (unlike a readback_issued, whose `isExactRestatement` compares against the value the agent
+// already read back) -- so a caller directly answering it with a bare name, "Meridian
+// Supply.", carries none of the CUE_PATTERNS' cue phrases (no verb, no "is"/"will be", no
+// amount before "to"). The engine re-asked the identical question six times while the caller
+// answered "Meridian Supply." every time (report above, turns c7-c10) because the answer
+// never became a claim at all. This is a SEPARATE, narrowly-scoped recognizer -- consulted
+// only by ledger.ts for the caller utterance(s) directly answering a pending person-field
+// elicit (see PERSON_ELICIT_ANSWER_WINDOW there) -- it never loosens `extractCuedNames`'s own
+// cue-phrase discipline for the general transcript pass.
+//
+// A short, closed-class lead-in ("it's"/"that's"/"this is"/"that is"/"that would be") is
+// stripped case-insensitively; whatever remains, after trimming trailing punctuation, must be
+// NOTHING BUT the NAME shape (1-4 capitalized words) or this returns null. The same guards
+// `extractCuedNames` uses (closed-class function words, department names) apply, so "It's
+// approved." and "Corporate Treasury." are correctly rejected, and a genuine non-answer like
+// "Yes, that's right." (extra words beyond the lead-in) never matches either.
+const ELICIT_ANSWER_LEADIN_RE = /^(?:it'?s|that'?s|that\s+is|that\s+would\s+be|this\s+is)\s+/i;
+const BARE_NAME_ONLY_RE = new RegExp(`^${NAME}$`);
+
+export function extractElicitAnswerName(text: string): string | null {
+  const withoutLeadin = text.trim().replace(ELICIT_ANSWER_LEADIN_RE, '');
+  // No `trimName` here (deliberately): trimming at the first comma would turn a genuine
+  // non-answer like "Yes, that's right." into the bare fragment "Yes", which then
+  // (wrongly) looks like a one-word name. The WHOLE remaining string, once trailing
+  // sentence punctuation is stripped, must be nothing but the NAME shape -- any comma,
+  // extra clause, or leftover word anywhere in it means this utterance is not a bare name
+  // answer, full stop.
+  const cleaned = withoutLeadin.trim().replace(/[.!?]+$/, '').trim();
+  if (cleaned.length === 0) return null;
+  if (!BARE_NAME_ONLY_RE.test(cleaned)) return null;
+  if (isNonNameWord(cleaned)) return null;
+  if (isDepartmentName(cleaned)) return null;
+  // REVIEW FINDING (2026-09-25): a bare date/time answer ("Friday.") is never a valid
+  // direct answer to a person-field elicit either -- same guard as `extractCuedNames`.
+  if (isDateTimeToken(cleaned)) return null;
+  return cleaned;
 }

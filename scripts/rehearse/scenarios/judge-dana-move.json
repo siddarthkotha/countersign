@@ -1,0 +1,664 @@
+{
+  "name": "judge-dana-move",
+  "title": "Judge Dana, the wording that failed on 2026-09-25 (move the payment)",
+  "description": "Regression for the beneficiary loop: this exact wording failed 2/2 on 031bfab (beneficiary not captured, question asked six times, ESCALATE).",
+  "source": "Derived from dana-patient.json",
+  "truth": {
+    "identity": "Dana Whitfield",
+    "beneficiary": "Meridian Supply",
+    "amount_usd": 84500,
+    "account_last4": "4471",
+    "counsel": null,
+    "escrow_institution": null,
+    "approver": null,
+    "deadline": "today"
+  },
+  "persona": "You are Dana Whitfield, corporate treasury at Meridian Dynamics. You are calling to move a real, already-approved wire payment earlier than scheduled: $84,500 to Meridian Supply, account ending 4471, approved in yesterday's close meeting, moving today instead of Friday. You know these facts exactly. When the agent reads a number or name back to you, confirm it if it matches what you said; firmly and plainly correct it with the true value if it does not (never agree with something wrong just to move things along). If asked for something you were never given (an id, a code, a PIN), say plainly that you do not have that and repeat your name. Stay calm, cooperative, and brief -- under 30 words per line.",
+  "turns": [
+    {
+      "id": "c1",
+      "text": "This is Dana Whitfield from corporate treasury.",
+      "pause_ms": 500
+    },
+    {
+      "id": "c1b",
+      "text": "I need to move the $84,500 payment to Meridian Supply, account ending 4471, to today instead of Friday. It was approved in yesterday's close meeting.",
+      "pause_ms": 400
+    },
+    {
+      "id": "c2",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong. It's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi."
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV-7734."
+          },
+          {
+            "if_agent_says_any": [
+              "purpose",
+              "what is this payment for",
+              "what this payment is for",
+              "is this payment for",
+              "is for",
+              "purpose of"
+            ],
+            "say": "The quarterly parts restock."
+          },
+          {
+            "if_agent_says_any": [
+              "identity id",
+              "identification id",
+              "id number"
+            ],
+            "say": "I don't have an identity id. This is Dana Whitfield."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c3",
+      "text": "Yes, correct.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong. It's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi."
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV-7734."
+          },
+          {
+            "if_agent_says_any": [
+              "purpose",
+              "what is this payment for",
+              "what this payment is for",
+              "is this payment for",
+              "is for",
+              "purpose of"
+            ],
+            "say": "The quarterly parts restock."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c4",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong. It's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi."
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV-7734."
+          },
+          {
+            "if_agent_says_any": [
+              "purpose",
+              "what is this payment for",
+              "what this payment is for",
+              "is this payment for",
+              "is for",
+              "purpose of"
+            ],
+            "say": "The quarterly parts restock."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c5",
+      "text": "Yes, that's right. This is Dana Whitfield.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong. It's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi."
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV-7734."
+          },
+          {
+            "if_agent_says_any": [
+              "purpose",
+              "what is this payment for",
+              "what this payment is for",
+              "is this payment for",
+              "is for",
+              "purpose of"
+            ],
+            "say": "The quarterly parts restock."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c6",
+      "text": "Yes, that's right. This is Dana Whitfield.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong. It's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi."
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV-7734."
+          },
+          {
+            "if_agent_says_any": [
+              "purpose",
+              "what is this payment for",
+              "what this payment is for",
+              "is this payment for",
+              "is for",
+              "purpose of"
+            ],
+            "say": "The quarterly parts restock."
+          }
+        ]
+      }
+    },
+    {
+      "id": "c7",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong. It's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi."
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV-7734."
+          },
+          {
+            "if_agent_says_any": [
+              "purpose",
+              "what is this payment for",
+              "what this payment is for",
+              "is this payment for",
+              "is for",
+              "purpose of"
+            ],
+            "say": "The quarterly parts restock."
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock."
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars."
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday."
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one."
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
+    },
+    {
+      "id": "c8",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong. It's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi."
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV-7734."
+          },
+          {
+            "if_agent_says_any": [
+              "purpose",
+              "what is this payment for",
+              "what this payment is for",
+              "is this payment for",
+              "is for",
+              "purpose of"
+            ],
+            "say": "The quarterly parts restock."
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock."
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars."
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday."
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one."
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
+    },
+    {
+      "id": "c9",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong. It's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi."
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV-7734."
+          },
+          {
+            "if_agent_says_any": [
+              "purpose",
+              "what is this payment for",
+              "what this payment is for",
+              "is this payment for",
+              "is for",
+              "purpose of"
+            ],
+            "say": "The quarterly parts restock."
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock."
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars."
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday."
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one."
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
+    },
+    {
+      "id": "c10",
+      "text": "Yes, that's right.",
+      "pause_ms": 400,
+      "respond": {
+        "rules": [
+          {
+            "if_agent_says_any": [
+              "Northgate"
+            ],
+            "say": "No, that's wrong. It's Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "approver",
+              "signed off",
+              "who approved"
+            ],
+            "say": "Marcus Obi."
+          },
+          {
+            "if_agent_says_any": [
+              "invoice"
+            ],
+            "say": "INV-7734."
+          },
+          {
+            "if_agent_says_any": [
+              "purpose",
+              "what is this payment for",
+              "what this payment is for",
+              "is this payment for",
+              "is for",
+              "purpose of"
+            ],
+            "say": "The quarterly parts restock."
+          },
+          {
+            "if_agent_says_any": [
+              "what is this payment for",
+              "what this payment is for",
+              "purpose of this payment",
+              "purpose of the payment",
+              "is this payment for"
+            ],
+            "say": "It's the quarterly parts restock."
+          },
+          {
+            "if_agent_says_any": [
+              "restate the total",
+              "restate the amount",
+              "dollar amount",
+              "amount in dollars",
+              "how much"
+            ],
+            "say": "Eighty four thousand five hundred dollars."
+          },
+          {
+            "if_agent_says_any": [
+              "deadline",
+              "date or time",
+              "when do you need",
+              "by when",
+              "specific date"
+            ],
+            "say": "Today. I need it to go out today instead of Friday."
+          },
+          {
+            "if_agent_says_any": [
+              "account"
+            ],
+            "say": "The account ends four four seven one."
+          },
+          {
+            "if_agent_says_any": [
+              "beneficiary",
+              "vendor",
+              "who is the payment"
+            ],
+            "and_agent_says_any": [
+              "?",
+              "can you",
+              "could you",
+              "what",
+              "which",
+              "please restate",
+              "please state"
+            ],
+            "unless_agent_says_any": [
+              "just to confirm"
+            ],
+            "say": "Meridian Supply."
+          },
+          {
+            "if_agent_says_any": [
+              "who is calling",
+              "your name",
+              "identify"
+            ],
+            "say": "Dana Whitfield, corporate treasury."
+          }
+        ],
+        "else_say": "Yes, that's right."
+      }
+    }
+  ],
+  "expected": {
+    "verdict": "STAGE",
+    "max_wall_ms": 150000
+  },
+  "demo_persona": "legitimate",
+  "max_wall_ms": 240000,
+  "caller_style": "patient"
+}

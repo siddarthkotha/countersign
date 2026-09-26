@@ -17,7 +17,7 @@
 // after a `readback_issued` for that field that the caller NEGATED (the readback-repair
 // path). Otherwise CONTRADICTED. A plain time gap with none of the above is CONTRADICTED,
 // full stop — "it happened soon after" is not, by itself, evidence the caller was honest.
-import { extractAccountLast4, extractCuedNames, extractDeadline } from './extract/claims.js';
+import { extractAccountLast4, extractCuedNames, extractDeadline, extractElicitAnswerName } from './extract/claims.js';
 import { extractAmounts } from './extract/amounts.js';
 import { extractSpokenAmounts } from './extract/spokenNumbers.js';
 import { extractIdentityClaim } from './extract/identity.js';
@@ -185,11 +185,16 @@ export function buildLedger(
     return actions.some((a) => AGENT_QUESTION_ACTION_KINDS.has(a.kind) && a.t_ms > fromExclusive && a.t_ms < toExclusive);
   }
 
-  // Only readback_issued/challenge_issued actions matter to the ledger: the former drives
-  // CONFIRMED/UNKNOWN and the repair window; both bound how long a readback stays "open for
-  // an answer" (§C: the agent has moved on once it asks the next thing).
+  // Only readback_issued/challenge_issued/elicit_issued actions matter to the ledger:
+  // readback_issued drives CONFIRMED/UNKNOWN and the repair window; both it and
+  // challenge_issued bound how long a readback stays "open for an answer" (§C: the agent has
+  // moved on once it asks the next thing). elicit_issued (added 2026-09-25, judge-dana
+  // defect fix -- see `activePersonElicit` below) opens the same kind of "open for an
+  // answer" window for a bare name directly answering an ELICIT_MISSING_CRITICAL question
+  // for a person-shaped field, which carries no expected value to restate against the way a
+  // readback does.
   const boundaryActions = actions
-    .filter((a) => a.kind === 'readback_issued' || a.kind === 'challenge_issued')
+    .filter((a) => a.kind === 'readback_issued' || a.kind === 'challenge_issued' || a.kind === 'elicit_issued')
     .sort((a, b) => a.t_ms - b.t_ms);
 
   const timeline: TimelineEntry[] = [
@@ -201,6 +206,14 @@ export function buildLedger(
   let request_version = 1;
   let nextId = 1;
   const activeReadback: Partial<Record<ClaimField, PendingReadback>> = {};
+  // FIX (2026-09-25, judge-dana defect): a pending "open for an answer" window for a
+  // person-shaped field's ELICIT_MISSING_CRITICAL question, mirroring `activeReadback`'s
+  // shape but resolved by `extractElicitAnswerName` (a bare name answer) instead of an
+  // affirm/negate/exact-restatement of an already-known expected value (there is none to
+  // restate -- the whole point of an elicit is that the field is still missing). See
+  // `PERSON_SHAPED_FIELDS`'s own doc comment above and the 'action' timeline-entry handling
+  // below for how this opens/closes.
+  const activePersonElicit: Partial<Record<ClaimField, PendingReadback>> = {};
   const repairWindowSince: Partial<Record<ClaimField, number>> = {};
 
   // Compute which caller utterances are answers to person-shaped questions (approver, counsel, etc).
@@ -390,11 +403,17 @@ export function buildLedger(
 
   for (const entry of timeline) {
     if (entry.kind === 'action') {
-      // Any readback_issued or challenge_issued action closes out whatever was pending —
-      // the follow-up window for a readback ends at the NEXT such action (§C).
+      // Any readback_issued/challenge_issued/elicit_issued action closes out whatever was
+      // pending — the follow-up window for a readback (or a person-field elicit) ends at
+      // the NEXT such action (§C).
       for (const f of Object.keys(activeReadback) as ClaimField[]) delete activeReadback[f];
+      for (const f of Object.keys(activePersonElicit) as ClaimField[]) delete activePersonElicit[f];
       if (entry.a.kind === 'readback_issued' && entry.a.field) {
         activeReadback[entry.a.field] = { action: entry.a, utterancesSeen: 0 };
+      } else if (entry.a.kind === 'elicit_issued' && entry.a.field && PERSON_SHAPED_FIELDS.has(entry.a.field)) {
+        // FIX (2026-09-25, judge-dana defect): opens the "open for a bare name answer"
+        // window this same field's own re-issue (or the caller's reply) will close.
+        activePersonElicit[entry.a.field] = { action: entry.a, utterancesSeen: 0 };
       }
       continue;
     }
@@ -406,6 +425,7 @@ export function buildLedger(
     // Check both active readbacks AND the precomputed set of challenge answers.
     const answeringPersonQuestion =
       Object.keys(activeReadback).some((field) => PERSON_SHAPED_FIELDS.has(field as ClaimField)) ||
+      Object.keys(activePersonElicit).length > 0 ||
       pqa.has(u.id);
 
     // See `classifyDifferentValue`'s (a2) comment: defined only when the immediately
@@ -443,6 +463,27 @@ export function buildLedger(
         delete activeReadback[field];
       } else if (pending.utterancesSeen >= 2) {
         delete activeReadback[field]; // exhausted the cap without a resolving reply
+      }
+    }
+
+    // FIX (2026-09-25, judge-dana defect): resolve any pending person-field elicit(s) with
+    // this utterance, capped at 2 utterances (mirrors the readback cap directly above). An
+    // elicit has no expected value to affirm/negate/restate against -- it's simply "still
+    // missing" -- so the only question is whether this utterance IS a bare name answer
+    // (`extractElicitAnswerName`). When it is, the claim is recorded through the same
+    // `processHit` path every other extracted field uses (STATED on first sighting, or
+    // graded CORRECTED/CONTRADICTED against an existing claim the ordinary way) so a bare
+    // elicit answer is never treated differently from a cued one once it's in the ledger.
+    for (const field of Object.keys(activePersonElicit) as ClaimField[]) {
+      const pending = activePersonElicit[field];
+      if (!pending) continue;
+      pending.utterancesSeen += 1;
+      const bareName = extractElicitAnswerName(u.text);
+      if (bareName !== null) {
+        processHit(field, bareName, bareName, u, false, precedingCorrectionText);
+        delete activePersonElicit[field];
+      } else if (pending.utterancesSeen >= 2) {
+        delete activePersonElicit[field]; // exhausted the cap without a resolving reply
       }
     }
 

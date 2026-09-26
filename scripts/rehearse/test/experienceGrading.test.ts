@@ -43,6 +43,9 @@ function readbackIssued(t_ms: number, field: string, reply_id: string) {
 function challengeIssued(t_ms: number, challenge_id: string, reply_id: string) {
   return { t_ms, kind: 'action_logged', detail: { kind: 'challenge_issued', t_ms, challenge_id, fact_id: null, spec_kind: 'TRAP_FACT', reply_id } };
 }
+function elicitIssued(t_ms: number, field: string, reply_id: string) {
+  return { t_ms, kind: 'action_logged', detail: { kind: 'elicit_issued', t_ms, field, spec_kind: 'ELICIT', reply_id } };
+}
 /** A minimal `evaluate` event carrying just the one evidence card a `repeatedQuestion` test
  *  needs -- real bundles carry many more cards (identity/request/pressure/...) but
  *  `gradedStatusAt` only ever looks up the one id it's asked for. */
@@ -277,6 +280,35 @@ describe('repeatedQuestion', () => {
     const result = repeatedQuestion(b);
     expect(result.count).toBe(1);
     expect(result.timestamps_s).toEqual([65.765]);
+  });
+
+  // PROVEN gap (2026-09-25, judge-dana defect, scripts/rehearse/reports/
+  // 2026-09-25T22-31-41-judge-dana.diagnostics.json): "Who is the beneficiary of this
+  // payment?" (ELICIT_MISSING_CRITICAL, `elicit_issued`) was spoken six times while the
+  // caller answered "Meridian Supply." each time -- yet this grader reported 0 repeats,
+  // because `extractActionLogged` never even collected `elicit_issued` events at all
+  // (readback_issued/challenge_issued only), so signal 1 had nothing to see, and signal 2
+  // (transcript-based) requires NO caller line between the two identical lines, which is
+  // false here (the caller answered every time) so it never fires either. Unlike a
+  // challenge, an elicit has no evidence card to grade (it is not a knowledge check) and no
+  // legitimate reason to be asked again once the caller has said anything at all in
+  // response -- so ANY reissue of the same field's elicit_issued with at least one caller
+  // utterance since the previous issuance is always a repeat, full stop (no "still
+  // ungraded, still a legitimate dodge" carve-out the way a challenge gets).
+  it('PROVEN judge-dana: a re-issued elicit_issued for the same field, with a genuine (non-dodge) caller reply in between that was simply never accepted -- 1 repeat, not 0', () => {
+    const b = bundle([
+      elicitIssued(75338, 'beneficiary', 'r1'),
+      userTranscript(89397, 'Meridian Supply.'),
+      elicitIssued(92367, 'beneficiary', 'r2'),
+    ]);
+    const result = repeatedQuestion(b);
+    expect(result.count).toBe(1);
+    expect(result.timestamps_s).toEqual([92.367]);
+  });
+
+  it('a single elicit_issued for a field, never reissued, is not a repeat', () => {
+    const b = bundle([elicitIssued(75338, 'beneficiary', 'r1'), userTranscript(89397, 'Meridian Supply.')]);
+    expect(repeatedQuestion(b).count).toBe(0);
   });
 });
 

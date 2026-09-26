@@ -131,12 +131,11 @@ interface SpeechWindow {
 
 interface ActionLoggedEvent {
   t_ms: number;
-  /** 'readback_issued' or 'challenge_issued' -- the two kinds `expectations.ts`/report.ts
-   *  already treat as "tool_call"-adjacent action events (PROVEN kinds, see
-   *  diagnosticsSummary.ts's `TOOL_KINDS`). Every other `action_logged.kind` (e.g.
-   *  `terminal_action`-adjacent ones logged elsewhere) is ignored here. */
-  kind: 'readback_issued' | 'challenge_issued';
-  /** The grouping key: `field` for a readback, `challenge_id` for a challenge. */
+  /** 'readback_issued'/'challenge_issued'/'elicit_issued' -- see each variant's own field doc
+   *  below. Every other `action_logged.kind` (e.g. `terminal_action`-adjacent ones logged
+   *  elsewhere) is ignored here. */
+  kind: 'readback_issued' | 'challenge_issued' | 'elicit_issued';
+  /** The grouping key: `field` for a readback or an elicit, `challenge_id` for a challenge. */
   key: string;
   /** The evidence card id `compose.ts` gives this question's own graded result --
    *  `ev-readback-<field>` (packages/engine/src/compose.ts:379) for a readback,
@@ -144,8 +143,14 @@ interface ActionLoggedEvent {
    *  `spec_kind` (TRAP_FACT/SEED_FACT/LIVE_COMMITMENT/RELATIONAL all resolve through the same
    *  `knowledge_check_result` card, PROVEN: compose.ts's `buildKnowledgeEvidence`, one card per
    *  challenge_id regardless of kind). Used by `repeatedQuestion` to look up whether THIS
-   *  question had already been graded before it was asked again. */
-  evidence_id: string;
+   *  question had already been graded before it was asked again.
+   *
+   *  `null` for `elicit_issued` (2026-09-25, judge-dana defect fix): an
+   *  ELICIT_MISSING_CRITICAL question is not a knowledge check -- it has no evidence card to
+   *  grade at all (compose.ts never builds one for it), so "was this already graded" is not
+   *  a meaningful question to ask about a reissue. See `repeatedQuestion`'s own handling of
+   *  this kind below. */
+  evidence_id: string | null;
 }
 
 /** One `evaluate` event's own evidence array, reduced to an id -> status lookup, keyed by the
@@ -237,6 +242,12 @@ function extractActionLogged(bundle: RehearseDiagnosticBundle): ActionLoggedEven
         key: `challenge:${d.challenge_id}`,
         evidence_id: `ev-knowledge-${d.challenge_id}`,
       });
+    } else if (d.kind === 'elicit_issued' && typeof d.field === 'string') {
+      // FIX (2026-09-25, judge-dana defect): previously never collected at all, so a
+      // repeated ELICIT_MISSING_CRITICAL question (no readback/challenge action logged for
+      // it) was invisible to this whole check -- see this interface's own `evidence_id` doc
+      // comment for why it carries no evidence card id.
+      out.push({ t_ms: e.t_ms, kind: 'elicit_issued', key: `elicit:${d.field}`, evidence_id: null });
     }
   }
   return out;
@@ -386,14 +397,27 @@ export function repeatedQuestion(bundle: RehearseDiagnosticBundle): TimestampedC
 
   const timestampsSet = new Set<number>();
 
-  // Signal 1: action-logged readbacks/challenges (original signal)
+  // Signal 1: action-logged readbacks/challenges/elicits (original signal, extended
+  // 2026-09-25 for elicit_issued -- see this function's own PROVEN judge-dana doc comment).
   const lastByKey = new Map<string, ActionLoggedEvent>();
   for (const a of actions) {
     const prev = lastByKey.get(a.key);
     lastByKey.set(a.key, a);
     if (!prev) continue;
 
-    const gradedStatus = gradedStatusAt(snapshots, a.evidence_id, a.t_ms);
+    // FIX (2026-09-25, judge-dana defect): an elicit_issued reissue has no evidence card to
+    // grade at all (see `ActionLoggedEvent.evidence_id`'s own doc comment) and no legitimate
+    // "still waiting on a dodge" carve-out the way a challenge gets -- unlike a readback
+    // (which can legitimately be re-confirmed) or a challenge (which can legitimately still
+    // be AWAITING a real answer), a caller field is either now claimed (the elicit stops
+    // being issued at all, engine-side) or it is not -- so ANY reissue of the same field,
+    // whether or not the caller said something in between, is always a repeat.
+    if (a.kind === 'elicit_issued') {
+      timestampsSet.add(toSec(a.t_ms) * 1000);
+      continue;
+    }
+
+    const gradedStatus = gradedStatusAt(snapshots, a.evidence_id!, a.t_ms);
     const alreadyGraded = gradedStatus !== null && gradedStatus !== 'PENDING';
     const utterancesBetween = userTranscript.filter((u) => u.t_ms > prev.t_ms && u.t_ms < a.t_ms);
     const callerSpokeBetween = utterancesBetween.length > 0;
