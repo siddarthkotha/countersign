@@ -94,9 +94,10 @@ docs/PLAY-SHEET.md passed live through the same harness (2026-09-21).
   the token and answers with the exact sentence the engine's current goal renders
   (`packages/server/src/brain/endpoint.ts`, `packages/server/src/brain/spokenLines.ts`), so no
   model composes the agent's words. The greeting asks for the caller's name first because, in
-  tests that streamed a recorded human voice into fresh sessions, a long request spoken as the
-  first turn was cut off early 13 times out of 13, and whole 3 times out of 3 after one short
-  name line (2026-09-25, `scripts/spike/turn-repro/results/`). If the stored agent cannot be set
+  tests that streamed the founder's recorded voice into fresh sessions, one long request spoken
+  as the first turn was cut off early 13 times out of 13, and whole 3 times out of 3 after one
+  short name line first; a second recorded request was not cut in the same test
+  (2026-09-25, `scripts/spike/turn-repro/results/`). If the stored agent cannot be set
   up at boot, every call falls back to the earlier mode described in the next bullets.
 - **Earlier mode (still the automatic fallback): `session.update` at connect, then again on every
   goal change.** The first `session.update` sets `system_prompt`, `input.format.encoding`,
