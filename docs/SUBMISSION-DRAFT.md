@@ -33,15 +33,15 @@ credential reset, Countersign answers first. It is a real-time voice agent, buil
 the AssemblyAI Voice Agent API, that runs a calm, adaptive security interview before
 any request can move, checking what the caller claims to know, asking cross-checking
 questions, and tracking whether their story holds up turn to turn. Every claim is
-checked against structured evidence, never a guess, and a deterministic engine, not the
-AI, decides. The deterministic engine writes every word the agent speaks.
+checked against structured evidence, and a deterministic engine, not the AI, decides
+and writes every word the agent speaks.
 
 Countersign never claims to detect a fake or cloned voice. It proves things
 behaviorally: what the caller knows, whether their story stays consistent, and what
 independent checks confirm. A fully verified call never releases money. It only stages
 the request for a second, independent human to approve. A failed call freezes the
-request, opens an incident, and leaves a hash-chained evidence export (each record carries a fingerprint of the one before it, so any edit shows) behind.
-<!-- word count: 150; verified via `wc -w` before commit -->
+request, opens an incident, and leaves a hash-chained evidence export behind.
+<!-- word count: 149; verified 2026-09-25 (HTML comments and heading stripped) -->
 
 ---
 
@@ -129,23 +129,23 @@ interrogation feeding an engine capped at staging for a second human.
 ## 5. Links
 
 - **Live demo:** https://countersign-bf8q.onrender.com
-- **Repository:** [ADD BEFORE SUBMITTING: repo is private during the build, goes
-  public at the pre-flip checklist, docs/PREFLIP_CHECKLIST.md]
-- **Video:** [ADD BEFORE SUBMITTING: video not yet recorded; target at least 2:20 of
-  live agent interaction per gate G6]
+- **Repository:** https://github.com/siddarthkotha/countersign (public at submission)
+- **Video (2:52):** https://youtu.be/9koOgcfhYfE
   <!-- source: docs/BRIEF.md §10 gate G6; §8 video production plan -->
 
 ---
 
 ## 6. What to click first (for judges)
 
-1. Open the live demo link above. No signup, no install.
-2. Click **Replay** first. No microphone needed. It runs a full recorded interrogation
-   through the real decision engine so you see the whole story in under two minutes.
+1. Open the live demo link above. No signup, no install. The free host can take up to a
+   minute to wake on the first visit.
+2. Click **Watch a recorded attack** first. No microphone needed. It replays a real
+   recorded call, both voices, through the real decision engine.
 3. Watch the split screen: the call on the left, the evidence record building card by
    card on the right, in step with what's said.
-4. Then click **Try it live (experimental)** and use your own microphone.
-5. Interrupt the agent mid-sentence. Watch it stop clean and resume calmly, not
-   garbled.
-6. Change a dollar amount partway through your call. Watch it catch and name the
-   inconsistency out loud, live.
+4. Then pick a role card, click **Check microphone**, then **Try it live (experimental)** and
+   **Start Call**. The agent asks "Who am I speaking with?": give your name first, then your
+   request.
+5. Interrupt the agent mid-sentence. Watch it stop mid-word.
+6. As the CEO caller, change the dollar amount partway through. Watch the wire freeze and
+   the amount check quote both figures in your own words.
