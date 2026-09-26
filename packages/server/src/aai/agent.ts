@@ -6,7 +6,17 @@
 // records ({id, name, created_at, updated_at, deleted_at}, searchable by name), per this
 // lane's own live docs re-check (2026-09-22, https://www.assemblyai.com/docs/voice-agents/
 // voice-agent-api/manage-agents, and the update/delete endpoints confirmed at
-// .../api-spec/update-agent and .../api-spec/delete-agent). Never throws: every path below
+// .../api-spec/update-agent and .../api-spec/delete-agent).
+//
+// LIST-SHAPE FIX (2026-09-25, backlog item BRAIN-AGENT-DUPLICATE-ON-RESTART): a read-only curl
+// of the LIVE endpoint proved the real response is an OBJECT
+// `{agents: [...], has_more, response_metadata}`, not the bare array the 2026-09-22 docs
+// re-check assumed (the documented OpenAPI spec at .../api-spec/list-agents still shows a bare
+// array with no pagination parameter, as of this same date -- docs and live behavior disagree).
+// `listAgents`/`extractAgentListItems` below accept BOTH shapes so this module actually finds
+// the existing agent instead of leaking a fresh duplicate on every boot, which is exactly what
+// happened live: 7 agents named "countersign-brain" piled up between 2026-09-23 and 2026-09-26.
+// Never throws: every path below
 // is caught and returns `null` so `index.ts` can log and fall back to legacy mode for every
 // call rather than crash the server (plan §4: "Failure to create the agent at boot must NOT
 // crash the server").
@@ -84,12 +94,59 @@ function buildLlmBaseUrl(publicUrl: string): string {
   return `${publicUrl.replace(/\/+$/, '')}/api/brain`;
 }
 
-/** GET /v1/agents -- PROVEN to exist (this lane's live docs re-check, 2026-09-22, see the
- *  module doc comment above): returns a JSON array of lightweight records, newest first,
- *  searchable by `name`. Never throws -- a network/parse/non-2xx failure returns `[]` so the
- *  caller falls through to "create fresh" rather than treating a transient list failure as
- *  proof no agent exists (which would otherwise leak a duplicate agent into AssemblyAI's
- *  account on every flaky boot). */
+/** Coerces one raw list-response record into an `AgentListItem`, or `undefined` when it is
+ *  missing the required `id`/`name` string fields -- shared by both response shapes below so
+ *  malformed individual entries are dropped the same way regardless of which shape wraps them. */
+function coerceAgentListItem(e: unknown): AgentListItem | undefined {
+  if (typeof e !== 'object' || e === null) return undefined;
+  const rec = e as { id?: unknown; name?: unknown; created_at?: unknown };
+  if (typeof rec.id !== 'string' || typeof rec.name !== 'string') return undefined;
+  return { id: rec.id, name: rec.name, ...(typeof rec.created_at === 'string' ? { created_at: rec.created_at } : {}) };
+}
+
+/** Extracts the `AgentListItem[]` from a GET /v1/agents JSON body in either documented/observed
+ *  shape:
+ *   - a bare array (this module's original doc-comment-cited shape), OR
+ *   - `{agents: [...], has_more, response_metadata}` (PROVEN live, 2026-09-25 read-only curl of
+ *     GET https://agents.assemblyai.com/v1/agents -- backlog item
+ *     BRAIN-AGENT-DUPLICATE-ON-RESTART: the earlier "bare array" assumption was wrong, which is
+ *     exactly why duplicates piled up -- this function never found the existing agent).
+ *  Any other shape (missing/non-array `agents`, or a non-array/non-object body) is malformed:
+ *  returns `[]` so the caller falls through to its existing "no agent found -> create fresh"
+ *  path rather than ever risking a wrong DELETE against a misread list.
+ *
+ *  Pagination: when the object shape reports `has_more: true`, this module has NO PROVEN query
+ *  parameter to request the next page (2026-09-25 doc re-check of
+ *  https://www.assemblyai.com/docs/voice-agents/voice-agent-api/api-spec/list-agents found the
+ *  documented shape is a bare array with no pagination parameter at all, and no
+ *  `response_metadata`/cursor field -- contradicting the live-observed object shape). Per this
+ *  lane's own instruction not to guess an unconfirmed parameter name: this reads only the first
+ *  page and logs a warning so a future lane can look again once the account has enough agents
+ *  for it to matter (today's live account has a handful, one page). */
+function extractAgentListItems(body: unknown): AgentListItem[] {
+  if (Array.isArray(body)) {
+    return body.map(coerceAgentListItem).filter((x): x is AgentListItem => x !== undefined);
+  }
+  if (typeof body === 'object' && body !== null) {
+    const rec = body as { agents?: unknown; has_more?: unknown };
+    if (Array.isArray(rec.agents)) {
+      if (rec.has_more === true) {
+        console.warn(
+          'countersign: GET /v1/agents reported has_more:true but this module has no proven pagination parameter to follow -- reading only the first page (see extractAgentListItems doc comment).'
+        );
+      }
+      return rec.agents.map(coerceAgentListItem).filter((x): x is AgentListItem => x !== undefined);
+    }
+  }
+  return [];
+}
+
+/** GET /v1/agents -- returns lightweight records, newest first, searchable by `name`. Accepts
+ *  either a bare array or `{agents: [...], has_more, response_metadata}` (see
+ *  `extractAgentListItems`). Never throws -- a network/parse/non-2xx/malformed-body failure
+ *  returns `[]` so the caller falls through to "create fresh" rather than treating a transient
+ *  list failure as proof no agent exists (which would otherwise leak a duplicate agent into
+ *  AssemblyAI's account on every flaky boot). */
 async function listAgents(opts: EnsureBrainAgentOpts): Promise<AgentListItem[]> {
   const controller = new AbortController();
   const timeoutMs = opts.fetchTimeoutMs ?? 10000;
@@ -103,15 +160,7 @@ async function listAgents(opts: EnsureBrainAgentOpts): Promise<AgentListItem[]> 
     });
     if (!res.ok) return [];
     const body: unknown = await res.json();
-    if (!Array.isArray(body)) return [];
-    const items: AgentListItem[] = [];
-    for (const e of body) {
-      if (typeof e !== 'object' || e === null) continue;
-      const rec = e as { id?: unknown; name?: unknown; created_at?: unknown };
-      if (typeof rec.id !== 'string' || typeof rec.name !== 'string') continue;
-      items.push({ id: rec.id, name: rec.name, ...(typeof rec.created_at === 'string' ? { created_at: rec.created_at } : {}) });
-    }
-    return items;
+    return extractAgentListItems(body);
   } catch {
     return [];
   } finally {

@@ -34,6 +34,10 @@ interface Call {
  *  call is recorded to `calls` so a test can assert exactly what was sent and how many times. */
 function fakeFetch(state: {
   listResponse: { id: string; name: string; created_at?: string }[];
+  /** Overrides `listResponse` entirely for the GET response body -- lets a test construct an
+   *  arbitrary (including malformed or object-shaped) list body without touching the plain
+   *  array fixture every other test already relies on. */
+  rawListBody?: unknown;
   putOk?: boolean;
   putResults?: boolean[];
   postOk?: boolean;
@@ -49,9 +53,10 @@ function fakeFetch(state: {
     const body = init?.body ? JSON.parse(init.body as string) : undefined;
     calls.push({ method, url, body });
 
-    if (method === 'GET' && url === 'https://agents.assemblyai.com/v1/agents') {
+    if (method === 'GET' && url.startsWith('https://agents.assemblyai.com/v1/agents') && !url.includes('/agents/')) {
       if (state.throwOnList) throw new Error('network down');
-      return new Response(JSON.stringify(state.listResponse), { status: 200 });
+      const responseBody = 'rawListBody' in state ? state.rawListBody : state.listResponse;
+      return new Response(JSON.stringify(responseBody), { status: 200 });
     }
     if (method === 'PUT') {
       let ok: boolean;
@@ -200,6 +205,79 @@ describe('ensureBrainAgent', () => {
     expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
     expect(calls.find((c) => c.method === 'PUT')!.url).toBe('https://agents.assemblyai.com/v1/agents/newer-id');
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+  });
+
+  // OBJECT-SHAPED LIST RESPONSE (live-run finding, 2026-09-25: a read-only curl of the real
+  // GET /v1/agents proved the live body is `{agents: [...], has_more, response_metadata}`, not
+  // a bare array as the earlier docs re-check assumed. listAgents must accept both shapes.
+  it('accepts an object-shaped list response ({agents:[...]}): the newest of 3 same-name agents survives (PUT), the other two are DELETEd, no POST', async () => {
+    const { fetchImpl, calls } = fakeFetch({
+      listResponse: [],
+      rawListBody: {
+        agents: [
+          { id: 'newest-id', name: BRAIN_AGENT_NAME, created_at: '2026-09-26T00:48:38.709185' },
+          { id: 'middle-id', name: BRAIN_AGENT_NAME, created_at: '2026-09-24T12:00:00.000000' },
+          { id: 'oldest-id', name: BRAIN_AGENT_NAME, created_at: '2026-09-23T12:38:00.000000' },
+        ],
+        has_more: false,
+        response_metadata: {},
+      },
+    });
+
+    const result = await ensureBrainAgent(opts({ fetchImpl }));
+
+    expect(result).toEqual({ id: 'newest-id' });
+    const deleteUrls = calls.filter((c) => c.method === 'DELETE').map((c) => c.url);
+    expect(deleteUrls.sort()).toEqual(
+      ['https://agents.assemblyai.com/v1/agents/middle-id', 'https://agents.assemblyai.com/v1/agents/oldest-id'].sort()
+    );
+    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+    expect(calls.find((c) => c.method === 'PUT')!.url).toBe('https://agents.assemblyai.com/v1/agents/newest-id');
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+  });
+
+  it('still works with a bare-array list response (the old documented shape) alongside the new object shape', async () => {
+    const { fetchImpl, calls } = fakeFetch({
+      listResponse: [{ id: 'existing-id', name: BRAIN_AGENT_NAME }],
+    });
+
+    const result = await ensureBrainAgent(opts({ fetchImpl }));
+
+    expect(result).toEqual({ id: 'existing-id' });
+    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+  });
+
+  it('a malformed list body (neither a bare array nor an {agents:[...]} object) is treated as empty -- never a wrong DELETE, falls through to create', async () => {
+    const { fetchImpl, calls } = fakeFetch({
+      listResponse: [],
+      rawListBody: { unexpected: 'shape', agents: 'not-an-array' },
+    });
+
+    const result = await ensureBrainAgent(opts({ fetchImpl }));
+
+    expect(result).toEqual({ id: 'created-agent-id' });
+    expect(calls.filter((c) => c.method === 'DELETE')).toHaveLength(0);
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+  });
+
+  it('logs a warning and stops after the first page when the object-shaped response says has_more:true (no proven pagination parameter to follow)', async () => {
+    const { fetchImpl, calls } = fakeFetch({
+      listResponse: [],
+      rawListBody: {
+        agents: [{ id: 'only-page-id', name: BRAIN_AGENT_NAME, created_at: '2026-09-23T12:38:00.000000' }],
+        has_more: true,
+        response_metadata: { next_cursor: 'some-cursor-value' },
+      },
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await ensureBrainAgent(opts({ fetchImpl }));
+
+    expect(result).toEqual({ id: 'only-page-id' });
+    expect(calls.filter((c) => c.method === 'GET')).toHaveLength(1); // never paginated further
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/has_more/i));
+    warn.mockRestore();
   });
 
   it('never deletes an agent whose name is not exactly countersign-brain', async () => {
